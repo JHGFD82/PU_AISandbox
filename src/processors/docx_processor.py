@@ -14,23 +14,46 @@ class DocxProcessor(BaseTextProcessor):
     """Handles extraction of text from Word documents."""
     
     def extract_raw_content(self, file_obj: BinaryIO) -> str:
-        """Extract raw text content from a Word document."""
+        """Extract raw text content from a Word document, including table cells.
+
+        Walks the document body in document order so that table content appears
+        at its correct position relative to surrounding paragraphs.  Each table
+        row is rendered as a tab-separated line; rows are separated by newlines.
+        """
         try:
             from docx import Document
-            
-            # Load the document
+            from docx.oxml.ns import qn
+
             doc = Document(file_obj)
-            
-            # Extract text from all paragraphs
-            paragraphs: List[str] = []
-            for paragraph in doc.paragraphs:
-                text = paragraph.text.strip()
-                if text:  # Only add non-empty paragraphs
-                    paragraphs.append(text)
-            
-            # Join paragraphs with double newlines
-            return '\n\n'.join(paragraphs) if paragraphs else ""
-                
+            blocks: List[str] = []
+
+            for child in doc.element.body:
+                tag = child.tag.split('}')[-1] if '}' in child.tag else child.tag
+
+                if tag == 'p':
+                    # Regular paragraph
+                    text = ''.join(node.text or '' for node in child.iter(qn('w:t'))).strip()
+                    if text:
+                        blocks.append(text)
+
+                elif tag == 'tbl':
+                    # Table — collect rows, cells separated by tabs
+                    rows: List[str] = []
+                    for row in child.iter(qn('w:tr')):
+                        cells: List[str] = []
+                        for cell in row.iter(qn('w:tc')):
+                            cell_text = ''.join(
+                                node.text or '' for node in cell.iter(qn('w:t'))
+                            ).strip()
+                            cells.append(cell_text)
+                        row_text = '\t'.join(cells)
+                        if row_text.strip():
+                            rows.append(row_text)
+                    if rows:
+                        blocks.append('\n'.join(rows))
+
+            return '\n\n'.join(blocks) if blocks else ""
+
         except ImportError:
             raise ImportError(
                 "python-docx is required to process Word documents. "

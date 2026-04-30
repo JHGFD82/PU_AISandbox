@@ -133,6 +133,82 @@ class TestDocxProcessorExtractMedia:
 
 
 # ---------------------------------------------------------------------------
+# DocxProcessor.extract_raw_content — table extraction
+# ---------------------------------------------------------------------------
+
+class TestDocxProcessorTableExtraction:
+    """Verify that text inside tables is included in extracted content."""
+
+    def _make_docx_with_table(self, rows=2, cols=2) -> BytesIO:
+        from docx import Document
+        buf = BytesIO()
+        doc = Document()
+        doc.add_paragraph("Before table")
+        table = doc.add_table(rows=rows, cols=cols)
+        for r_idx, row in enumerate(table.rows):
+            for c_idx, cell in enumerate(row.cells):
+                cell.text = f"R{r_idx}C{c_idx}"
+        doc.add_paragraph("After table")
+        doc.save(buf)
+        buf.seek(0)
+        return buf
+
+    def test_table_text_is_included(self):
+        from src.processors.docx_processor import DocxProcessor
+        buf = self._make_docx_with_table()
+        processor = DocxProcessor()
+        content = processor.extract_raw_content(buf)
+        assert "R0C0" in content
+        assert "R1C1" in content
+
+    def test_table_appears_between_surrounding_paragraphs(self):
+        from src.processors.docx_processor import DocxProcessor
+        buf = self._make_docx_with_table()
+        processor = DocxProcessor()
+        content = processor.extract_raw_content(buf)
+        before_pos = content.index("Before table")
+        after_pos = content.index("After table")
+        cell_pos = content.index("R0C0")
+        assert before_pos < cell_pos < after_pos
+
+    def test_table_cells_tab_separated(self):
+        from src.processors.docx_processor import DocxProcessor
+        buf = self._make_docx_with_table(rows=1, cols=3)
+        # Overwrite cells so we know exact content
+        from docx import Document
+        buf2 = BytesIO()
+        doc = Document()
+        tbl = doc.add_table(rows=1, cols=3)
+        tbl.rows[0].cells[0].text = "Alpha"
+        tbl.rows[0].cells[1].text = "Beta"
+        tbl.rows[0].cells[2].text = "Gamma"
+        doc.save(buf2)
+        buf2.seek(0)
+        content = DocxProcessor().extract_raw_content(buf2)
+        assert "Alpha\tBeta\tGamma" in content
+
+    def test_pure_paragraph_doc_unchanged(self):
+        from docx import Document
+        from src.processors.docx_processor import DocxProcessor
+        buf = BytesIO()
+        doc = Document()
+        doc.add_paragraph("First")
+        doc.add_paragraph("Second")
+        doc.save(buf)
+        buf.seek(0)
+        content = DocxProcessor().extract_raw_content(buf)
+        assert "First" in content
+        assert "Second" in content
+
+    def test_process_docx_with_pages_includes_table_text(self):
+        from src.processors.docx_processor import DocxProcessor
+        buf = self._make_docx_with_table()
+        pages = DocxProcessor.process_docx_with_pages(buf)
+        combined = "\n".join(pages)
+        assert "R0C0" in combined
+
+
+# ---------------------------------------------------------------------------
 # CLI flag parsing
 # ---------------------------------------------------------------------------
 
