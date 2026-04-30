@@ -26,3 +26,10 @@ class EmbeddedMedia:
     position_fraction: float
     width_emu: Optional[int] = None
     height_emu: Optional[int] = None
+    page_number: Optional[int] = None
+    """0-based PDF page index this image was extracted from.
+
+    Set by :class:`~src.processors.pdf_media_extractor.PdfMediaExtractor`.
+    ``None`` for images extracted from DOCX sources, where fractional
+    placement is used instead.
+    """

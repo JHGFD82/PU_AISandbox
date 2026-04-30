@@ -340,3 +340,127 @@ class TestPreserveMediaValidationPdfInput:
                     "--preserve-media does not yet support PDF output. "
                     "Specify a .docx output file with -o."
                 )
+
+
+# ---------------------------------------------------------------------------
+# Part 5: page-marker-based image insertion (PDF source)
+# ---------------------------------------------------------------------------
+
+class TestSaveToDocxPageMarkerInsertion:
+    """Images with page_number set use '-- Page N --' markers for placement."""
+
+    @pytest.fixture(autouse=True)
+    def _require_docx(self):
+        pytest.importorskip("docx")
+
+    def _para_texts(self, docx_path: str) -> list:
+        from docx import Document
+        return [p.text for p in Document(docx_path).paragraphs]
+
+    def test_image_placed_after_correct_page_block(self, tmp_path):
+        """Image with page_number=1 should appear after '-- Page 2 --' content,
+        not at the start or end of the document."""
+        from src.output.file_output import FileOutputHandler
+        out = str(tmp_path / "pm.docx")
+        # Translated output with two page blocks
+        content = "\n\n-- Page 1 --\n\nText of page one.\n\n-- Page 2 --\n\nText of page two."
+        # Image belongs to page_index=1 (label "Page 2")
+        media = [EmbeddedMedia(
+            data=_make_1x1_png(), content_type="image/png",
+            position_fraction=0.5, page_number=1,
+        )]
+        FileOutputHandler.save_to_docx(content, out, media=media)
+        texts = self._para_texts(out)
+        # Image paragraph has no text; locate it by finding the empty-run para
+        from docx import Document
+        doc = Document(out)
+        para_texts = [p.text for p in doc.paragraphs]
+        # '-- Page 2 --' and 'Text of page two.' must both appear
+        assert "-- Page 2 --" in para_texts
+        assert "Text of page two." in para_texts
+        # Image (empty text paragraph) should NOT be before '-- Page 1 --'
+        first_empty = next((i for i, t in enumerate(para_texts) if t == ""), None)
+        page1_idx = para_texts.index("-- Page 1 --")
+        assert first_empty is None or first_empty > page1_idx
+
+    def test_image_on_page_zero_appears_before_page_two(self, tmp_path):
+        """Image on page_index=0 should appear in the page-1 block (before page 2)."""
+        from src.output.file_output import FileOutputHandler
+        out = str(tmp_path / "p0.docx")
+        content = "\n\n-- Page 1 --\n\nPage one text.\n\n-- Page 2 --\n\nPage two text."
+        media = [EmbeddedMedia(
+            data=_make_1x1_png(), content_type="image/png",
+            position_fraction=0.1, page_number=0,
+        )]
+        FileOutputHandler.save_to_docx(content, out, media=media)
+        from docx import Document
+        doc = Document(out)
+        para_texts = [p.text for p in doc.paragraphs]
+        # Empty image paragraph should appear before '-- Page 2 --'
+        page2_idx = para_texts.index("-- Page 2 --")
+        empty_indices = [i for i, t in enumerate(para_texts) if t == ""]
+        assert empty_indices, "Expected at least one image paragraph"
+        assert all(idx < page2_idx for idx in empty_indices)
+
+    def test_images_from_multiple_pages_all_inserted(self, tmp_path):
+        """Images from two different PDF pages should both appear in the output."""
+        from src.output.file_output import FileOutputHandler
+        from docx import Document
+        out = str(tmp_path / "multi.docx")
+        content = "\n\n-- Page 1 --\n\nPage one.\n\n-- Page 2 --\n\nPage two."
+        media = [
+            EmbeddedMedia(data=_make_1x1_png(), content_type="image/png",
+                          position_fraction=0.1, page_number=0),
+            EmbeddedMedia(data=_make_1x1_png(), content_type="image/png",
+                          position_fraction=0.6, page_number=1),
+        ]
+        FileOutputHandler.save_to_docx(content, out, media=media)
+        doc = Document(out)
+        # 2 page markers + 2 text paras + 2 image paras = 6 paragraphs
+        assert len(doc.paragraphs) == 6
+
+    def test_images_on_last_page_flushed_at_end(self, tmp_path):
+        """Images for the last page should appear after that page's text."""
+        from src.output.file_output import FileOutputHandler
+        from docx import Document
+        out = str(tmp_path / "last.docx")
+        content = "\n\n-- Page 1 --\n\nOnly page."
+        media = [EmbeddedMedia(
+            data=_make_1x1_png(), content_type="image/png",
+            position_fraction=0.5, page_number=0,
+        )]
+        FileOutputHandler.save_to_docx(content, out, media=media)
+        doc = Document(out)
+        para_texts = [p.text for p in doc.paragraphs]
+        # '-- Page 1 --' and 'Only page.' must appear; image paragraph after them
+        assert "-- Page 1 --" in para_texts
+        assert "Only page." in para_texts
+        page1_idx = para_texts.index("-- Page 1 --")
+        empty_indices = [i for i, t in enumerate(para_texts) if t == ""]
+        assert all(idx > page1_idx for idx in empty_indices)
+
+    def test_page_number_none_uses_fraction_path(self, tmp_path):
+        """Images with page_number=None fall back to fractional placement."""
+        from src.output.file_output import FileOutputHandler
+        from docx import Document
+        out = str(tmp_path / "frac.docx")
+        # Content with page markers but image has no page_number → fraction path
+        content = "\n\n-- Page 1 --\n\nA.\n\n-- Page 2 --\n\nB.\n\nC."
+        media = [EmbeddedMedia(
+            data=_make_1x1_png(), content_type="image/png",
+            position_fraction=0.99,  # very late → should be at end
+            page_number=None,
+        )]
+        FileOutputHandler.save_to_docx(content, out, media=media)
+        doc = Document(out)
+        # 2 page-marker paras + 3 text paras (A., B., C.) + 1 image para = 6
+        assert len(doc.paragraphs) == 6
+
+    def test_page_number_field_on_extractor_output(self):
+        """PdfMediaExtractor sets page_number to the 0-based page index."""
+        with patch("src.processors.pdf_media_extractor._MIN_IMAGE_BYTES", 0):
+            buf = _make_pdf_with_image()
+            items = PdfMediaExtractor.extract_media(buf)
+        assert len(items) == 1
+        assert items[0].page_number == 0  # single-page PDF → page_index 0
+

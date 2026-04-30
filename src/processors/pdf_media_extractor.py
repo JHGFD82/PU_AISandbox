@@ -10,6 +10,11 @@ if TYPE_CHECKING:
 # Minimum raw image size (bytes) to bother embedding — skips tiny icons/artifacts.
 _MIN_IMAGE_BYTES = 512
 
+# Minimum display height in PDF points for an image to be included.
+# Decorative elements (navigation tabs, horizontal rules) are typically < 35 pt
+# tall; real figures are at least 50 pt. 72 pts = 1 inch.
+_MIN_DISPLAY_HEIGHT_PTS: float = 50.0
+
 # Image types reported by PyMuPDF that map cleanly to MIME types.
 _EXT_TO_MIME: dict[str, str] = {
     "png":  "image/png",
@@ -100,6 +105,7 @@ class PdfMediaExtractor:
                 y_frac = 0.0
                 display_width_emu: Optional[int] = None
                 display_height_emu: Optional[int] = None
+                display_height_pts: Optional[float] = None
                 for item in page.get_image_info(xrefs=True):
                     if item.get("xref") == xref:
                         bbox = item.get("bbox")  # (x0, y0, x1, y1) in page points
@@ -111,7 +117,22 @@ class PdfMediaExtractor:
                                 display_width_emu = int(w_pts * 12700)
                             if h_pts > 0:
                                 display_height_emu = int(h_pts * 12700)
+                                display_height_pts = h_pts
                         break
+
+                # Skip images that are too short to be real content (decorative
+                # tabs, horizontal rules, etc.).  Only applies when a bbox was
+                # found; unknown-size images are allowed through.
+                if (
+                    display_height_pts is not None
+                    and display_height_pts < _MIN_DISPLAY_HEIGHT_PTS
+                ):
+                    logging.debug(
+                        f"Skipping short decorative image xref={xref} "
+                        f"(height={display_height_pts:.1f}pt < {_MIN_DISPLAY_HEIGHT_PTS}pt)"
+                    )
+                    seen_xrefs.discard(xref)  # allow it to be re-evaluated on later pages
+                    continue
 
                 position_fraction = (page_index + y_frac) / total_pages
 
@@ -150,6 +171,7 @@ class PdfMediaExtractor:
                     position_fraction=position_fraction,
                     width_emu=display_width_emu,
                     height_emu=display_height_emu,
+                    page_number=page_index,
                 ))
 
         doc.close()
