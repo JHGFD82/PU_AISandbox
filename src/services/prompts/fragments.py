@@ -130,6 +130,16 @@ TRANSLATION_NO_META_COMMENTARY = (
     'Do not provide any prompts to the user, for example: "This is the translation of the current page.":'
 )
 
+# Injected into both system and user prompts when the page text contains
+# [TABLE_N] placeholder tokens (i.e. tables extracted for separate translation).
+TRANSLATION_TABLE_MARKER_RULE = (
+    "IMPORTANT: This text contains table placeholder tokens such as [TABLE_1], [TABLE_2], etc. "
+    "These tokens represent tables that are translated separately and will be reinserted into the "
+    "output document automatically. "
+    "Preserve every [TABLE_N] token EXACTLY as written — same case, same brackets, same number. "
+    "Do NOT translate, paraphrase, remove, or reformat these tokens in any way."
+)
+
 
 # ---------------------------------------------------------------------------
 # OCR — system prompt sections

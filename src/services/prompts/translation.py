@@ -21,6 +21,7 @@ class TranslationPromptSpec:
     kanbun: bool = False
     system_note: Optional[str] = None
     user_note: Optional[str] = None
+    has_table_markers: bool = False
 
     def _formatting_fragment(self) -> str:
         key = "file" if self.output_format.lower() in ("pdf", "txt", "file", "docx") else "console"
@@ -42,6 +43,7 @@ class TranslationPromptSpec:
             F.TRANSLATION_ROLE.format(source=self.source_language, target=self.target_language),
             self._formatting_fragment(),
             F.TRANSLATION_NUMBERED_SYSTEM if self.has_numbered else None,
+            F.TRANSLATION_TABLE_MARKER_RULE if self.has_table_markers else None,
             self._context_spec(),
             F.ADDITIONAL_INSTRUCTIONS.format(note=pair_note) if pair_note else None,
             F.ADDITIONAL_INSTRUCTIONS.format(note=F.KANBUN_NOTE) if self.kanbun else None,
@@ -57,6 +59,7 @@ class TranslationPromptSpec:
         parts = [
             base,
             F.TRANSLATION_NUMBERED_USER if self.has_numbered else None,
+            F.TRANSLATION_TABLE_MARKER_RULE if self.has_table_markers else None,
             F.TRANSLATION_FOOTNOTE_RULE,
             F.TRANSLATION_NO_META_COMMENTARY,
             F.ADDITIONAL_NOTES.format(note=self.user_note) if self.user_note else None,

@@ -74,6 +74,7 @@ class TranslationService(BaseService):
     def _create_translation_prompt(self, source_language: str, target_language: str, output_format: str = "console", text: str = "", context_type: str = "none") -> tuple[str, str]:
         """Create system and user prompt templates for translation."""
         has_numbered = detect_numbered_content(text) if text else False
+        has_table_markers = '[TABLE_' in text if text else False
         logging.debug(f"Numbered content detected: {has_numbered}")
         spec = TranslationPromptSpec(
             source_language=source_language,
@@ -84,6 +85,7 @@ class TranslationService(BaseService):
             kanbun=self.kanbun,
             system_note=self.system_note,
             user_note=self.user_note,
+            has_table_markers=has_table_markers,
         )
         return spec.system_prompt(), spec.user_prompt()
     
@@ -418,9 +420,111 @@ class TranslationService(BaseService):
 
         return document_text
 
+    # ------------------------------------------------------------------
+    # Table translation helpers (Markdown round-trip)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _rows_to_markdown(rows: List[List[str]]) -> str:
+        """Convert a cell grid to a Markdown table string.
+
+        Rows with unequal column counts are padded to the maximum width.
+        A separator row is inserted after the first (header) row.
+        """
+        if not rows:
+            return ""
+        ncols = max(len(row) for row in rows)
+        lines: List[str] = []
+        for i, row in enumerate(rows):
+            padded = list(row) + [''] * (ncols - len(row))
+            lines.append('| ' + ' | '.join(padded) + ' |')
+            if i == 0:
+                lines.append('|' + '|'.join(' --- ' for _ in range(ncols)) + '|')
+        return '\n'.join(lines)
+
+    @staticmethod
+    def _parse_markdown_table(md: str) -> Optional[List[List[str]]]:
+        """Parse a Markdown table string back to a cell grid.
+
+        Separator rows (containing only ``-``, ``:``, and ``|``) are skipped.
+        Returns ``None`` if no valid table rows are found.
+        """
+        rows: List[List[str]] = []
+        for line in md.strip().splitlines():
+            line = line.strip()
+            if not line.startswith('|'):
+                continue
+            # Skip separator rows like |---|---|
+            if not line.replace('|', '').replace('-', '').replace(' ', '').replace(':', ''):
+                continue
+            cells = [c.strip() for c in line.strip('|').split('|')]
+            rows.append(cells)
+        return rows if rows else None
+
+    def translate_table_grid(
+        self,
+        rows: List[List[str]],
+        source_language: str,
+        target_language: str,
+    ) -> List[List[str]]:
+        """Translate a table's cell grid via a dedicated Markdown round-trip API call.
+
+        Converts *rows* to a Markdown table, sends it to the model with a
+        table-specific system prompt, then parses the response back to a grid.
+
+        Falls back to the original *rows* if:
+        * the API returns no content or an error signal,
+        * the Markdown cannot be parsed, or
+        * the translated row count does not match the original.
+        """
+        if not rows:
+            return rows
+
+        md = TranslationService._rows_to_markdown(rows)
+        system_prompt = (
+            f"You are a professional translator. "
+            f"Translate the following Markdown table from {source_language} to {target_language}. "
+            f"Return ONLY the translated Markdown table with exactly the same number of rows and "
+            f"columns and the same pipe/separator structure. "
+            f"Do not add any explanation, commentary, or text outside of the table."
+        )
+
+        model = self._get_model()
+        system_role = get_model_system_role(model)
+
+        def body(attempt: int) -> Any:
+            response = self._call_translation_api(model, system_role, system_prompt, md)
+            self._record_response_usage(response, model)
+            if response.choices and response.choices[0].message:
+                return response.choices[0].message.content
+            return None
+
+        result_md = self._run_with_retry(
+            body, model, "table_translation",
+            timeout_msg="Table translation returned no content after maximum retries.",
+            return_signal_on_error=True,
+        )
+
+        if not result_md or isinstance(result_md, APISignal):
+            logging.warning("Table translation failed — using original table content")
+            return rows
+
+        parsed = TranslationService._parse_markdown_table(str(result_md))
+        if not parsed:
+            logging.warning("Could not parse table translation response — using original")
+            return rows
+
+        if len(parsed) != len(rows):
+            logging.warning(
+                f"Table translation returned {len(parsed)} row(s), expected {len(rows)} — "
+                "using original table content"
+            )
+            return rows
+
+        return parsed
+
     @staticmethod
     def _resolve_output_format(opts: OutputOptions) -> str:
-        """Derive the output format string from the requested output file path and auto-save flag."""
         if opts.output_file:
             ext = opts.output_file.lower().rsplit('.', 1)[-1] if '.' in opts.output_file else ''
             format_map = {'pdf': 'pdf', 'docx': 'docx', 'txt': 'txt'}

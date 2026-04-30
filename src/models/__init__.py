@@ -4,6 +4,7 @@ Re-exports every symbol from the three submodules so callers can use either
 ``from src.models import X`` or ``from src.models.catalog import X``.
 """
 
+from .doc_block import ParagraphBlock, TableBlock
 from .embedded_media import EmbeddedMedia
 from .catalog import (
     DEFAULT_FALLBACK_MODEL,
@@ -64,4 +65,7 @@ __all__ = [
     "OutputOptions",
     # embedded media
     "EmbeddedMedia",
+    # doc blocks
+    "ParagraphBlock",
+    "TableBlock",
 ]

@@ -1,13 +1,14 @@
 """Word document processor: extracts text from .docx files into logical sections."""
 
 import logging
-from typing import List, BinaryIO, TYPE_CHECKING
+from typing import Dict, List, BinaryIO, Tuple, Union, TYPE_CHECKING
 
 from .base_text_processor import BaseTextProcessor
 from .constants import DEFAULT_PAGE_SIZE
 
 if TYPE_CHECKING:
     from ..models.embedded_media import EmbeddedMedia
+    from ..models.doc_block import ParagraphBlock, TableBlock
 
 
 class DocxProcessor(BaseTextProcessor):
@@ -90,6 +91,100 @@ class DocxProcessor(BaseTextProcessor):
         except Exception as e:
             logging.error(f"Error processing Word document: {e}")
             raise Exception(f"Failed to process Word document: {e}")
+
+    @staticmethod
+    def extract_blocks(file_obj: BinaryIO) -> "List[Union[ParagraphBlock, TableBlock]]":
+        """Extract the document body as an ordered list of typed blocks.
+
+        Paragraphs become :class:`~src.models.doc_block.ParagraphBlock` items;
+        tables become :class:`~src.models.doc_block.TableBlock` items with
+        unique ``[TABLE_N]`` placeholder tokens that can be embedded in
+        translation prompts and resolved back to Word table objects later.
+
+        Walks ``doc.element.body`` in document order so tables appear at their
+        correct position relative to surrounding paragraphs.
+        """
+        from docx import Document
+        from docx.oxml.ns import qn
+        from ..models.doc_block import ParagraphBlock, TableBlock
+
+        doc = Document(file_obj)
+        blocks: List[Union[ParagraphBlock, TableBlock]] = []
+        table_counter = 0
+
+        for child in doc.element.body:
+            tag = child.tag.split('}')[-1] if '}' in child.tag else child.tag
+
+            if tag == 'p':
+                text = ''.join(node.text or '' for node in child.iter(qn('w:t'))).strip()
+                if text:
+                    blocks.append(ParagraphBlock(text=text))
+
+            elif tag == 'tbl':
+                table_counter += 1
+                placeholder = f"[TABLE_{table_counter}]"
+                rows: List[List[str]] = []
+                for row in child.iter(qn('w:tr')):
+                    cells: List[str] = [
+                        ''.join(node.text or '' for node in cell.iter(qn('w:t'))).strip()
+                        for cell in row.iter(qn('w:tc'))
+                    ]
+                    if any(c for c in cells):
+                        rows.append(cells)
+                if rows:
+                    blocks.append(TableBlock(rows=rows, placeholder=placeholder))
+
+        return blocks
+
+    @staticmethod
+    def process_docx_for_translation(
+        file_obj: BinaryIO,
+        target_page_size: int = DEFAULT_PAGE_SIZE,
+    ) -> "Tuple[List[str], Dict[str, List[List[str]]]]":
+        """Extract pages and a table registry for Markdown-round-trip translation.
+
+        Returns ``(pages, table_registry)`` where:
+
+        * ``pages`` — text strings split to ``target_page_size`` just like
+          :meth:`process_docx_with_pages`, but each table is replaced by its
+          unique ``[TABLE_N]`` placeholder token.
+        * ``table_registry`` — mapping from ``"[TABLE_N]"`` to the raw cell
+          grid (list-of-lists).  The grid is translated separately via
+          :meth:`~src.services.translation_service.TranslationService.translate_table_grid`
+          and later reinserted by
+          :meth:`~src.output.file_output.FileOutputHandler.save_to_docx`.
+
+        Use this method (instead of :meth:`process_docx_with_pages`) whenever
+        the output format is ``.docx``, so that tables survive translation as
+        proper Word table objects rather than being flattened to prose.
+        """
+        from ..models.doc_block import ParagraphBlock, TableBlock
+
+        processor = DocxProcessor()
+        blocks = DocxProcessor.extract_blocks(file_obj)
+
+        table_registry: Dict[str, List[List[str]]] = {}
+        text_parts: List[str] = []
+
+        for block in blocks:
+            if isinstance(block, ParagraphBlock):
+                text_parts.append(block.text)
+            elif isinstance(block, TableBlock):
+                table_registry[block.placeholder] = block.rows
+                text_parts.append(block.placeholder)
+
+        combined = '\n\n'.join(text_parts) if text_parts else ""
+        if not combined:
+            logging.warning("No content found in Word document")
+            return [""], {}
+
+        paragraphs = processor.parse_text_into_paragraphs(combined)
+        pages = processor.split_text_into_pages(paragraphs, target_page_size)
+        logging.info(
+            f"Split Word document into {len(pages)} logical page(s) "
+            f"with {len(table_registry)} table(s) extracted for separate translation"
+        )
+        return pages, table_registry
 
     @staticmethod
     def extract_media(file_obj: BinaryIO) -> "List[EmbeddedMedia]":

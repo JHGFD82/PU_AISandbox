@@ -227,6 +227,8 @@ class SandboxProcessor(_CommandMixin):
 
         try:
             document_text: List[str] = []
+            docx_table_registry: Optional[dict] = None
+
             if file_type == 'pdf':
                 with open(file_path, 'rb') as f:
                     all_pdf_pages = list(self.pdf_processor.process_pdf(f))
@@ -242,22 +244,74 @@ class SandboxProcessor(_CommandMixin):
                             file_path,
                             workers=workers,
                         ))
-            elif file_type in ('docx', 'txt'):
+            elif file_type == 'txt':
                 document_text = self._process_text_based_file(
-                    file_path,
-                    file_type,
-                    page_nums,
-                    abstract_text,
-                    source_language,
-                    target_language,
-                    opts,
-                    workers=workers,
+                    file_path, 'txt', page_nums, abstract_text,
+                    source_language, target_language, opts, workers=workers,
                 )
+            elif file_type == 'docx':
+                output_is_docx = bool(
+                    opts.output_file and opts.output_file.lower().endswith('.docx')
+                )
+                if output_is_docx:
+                    # Table-aware path: tables translated separately and reinserted
+                    # as proper Word table objects in the output document.
+                    with open(file_path, 'rb') as f:
+                        all_pages, source_table_registry = DocxProcessor.process_docx_for_translation(
+                            f, target_page_size=DEFAULT_PAGE_SIZE
+                        )
+                    file_label = "Word document"
+                    for start_page, end_page in _parse_page_ranges(page_nums):
+                        if start_page >= len(all_pages):
+                            raise CLIError(
+                                f"Page {start_page + 1} does not exist. "
+                                f"Document has {len(all_pages)} logical pages."
+                            )
+                        actual_end = (
+                            min(end_page, len(all_pages) - 1)
+                            if end_page is not None else len(all_pages) - 1
+                        )
+                        segment = all_pages[start_page : actual_end + 1]
+                        if page_nums:
+                            logger.info(
+                                f"Processing pages {start_page + 1}–{actual_end + 1} of "
+                                f"{file_label} (logical pages based on content length)"
+                            )
+                        logger.info(
+                            f"Translating {len(segment)} page(s) from "
+                            f"{source_language} to {target_language}"
+                        )
+                        document_text.extend(
+                            self.translation_service.translate_text_pages(
+                                segment, abstract_text, source_language, target_language,
+                                opts, file_path, workers=workers,
+                            )
+                        )
+
+                    # Translate each table separately via Markdown round-trip.
+                    if source_table_registry:
+                        docx_table_registry = {}
+                        for key, rows in source_table_registry.items():
+                            ncols = len(rows[0]) if rows else 0
+                            logger.info(
+                                f"Translating {key} "
+                                f"({len(rows)} row(s) × {ncols} col(s))…"
+                            )
+                            docx_table_registry[key] = (
+                                self.translation_service.translate_table_grid(
+                                    rows, source_language, target_language
+                                )
+                            )
+                else:
+                    # Standard path: docx → txt or pdf (tables rendered as text)
+                    document_text = self._process_text_based_file(
+                        file_path, 'docx', page_nums, abstract_text,
+                        source_language, target_language, opts, workers=workers,
+                    )
             else:
                 raise CLIError(f"Cannot translate file type '{file_type}'.")
 
             full_translation = "".join(document_text)
-
 
             if not opts.progressive_save and (opts.output_file or opts.auto_save):
                 logger.info("Saving translation output")
@@ -270,6 +324,7 @@ class SandboxProcessor(_CommandMixin):
                     target_language,
                     opts.custom_font,
                     media=embedded_media,
+                    table_registry=docx_table_registry,
                 )
 
         except ImportError as e:

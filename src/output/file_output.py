@@ -233,12 +233,18 @@ class FileOutputHandler:
     
     @staticmethod
     def save_to_docx(content: str, output_path: str, custom_font: Optional[str] = None,
-                     target_lang: Optional[str] = None, media: Optional[List] = None) -> None:
+                     target_lang: Optional[str] = None, media: Optional[List] = None,
+                     table_registry: Optional[dict] = None) -> None:
         """Save content to a Word document using python-docx.
 
         If *media* is provided (a list of :class:`~src.models.embedded_media.EmbeddedMedia`
         items), each image is reinserted at the proportionally equivalent position in
         the translated document.
+
+        If *table_registry* is provided (a mapping from ``"[TABLE_N]"`` placeholder
+        tokens to translated cell grids), any paragraph whose text is exactly a
+        ``[TABLE_N]`` token is replaced by a proper Word ``Table`` object instead
+        of being written as a paragraph.
         """
         try:
             from docx import Document
@@ -290,6 +296,37 @@ class FileOutputHandler:
             # Split content into paragraphs and add to document
             for i, clean_text in enumerate(translated_paras, start=1):
                 para_fraction = i / total_paras
+
+                # --- Table placeholder: replace with a Word Table object ---
+                if table_registry and clean_text.strip() in table_registry:
+                    rows = table_registry[clean_text.strip()]
+                    if rows:
+                        try:
+                            n_cols = max(len(row) for row in rows)
+                            tbl = doc.add_table(rows=len(rows), cols=n_cols)
+                            for r_idx, row in enumerate(rows):
+                                for c_idx, cell_text in enumerate(row):
+                                    if c_idx < n_cols:
+                                        cell = tbl.cell(r_idx, c_idx)
+                                        cell.text = cell_text
+                                        for para in cell.paragraphs:
+                                            for run in para.runs:
+                                                run.font.name = font_name
+                                                run.font.size = Pt(12)
+                            logging.debug(
+                                f"Inserted Word table for '{clean_text.strip()}' "
+                                f"({len(rows)} row(s) × {n_cols} col(s))"
+                            )
+                        except Exception as tbl_err:
+                            logging.warning(
+                                f"Could not insert table for '{clean_text.strip()}': {tbl_err}; "
+                                "writing placeholder as plain text"
+                            )
+                            doc.add_paragraph(clean_text)
+                    _insert_images_up_to(para_fraction)
+                    continue
+
+                # --- Regular paragraph ---
                 try:
                     paragraph = doc.add_paragraph(clean_text)
                     paragraph_format = paragraph.paragraph_format
@@ -366,7 +403,8 @@ class FileOutputHandler:
     def save_translation_output(content: str, input_file: Optional[str], output_file: Optional[str],
                               auto_save: bool, source_lang: str, target_lang: str,
                               custom_font: Optional[str] = None,
-                              media: Optional[List] = None) -> None:
+                              media: Optional[List] = None,
+                              table_registry: Optional[dict] = None) -> None:
         """Save translation output to file based on user preferences."""
         if not content.strip():
             FileOutputHandler._emit_message("No content to save.", level=logging.INFO)
@@ -390,7 +428,10 @@ class FileOutputHandler:
             FileOutputHandler.save_to_pdf(content, output_path, custom_font, target_lang)
             return
         if extension == '.docx':
-            FileOutputHandler.save_to_docx(content, output_path, custom_font, target_lang, media=media)
+            FileOutputHandler.save_to_docx(
+                content, output_path, custom_font, target_lang,
+                media=media, table_registry=table_registry,
+            )
             return
 
         if extension != '.txt':
