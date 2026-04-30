@@ -29,7 +29,18 @@ def tqdm_logging() -> Generator[None, None, None]:
 
     Use this around any block that runs a tqdm progress bar to prevent
     logging output from corrupting the bar display.
+
+    Also silences INFO-level chatter from third-party libraries (httpx HTTP
+    request lines) and internal loggers (token_tracker model-substitution
+    notes) that are redundant when tqdm already shows running totals.
     """
+    # Loggers to quieten to WARNING for the duration of the parallel run.
+    _QUIET_LOGGERS = (
+        "httpx",                          # "HTTP Request: POST … 200 OK"
+        "httpcore",                       # lower-level httpx transport
+        "src.tracking.token_tracker",     # "Using requested model … for pricing"
+    )
+
     root_logger = logging.getLogger()
     handler = _TqdmLoggingHandler()
     handler.setFormatter(_TQDM_LOG_FORMATTER)
@@ -37,12 +48,23 @@ def tqdm_logging() -> Generator[None, None, None]:
     for h in existing_handlers:
         root_logger.removeHandler(h)
     root_logger.addHandler(handler)
+
+    # Save and raise levels for chatty loggers.
+    _saved_levels: dict[str, int] = {}
+    for name in _QUIET_LOGGERS:
+        lg = logging.getLogger(name)
+        _saved_levels[name] = lg.level
+        lg.setLevel(logging.WARNING)
+
     try:
         yield
     finally:
         root_logger.removeHandler(handler)
         for h in existing_handlers:
             root_logger.addHandler(h)
+        # Restore logger levels.
+        for name, level in _saved_levels.items():
+            logging.getLogger(name).setLevel(level)
 
 
 def update_pbar_postfix(

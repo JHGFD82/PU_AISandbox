@@ -223,7 +223,7 @@ class TokenTracker:
             timestamp = datetime.now().isoformat()
             pricing_model = requested_model if requested_model else model
             if requested_model and requested_model != model:
-                logging.info(f"Using requested model '{requested_model}' for pricing instead of API model '{model}'")
+                logging.debug(f"Using requested model '{requested_model}' for pricing instead of API model '{model}'")
 
             input_cost, output_cost, total_cost = self._calculate_costs(pricing_model, prompt_tokens, completion_tokens)
 
