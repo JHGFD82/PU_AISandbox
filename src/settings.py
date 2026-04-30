@@ -52,6 +52,7 @@ BASE_RETRY_DELAY: float = _s["retry"]["base_retry_delay"]
 DEFAULT_PARALLEL_WORKERS: int = _s["processing"]["default_parallel_workers"]
 DEFAULT_OCR_PASSES: int = _s["processing"]["default_ocr_passes"]
 DEFAULT_PAGE_SIZE: int = _s["processing"]["default_page_size"]
+MAX_PARALLEL_WORKERS: int = _s["processing"]["max_parallel_workers"]
 
 # ── Transcription review ───────────────────────────────────────────────────────
 TRANSCRIPTION_REVIEW_TEMPERATURE: float = _s["transcription_review"]["temperature"]

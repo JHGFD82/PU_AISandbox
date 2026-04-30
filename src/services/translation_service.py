@@ -27,7 +27,7 @@ from .prompts import TranslationPromptSpec
 from ..output.file_output import FileOutputHandler
 from ..processors.pdf_processor import PDFProcessor, generate_process_text, detect_numbered_content
 from ..tracking.token_tracker import TokenTracker
-from .constants import PAGE_DELAY_SECONDS
+from .constants import PAGE_DELAY_SECONDS, MAX_PARALLEL_WORKERS
 from ..settings import (
     TRANSLATION_TEMPERATURE,
     TRANSLATION_MAX_TOKENS,
@@ -51,6 +51,9 @@ class TranslationService(BaseService):
         # Tracks image-only (blank) pages skipped during a translation run
         self._blank_page_count: int = 0
         self._blank_page_lock = threading.Lock()
+        # Tracks API/connection errors batched for summary in parallel mode
+        self._api_error_count: int = 0
+        self._api_error_lock = threading.Lock()
     
     def _get_model(self) -> str:
         """Get the model to use, preferring custom model if specified."""
@@ -273,8 +276,9 @@ class TranslationService(BaseService):
         ``finally`` block so they are cleaned up even if a worker raises.
         """
         n_pages = len(all_triples)
-        actual_workers = min(workers, n_pages)
+        actual_workers = min(workers, n_pages, MAX_PARALLEL_WORKERS)
         self._suppress_inline_print = True
+        self._api_error_count = 0
 
         if opts.progressive_save:
             print(
@@ -284,9 +288,12 @@ class TranslationService(BaseService):
             logging.warning("progressive_save disabled: incompatible with workers > 1")
 
         if actual_workers < workers:
-            logging.info(
-                f"workers capped at {actual_workers} (document has {n_pages} {unit_label}(s))"
+            cap_reason = (
+                f"document has {n_pages} {unit_label}(s)"
+                if actual_workers == n_pages
+                else f"max_parallel_workers={MAX_PARALLEL_WORKERS} in settings.toml"
             )
+            logging.info(f"workers capped at {actual_workers} ({cap_reason})")
 
         tmpdir = tempfile.mkdtemp(prefix="pu_sandbox_translate_")
         tmp_paths: Dict[int, str] = {}
@@ -327,12 +334,16 @@ class TranslationService(BaseService):
                                 tmp_paths[idx] = tmp_path
                             except Exception as e:
                                 error_msg = f"\n***Translation error on {unit_label} {idx + 1}: {e}***\n"
-                                tqdm.write(f"Error on {unit_label} {idx + 1}: {e}")
-                                logging.error(f"Parallel worker error on {unit_label} {idx + 1}: {e}")
-                                tmp_path = os.path.join(tmpdir, f"page_{idx:06d}.tmp")
-                                with open(tmp_path, "w", encoding="utf-8") as f:
-                                    f.write(error_msg)
-                                tmp_paths[idx] = tmp_path
+                                logging.debug(f"Parallel worker error on {unit_label} {idx + 1}: {e}")
+                                with self._api_error_lock:
+                                    self._api_error_count += 1
+                                try:
+                                    tmp_path = os.path.join(tmpdir, f"page_{idx:06d}.tmp")
+                                    with open(tmp_path, "w", encoding="utf-8") as f:
+                                        f.write(error_msg)
+                                    tmp_paths[idx] = tmp_path
+                                except OSError:
+                                    logging.debug(f"Could not write error temp file for {unit_label} {idx + 1}")
                             update_pbar_postfix(pbar, self.token_tracker.usage_data, baseline_tokens, baseline_cost)
                             pbar.update(1)
 
@@ -439,6 +450,17 @@ class TranslationService(BaseService):
         if skipped:
             msg = (
                 f"  {skipped} image-only {unit_label}(s) had no extractable text and were skipped"
+                " (run with --verbose for details)."
+            )
+            print(msg)
+            logging.info(msg.strip())
+
+        with self._api_error_lock:
+            failed = self._api_error_count
+            self._api_error_count = 0
+        if failed:
+            msg = (
+                f"  {failed} {unit_label}(s) failed due to API/connection errors and were skipped"
                 " (run with --verbose for details)."
             )
             print(msg)

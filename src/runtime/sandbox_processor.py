@@ -17,7 +17,7 @@ from ..processors.image_processor import ImageProcessor
 from ..processors.pdf_media_extractor import PdfMediaExtractor
 from ..processors.pdf_processor import PDFProcessor
 from ..processors.txt_processor import TxtProcessor
-from ..settings import DEFAULT_PAGE_SIZE
+from ..settings import DEFAULT_PAGE_SIZE, MAX_PARALLEL_WORKERS
 from ..services.image_processor_service import ImageProcessorService
 from ..services.image_translation_service import ImageTranslationService
 from ..services.parallel_utils import tqdm_logging, update_pbar_postfix
@@ -478,9 +478,14 @@ class SandboxProcessor(_CommandMixin):
             return
 
         # --- parallel path ---
-        actual_workers = min(workers, len(image_files))
+        actual_workers = min(workers, len(image_files), MAX_PARALLEL_WORKERS)
         if actual_workers < workers:
-            logger.info(f"Image translation workers capped at {actual_workers} (folder has {len(image_files)} image(s))")
+            cap_reason = (
+                f"folder has {len(image_files)} image(s)"
+                if actual_workers == len(image_files)
+                else f"max_parallel_workers={MAX_PARALLEL_WORKERS} in settings.toml"
+            )
+            logger.info(f"Image translation workers capped at {actual_workers} ({cap_reason})")
 
         results_map: dict[int, tuple[str, str, str]] = {}  # index → (filename, transcript, translation)
 
@@ -595,9 +600,14 @@ class SandboxProcessor(_CommandMixin):
             return
 
         # --- parallel path ---
-        actual_workers = min(workers, len(image_files))
+        actual_workers = min(workers, len(image_files), MAX_PARALLEL_WORKERS)
         if actual_workers < workers:
-            logger.info(f"OCR workers capped at {actual_workers} (folder has {len(image_files)} image(s))")
+            cap_reason = (
+                f"folder has {len(image_files)} image(s)"
+                if actual_workers == len(image_files)
+                else f"max_parallel_workers={MAX_PARALLEL_WORKERS} in settings.toml"
+            )
+            logger.info(f"OCR workers capped at {actual_workers} ({cap_reason})")
 
         results_map: dict[int, tuple[str, str]] = {}  # index → (filename, extracted_text)
 

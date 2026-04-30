@@ -34,6 +34,7 @@ base_retry_delay = 3.0     # Base seconds for exponential backoff (delay = base 
 default_parallel_workers = 1  # Default -w/--workers value; 1 = sequential (safe default)
 default_ocr_passes = 1        # Default -P/--passes value; >1 enables multi-pass OCR refinement
 default_page_size = 2000      # Target characters per logical page when splitting DOCX/TXT files
+max_parallel_workers = 50     # Hard cap on concurrent workers to avoid OS file-descriptor exhaustion
 
 [transcription_review]
 temperature = 0.1          # Low temperature for precise, analytical error detection

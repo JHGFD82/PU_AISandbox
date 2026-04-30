@@ -36,9 +36,11 @@ def tqdm_logging() -> Generator[None, None, None]:
     """
     # Loggers to quieten to WARNING for the duration of the parallel run.
     _QUIET_LOGGERS = (
-        "httpx",                          # "HTTP Request: POST … 200 OK"
-        "httpcore",                       # lower-level httpx transport
-        "src.tracking.token_tracker",     # "Using requested model … for pricing"
+        "httpx",                                      # "HTTP Request: POST … 200 OK"
+        "httpcore",                                   # lower-level httpx transport
+        "src.tracking.token_tracker",                 # "Using requested model … for pricing"
+        "openai._base_client",                        # "Retrying request to /chat/completions …"
+        "portkey_ai._vendor.openai._base_client",     # same, via portkey vendor copy
     )
 
     root_logger = logging.getLogger()
