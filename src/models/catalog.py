@@ -10,6 +10,20 @@ from typing import Any, Dict, List, Optional
 MODEL_CATALOG_FILE = "model_catalog.json"
 DEFAULT_FALLBACK_MODEL = "gpt-4o-mini"
 
+# In-memory cache: populated on first load, invalidated whenever the catalog
+# is written.  Eliminates repeated file-descriptor opens during parallel
+# translation where each worker would otherwise call load_model_catalog() for
+# every API call.
+#
+# The cache is keyed on both the resolved file path and its mtime so that:
+#   a) test fixtures that redirect get_model_catalog_path() to a tmp file get
+#      a fresh read automatically.
+#   b) any writer (including test helpers that bypass save_model_catalog) that
+#      modifies the file on disk invalidates the cache via the changed mtime.
+_catalog_cache: Optional[Dict[str, Any]] = None
+_catalog_cache_path: Optional[Path] = None
+_catalog_cache_mtime: Optional[float] = None
+
 
 def get_model_catalog_path() -> Path:
     """Get the path to the model catalog file (src/model_catalog.json)."""
@@ -18,8 +32,28 @@ def get_model_catalog_path() -> Path:
 
 
 def load_model_catalog() -> Dict[str, Any]:
-    """Load model catalog from file with comprehensive validation."""
+    """Load model catalog from file with comprehensive validation.
+
+    The result is cached in memory after the first successful read and
+    re-used as long as the file's mtime has not changed.  This eliminates
+    repeated file-descriptor opens during parallel translation where each
+    worker would otherwise open the catalog for every API call.
+    """
+    global _catalog_cache, _catalog_cache_path, _catalog_cache_mtime
+
     catalog_file = get_model_catalog_path()
+    try:
+        current_mtime: Optional[float] = os.path.getmtime(catalog_file)
+    except OSError:
+        current_mtime = None
+
+    if (
+        _catalog_cache is not None
+        and _catalog_cache_path == catalog_file
+        and _catalog_cache_mtime == current_mtime
+    ):
+        return _catalog_cache
+
 
     if not catalog_file.exists():
         template_file = catalog_file.parent / "model_catalog.template.json"
@@ -57,6 +91,9 @@ def load_model_catalog() -> Dict[str, Any]:
         logging.error(error_msg)
         raise ValueError(error_msg)
 
+    _catalog_cache = config
+    _catalog_cache_path = catalog_file
+    _catalog_cache_mtime = current_mtime
     return config
 
 
@@ -65,7 +102,10 @@ def save_model_catalog(config: Dict[str, Any]) -> None:
 
     Writes to a temp file in the same directory, then replaces the target
     with os.replace() so readers never see a partially written file.
+    Invalidates the in-memory cache so the next read reflects the new data.
     """
+    global _catalog_cache
+    _catalog_cache = None  # Invalidate before write so any concurrent reader re-reads
     catalog_file = get_model_catalog_path()
     catalog_file.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp_path = tempfile.mkstemp(dir=catalog_file.parent, suffix=".tmp")

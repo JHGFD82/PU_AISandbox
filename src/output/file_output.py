@@ -16,6 +16,11 @@ PDF_MARGINS = {
     'bottom': 18,
 }
 
+# Maximum width (EMU) an inserted image may occupy inside a Word document.
+# Derived from US Letter (8.5") with 1" margins on each side: 6.5" × 914400 EMU/inch.
+_MAX_IMAGE_WIDTH_EMU: int = 5_943_600
+
+
 
 def generate_output_filename(input_file: str, source_lang: str, target_lang: str, extension: str = '.txt') -> str:
     """Generate an output filename based on input file and languages."""
@@ -325,13 +330,19 @@ class FileOutputHandler:
                     try:
                         img_para = doc.add_paragraph()
                         img_run = img_para.add_run()
-                        img_run.add_picture(
-                            BytesIO(item.data),
-                            width=Emu(item.width_emu) if item.width_emu else None,
+                        # Cap width to the text-area; height scales automatically.
+                        display_width = Emu(
+                            min(item.width_emu, _MAX_IMAGE_WIDTH_EMU)
+                            if item.width_emu
+                            else _MAX_IMAGE_WIDTH_EMU
                         )
+                        img_run.add_picture(BytesIO(item.data), width=display_width)
                         logging.debug(f"Inserted image at position_fraction={item.position_fraction:.3f}")
                     except Exception as img_err:
-                        logging.warning(f"Could not insert image at fraction {item.position_fraction:.3f}: {img_err}")
+                        logging.warning(
+                            f"Could not insert image at fraction {item.position_fraction:.3f}: "
+                            f"{type(img_err).__name__}: {img_err}"
+                        )
                     media_cursor += 1
 
             # Split content into paragraphs and add to document

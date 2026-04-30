@@ -1,7 +1,7 @@
 """PDF media extractor: extracts embedded images from PDF files using PyMuPDF."""
 
 import logging
-from typing import List, BinaryIO, TYPE_CHECKING
+from typing import List, Optional, BinaryIO, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from ..models.embedded_media import EmbeddedMedia
@@ -95,13 +95,22 @@ class PdfMediaExtractor:
                     continue
                 seen_xrefs.add(xref)
 
-                # Locate the image on the page to compute y-position.
+                # Locate the image on the page to compute y-position AND display size.
+                # bbox is in PDF points (1 pt = 1/72 inch = 12700 EMU).
                 y_frac = 0.0
+                display_width_emu: Optional[int] = None
+                display_height_emu: Optional[int] = None
                 for item in page.get_image_info(xrefs=True):
                     if item.get("xref") == xref:
-                        bbox = item.get("bbox")  # (x0, y0, x1, y1) in page coords
+                        bbox = item.get("bbox")  # (x0, y0, x1, y1) in page points
                         if bbox:
                             y_frac = bbox[1] / page_height
+                            w_pts = bbox[2] - bbox[0]
+                            h_pts = bbox[3] - bbox[1]
+                            if w_pts > 0:
+                                display_width_emu = int(w_pts * 12700)
+                            if h_pts > 0:
+                                display_height_emu = int(h_pts * 12700)
                         break
 
                 position_fraction = (page_index + y_frac) / total_pages
@@ -123,19 +132,24 @@ class PdfMediaExtractor:
                 ext: str = img_dict.get("ext", "").lower()
                 content_type = _EXT_TO_MIME.get(ext, f"image/{ext}" if ext else "image/png")
 
-                # PyMuPDF returns width/height in pixels; convert to EMU
-                # (1 inch = 914400 EMU; assume 72 DPI → 12700 EMU per pixel).
-                width_px: int = img_dict.get("width", 0)
-                height_px: int = img_dict.get("height", 0)
-                width_emu = width_px * 12700 if width_px else None
-                height_emu = height_px * 12700 if height_px else None
+                # Use display dimensions derived from the page bbox (PDF points
+                # → EMU) rather than raw pixel dimensions.  A 300 DPI embedded
+                # image has ~4× more pixels than a 72 DPI one even when displayed
+                # at the same size, so pixel-based EMU would be grossly oversized.
+                # Fall back to pixel-based estimate only if bbox was unavailable.
+                if display_width_emu is None:
+                    width_px: int = img_dict.get("width", 0)
+                    display_width_emu = width_px * 12700 if width_px else None
+                if display_height_emu is None:
+                    height_px: int = img_dict.get("height", 0)
+                    display_height_emu = height_px * 12700 if height_px else None
 
                 media_items.append(EmbeddedMedia(
                     data=data,
                     content_type=content_type,
                     position_fraction=position_fraction,
-                    width_emu=width_emu,
-                    height_emu=height_emu,
+                    width_emu=display_width_emu,
+                    height_emu=display_height_emu,
                 ))
 
         doc.close()
