@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Optional, Tuple, cast
 
 from ..errors import CLIError
 from ..models import OutputOptions
+from ..processors.constants import IMAGE_EXTENSIONS
 from ..processors.docx_processor import DocxProcessor
 from ..processors.pdf_processor import generate_process_text
 from ..processors.txt_processor import TxtProcessor
@@ -175,6 +176,60 @@ class _CommandMixin:
         source_language: str = lang_tuple[0]
         target_language: str = lang_tuple[1]
 
+        # --preserve-media compatibility checks — raise an error immediately so
+        # the user can correct their command before any tokens are spent.
+        if getattr(args, 'preserve_media', False):
+            if getattr(args, 'progressive_save', False):
+                raise CLIError("Cannot combine --preserve-media with --progressive-save.")
+            if getattr(args, 'custom_text', False):
+                raise CLIError(
+                    "Cannot use --preserve-media with custom text input (-c): "
+                    "pasted text contains no embedded media."
+                )
+            input_file_arg: Optional[str] = getattr(args, 'input_file', None)
+            if not input_file_arg:
+                raise CLIError(
+                    "Cannot use --preserve-media without a file input (-i)."
+                )
+            input_ext = os.path.splitext(input_file_arg)[1].lower()
+            if input_ext in IMAGE_EXTENSIONS:
+                raise CLIError(
+                    "Cannot use --preserve-media with an image file input: "
+                    "images have no embedded media to carry over."
+                )
+            if input_ext != '.docx':
+                raise CLIError(
+                    f"Cannot use --preserve-media with '{input_ext}' files: "
+                    "media preservation currently supports Word documents (.docx) only."
+                )
+            output_file_arg: Optional[str] = getattr(args, 'output_file', None)
+            if getattr(args, 'auto_save', False) and not output_file_arg:
+                raise CLIError(
+                    "Cannot use --preserve-media with --auto-save: auto-save produces a .txt file. "
+                    "Specify a .docx output with -o."
+                )
+            if not output_file_arg:
+                raise CLIError(
+                    "Cannot use --preserve-media without a .docx output file. "
+                    "Specify an output with -o, e.g. -o translated.docx."
+                )
+            out_ext = os.path.splitext(output_file_arg)[1].lower()
+            if out_ext == '.txt':
+                raise CLIError(
+                    "--preserve-media requires a .docx output file; "
+                    ".txt files cannot embed images."
+                )
+            if out_ext == '.pdf':
+                raise CLIError(
+                    "--preserve-media requires a .docx output file; "
+                    "PDF media preservation is not yet supported."
+                )
+            if out_ext != '.docx':
+                raise CLIError(
+                    "--preserve-media requires a .docx output file "
+                    f"(got '{out_ext}')."
+                )
+
         if getattr(args, 'notes', False):
             # Build a prompt preview so the user can see what they are annotating.
             # Use the image-translation prompts for image inputs, text-translation
@@ -284,6 +339,7 @@ class _CommandMixin:
             auto_save=getattr(args, 'auto_save', False),
             progressive_save=getattr(args, 'progressive_save', False),
             custom_font=getattr(args, 'custom_font', None),
+            preserve_media=getattr(args, 'preserve_media', False),
         )
         workers = getattr(args, 'workers', 1)
         spread = getattr(args, 'spread', False)

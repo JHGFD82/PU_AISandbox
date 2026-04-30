@@ -23,3 +23,4 @@ class OutputOptions:
     auto_save: bool = False
     progressive_save: bool = False
     custom_font: Optional[str] = None
+    preserve_media: bool = False

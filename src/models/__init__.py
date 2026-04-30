@@ -4,6 +4,7 @@ Re-exports every symbol from the three submodules so callers can use either
 ``from src.models import X`` or ``from src.models.catalog import X``.
 """
 
+from .embedded_media import EmbeddedMedia
 from .catalog import (
     DEFAULT_FALLBACK_MODEL,
     MODEL_CATALOG_FILE,
@@ -61,4 +62,6 @@ __all__ = [
     "resolve_model",
     # output options
     "OutputOptions",
+    # embedded media
+    "EmbeddedMedia",
 ]

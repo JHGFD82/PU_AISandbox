@@ -1,8 +1,9 @@
 """File output handler: writes translations to .txt, .pdf, or .docx with CJK font support."""
 
 import logging
+from io import BytesIO
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 from datetime import datetime
 
 from .font_resolver import get_docx_font, get_pdf_font
@@ -231,15 +232,21 @@ class FileOutputHandler:
             FileOutputHandler._fallback_to_text(content, output_path)
     
     @staticmethod
-    def save_to_docx(content: str, output_path: str, custom_font: Optional[str] = None, target_lang: Optional[str] = None) -> None:
-        """Save content to a Word document using python-docx."""
+    def save_to_docx(content: str, output_path: str, custom_font: Optional[str] = None,
+                     target_lang: Optional[str] = None, media: Optional[List] = None) -> None:
+        """Save content to a Word document using python-docx.
+
+        If *media* is provided (a list of :class:`~src.models.embedded_media.EmbeddedMedia`
+        items), each image is reinserted at the proportionally equivalent position in
+        the translated document.
+        """
         try:
             from docx import Document
-            from docx.shared import Inches, Pt
-            
+            from docx.shared import Inches, Pt, Emu
+
             # Create a new document
             doc = Document()
-            
+
             # Set up margins (similar to PDF margins)
             sections = doc.sections
             for section in sections:
@@ -247,7 +254,7 @@ class FileOutputHandler:
                 section.bottom_margin = Inches(1.0)
                 section.left_margin = Inches(1.0)
                 section.right_margin = Inches(1.0)
-            
+
             # Get font name for CJK support
             if not custom_font and target_lang == 'English':
                 font_name = 'Times New Roman'
@@ -255,9 +262,34 @@ class FileOutputHandler:
             else:
                 font_name = get_docx_font(custom_font)
                 logging.debug(f"Using CJK font for Word: {font_name} (custom_font={custom_font}, target_lang={target_lang})")
-            
+
+            # Pre-sort media by position so we can sweep through in a single pass.
+            sorted_media = sorted(media, key=lambda m: m.position_fraction) if media else []
+            media_cursor = 0
+
+            translated_paras = FileOutputHandler._normalize_paragraphs(content)
+            total_paras = len(translated_paras) or 1
+
+            def _insert_images_up_to(para_fraction: float) -> None:
+                """Insert all media items whose position_fraction <= para_fraction."""
+                nonlocal media_cursor
+                while media_cursor < len(sorted_media) and sorted_media[media_cursor].position_fraction <= para_fraction:
+                    item = sorted_media[media_cursor]
+                    try:
+                        img_para = doc.add_paragraph()
+                        img_run = img_para.add_run()
+                        img_run.add_picture(
+                            BytesIO(item.data),
+                            width=Emu(item.width_emu) if item.width_emu else None,
+                        )
+                        logging.debug(f"Inserted image at position_fraction={item.position_fraction:.3f}")
+                    except Exception as img_err:
+                        logging.warning(f"Could not insert image at fraction {item.position_fraction:.3f}: {img_err}")
+                    media_cursor += 1
+
             # Split content into paragraphs and add to document
-            for i, clean_text in enumerate(FileOutputHandler._normalize_paragraphs(content), start=1):
+            for i, clean_text in enumerate(translated_paras, start=1):
+                para_fraction = i / total_paras
                 try:
                     paragraph = doc.add_paragraph(clean_text)
                     paragraph_format = paragraph.paragraph_format
@@ -281,8 +313,15 @@ class FileOutputHandler:
                         logging.debug(f"Added paragraph {i} with basic formatting")
                     except Exception as fallback_error:
                         logging.warning(f"Failed to add paragraph {i} to Word document: {fallback_error}")
+                        para_fraction = i / total_paras
+                        _insert_images_up_to(para_fraction)
                         continue
-            
+
+                _insert_images_up_to(para_fraction)
+
+            # Append any remaining images that fall past the last paragraph.
+            _insert_images_up_to(1.0)
+
             # Save the document
             if len(doc.paragraphs) > 0:
                 doc.save(output_path)
@@ -301,7 +340,7 @@ class FileOutputHandler:
                     log_message="No content could be processed for Word document generation",
                 )
                 FileOutputHandler._fallback_to_text(content, output_path)
-            
+
         except ImportError:
             FileOutputHandler._emit_message(
                 "Warning: python-docx not installed. To enable Word document export, install it with:",
@@ -324,8 +363,10 @@ class FileOutputHandler:
             FileOutputHandler._fallback_to_text(content, output_path)
     
     @staticmethod
-    def save_translation_output(content: str, input_file: Optional[str], output_file: Optional[str], 
-                              auto_save: bool, source_lang: str, target_lang: str, custom_font: Optional[str] = None) -> None:
+    def save_translation_output(content: str, input_file: Optional[str], output_file: Optional[str],
+                              auto_save: bool, source_lang: str, target_lang: str,
+                              custom_font: Optional[str] = None,
+                              media: Optional[List] = None) -> None:
         """Save translation output to file based on user preferences."""
         if not content.strip():
             FileOutputHandler._emit_message("No content to save.", level=logging.INFO)
@@ -345,14 +386,11 @@ class FileOutputHandler:
         FileOutputHandler._ensure_parent_directory(output_path)
 
         extension = Path(output_path).suffix.lower()
-        writer_map = {
-            '.pdf': FileOutputHandler.save_to_pdf,
-            '.docx': FileOutputHandler.save_to_docx,
-        }
-        
-        writer = writer_map.get(extension)
-        if writer:
-            writer(content, output_path, custom_font, target_lang)
+        if extension == '.pdf':
+            FileOutputHandler.save_to_pdf(content, output_path, custom_font, target_lang)
+            return
+        if extension == '.docx':
+            FileOutputHandler.save_to_docx(content, output_path, custom_font, target_lang, media=media)
             return
 
         if extension != '.txt':

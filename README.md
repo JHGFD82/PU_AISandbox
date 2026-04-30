@@ -93,7 +93,17 @@ python main.py heller translate JE -i document.txt -o translation.docx -f AppleG
 
 # Use custom font for PDF/Word output
 python main.py smith translate CE -i document.pdf -o translation.pdf -f AppleGothic
+
+# Carry embedded images from a Word document into the translated Word document
+python main.py heller translate CE -i document.docx -o translation.docx --preserve-media
 ```
+
+**`--preserve-media` requirements and restrictions:**
+- Requires a Word document (`.docx`) as input (`-i`)
+- Requires an explicit `.docx` output file (`-o translation.docx`)
+- Incompatible with `--progressive-save`, `--auto-save`, `-c` (custom text), and non-`.docx` output formats
+- Images are reinserted at proportionally equivalent positions in the translated document (approximate due to paragraph count differences between source and translation)
+- PDF media preservation is not yet supported
 
 ### Model Selection
 ```bash

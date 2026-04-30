@@ -9,7 +9,7 @@ from tqdm import tqdm
 
 from ..config import get_api_key
 from ..errors import CLIError
-from ..models import OutputOptions
+from ..models import EmbeddedMedia, OutputOptions
 from ..output.file_output import FileOutputHandler
 from ..processors.constants import IMAGE_EXTENSIONS
 from ..processors.docx_processor import DocxProcessor
@@ -216,6 +216,15 @@ class SandboxProcessor(_CommandMixin):
 
         logger.info(f"Starting translation: {source_language} → {target_language}")
 
+        # Extract media from the source DOCX before translation begins so the
+        # file handle is not consumed by later processing.
+        embedded_media: Optional[List[EmbeddedMedia]] = None
+        if opts.preserve_media and file_type == 'docx':
+            logger.info("Extracting embedded media from source Word document.")
+            with open(file_path, 'rb') as _mf:
+                embedded_media = DocxProcessor.extract_media(_mf)
+            logger.info(f"Found {len(embedded_media)} embedded image(s).")
+
         try:
             document_text: List[str] = []
             if file_type == 'pdf':
@@ -260,6 +269,7 @@ class SandboxProcessor(_CommandMixin):
                     source_language,
                     target_language,
                     opts.custom_font,
+                    media=embedded_media,
                 )
 
         except ImportError as e:

@@ -62,6 +62,7 @@ python main.py heller translate CE -i test.pdf -p 1-5        # Page range
 python main.py heller translate CE -i test.pdf -p "4,15-17,20,30-55"  # Multi-range
 python main.py heller translate CE -i test.pdf -o out.docx   # Output as Word
 python main.py heller translate CE -i test.pdf -w 4          # 4 parallel workers
+python main.py heller translate CE -i test.docx -o out.docx --preserve-media  # Carry images into output Word doc
 
 # Transcription (OCR) — use single language char, not a pair
 python main.py heller transcribe E -i test.jpg               # OCR to console
@@ -94,6 +95,22 @@ Two-character codes: `CE` (Chinese→English), `JK` (Japanese→Korean), etc.
 ### Progressive Saving
 - **Text format only**: `--progressive-save` saves each page immediately as it finishes
 - **Incompatible with parallel mode**: `--progressive-save` is silently disabled (with a printed warning) when `workers > 1`
+- **Incompatible with --preserve-media**: combining these two raises a `CLIError` immediately.
+
+### Media Preservation (`--preserve-media`)
+- **Flag**: `--preserve-media` (boolean, translate command only)
+- **Scope**: Word documents only — requires a `.docx` input (`-i`) and a `.docx` output (`-o`)
+- **Incompatible combinations** (all raise `CLIError` before any API call):
+  - `--progressive-save` — cannot combine
+  - `-c` / `--custom` — pasted text has no embedded media
+  - Non-`.docx` input (PDF, TXT, image) — only DOCX extraction is implemented
+  - No output path or `--auto-save` without `-o` — auto-save defaults to `.txt`
+  - `.txt` or `.pdf` output extension — these formats cannot embed images
+- **Extraction**: `DocxProcessor.extract_media(file_obj)` — iterates paragraph runs, finds `w:drawing` → `a:blip` elements, reads `ImagePart.blob`, records `position_fraction` (para_idx / total_paras), and EMU dimensions from `wp:extent`.
+- **Reinsertion**: `FileOutputHandler.save_to_docx(..., media=...)` — images are inserted using proportional positioning: each image is appended immediately after the translated paragraph whose cumulative fraction (`i / total_paras`) first meets or exceeds the image's `position_fraction`.
+- **Data model**: `src/models/embedded_media.py` — `EmbeddedMedia` dataclass (`data`, `content_type`, `position_fraction`, `width_emu`, `height_emu`)
+- **Pipeline flow**: `_run_translate` validates → `translate_document` extracts media (before translation) → `save_translation_output` forwards media → `save_to_docx` reinserts
+- **No new dependencies**: uses only the existing `python-docx` dependency
 
 ### Parallel Processing
 - **Flag**: `-w N` / `--workers N` (default: `1` = sequential). The default is defined as `DEFAULT_PARALLEL_WORKERS` in `src/services/constants.py`.
@@ -194,6 +211,7 @@ Use `python main.py --show-config` to validate professor configuration without m
 - **Parallel translation**: `tests/test_parallel_translation.py` — order correctness, context passing, temp file cleanup, worker capping, progressive-save warning, context-length splitting inside workers
 - **Parallel OCR**: `tests/test_parallel_ocr.py` — folder mode order, worker exceptions, multi-pass forwarding, worker capping, empty folder error
 - **Thread safety**: `tests/test_token_tracker.py::TestConcurrentRecordUsage` — 16 concurrent `record_usage()` calls, exact token count, call count, session history length
+- **Media preservation**: `tests/test_preserve_media.py` — `EmbeddedMedia` dataclass, `DocxProcessor.extract_media()`, CLI flag parsing, all incompatible-flag `CLIError` cases, `save_to_docx()` with positional reinsertion, `save_translation_output()` media forwarding
 
 ## Git Commit Workflow
 - A `.gitmessage` template exists at the repo root — always follow its format when writing commits:

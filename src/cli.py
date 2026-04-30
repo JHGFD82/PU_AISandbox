@@ -95,8 +95,10 @@ Translation:
   python main.py heller translate CE -i doc.pdf -n              Append ad-hoc notes to prompt
   python main.py heller translate CE -i doc.pdf -w 4            Translate 4 pages in parallel
   python main.py heller translate JE -i spread.jpg --spread     Image is a two-page spread (images only)
+  python main.py heller translate CE -i doc.docx -o out.docx --preserve-media  Carry images from source Word doc into output
     Note: -w > 1 passes untranslated source text as context (not prior translation) and
     disables --progressive-save. Each page's context_length_exceeded splitting still works.
+    --preserve-media requires a .docx input and a .docx output file (-o out.docx).
 
 Transcription (OCR):
   python main.py heller transcribe E -i image.jpg
@@ -241,6 +243,12 @@ Transcription review (OCR error detection):
         ),
     )
     translate_parser.add_argument('--spread', dest='spread', action='store_true', help='Image is a two-page spread (two facing pages scanned together); only applies to image file inputs')
+    translate_parser.add_argument(
+        '--preserve-media',
+        dest='preserve_media',
+        action='store_true',
+        help='Carry embedded images from a .docx source into the translated .docx output (requires -i *.docx and -o *.docx)',
+    )
     _add_common_flags(translate_parser)
     _add_notes_flags(translate_parser)
 
