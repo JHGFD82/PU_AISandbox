@@ -5,6 +5,7 @@ import os
 import re
 import shutil
 import tempfile
+import threading
 import time
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -47,6 +48,9 @@ class TranslationService(BaseService):
         # Set to True in parallel mode to suppress per-page console output
         self._suppress_inline_print: bool = False
         self.kanbun: bool = False
+        # Tracks image-only (blank) pages skipped during a translation run
+        self._blank_page_count: int = 0
+        self._blank_page_lock = threading.Lock()
     
     def _get_model(self) -> str:
         """Get the model to use, preferring custom model if specified."""
@@ -162,7 +166,9 @@ class TranslationService(BaseService):
         # Short-circuit for image-only (blank) pages — no text to translate,
         # no API call, no error message in the output.
         if not page_text.strip():
-            logging.info(
+            with self._blank_page_lock:
+                self._blank_page_count += 1
+            logging.debug(
                 f"Page {page_num + 1} has no extractable text (likely image-only); skipping."
             )
             return f"\n\n-- Page {page_num + 1} -- \n"
@@ -367,7 +373,7 @@ class TranslationService(BaseService):
         """
         if workers > 1:
             all_triples = list(page_triples)
-            return self._translate_pages_parallel(
+            document_text = self._translate_pages_parallel(
                 all_triples,
                 abstract_text=abstract_text,
                 source_language=source_language,
@@ -377,54 +383,66 @@ class TranslationService(BaseService):
                 workers=workers,
                 opts=opts,
             )
+        else:
+            # --- sequential path ---
+            document_text = []
+            progressive_output_path: Optional[str] = None
+            previous_translated = ""
 
-        # --- sequential path (unchanged) ---
-        document_text: list[str] = []
-        progressive_output_path: Optional[str] = None
-        previous_translated = ""
-
-        for i, page_text, previous_page in tqdm(page_triples, desc="Translating... ", ascii=True):
-            try:
-                translated_text = self.generate_text(
-                    abstract_text, page_text, previous_page, i,
-                    source_language, target_language, output_format, previous_translated
-                )
-                document_text.append(translated_text)
-                previous_translated = translated_text
-
-                if i > first_index:
-                    time.sleep(PAGE_DELAY_SECONDS)
-
-                if opts.progressive_save and (opts.output_file or opts.auto_save):
-                    progressive_output_path = FileOutputHandler.save_page_progressively(
-                        translated_text,
-                        input_file_path,
-                        opts.output_file,
-                        opts.auto_save,
-                        source_language,
-                        target_language,
-                        is_first_page=(i == first_index),
+            for i, page_text, previous_page in tqdm(page_triples, desc="Translating... ", ascii=True):
+                try:
+                    translated_text = self.generate_text(
+                        abstract_text, page_text, previous_page, i,
+                        source_language, target_language, output_format, previous_translated
                     )
+                    document_text.append(translated_text)
+                    previous_translated = translated_text
 
-            except Exception as e:
-                error_message = f"\n***Translation error on {unit_label} {i + 1}: {e}***\n"
-                document_text.append(error_message)
-                print(f"Error on {unit_label} {i + 1}: {e}")
+                    if i > first_index:
+                        time.sleep(PAGE_DELAY_SECONDS)
 
-                if opts.progressive_save and (opts.output_file or opts.auto_save):
-                    FileOutputHandler.save_page_progressively(
-                        error_message,
-                        input_file_path,
-                        opts.output_file,
-                        opts.auto_save,
-                        source_language,
-                        target_language,
-                        is_first_page=(i == first_index),
-                    )
-                continue
+                    if opts.progressive_save and (opts.output_file or opts.auto_save):
+                        progressive_output_path = FileOutputHandler.save_page_progressively(
+                            translated_text,
+                            input_file_path,
+                            opts.output_file,
+                            opts.auto_save,
+                            source_language,
+                            target_language,
+                            is_first_page=(i == first_index),
+                        )
 
-        if opts.progressive_save and progressive_output_path:
-            print(f"\nProgressive translation saved to: {progressive_output_path}")
+                except Exception as e:
+                    error_message = f"\n***Translation error on {unit_label} {i + 1}: {e}***\n"
+                    document_text.append(error_message)
+                    print(f"Error on {unit_label} {i + 1}: {e}")
+
+                    if opts.progressive_save and (opts.output_file or opts.auto_save):
+                        FileOutputHandler.save_page_progressively(
+                            error_message,
+                            input_file_path,
+                            opts.output_file,
+                            opts.auto_save,
+                            source_language,
+                            target_language,
+                            is_first_page=(i == first_index),
+                        )
+                    continue
+
+            if opts.progressive_save and progressive_output_path:
+                print(f"\nProgressive translation saved to: {progressive_output_path}")
+
+        # --- post-run summary (both paths) ---
+        with self._blank_page_lock:
+            skipped = self._blank_page_count
+            self._blank_page_count = 0
+        if skipped:
+            msg = (
+                f"  {skipped} image-only {unit_label}(s) had no extractable text and were skipped"
+                " (run with --verbose for details)."
+            )
+            print(msg)
+            logging.info(msg.strip())
 
         return document_text
 

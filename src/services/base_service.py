@@ -131,8 +131,16 @@ class BaseService:
                 total_tokens=response.usage.total_tokens,
                 requested_model=model,
             )
-            logging.info(
-                f"Tokens used — prompt: {response.usage.prompt_tokens}, "
+            # In parallel mode (_suppress_inline_print=True) the tqdm postfix already
+            # shows running totals, so demote per-call token info to DEBUG.
+            _token_level = (
+                logging.DEBUG
+                if getattr(self, "_suppress_inline_print", False)
+                else logging.INFO
+            )
+            logging.log(
+                _token_level,
+                f"Tokens used \u2014 prompt: {response.usage.prompt_tokens}, "
                 f"completion: {response.usage.completion_tokens}, "
                 f"total: {response.usage.total_tokens}, "
                 f"cost: ${usage.total_cost:.4f}"
