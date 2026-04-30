@@ -3,6 +3,7 @@ portkey-ai
 openai
 requests
 pdfminer.six
+pymupdf
 tqdm
 reportlab
 python-docx

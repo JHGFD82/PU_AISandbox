@@ -14,6 +14,7 @@ from ..output.file_output import FileOutputHandler
 from ..processors.constants import IMAGE_EXTENSIONS
 from ..processors.docx_processor import DocxProcessor
 from ..processors.image_processor import ImageProcessor
+from ..processors.pdf_media_extractor import PdfMediaExtractor
 from ..processors.pdf_processor import PDFProcessor
 from ..processors.txt_processor import TxtProcessor
 from ..settings import DEFAULT_PAGE_SIZE
@@ -216,13 +217,18 @@ class SandboxProcessor(_CommandMixin):
 
         logger.info(f"Starting translation: {source_language} → {target_language}")
 
-        # Extract media from the source DOCX before translation begins so the
+        # Extract media from the source document before translation begins so the
         # file handle is not consumed by later processing.
         embedded_media: Optional[List[EmbeddedMedia]] = None
         if opts.preserve_media and file_type == 'docx':
             logger.info("Extracting embedded media from source Word document.")
             with open(file_path, 'rb') as _mf:
                 embedded_media = DocxProcessor.extract_media(_mf)
+            logger.info(f"Found {len(embedded_media)} embedded image(s).")
+        elif opts.preserve_media and file_type == 'pdf':
+            logger.info("Extracting embedded media from source PDF.")
+            with open(file_path, 'rb') as _mf:
+                embedded_media = PdfMediaExtractor.extract_media(_mf)
             logger.info(f"Found {len(embedded_media)} embedded image(s).")
 
         try:

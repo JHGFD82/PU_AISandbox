@@ -328,12 +328,16 @@ class TestPreserveMediaValidation:
         with pytest.raises(CLIError, match=r"image"):
             self.mixin._run_translate(args)
 
-    def test_preserve_media_with_pdf_input_raises(self):
+    def test_preserve_media_with_pdf_input_does_not_raise(self):
+        """PDF input with .docx output is now supported for media preservation."""
         args = _make_translate_args(
             preserve_media=True, input_file="doc.pdf", output_file="out.docx"
         )
-        with pytest.raises(CLIError, match=r"\.pdf"):
+        # Should NOT raise; PDF input + docx output is a valid combination.
+        try:
             self.mixin._run_translate(args)
+        except CLIError as exc:
+            pytest.fail(f"Unexpected CLIError for PDF input: {exc}")
 
     def test_preserve_media_with_txt_input_raises(self):
         args = _make_translate_args(

@@ -62,7 +62,8 @@ python main.py heller translate CE -i test.pdf -p 1-5        # Page range
 python main.py heller translate CE -i test.pdf -p "4,15-17,20,30-55"  # Multi-range
 python main.py heller translate CE -i test.pdf -o out.docx   # Output as Word
 python main.py heller translate CE -i test.pdf -w 4          # 4 parallel workers
-python main.py heller translate CE -i test.docx -o out.docx --preserve-media  # Carry images into output Word doc
+python main.py heller translate CE -i test.docx -o out.docx --preserve-media  # Carry DOCX images into output Word doc
+python main.py heller translate CE -i test.pdf -o out.docx --preserve-media   # Carry PDF images into output Word doc
 
 # Transcription (OCR) — use single language char, not a pair
 python main.py heller transcribe E -i test.jpg               # OCR to console
@@ -99,18 +100,20 @@ Two-character codes: `CE` (Chinese→English), `JK` (Japanese→Korean), etc.
 
 ### Media Preservation (`--preserve-media`)
 - **Flag**: `--preserve-media` (boolean, translate command only)
-- **Scope**: Word documents only — requires a `.docx` input (`-i`) and a `.docx` output (`-o`)
+- **Scope**: `.docx` or `.pdf` input with a `.docx` output (`-o`). Images extracted from the source are reinserted into the output Word document at proportional positions.
 - **Incompatible combinations** (all raise `CLIError` before any API call):
   - `--progressive-save` — cannot combine
   - `-c` / `--custom` — pasted text has no embedded media
-  - Non-`.docx` input (PDF, TXT, image) — only DOCX extraction is implemented
+  - Non-`.docx`, non-`.pdf` input (TXT, image) — only DOCX and PDF extraction are implemented
   - No output path or `--auto-save` without `-o` — auto-save defaults to `.txt`
-  - `.txt` or `.pdf` output extension — these formats cannot embed images
-- **Extraction**: `DocxProcessor.extract_media(file_obj)` — iterates paragraph runs, finds `w:drawing` → `a:blip` elements, reads `ImagePart.blob`, records `position_fraction` (para_idx / total_paras), and EMU dimensions from `wp:extent`.
+  - `.txt` output extension — cannot embed images
+  - `.pdf` output extension — PDF output not yet implemented (use `.docx`)
+- **DOCX extraction**: `DocxProcessor.extract_media(file_obj)` — iterates paragraph runs, finds `w:drawing` → `a:blip` elements, reads `ImagePart.blob`, records `position_fraction` (para_idx / total_paras), and EMU dimensions from `wp:extent`.
+- **PDF extraction**: `PdfMediaExtractor.extract_media(file_obj)` (`src/processors/pdf_media_extractor.py`) — uses PyMuPDF (`fitz`); iterates pages, deduplicates by xref, computes `position_fraction = (page_index + y_frac) / total_pages`, converts pixel dims to EMU (12700 EMU/px at 72 DPI), skips images < 512 bytes.
 - **Reinsertion**: `FileOutputHandler.save_to_docx(..., media=...)` — images are inserted using proportional positioning: each image is appended immediately after the translated paragraph whose cumulative fraction (`i / total_paras`) first meets or exceeds the image's `position_fraction`.
 - **Data model**: `src/models/embedded_media.py` — `EmbeddedMedia` dataclass (`data`, `content_type`, `position_fraction`, `width_emu`, `height_emu`)
-- **Pipeline flow**: `_run_translate` validates → `translate_document` extracts media (before translation) → `save_translation_output` forwards media → `save_to_docx` reinserts
-- **No new dependencies**: uses only the existing `python-docx` dependency
+- **Pipeline flow**: `_run_translate` validates → `translate_document` extracts media via `DocxProcessor` or `PdfMediaExtractor` (before translation) → `save_translation_output` forwards media → `save_to_docx` reinserts
+- **Dependencies**: `python-docx` (DOCX extraction/reinsertion), `pymupdf` (PDF extraction)
 
 ### Parallel Processing
 - **Flag**: `-w N` / `--workers N` (default: `1` = sequential). The default is defined as `DEFAULT_PARALLEL_WORKERS` in `src/services/constants.py`.

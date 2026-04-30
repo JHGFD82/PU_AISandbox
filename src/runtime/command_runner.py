@@ -197,10 +197,10 @@ class _CommandMixin:
                     "Cannot use --preserve-media with an image file input: "
                     "images have no embedded media to carry over."
                 )
-            if input_ext != '.docx':
+            if input_ext not in ('.docx', '.pdf'):
                 raise CLIError(
                     f"Cannot use --preserve-media with '{input_ext}' files: "
-                    "media preservation currently supports Word documents (.docx) only."
+                    "media preservation supports Word documents (.docx) and PDF files (.pdf)."
                 )
             output_file_arg: Optional[str] = getattr(args, 'output_file', None)
             if getattr(args, 'auto_save', False) and not output_file_arg:
@@ -221,8 +221,8 @@ class _CommandMixin:
                 )
             if out_ext == '.pdf':
                 raise CLIError(
-                    "--preserve-media requires a .docx output file; "
-                    "PDF media preservation is not yet supported."
+                    "--preserve-media does not yet support PDF output. "
+                    "Specify a .docx output file with -o."
                 )
             if out_ext != '.docx':
                 raise CLIError(

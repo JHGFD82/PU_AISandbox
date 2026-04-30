@@ -113,12 +113,19 @@ class FileOutputHandler:
             )
     
     @staticmethod
-    def save_to_pdf(content: str, output_path: str, custom_font: Optional[str] = None, target_lang: Optional[str] = None) -> None:
-        """Save content to a PDF file using reportlab."""
+    def save_to_pdf(content: str, output_path: str, custom_font: Optional[str] = None,
+                    target_lang: Optional[str] = None,
+                    table_registry: Optional[dict] = None) -> None:
+        """Save content to a PDF file using reportlab.
+
+        If *table_registry* is provided, ``[TABLE_N]`` placeholder paragraphs
+        are rendered as reportlab ``Table`` flowables instead of plain text.
+        """
         try:
             from reportlab.lib.pagesizes import letter
             from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-            from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Flowable
+            from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Flowable, Table, TableStyle
+            from reportlab.lib import colors
             
             # Create PDF document
             doc = SimpleDocTemplate(
@@ -170,6 +177,40 @@ class FileOutputHandler:
 
             # Split content into paragraphs and add to story
             for i, clean_text in enumerate(FileOutputHandler._normalize_paragraphs(content), start=1):
+
+                # --- Table placeholder: render as a reportlab Table flowable ---
+                if table_registry and clean_text.strip() in table_registry:
+                    rows = table_registry[clean_text.strip()]
+                    if rows:
+                        try:
+                            # Build cell data — each cell wrapped in a Paragraph for wrapping
+                            cell_data = [
+                                [Paragraph(cell or '', normal_style) for cell in row]
+                                for row in rows
+                            ]
+                            tbl = Table(cell_data, hAlign='LEFT')
+                            tbl.setStyle(TableStyle([
+                                ('GRID',       (0, 0), (-1, -1), 0.5, colors.black),
+                                ('BACKGROUND', (0, 0), (-1, 0),  colors.lightgrey),
+                                ('FONTNAME',   (0, 0), (-1, -1), font_name),
+                                ('FONTSIZE',   (0, 0), (-1, -1), 10),
+                                ('TOPPADDING',    (0, 0), (-1, -1), 4),
+                                ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+                            ]))
+                            story.append(tbl)
+                            story.append(Spacer(1, 12))
+                            logging.debug(
+                                f"Inserted PDF table for '{clean_text.strip()}' "
+                                f"({len(rows)} row(s))"
+                            )
+                            continue
+                        except Exception as tbl_err:
+                            logging.warning(
+                                f"Could not render PDF table for '{clean_text.strip()}': {tbl_err}; "
+                                "falling back to plain text"
+                            )
+                            # fall through to plain-paragraph rendering below
+
                 try:
                     paragraph = Paragraph(clean_text, normal_style)
                     story.append(paragraph)
@@ -425,7 +466,10 @@ class FileOutputHandler:
 
         extension = Path(output_path).suffix.lower()
         if extension == '.pdf':
-            FileOutputHandler.save_to_pdf(content, output_path, custom_font, target_lang)
+            FileOutputHandler.save_to_pdf(
+                content, output_path, custom_font, target_lang,
+                table_registry=table_registry,
+            )
             return
         if extension == '.docx':
             FileOutputHandler.save_to_docx(
