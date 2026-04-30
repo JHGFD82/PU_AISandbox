@@ -155,10 +155,18 @@ class TranslationService(BaseService):
 
         return middle_index
 
-    def generate_text(self, abstract_text: str, page_text: str, previous_page: str, 
-                     page_num: int, source_language: str, target_language: str, output_format: str = "console", 
+    def generate_text(self, abstract_text: str, page_text: str, previous_page: str,
+                     page_num: int, source_language: str, target_language: str, output_format: str = "console",
                      previous_translated: str = "") -> str:
         """Generate translated text for a page, handling context length limits."""
+        # Short-circuit for image-only (blank) pages — no text to translate,
+        # no API call, no error message in the output.
+        if not page_text.strip():
+            logging.info(
+                f"Page {page_num + 1} has no extractable text (likely image-only); skipping."
+            )
+            return f"\n\n-- Page {page_num + 1} -- \n"
+
         result: list[str] = []
         parts_to_translate: deque[str] = deque([page_text])
         

@@ -336,7 +336,33 @@ class FileOutputHandler:
                             if item.width_emu
                             else _MAX_IMAGE_WIDTH_EMU
                         )
-                        img_run.add_picture(BytesIO(item.data), width=display_width)
+                        img_data = BytesIO(item.data)
+                        try:
+                            img_run.add_picture(img_data, width=display_width)
+                        except Exception:
+                            # python-docx cannot handle some formats (e.g. TIFF,
+                            # CMYK JPEG).  Try converting to PNG via Pillow.
+                            try:
+                                from PIL import Image as _PILImage
+                                img_data.seek(0)
+                                pil_img = _PILImage.open(img_data)
+                                # Convert CMYK or P-mode to RGB before saving as PNG
+                                if pil_img.mode not in ('RGB', 'RGBA', 'L'):
+                                    pil_img = pil_img.convert('RGB')
+                                png_buf = BytesIO()
+                                pil_img.save(png_buf, format='PNG')
+                                png_buf.seek(0)
+                                img_run.add_picture(png_buf, width=display_width)
+                                logging.debug(
+                                    f"Converted image at fraction "
+                                    f"{item.position_fraction:.3f} to PNG for insertion."
+                                )
+                            except Exception as conv_err:
+                                logging.warning(
+                                    f"Could not insert image at fraction "
+                                    f"{item.position_fraction:.3f}: "
+                                    f"{type(conv_err).__name__}: {conv_err}"
+                                )
                         logging.debug(f"Inserted image at position_fraction={item.position_fraction:.3f}")
                     except Exception as img_err:
                         logging.warning(
