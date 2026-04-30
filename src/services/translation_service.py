@@ -480,13 +480,11 @@ class TranslationService(BaseService):
         if not rows:
             return rows
 
+        from .prompts import fragments as F
+
         md = TranslationService._rows_to_markdown(rows)
-        system_prompt = (
-            f"You are a professional translator. "
-            f"Translate the following Markdown table from {source_language} to {target_language}. "
-            f"Return ONLY the translated Markdown table with exactly the same number of rows and "
-            f"columns and the same pipe/separator structure. "
-            f"Do not add any explanation, commentary, or text outside of the table."
+        system_prompt = F.TRANSLATION_TABLE_SYSTEM.format(
+            source=source_language, target=target_language
         )
 
         model = self._get_model()

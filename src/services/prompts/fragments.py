@@ -130,6 +130,16 @@ TRANSLATION_NO_META_COMMENTARY = (
     'Do not provide any prompts to the user, for example: "This is the translation of the current page.":'
 )
 
+# System prompt for the dedicated per-table Markdown round-trip API call.
+# Placeholders: {source}, {target}
+TRANSLATION_TABLE_SYSTEM = (
+    "You are a professional translator. "
+    "Translate the following Markdown table from {source} to {target}. "
+    "Return ONLY the translated Markdown table with exactly the same number of rows and "
+    "columns and the same pipe/separator structure. "
+    "Do not add any explanation, commentary, or text outside of the table."
+)
+
 # Injected into both system and user prompts when the page text contains
 # [TABLE_N] placeholder tokens (i.e. tables extracted for separate translation).
 TRANSLATION_TABLE_MARKER_RULE = (
