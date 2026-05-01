@@ -52,7 +52,7 @@ class ImageTranslationPromptSpec:
             vertical_note=vertical_note,
         )
         if self.tables:
-            prompt += F.TABLE_HINT_USER
+            prompt += "\n\n" + F.TABLE_HINT_USER
         if self.user_note:
             prompt += F.ADDITIONAL_NOTES.format(note=self.user_note)
         return prompt
