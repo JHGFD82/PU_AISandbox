@@ -49,6 +49,7 @@ class TranslationService(BaseService):
         self._suppress_inline_print: bool = False
         self.kanbun: bool = False
         self.tables: bool = False
+        self.toc: bool = False
         # Tracks image-only (blank) pages skipped during a translation run
         self._blank_page_count: int = 0
         self._blank_page_lock = threading.Lock()
@@ -95,6 +96,7 @@ class TranslationService(BaseService):
             user_note=self.user_note,
             has_table_markers=has_table_markers,
             tables=self.tables,
+            toc=self.toc,
         )
         return spec.system_prompt(), spec.user_prompt()
     

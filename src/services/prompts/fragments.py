@@ -339,6 +339,15 @@ KANBUN_SCRIPT_NOTE = (
     "do NOT omit small or lightly printed kana, as they are critical annotations."
 )
 
+TOC_NOTE = (
+    "This document contains a table of contents. TOC entries use dot leaders — "
+    "a long run of dots (e.g. '............') between the section title and the "
+    "page number. Because the translated title will be a different length than the "
+    "original, do NOT reproduce the exact number of dots. Instead, replace any "
+    "sequence of three or more consecutive dots used as a leader with exactly five "
+    "dots (.....), with the page number before it and the title after it."
+)
+
 KANBUN_MAIN_SCRIPT_NOTE = (
     "The text is kanbun (漢文) — Classical Chinese written primarily in kanji. "
     "Small kana characters beside the main characters are kundoku annotations "

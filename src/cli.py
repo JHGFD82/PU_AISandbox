@@ -264,6 +264,12 @@ Transcription review (OCR error detection):
         action='store_true',
         help='Carry embedded images from a .docx source into the translated .docx output (requires -i *.docx and -o *.docx)',
     )
+    translate_parser.add_argument(
+        '--toc',
+        dest='toc',
+        action='store_true',
+        help='Document contains a table of contents: normalize dot leaders (e.g. "............") to exactly five dots (.....) between section titles and page numbers',
+    )
     _add_common_flags(translate_parser)
     _add_notes_flags(translate_parser)
 

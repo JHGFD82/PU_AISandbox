@@ -23,6 +23,7 @@ class TranslationPromptSpec:
     user_note: Optional[str] = None
     has_table_markers: bool = False
     tables: bool = False
+    toc: bool = False
 
     def _formatting_fragment(self) -> str:
         key = "file" if self.output_format.lower() in ("pdf", "txt", "file", "docx") else "console"
@@ -49,6 +50,7 @@ class TranslationPromptSpec:
             F.ADDITIONAL_INSTRUCTIONS.format(note=pair_note) if pair_note else None,
             F.ADDITIONAL_INSTRUCTIONS.format(note=F.KANBUN_NOTE) if self.kanbun else None,
             F.TABLE_HINT_SYSTEM if self.tables else None,
+            F.ADDITIONAL_INSTRUCTIONS.format(note=F.TOC_NOTE) if self.toc else None,
             F.ADDITIONAL_INSTRUCTIONS.format(note=self.system_note) if self.system_note else None,
         ]
         return "\n\n".join(s for s in sections if s)
