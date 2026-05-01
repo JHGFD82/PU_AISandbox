@@ -1,8 +1,10 @@
 """Shared utilities for parallel processing across services."""
 
 import logging
+import os
+from concurrent.futures import ThreadPoolExecutor, as_completed as futures_as_completed
 from contextlib import contextmanager
-from typing import Any, Dict, Generator
+from typing import Any, Callable, Dict, Generator, List, Optional, Tuple
 
 
 def cap_worker_count(
@@ -35,6 +37,54 @@ def cap_worker_count(
             reason = f"max_parallel_workers={max_workers} in settings.toml"
         logging.info(f"workers capped at {actual} ({reason})")
     return actual
+
+
+def run_folder_parallel(
+    image_files: List[str],
+    worker_fn: Callable[[int, str], Tuple],
+    make_error_result: Callable[[str, Exception], Tuple],
+    usage_data: Dict[str, Any],
+    actual_workers: int,
+    desc: str,
+) -> Dict[int, Tuple]:
+    """Run *worker_fn* over *image_files* in parallel with a tqdm progress bar.
+
+    Each call to *worker_fn(index, file_path)* must return a tuple whose first
+    element is the original *index* (so results can be reassembled in order):
+    ``(index, filename, *payload)``.
+
+    *make_error_result(filename, exc)* is called when a worker raises; it
+    should return a ``(filename, *fallback_payload)`` tuple that matches the
+    shape of a successful payload (minus the leading index).
+
+    Returns a ``dict[index → (filename, *payload)]``.
+    """
+    results: Dict[int, Tuple] = {}
+    baseline_tokens = usage_data["total_usage"].get("total_tokens", 0)
+    baseline_cost = usage_data["total_usage"].get("total_cost", 0.0)
+
+    from tqdm import tqdm  # local import avoids circular dependency at module level
+
+    with tqdm_logging():
+        with ThreadPoolExecutor(max_workers=actual_workers) as executor:
+            future_map = {
+                executor.submit(worker_fn, i, path): i
+                for i, path in enumerate(image_files)
+            }
+            with tqdm(total=len(image_files), desc=desc, ascii=True) as pbar:
+                for future in futures_as_completed(future_map):
+                    orig_idx = future_map[future]
+                    try:
+                        idx, *rest = future.result()
+                        results[idx] = tuple(rest)
+                    except Exception as e:
+                        filename = os.path.basename(image_files[orig_idx])
+                        logging.error(f"Error processing '{filename}': {e}", exc_info=True)
+                        results[orig_idx] = make_error_result(filename, e)
+                    update_pbar_postfix(pbar, usage_data, baseline_tokens, baseline_cost)
+                    pbar.update(1)
+    return results
+
 
 from tqdm import tqdm
 

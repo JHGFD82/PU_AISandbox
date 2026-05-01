@@ -3,10 +3,7 @@
 import logging
 import os
 import tempfile
-from concurrent.futures import ThreadPoolExecutor, as_completed as futures_as_completed
 from typing import Optional, List, Tuple, TypedDict
-
-from tqdm import tqdm
 
 from ..config import get_api_key
 from ..errors import CLIError
@@ -21,7 +18,7 @@ from ..processors.txt_processor import TxtProcessor
 from ..settings import DEFAULT_PAGE_SIZE, MAX_PARALLEL_WORKERS
 from ..services.image_processor_service import ImageProcessorService
 from ..services.image_translation_service import ImageTranslationService
-from ..services.parallel_utils import tqdm_logging, update_pbar_postfix, cap_worker_count
+from ..services.parallel_utils import tqdm_logging, update_pbar_postfix, cap_worker_count, run_folder_parallel
 from ..services.prompt_service import PromptService
 from ..services.transcription_review_service import TranscriptionReviewService
 from ..services.translation_service import TranslationService
@@ -149,13 +146,28 @@ class SandboxProcessor(_CommandMixin):
         target_language: str,
         opts: OutputOptions,
         workers: int = 1,
-    ) -> List[str]:
-        """Process text-based files (DOCX, TXT) with common logic."""
+        table_aware: bool = False,
+    ) -> Tuple[List[str], Optional[dict]]:
+        """Process text-based files (DOCX, TXT) with common logic.
+
+        Returns ``(translated_pages, source_table_registry)``.  The registry
+        is only populated when *file_type* is ``'docx'`` and *table_aware* is
+        ``True``; it contains the *untranslated* table grids extracted by
+        :meth:`DocxProcessor.process_docx_for_translation` and must be
+        translated by the caller before use.
+        """
         logger.info(f"Processing {file_type.upper()} file: {os.path.basename(file_path)}")
 
+        source_table_registry: Optional[dict] = None
         if file_type == 'docx':
-            with open(file_path, 'rb') as f:
-                all_pages = DocxProcessor.process_docx_with_pages(f, target_page_size=DEFAULT_PAGE_SIZE)
+            if table_aware:
+                with open(file_path, 'rb') as f:
+                    all_pages, source_table_registry = DocxProcessor.process_docx_for_translation(
+                        f, target_page_size=DEFAULT_PAGE_SIZE
+                    )
+            else:
+                with open(file_path, 'rb') as f:
+                    all_pages = DocxProcessor.process_docx_with_pages(f, target_page_size=DEFAULT_PAGE_SIZE)
             file_label = "Word document"
         elif file_type == 'txt':
             with open(file_path, 'r', encoding='utf-8') as f:
@@ -179,7 +191,7 @@ class SandboxProcessor(_CommandMixin):
             results.extend(self.translation_service.translate_text_pages(
                 segment, abstract_text, source_language, target_language, opts, file_path, workers=workers,
             ))
-        return results
+        return results, source_table_registry
 
     def translate_document(
         self,
@@ -293,7 +305,7 @@ class SandboxProcessor(_CommandMixin):
                             workers=workers,
                         ))
             elif file_type == 'txt':
-                document_text = self._process_text_based_file(
+                document_text, _ = self._process_text_based_file(
                     file_path, 'txt', page_nums, abstract_text,
                     source_language, target_language, opts, workers=workers,
                 )
@@ -301,61 +313,29 @@ class SandboxProcessor(_CommandMixin):
                 output_is_docx = bool(
                     opts.output_file and opts.output_file.lower().endswith('.docx')
                 )
-                if output_is_docx:
-                    # Table-aware path: tables translated separately and reinserted
-                    # as proper Word table objects in the output document.
-                    with open(file_path, 'rb') as f:
-                        all_pages, source_table_registry = DocxProcessor.process_docx_for_translation(
-                            f, target_page_size=DEFAULT_PAGE_SIZE
-                        )
-                    file_label = "Word document"
-                    for start_page, end_page in _parse_page_ranges(page_nums):
-                        if start_page >= len(all_pages):
-                            raise CLIError(
-                                f"Page {start_page + 1} does not exist. "
-                                f"Document has {len(all_pages)} logical pages."
-                            )
-                        actual_end = (
-                            min(end_page, len(all_pages) - 1)
-                            if end_page is not None else len(all_pages) - 1
-                        )
-                        segment = all_pages[start_page : actual_end + 1]
-                        if page_nums:
-                            logger.info(
-                                f"Processing pages {start_page + 1}–{actual_end + 1} of "
-                                f"{file_label} (logical pages based on content length)"
-                            )
-                        logger.info(
-                            f"Translating {len(segment)} page(s) from "
-                            f"{source_language} to {target_language}"
-                        )
-                        document_text.extend(
-                            self.translation_service.translate_text_pages(
-                                segment, abstract_text, source_language, target_language,
-                                opts, file_path, workers=workers,
-                            )
-                        )
+                # Table-aware path (→ .docx output): tables translated separately
+                # and reinserted as proper Word table objects.
+                # Standard path (→ .txt/.pdf): tables rendered as plain text.
+                document_text, source_table_registry = self._process_text_based_file(
+                    file_path, 'docx', page_nums, abstract_text,
+                    source_language, target_language, opts, workers=workers,
+                    table_aware=output_is_docx,
+                )
 
-                    # Translate each table separately via Markdown round-trip.
-                    if source_table_registry:
-                        docx_table_registry = {}
-                        for key, rows in source_table_registry.items():
-                            ncols = len(rows[0]) if rows else 0
-                            logger.info(
-                                f"Translating {key} "
-                                f"({len(rows)} row(s) × {ncols} col(s))…"
+                # Translate each extracted table via Markdown round-trip.
+                if source_table_registry:
+                    docx_table_registry = {}
+                    for key, rows in source_table_registry.items():
+                        ncols = len(rows[0]) if rows else 0
+                        logger.info(
+                            f"Translating {key} "
+                            f"({len(rows)} row(s) × {ncols} col(s))…"
+                        )
+                        docx_table_registry[key] = (
+                            self.translation_service.translate_table_grid(
+                                rows, source_language, target_language
                             )
-                            docx_table_registry[key] = (
-                                self.translation_service.translate_table_grid(
-                                    rows, source_language, target_language
-                                )
-                            )
-                else:
-                    # Standard path: docx → txt or pdf (tables rendered as text)
-                    document_text = self._process_text_based_file(
-                        file_path, 'docx', page_nums, abstract_text,
-                        source_language, target_language, opts, workers=workers,
-                    )
+                        )
             else:
                 raise CLIError(f"Cannot translate file type '{file_type}'.")
 
@@ -530,41 +510,24 @@ class SandboxProcessor(_CommandMixin):
         # --- parallel path ---
         actual_workers = cap_worker_count(workers, len(image_files), MAX_PARALLEL_WORKERS, "image", "folder")
 
-        results_map: dict[int, tuple[str, str, str]] = {}  # index → (filename, transcript, translation)
-
         # Warm pricing cache and suppress per-image prints before dispatching workers
         self.image_translation_service._get_model()
         self.image_translation_service._suppress_inline_print = True
 
-        def _translate_one(idx: int, img_path: str) -> tuple[int, str, str, str]:
+        def _translate_one(idx: int, img_path: str) -> tuple:
             filename = os.path.basename(img_path)
             transcript, translation = self.image_translation_service.process_image_translation(
                 img_path, source_language, target_language, spread=spread
             )
             return idx, filename, transcript, translation
 
-        baseline_tokens = self.token_tracker.usage_data["total_usage"].get("total_tokens", 0)
-        baseline_cost = self.token_tracker.usage_data["total_usage"].get("total_cost", 0.0)
-
-        with tqdm_logging():
-            with ThreadPoolExecutor(max_workers=actual_workers) as executor:
-                future_map = {
-                    executor.submit(_translate_one, i, path): i
-                    for i, path in enumerate(image_files)
-                }
-                desc = f"Translating ({actual_workers} workers)... "
-                with tqdm(total=len(image_files), desc=desc, ascii=True) as pbar:
-                    for future in futures_as_completed(future_map):
-                        orig_idx = future_map[future]
-                        try:
-                            idx, filename, transcript, translation = future.result()
-                            results_map[idx] = (filename, transcript, translation)
-                        except Exception as e:
-                            filename = os.path.basename(image_files[orig_idx])
-                            logger.error(f"Error processing '{filename}': {e}", exc_info=True)
-                            results_map[orig_idx] = (filename, "", f"[Error processing {filename}: {e}]")
-                        update_pbar_postfix(pbar, self.token_tracker.usage_data, baseline_tokens, baseline_cost)
-                        pbar.update(1)
+        results_map = run_folder_parallel(
+            image_files, _translate_one,
+            lambda fname, e: (fname, "", f"[Error processing {fname}: {e}]"),
+            self.token_tracker.usage_data,
+            actual_workers,
+            desc=f"Translating ({actual_workers} workers)... ",
+        )
 
         # Print and assemble in sorted-filename (original) order
         combined_parts_p: List[str] = []
@@ -649,42 +612,25 @@ class SandboxProcessor(_CommandMixin):
         # --- parallel path ---
         actual_workers = cap_worker_count(workers, len(image_files), MAX_PARALLEL_WORKERS, "image", "folder")
 
-        results_map: dict[int, tuple[str, str]] = {}  # index → (filename, extracted_text)
-
         # Warm the pricing cache on the main thread so workers share the fast path.
         # Also suppress per-image/per-pass prints that would interleave with tqdm.
         self.image_processor_service._get_model()
         self.image_processor_service._suppress_inline_print = True
 
-        def _ocr_one(idx: int, img_path: str) -> tuple[int, str, str]:
+        def _ocr_one(idx: int, img_path: str) -> tuple:
             filename = os.path.basename(img_path)
             extracted = self.image_processor_service.process_image_ocr(
                 img_path, target_language, output_format="console", vertical=vertical, spread=spread, passes=passes
             )
             return idx, filename, extracted
 
-        baseline_tokens = self.token_tracker.usage_data["total_usage"].get("total_tokens", 0)
-        baseline_cost = self.token_tracker.usage_data["total_usage"].get("total_cost", 0.0)
-
-        with tqdm_logging():
-            with ThreadPoolExecutor(max_workers=actual_workers) as executor:
-                future_map = {
-                    executor.submit(_ocr_one, i, path): i
-                    for i, path in enumerate(image_files)
-                }
-                desc = f"Transcribing ({actual_workers} workers)... "
-                with tqdm(total=len(image_files), desc=desc, ascii=True) as pbar:
-                    for future in futures_as_completed(future_map):
-                        orig_idx = future_map[future]
-                        try:
-                            idx, filename, extracted_text = future.result()
-                            results_map[idx] = (filename, extracted_text)
-                        except Exception as e:
-                            filename = os.path.basename(image_files[orig_idx])
-                            logger.error(f"Error processing '{filename}': {e}", exc_info=True)
-                            results_map[orig_idx] = (filename, f"[Error processing {filename}: {e}]")
-                        update_pbar_postfix(pbar, self.token_tracker.usage_data, baseline_tokens, baseline_cost)
-                        pbar.update(1)
+        results_map = run_folder_parallel(
+            image_files, _ocr_one,
+            lambda fname, e: (fname, f"[Error processing {fname}: {e}]"),
+            self.token_tracker.usage_data,
+            actual_workers,
+            desc=f"Transcribing ({actual_workers} workers)... ",
+        )
 
         # Print and assemble in sorted-filename (original) order
         combined_parts_p: List[str] = []
@@ -712,7 +658,7 @@ class SandboxProcessor(_CommandMixin):
             response = self.prompt_service.send_prompt(user_prompt, system_prompt)
             print("\n" + response)
             if output_file:
-                self._save_text_file(response, output_file, "Response")
+                FileOutputHandler.save_to_text_file(response, output_file, label="Response")
         except Exception as e:
             logger.error(f"Error sending prompt: {e}", exc_info=True)
             raise CLIError(f"Error sending prompt: {e}") from e
@@ -732,17 +678,7 @@ class SandboxProcessor(_CommandMixin):
             )
             print("\n" + result_json)
             if output_file:
-                self._save_text_file(result_json, output_file, "Review")
+                FileOutputHandler.save_to_text_file(result_json, output_file, label="Review")
         except Exception as e:
             logger.error(f"Error during transcription review: {e}", exc_info=True)
             raise CLIError(f"Error during transcription review: {e}") from e
-
-    @staticmethod
-    def _save_text_file(text: str, output_file: str, label: str = "Output") -> None:
-        """Write *text* to *output_file*, then print the saved path."""
-        with open(output_file, 'w', encoding='utf-8') as f:
-            f.write(text)
-        print(f"{label} saved to: {os.path.basename(output_file)}")
-
-
-

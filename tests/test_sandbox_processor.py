@@ -8,6 +8,7 @@ import pytest
 
 from src.errors import CLIError
 from src.models import OutputOptions
+from src.output.file_output import FileOutputHandler
 from src.runtime.sandbox_processor import SandboxProcessor, _collect_image_files, _parse_page_ranges
 
 
@@ -215,11 +216,12 @@ class TestProcessTextBasedFile:
         f = tmp_path / "source.txt"
         f.write_text("Hello world\n\nSecond paragraph", encoding="utf-8")
         proc.translation_service.translate_text_pages.return_value = ["Bonjour monde"]
-        result = proc._process_text_based_file(
+        pages, registry = proc._process_text_based_file(
             str(f), "txt", None, None, "English", "French",
             OutputOptions(),
         )
-        assert result == ["Bonjour monde"]
+        assert pages == ["Bonjour monde"]
+        assert registry is None
         proc.translation_service.translate_text_pages.assert_called_once()
 
     def test_docx_file_translated(self, tmp_path, monkeypatch):
@@ -232,11 +234,11 @@ class TestProcessTextBasedFile:
         f = tmp_path / "doc.docx"
         f.write_bytes(b"fake")
         proc.translation_service.translate_text_pages.return_value = ["翻訳"]
-        result = proc._process_text_based_file(
+        pages, registry = proc._process_text_based_file(
             str(f), "docx", None, None, "English", "Japanese",
             OutputOptions(),
         )
-        assert result == ["翻訳"]
+        assert pages == ["翻訳"]
 
     def test_unsupported_file_type_raises_value_error(self, tmp_path, monkeypatch):
         proc = _make_processor(monkeypatch)
@@ -317,12 +319,12 @@ class TestSaveTextFile:
 
     def test_writes_content_to_file(self, tmp_path):
         out = tmp_path / "output.txt"
-        SandboxProcessor._save_text_file("hello world", str(out))
+        FileOutputHandler.save_to_text_file("hello world", str(out), label="Output")
         assert out.read_text() == "hello world"
 
     def test_prints_saved_path(self, tmp_path, capsys):
         out = tmp_path / "output.txt"
-        SandboxProcessor._save_text_file("content", str(out), label="Translation")
+        FileOutputHandler.save_to_text_file("content", str(out), label="Translation")
         captured = capsys.readouterr().out
         assert "Translation" in captured
         assert "output.txt" in captured
@@ -548,7 +550,7 @@ class TestTranslateDocumentSaveOutput:
         )
         monkeypatch.setattr(
             "src.runtime.sandbox_processor.SandboxProcessor._process_text_based_file",
-            lambda *a, **kw: ["Translated text"]
+            lambda *a, **kw: (["Translated text"], None)
         )
 
         out_file = str(tmp_path / "out.txt")
@@ -659,11 +661,11 @@ class TestProcessTextBasedFilePageRange:
         f = tmp_path / "short.txt"
         f.write_text("Page one\n\nPage two", encoding="utf-8")
         proc.translation_service.translate_text_pages.return_value = ["翻訳"]
-        result = proc._process_text_based_file(
+        pages, _ = proc._process_text_based_file(
             str(f), "txt", "1-5", None, "English", "Japanese",
             OutputOptions(),
         )
-        assert result == ["翻訳"]
+        assert pages == ["翻訳"]
         # actual_end was clamped to 1 (min(4, 1) = 1)
         proc.translation_service.translate_text_pages.assert_called_once()
 
@@ -677,11 +679,11 @@ class TestProcessTextBasedFilePageRange:
         f = tmp_path / "three.txt"
         f.write_text("Page one\n\nPage two\n\nPage three", encoding="utf-8")
         proc.translation_service.translate_text_pages.return_value = ["結果"]
-        result = proc._process_text_based_file(
+        pages, _ = proc._process_text_based_file(
             str(f), "txt", "1-2", None, "English", "Japanese",
             OutputOptions(),
         )
-        assert result == ["結果"]
+        assert pages == ["結果"]
 
 
 class TestTranslateCustomTextExceptionHandling:
@@ -710,7 +712,7 @@ class TestTranslateDocumentAbstractFlag:
         )
         monkeypatch.setattr(
             "src.runtime.sandbox_processor.SandboxProcessor._process_text_based_file",
-            lambda self, *a, **kw: ["Translated"],
+            lambda self, *a, **kw: (["Translated"], None),
         )
         # _collect_multiline is called once for the abstract
         abstract_calls = []
