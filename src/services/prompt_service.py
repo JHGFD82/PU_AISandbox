@@ -4,8 +4,8 @@ import logging
 from typing import Any, Optional
 
 from ..models import (
-    resolve_model, get_model_system_role,
-    maybe_sync_model_pricing, get_model_max_completion_tokens,
+    get_model_system_role,
+    get_model_max_completion_tokens,
 )
 from ..tracking.token_tracker import TokenTracker
 from .api_errors import handle_api_errors
@@ -34,12 +34,6 @@ class PromptService(BaseService):
         max_tokens: Optional[int] = None,
     ):
         super().__init__(api_key, professor, token_tracker, None, model, temperature, top_p, max_tokens)
-
-    def _get_model(self) -> str:
-        """Resolve model, syncing pricing if needed."""
-        model = resolve_model(requested_model=self.custom_model)
-        maybe_sync_model_pricing(model)
-        return model
 
     def build_prompts(
         self,
@@ -86,10 +80,4 @@ class PromptService(BaseService):
             raise
 
         self._record_response_usage(response, model)
-
-        if response.choices and response.choices[0].message:
-            content = response.choices[0].message.content
-            if content is not None and isinstance(content, str):
-                return content
-
-        return ""
+        return self._extract_response_content(response) or ""

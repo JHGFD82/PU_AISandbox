@@ -8,8 +8,6 @@ from typing import Any, Optional
 from ..models import (
     get_model_system_role,
     get_model_max_completion_tokens,
-    resolve_model,
-    maybe_sync_model_pricing,
 )
 from ..tracking.token_tracker import TokenTracker
 from .api_errors import handle_api_errors
@@ -43,12 +41,6 @@ class TranscriptionReviewService(BaseService):
         max_tokens: Optional[int] = None,
     ):
         super().__init__(api_key, professor, token_tracker, None, model, temperature, top_p, max_tokens)
-
-    def _get_model(self) -> str:
-        """Resolve model, syncing pricing if needed."""
-        model = resolve_model(requested_model=self.custom_model)
-        maybe_sync_model_pricing(model)
-        return model
 
     def build_prompts(
         self,
@@ -160,10 +152,7 @@ class TranscriptionReviewService(BaseService):
             raise
 
         self._record_response_usage(response, model)
-
-        if response.choices and response.choices[0].message:
-            content = response.choices[0].message.content
-            if content is not None and isinstance(content, str):
-                return self._inject_model_and_validate(content.strip(), model, language)
-
+        content = self._extract_response_content(response)
+        if content is not None:
+            return self._inject_model_and_validate(content.strip(), model, language)
         return ""

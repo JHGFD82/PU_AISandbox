@@ -22,7 +22,7 @@ from ..models import (
 )
 from .api_errors import APISignal
 from .base_service import BaseService
-from .parallel_utils import tqdm_logging, update_pbar_postfix
+from .parallel_utils import tqdm_logging, update_pbar_postfix, cap_worker_count
 from .prompts import TranslationPromptSpec
 from ..output.file_output import FileOutputHandler
 from ..processors.pdf_processor import PDFProcessor, generate_process_text, detect_numbered_content
@@ -57,12 +57,6 @@ class TranslationService(BaseService):
         self._api_error_count: int = 0
         self._api_error_lock = threading.Lock()
     
-    def _get_model(self) -> str:
-        """Get the model to use, preferring custom model if specified."""
-        model = resolve_model(requested_model=self.custom_model)
-        maybe_sync_model_pricing(model)
-        return model
-
     def _call_translation_api(self, model: str, system_role: str,
                                system_prompt: str, user_prompt: str) -> Any:
         """Call the translation API with the correct token-limit parameter for the model."""
@@ -119,13 +113,13 @@ class TranslationService(BaseService):
             system_role = get_model_system_role(model)
             response = self._call_translation_api(model, system_role, system_prompt, user_prompt)
             self._record_response_usage(response, model)
-            if response.choices and len(response.choices) > 0 and response.choices[0].message:
-                content = response.choices[0].message.content
-                if content is not None and isinstance(content, str):
-                    if not self._suppress_inline_print:
-                        print("\n" + content)
-                    return content
-                return None  # content was None or wrong type — retry
+            content = self._extract_response_content(response)
+            if content is not None:
+                if not self._suppress_inline_print:
+                    print("\n" + content)
+                return content
+            if response.choices and response.choices[0].message:
+                return None  # choices present but content was None or wrong type — retry
             if not self._suppress_inline_print:
                 print("\n[No content returned by the model]")
             logging.warning('No content returned by the model.')
@@ -280,7 +274,7 @@ class TranslationService(BaseService):
         ``finally`` block so they are cleaned up even if a worker raises.
         """
         n_pages = len(all_triples)
-        actual_workers = min(workers, n_pages, MAX_PARALLEL_WORKERS)
+        actual_workers = cap_worker_count(workers, n_pages, MAX_PARALLEL_WORKERS, unit_label, "document")
         self._suppress_inline_print = True
         self._api_error_count = 0
 
@@ -290,14 +284,6 @@ class TranslationService(BaseService):
                 "and has been disabled for this run."
             )
             logging.warning("progressive_save disabled: incompatible with workers > 1")
-
-        if actual_workers < workers:
-            cap_reason = (
-                f"document has {n_pages} {unit_label}(s)"
-                if actual_workers == n_pages
-                else f"max_parallel_workers={MAX_PARALLEL_WORKERS} in settings.toml"
-            )
-            logging.info(f"workers capped at {actual_workers} ({cap_reason})")
 
         tmpdir = tempfile.mkdtemp(prefix="pu_sandbox_translate_")
         tmp_paths: Dict[int, str] = {}
@@ -547,9 +533,7 @@ class TranslationService(BaseService):
         def body(attempt: int) -> Any:
             response = self._call_translation_api(model, system_role, system_prompt, md)
             self._record_response_usage(response, model)
-            if response.choices and response.choices[0].message:
-                return response.choices[0].message.content
-            return None
+            return self._extract_response_content(response)
 
         result_md = self._run_with_retry(
             body, model, "table_translation",

@@ -21,7 +21,7 @@ from ..processors.txt_processor import TxtProcessor
 from ..settings import DEFAULT_PAGE_SIZE, MAX_PARALLEL_WORKERS
 from ..services.image_processor_service import ImageProcessorService
 from ..services.image_translation_service import ImageTranslationService
-from ..services.parallel_utils import tqdm_logging, update_pbar_postfix
+from ..services.parallel_utils import tqdm_logging, update_pbar_postfix, cap_worker_count
 from ..services.prompt_service import PromptService
 from ..services.transcription_review_service import TranscriptionReviewService
 from ..services.translation_service import TranslationService
@@ -528,14 +528,7 @@ class SandboxProcessor(_CommandMixin):
             return
 
         # --- parallel path ---
-        actual_workers = min(workers, len(image_files), MAX_PARALLEL_WORKERS)
-        if actual_workers < workers:
-            cap_reason = (
-                f"folder has {len(image_files)} image(s)"
-                if actual_workers == len(image_files)
-                else f"max_parallel_workers={MAX_PARALLEL_WORKERS} in settings.toml"
-            )
-            logger.info(f"Image translation workers capped at {actual_workers} ({cap_reason})")
+        actual_workers = cap_worker_count(workers, len(image_files), MAX_PARALLEL_WORKERS, "image", "folder")
 
         results_map: dict[int, tuple[str, str, str]] = {}  # index → (filename, transcript, translation)
 
@@ -654,14 +647,7 @@ class SandboxProcessor(_CommandMixin):
             return
 
         # --- parallel path ---
-        actual_workers = min(workers, len(image_files), MAX_PARALLEL_WORKERS)
-        if actual_workers < workers:
-            cap_reason = (
-                f"folder has {len(image_files)} image(s)"
-                if actual_workers == len(image_files)
-                else f"max_parallel_workers={MAX_PARALLEL_WORKERS} in settings.toml"
-            )
-            logger.info(f"OCR workers capped at {actual_workers} ({cap_reason})")
+        actual_workers = cap_worker_count(workers, len(image_files), MAX_PARALLEL_WORKERS, "image", "folder")
 
         results_map: dict[int, tuple[str, str]] = {}  # index → (filename, extracted_text)
 

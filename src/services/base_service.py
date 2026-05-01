@@ -9,6 +9,7 @@ from collections.abc import Iterator as ABCIterator
 
 from ..models import (
     model_uses_max_completion_tokens, model_has_fixed_parameters,
+    resolve_model, maybe_sync_model_pricing,
 )
 from ..tracking.token_tracker import TokenTracker
 from .api_errors import APISignal, classify_api_error, is_transient_error
@@ -25,8 +26,11 @@ class BaseService:
       - _create_completion() for the 3-branch max_tokens API call
       - _record_response_usage() for token tracking + logging
       - _run_with_retry() for exponential-backoff retry with classify_api_error
+      - _get_model() default (resolve_model + maybe_sync_model_pricing)
+      - _extract_response_content() for safely pulling text from API responses
 
-    Each subclass is still responsible for its own _get_model() and prompt
+    Subclasses may override _get_model() for custom model selection
+    (e.g. vision-only models) and are responsible for their own prompt
     construction.
     """
 
@@ -55,6 +59,27 @@ class BaseService:
         )
         self.system_note: Optional[str] = None
         self.user_note: Optional[str] = None
+
+    def _get_model(self) -> str:
+        """Resolve and return the model to use, syncing pricing if needed.
+
+        Subclasses may override this to require vision support or a specific
+        default (e.g. ImageProcessorService, ImageTranslationService).
+        """
+        model = resolve_model(requested_model=self.custom_model)
+        maybe_sync_model_pricing(model)
+        return model
+
+    def _extract_response_content(self, response: Any) -> Optional[str]:
+        """Safely extract the text content from an API response choice.
+
+        Returns the content string if present and a valid str, otherwise None.
+        """
+        if response.choices and response.choices[0].message:
+            content = response.choices[0].message.content
+            if isinstance(content, str):
+                return content
+        return None
 
     def _create_completion(
         self,

@@ -238,8 +238,8 @@ class TestReviewTranscription:
         mock_resp = self._make_api_response(json.dumps(data))
         with patch.object(svc, "_create_completion", return_value=mock_resp), \
              patch.object(svc, "_record_response_usage"), \
-             patch("src.services.transcription_review_service.resolve_model", return_value="gpt-4o"), \
-             patch("src.services.transcription_review_service.maybe_sync_model_pricing"), \
+             patch("src.services.base_service.resolve_model", return_value="gpt-4o"), \
+             patch("src.services.base_service.maybe_sync_model_pricing"), \
              patch("src.services.transcription_review_service.get_model_system_role", return_value="system"), \
              patch("src.services.transcription_review_service.get_model_max_completion_tokens", return_value=4000):
             result = svc.review_transcription("some text", "Japanese")
@@ -253,8 +253,8 @@ class TestReviewTranscription:
         mock_resp = self._make_api_response(json.dumps(data))
         with patch.object(svc, "_create_completion", return_value=mock_resp), \
              patch.object(svc, "_record_response_usage"), \
-             patch("src.services.transcription_review_service.resolve_model", return_value="gpt-4o-mini"), \
-             patch("src.services.transcription_review_service.maybe_sync_model_pricing"), \
+             patch("src.services.base_service.resolve_model", return_value="gpt-4o-mini"), \
+             patch("src.services.base_service.maybe_sync_model_pricing"), \
              patch("src.services.transcription_review_service.get_model_system_role", return_value="system"), \
              patch("src.services.transcription_review_service.get_model_max_completion_tokens", return_value=4000):
             result = svc.review_transcription("some text", "Korean")
@@ -267,8 +267,8 @@ class TestReviewTranscription:
         mock_resp = self._make_api_response(json.dumps(data))
         with patch.object(svc, "_create_completion", return_value=mock_resp) as mock_call, \
              patch.object(svc, "_record_response_usage"), \
-             patch("src.services.transcription_review_service.resolve_model", return_value="gpt-4o"), \
-             patch("src.services.transcription_review_service.maybe_sync_model_pricing"), \
+             patch("src.services.base_service.resolve_model", return_value="gpt-4o"), \
+             patch("src.services.base_service.maybe_sync_model_pricing"), \
              patch("src.services.transcription_review_service.get_model_system_role", return_value="system"), \
              patch("src.services.transcription_review_service.get_model_max_completion_tokens", return_value=4000):
             svc.review_transcription("some text", "Japanese", kanbun=True)
@@ -342,8 +342,8 @@ class TestReviewTranscriptionExceptionPaths:
 
     def _patch_catalog(self):
         return [
-            patch("src.services.transcription_review_service.resolve_model", return_value="gpt-4o"),
-            patch("src.services.transcription_review_service.maybe_sync_model_pricing"),
+            patch("src.services.base_service.resolve_model", return_value="gpt-4o"),
+            patch("src.services.base_service.maybe_sync_model_pricing"),
             patch("src.services.transcription_review_service.get_model_system_role", return_value="system"),
             patch("src.services.transcription_review_service.get_model_max_completion_tokens", return_value=4000),
         ]

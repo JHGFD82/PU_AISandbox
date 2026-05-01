@@ -4,6 +4,38 @@ import logging
 from contextlib import contextmanager
 from typing import Any, Dict, Generator
 
+
+def cap_worker_count(
+    workers: int,
+    item_count: int,
+    max_workers: int,
+    item_label: str = "item",
+    container_label: str = "collection",
+) -> int:
+    """Return the effective worker count, capped at item_count and max_workers.
+
+    Logs an INFO message when the requested worker count is reduced, explaining
+    which limit was hit (item count or the settings.toml cap).
+
+    Args:
+        workers: Requested number of workers.
+        item_count: Number of items to process (e.g. pages, images).
+        max_workers: Upper bound from settings (MAX_PARALLEL_WORKERS).
+        item_label: Singular label for the items (e.g. \"page\", \"image\").
+        container_label: Label for the containing collection (e.g. \"document\", \"folder\").
+
+    Returns:
+        The effective worker count to use.
+    """
+    actual = min(workers, item_count, max_workers)
+    if actual < workers:
+        if actual == item_count:
+            reason = f"{container_label} has {item_count} {item_label}(s)"
+        else:
+            reason = f"max_parallel_workers={max_workers} in settings.toml"
+        logging.info(f"workers capped at {actual} ({reason})")
+    return actual
+
 from tqdm import tqdm
 
 
