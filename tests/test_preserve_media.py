@@ -409,14 +409,14 @@ class TestSaveToDocxWithMedia:
     def test_save_without_media_creates_docx(self, tmp_path):
         from src.output.file_output import FileOutputHandler
         out = str(tmp_path / "out.docx")
-        FileOutputHandler.save_to_docx("Paragraph one.\n\nParagraph two.", out)
+        FileOutputHandler.save_to_docx("Paragraph one.\n\nParagraph two.", out, label="Translation")
         assert Path(out).exists()
 
     def test_save_with_media_creates_docx(self, tmp_path):
         from src.output.file_output import FileOutputHandler
         out = str(tmp_path / "out_media.docx")
         media = [EmbeddedMedia(data=_make_1x1_png(), content_type="image/png", position_fraction=0.5)]
-        FileOutputHandler.save_to_docx("Para one.\n\nPara two.\n\nPara three.", out, media=media)
+        FileOutputHandler.save_to_docx("Para one.\n\nPara two.\n\nPara three.", out, media=media, label="Translation")
         assert Path(out).exists()
 
     def test_save_with_media_file_is_valid_docx(self, tmp_path):
@@ -425,7 +425,7 @@ class TestSaveToDocxWithMedia:
         from src.output.file_output import FileOutputHandler
         out = str(tmp_path / "valid.docx")
         media = [EmbeddedMedia(data=_make_1x1_png(), content_type="image/png", position_fraction=0.3)]
-        FileOutputHandler.save_to_docx("First para.\n\nSecond para.", out, media=media)
+        FileOutputHandler.save_to_docx("First para.\n\nSecond para.", out, media=media, label="Translation")
         doc = Document(out)
         texts = [p.text for p in doc.paragraphs if p.text.strip()]
         assert "First para." in texts
@@ -439,7 +439,7 @@ class TestSaveToDocxWithMedia:
         # 3 paragraphs; image at 0.4 → should appear after para 1 (para_fraction=0.33) but
         # before or at para 2 (para_fraction=0.67).
         media = [EmbeddedMedia(data=_make_1x1_png(), content_type="image/png", position_fraction=0.4)]
-        FileOutputHandler.save_to_docx("Alpha.\n\nBeta.\n\nGamma.", out, media=media)
+        FileOutputHandler.save_to_docx("Alpha.\n\nBeta.\n\nGamma.", out, media=media, label="Translation")
         doc = Document(out)
         # Document has 4 paragraphs: Alpha, Beta (with image inserted after it), Gamma
         # The exact order depends on insertion logic; just verify 4 total blocks.
@@ -453,7 +453,7 @@ class TestSaveToDocxWithMedia:
             EmbeddedMedia(data=_make_1x1_png(), content_type="image/png", position_fraction=0.2),
             EmbeddedMedia(data=_make_1x1_png(), content_type="image/png", position_fraction=0.8),
         ]
-        FileOutputHandler.save_to_docx("A.\n\nB.\n\nC.\n\nD.\n\nE.", out, media=media)
+        FileOutputHandler.save_to_docx("A.\n\nB.\n\nC.\n\nD.\n\nE.", out, media=media, label="Translation")
         doc = Document(out)
         # 5 text paras + 2 image paras = 7
         assert len(doc.paragraphs) == 7
@@ -464,8 +464,8 @@ class TestSaveToDocxWithMedia:
         out1 = str(tmp_path / "none.docx")
         out2 = str(tmp_path / "empty.docx")
         content = "Hello.\n\nWorld."
-        FileOutputHandler.save_to_docx(content, out1, media=None)
-        FileOutputHandler.save_to_docx(content, out2, media=[])
+        FileOutputHandler.save_to_docx(content, out1, media=None, label="Translation")
+        FileOutputHandler.save_to_docx(content, out2, media=[], label="Translation")
         doc1 = Document(out1)
         doc2 = Document(out2)
         assert len(doc1.paragraphs) == len(doc2.paragraphs)
@@ -491,6 +491,7 @@ class TestSaveTranslationOutputMediaForwarding:
                 source_lang="Chinese",
                 target_lang="English",
                 media=media,
+                label="Translation",
             )
         mock_docx.assert_called_once()
         _, kwargs = mock_docx.call_args[0], mock_docx.call_args[1]
@@ -507,6 +508,7 @@ class TestSaveTranslationOutputMediaForwarding:
                 auto_save=False,
                 source_lang="Chinese",
                 target_lang="English",
+                label="Translation",
             )
         mock_docx.assert_called_once()
         # media kwarg should be None (default)
@@ -525,6 +527,7 @@ class TestSaveTranslationOutputMediaForwarding:
                 source_lang="Chinese",
                 target_lang="English",
                 media=media,
+                label="Translation",
             )
         mock_pdf.assert_called_once()
         # save_to_pdf does not accept a media argument — confirm it wasn't passed

@@ -89,13 +89,13 @@ class TestSaveToPdfWithTableRegistry:
         original_save_to_pdf = FileOutputHandler.save_to_pdf
 
         # We just verify it runs without error and produces a real PDF file.
-        FileOutputHandler.save_to_pdf(content, out, table_registry=registry)
+        FileOutputHandler.save_to_pdf(content, out, table_registry=registry, label="Translation")
         assert Path(out).exists()
         assert Path(out).stat().st_size > 0
 
     def test_pdf_without_table_registry_unchanged(self, tmp_path):
         out = str(tmp_path / "out.pdf")
-        FileOutputHandler.save_to_pdf("Only plain text here.", out, table_registry=None)
+        FileOutputHandler.save_to_pdf("Only plain text here.", out, table_registry=None, label="Translation")
         assert Path(out).exists()
         assert Path(out).stat().st_size > 0
 
@@ -104,7 +104,7 @@ class TestSaveToPdfWithTableRegistry:
         out = str(tmp_path / "out.pdf")
         # No registry provided — token is treated as a normal paragraph
         FileOutputHandler.save_to_pdf(
-            "Before\n\n[TABLE_1]\n\nAfter", out, table_registry=None
+            "Before\n\n[TABLE_1]\n\nAfter", out, table_registry=None, label="Translation"
         )
         assert Path(out).exists()
 
@@ -115,7 +115,7 @@ class TestSaveToPdfWithTableRegistry:
             "[TABLE_2]": [["X", "Y"]],
         }
         content = "Intro\n\n[TABLE_1]\n\nMiddle\n\n[TABLE_2]\n\nEnd"
-        FileOutputHandler.save_to_pdf(content, out, table_registry=registry)
+        FileOutputHandler.save_to_pdf(content, out, table_registry=registry, label="Translation")
         assert Path(out).exists()
 
 
@@ -130,6 +130,7 @@ class TestSaveTranslationOutputPdfTableForwarding:
                 "Hello\n\n[TABLE_1]", None, out, False,
                 "Chinese", "English",
                 table_registry=registry,
+                label="Translation",
             )
         mock_pdf.assert_called_once()
         call_kwargs = mock_pdf.call_args.kwargs
@@ -141,6 +142,7 @@ class TestSaveTranslationOutputPdfTableForwarding:
             FileOutputHandler.save_translation_output(
                 "Content", None, out, False, "Chinese", "English",
                 table_registry=None,
+                label="Translation",
             )
         mock_pdf.assert_called_once()
         call_kwargs = mock_pdf.call_args.kwargs
@@ -369,7 +371,7 @@ class TestSaveToDocxPageMarkerInsertion:
             data=_make_1x1_png(), content_type="image/png",
             position_fraction=0.5, page_number=1,
         )]
-        FileOutputHandler.save_to_docx(content, out, media=media)
+        FileOutputHandler.save_to_docx(content, out, media=media, label="Translation")
         texts = self._para_texts(out)
         # Image paragraph has no text; locate it by finding the empty-run para
         from docx import Document
@@ -392,7 +394,7 @@ class TestSaveToDocxPageMarkerInsertion:
             data=_make_1x1_png(), content_type="image/png",
             position_fraction=0.1, page_number=0,
         )]
-        FileOutputHandler.save_to_docx(content, out, media=media)
+        FileOutputHandler.save_to_docx(content, out, media=media, label="Translation")
         from docx import Document
         doc = Document(out)
         para_texts = [p.text for p in doc.paragraphs]
@@ -414,7 +416,7 @@ class TestSaveToDocxPageMarkerInsertion:
             EmbeddedMedia(data=_make_1x1_png(), content_type="image/png",
                           position_fraction=0.6, page_number=1),
         ]
-        FileOutputHandler.save_to_docx(content, out, media=media)
+        FileOutputHandler.save_to_docx(content, out, media=media, label="Translation")
         doc = Document(out)
         # 2 page markers + 2 text paras + 2 image paras = 6 paragraphs
         assert len(doc.paragraphs) == 6
@@ -429,7 +431,7 @@ class TestSaveToDocxPageMarkerInsertion:
             data=_make_1x1_png(), content_type="image/png",
             position_fraction=0.5, page_number=0,
         )]
-        FileOutputHandler.save_to_docx(content, out, media=media)
+        FileOutputHandler.save_to_docx(content, out, media=media, label="Translation")
         doc = Document(out)
         para_texts = [p.text for p in doc.paragraphs]
         # '-- Page 1 --' and 'Only page.' must appear; image paragraph after them
@@ -451,7 +453,7 @@ class TestSaveToDocxPageMarkerInsertion:
             position_fraction=0.99,  # very late → should be at end
             page_number=None,
         )]
-        FileOutputHandler.save_to_docx(content, out, media=media)
+        FileOutputHandler.save_to_docx(content, out, media=media, label="Translation")
         doc = Document(out)
         # 2 page-marker paras + 3 text paras (A., B., C.) + 1 image para = 6
         assert len(doc.paragraphs) == 6

@@ -364,7 +364,7 @@ class TestSaveToDocxWithTableRegistry:
         out = str(tmp_path / "out.docx")
         registry = {"[TABLE_1]": [["H1", "H2"], ["R1", "R2"]]}
         content = "Intro paragraph\n\n[TABLE_1]\n\nConcluding paragraph"
-        FileOutputHandler.save_to_docx(content, out, table_registry=registry)
+        FileOutputHandler.save_to_docx(content, out, table_registry=registry, label="Translation")
 
         doc = Document(out)
         assert len(doc.tables) == 1
@@ -377,7 +377,7 @@ class TestSaveToDocxWithTableRegistry:
         out = str(tmp_path / "out.docx")
         registry = {"[TABLE_1]": [["A", "B"]]}
         content = "Before\n\n[TABLE_1]\n\nAfter"
-        FileOutputHandler.save_to_docx(content, out, table_registry=registry)
+        FileOutputHandler.save_to_docx(content, out, table_registry=registry, label="Translation")
 
         doc = Document(out)
         para_texts = [p.text for p in doc.paragraphs if p.text.strip()]
@@ -390,7 +390,7 @@ class TestSaveToDocxWithTableRegistry:
         out = str(tmp_path / "out.docx")
         # Pass no registry → placeholder treated as normal paragraph
         content = "Some text\n\n[TABLE_1]\n\nMore text"
-        FileOutputHandler.save_to_docx(content, out, table_registry=None)
+        FileOutputHandler.save_to_docx(content, out, table_registry=None, label="Translation")
 
         doc = Document(out)
         assert len(doc.tables) == 0
@@ -405,7 +405,7 @@ class TestSaveToDocxWithTableRegistry:
             "[TABLE_2]": [["B"]],
         }
         content = "Para\n\n[TABLE_1]\n\nMiddle\n\n[TABLE_2]\n\nEnd"
-        FileOutputHandler.save_to_docx(content, out, table_registry=registry)
+        FileOutputHandler.save_to_docx(content, out, table_registry=registry, label="Translation")
 
         doc = Document(out)
         assert len(doc.tables) == 2
@@ -413,7 +413,7 @@ class TestSaveToDocxWithTableRegistry:
     def test_no_table_registry_produces_normal_output(self, tmp_path):
         from docx import Document
         out = str(tmp_path / "out.docx")
-        FileOutputHandler.save_to_docx("Only paragraphs here.", out)
+        FileOutputHandler.save_to_docx("Only paragraphs here.", out, label="Translation")
         doc = Document(out)
         assert len(doc.tables) == 0
 
@@ -433,6 +433,7 @@ class TestSaveTranslationOutputTableForwarding:
                 content, None, out, False,
                 "Chinese", "English",
                 table_registry=registry,
+                label="Translation",
             )
         mock_save.assert_called_once()
         _, kwargs = mock_save.call_args[0], mock_save.call_args[1]
@@ -447,6 +448,7 @@ class TestSaveTranslationOutputTableForwarding:
             FileOutputHandler.save_translation_output(
                 "Content", None, out, False, "Chinese", "English",
                 table_registry=None,
+                label="Translation",
             )
 
     def test_txt_output_ignores_table_registry(self, tmp_path):
@@ -456,5 +458,6 @@ class TestSaveTranslationOutputTableForwarding:
             FileOutputHandler.save_translation_output(
                 "Content", None, out, False, "Chinese", "English",
                 table_registry={"[TABLE_1]": [["A"]]},
+                label="Translation",
             )
         mock_txt.assert_called_once()
