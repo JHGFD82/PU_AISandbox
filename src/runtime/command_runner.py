@@ -11,7 +11,7 @@ import argparse
 import logging
 import os
 import sys
-from typing import TYPE_CHECKING, Optional, Tuple, cast
+from typing import TYPE_CHECKING, Any, Optional, Tuple, cast
 
 from ..errors import CLIError
 from ..models import OutputOptions
@@ -124,6 +124,21 @@ class _CommandMixin:
         system_note = note_text if target in ('system', 'both') else None
         user_note   = note_text if target in ('user',   'both') else None
         return system_note, user_note
+
+    @staticmethod
+    def _apply_inline_notes(service: Any, args: argparse.Namespace) -> None:
+        """Apply inline note flags (-ns/-nu/-nb) from *args* to *service*.
+
+        -nb (note_both) sets both slots; -ns/-nu (note_system/note_user) set
+        individually and take precedence over -nb for their own slot.
+        """
+        _inline_both = getattr(args, 'note_both', None)
+        _inline_sys  = getattr(args, 'note_system', None) or _inline_both
+        _inline_usr  = getattr(args, 'note_user', None)   or _inline_both
+        if _inline_sys is not None:
+            service.system_note = _inline_sys
+        if _inline_usr is not None:
+            service.user_note = _inline_usr
 
     @staticmethod
     def _dry_run_display(model: str, system_prompt: str, user_prompt: str, note: Optional[str] = None,
@@ -276,15 +291,8 @@ class _CommandMixin:
 
         # Inline note flags (-ns / -nu / -nb) apply directly without interactive flow.
         # -nb sets both; -ns/-nu set individually (and override -nb for their slot).
-        _inline_both = getattr(args, 'note_both', None)
-        _inline_sys  = getattr(args, 'note_system', None) or _inline_both
-        _inline_usr  = getattr(args, 'note_user', None)   or _inline_both
-        if _inline_sys is not None:
-            self.translation_service.system_note = _inline_sys
-            self.image_translation_service.system_note = _inline_sys
-        if _inline_usr is not None:
-            self.translation_service.user_note = _inline_usr
-            self.image_translation_service.user_note = _inline_usr
+        self._apply_inline_notes(self.translation_service, args)
+        self._apply_inline_notes(self.image_translation_service, args)
 
         if getattr(args, 'kanbun', False):
             self.translation_service.kanbun = True
@@ -428,13 +436,7 @@ class _CommandMixin:
             self.image_processor_service.user_note = usr_note
 
         # Inline note flags (-ns / -nu / -nb) apply directly without interactive flow.
-        _inline_both = getattr(args, 'note_both', None)
-        _inline_sys  = getattr(args, 'note_system', None) or _inline_both
-        _inline_usr  = getattr(args, 'note_user', None)   or _inline_both
-        if _inline_sys is not None:
-            self.image_processor_service.system_note = _inline_sys
-        if _inline_usr is not None:
-            self.image_processor_service.user_note = _inline_usr
+        self._apply_inline_notes(self.image_processor_service, args)
 
         if getattr(args, 'kanbun', False):
             self.image_processor_service.kanbun = True
@@ -513,13 +515,7 @@ class _CommandMixin:
             self.transcription_review_service.system_note = sys_note
             self.transcription_review_service.user_note = usr_note
 
-        _inline_both = getattr(args, 'note_both', None)
-        _inline_sys  = getattr(args, 'note_system', None) or _inline_both
-        _inline_usr  = getattr(args, 'note_user', None)   or _inline_both
-        if _inline_sys is not None:
-            self.transcription_review_service.system_note = _inline_sys
-        if _inline_usr is not None:
-            self.transcription_review_service.user_note = _inline_usr
+        self._apply_inline_notes(self.transcription_review_service, args)
 
         if getattr(args, 'dry_run', False):
             model_dr = self.transcription_review_service._get_model()
