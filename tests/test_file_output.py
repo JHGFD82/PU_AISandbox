@@ -450,7 +450,9 @@ class TestSaveTranslationOutput:
     def test_txt_extension_saves_to_text(self, tmp_path):
         output_path = str(tmp_path / "out.txt")
         FileOutputHandler.save_translation_output("hello", None, output_path, False, "J", "E", label="Translation")
-        assert (tmp_path / "out.txt").read_text(encoding="utf-8") == "hello"(self, tmp_path):
+        assert (tmp_path / "out.txt").read_text(encoding="utf-8") == "hello"
+
+    def test_pdf_extension_routes_to_save_to_pdf(self, tmp_path):
         output_path = str(tmp_path / "out.pdf")
         with patch.object(FileOutputHandler, "save_to_pdf") as mock_pdf:
             FileOutputHandler.save_translation_output("content", None, output_path, False, "J", "E", label="Translation")
@@ -566,7 +568,7 @@ class TestSaveToPdfDeepPaths:
         output_path = str(tmp_path / "out.pdf")
         with patch("src.output.file_output.get_pdf_font", return_value="Helvetica") as mock_gpf:
             with caplog.at_level(logging.DEBUG):
-                FileOutputHandler.save_to_pdf("Content.", output_path, target_lang="Japanese")
+                FileOutputHandler.save_to_pdf("Content.", output_path, target_lang="Japanese", label="Translation")
         mock_gpf.assert_called_once()
         assert "Helvetica" in caplog.text
 
@@ -575,7 +577,7 @@ class TestSaveToPdfDeepPaths:
         output_path = str(tmp_path / "out.pdf")
         with patch("src.output.file_output.get_pdf_font", return_value="Helvetica"):
             with caplog.at_level(logging.DEBUG):
-                FileOutputHandler.save_to_pdf("Content here.", output_path, target_lang="Japanese")
+                FileOutputHandler.save_to_pdf("Content here.", output_path, target_lang="Japanese", label="Translation")
         assert "Used font: Helvetica" in caplog.text
 
     def test_paragraph_style_error_falls_back_to_normal_style(self, tmp_path, caplog):
@@ -591,7 +593,7 @@ class TestSaveToPdfDeepPaths:
         output_path = str(tmp_path / "out.pdf")
         with patch("reportlab.lib.styles.ParagraphStyle", side_effect=fail_on_cjk_normal):
             with caplog.at_level(logging.WARNING):
-                FileOutputHandler.save_to_pdf("Content.", output_path, target_lang="English")
+                FileOutputHandler.save_to_pdf("Content.", output_path, target_lang="English", label="Translation")
         assert "Failed to create custom style" in caplog.text
 
     def test_paragraph_render_error_uses_fallback_style(self, tmp_path, caplog):
@@ -608,7 +610,7 @@ class TestSaveToPdfDeepPaths:
         output_path = str(tmp_path / "out.pdf")
         with patch("reportlab.platypus.Paragraph", side_effect=once_fail_para):
             with caplog.at_level(logging.WARNING):
-                FileOutputHandler.save_to_pdf("Content.", output_path, target_lang="English")
+                FileOutputHandler.save_to_pdf("Content.", output_path, target_lang="English", label="Translation")
         assert "Error processing paragraph" in caplog.text
 
     def test_all_paragraph_renders_fail_with_cjk_content(self, tmp_path, caplog):
@@ -616,7 +618,7 @@ class TestSaveToPdfDeepPaths:
         output_path = str(tmp_path / "out.pdf")
         with patch("reportlab.platypus.Paragraph", side_effect=Exception("bad font")):
             with caplog.at_level(logging.WARNING):
-                FileOutputHandler.save_to_pdf("日本語テキスト", output_path, target_lang="English")
+                FileOutputHandler.save_to_pdf("日本語テキスト", output_path, target_lang="English", label="Translation")
         # Paragraph could not be created; content may fall back or skip
         assert (tmp_path / "out.pdf").exists() or (tmp_path / "out.txt").exists()
 
@@ -634,7 +636,7 @@ class TestSaveToPdfDeepPaths:
 
         output_path = str(tmp_path / "out.pdf")
         with patch("reportlab.platypus.Paragraph", side_effect=fail_twice):
-            FileOutputHandler.save_to_pdf("ASCII content here.", output_path, target_lang="English")
+            FileOutputHandler.save_to_pdf("ASCII content here.", output_path, target_lang="English", label="Translation")
         # ASCII safe fallback rendered; PDF should exist
         assert (tmp_path / "out.pdf").exists() or (tmp_path / "out.txt").exists()
 
@@ -653,7 +655,7 @@ class TestSaveToDocxDeepPaths:
         with patch.object(
             FileOutputHandler, "_normalize_paragraphs", return_value=[""]
         ):
-            FileOutputHandler.save_to_docx("any content", output_path, target_lang="English")
+            FileOutputHandler.save_to_docx("any content", output_path, target_lang="English", label="Translation")
         # File saved (paragraph with empty text still counts toward len(doc.paragraphs))
         assert (tmp_path / "out.docx").exists() or (tmp_path / "out.txt").exists()
 
@@ -674,7 +676,7 @@ class TestSaveToDocxDeepPaths:
 
         # Simpler approach: patch only docx.Document class
         with patch("docx.Document", return_value=mock_doc):
-            FileOutputHandler.save_to_docx("content", output_path, target_lang="English")
+            FileOutputHandler.save_to_docx("content", output_path, target_lang="English", label="Translation")
 
         # paragraphs is [], so _fallback_to_text is called → out.txt created
         assert (tmp_path / "out.txt").exists()
@@ -690,7 +692,7 @@ class TestSaveToDocxDeepPaths:
         mock_doc.add_paragraph.return_value = mock_para
 
         with patch("docx.Document", return_value=mock_doc):
-            FileOutputHandler.save_to_docx("content", output_path, target_lang="English")
+            FileOutputHandler.save_to_docx("content", output_path, target_lang="English", label="Translation")
 
         assert (tmp_path / "out.txt").exists()
 
@@ -705,6 +707,6 @@ class TestSaveToDocxDeepPaths:
 
         with patch("docx.Document", return_value=mock_doc):
             with caplog.at_level(logging.INFO):
-                FileOutputHandler.save_to_docx("content", output_path, target_lang="English")
+                FileOutputHandler.save_to_docx("content", output_path, target_lang="English", label="Translation")
 
         assert "Added paragraph" in caplog.text or "Error processing paragraph" in caplog.text
