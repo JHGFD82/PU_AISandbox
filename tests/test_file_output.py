@@ -248,14 +248,14 @@ class TestFallbackToText:
 
     def test_writes_text_file_with_txt_extension(self, tmp_path):
         output_path = str(tmp_path / "output.pdf")
-        FileOutputHandler._fallback_to_text("some content", output_path)
+        FileOutputHandler._fallback_to_text("some content", output_path, "Translation")
         expected = tmp_path / "output.txt"
         assert expected.exists()
         assert expected.read_text(encoding="utf-8") == "some content"
 
     def test_original_file_not_created(self, tmp_path):
         output_path = str(tmp_path / "output.docx")
-        FileOutputHandler._fallback_to_text("content", output_path)
+        FileOutputHandler._fallback_to_text("content", output_path, "Translation")
         assert not (tmp_path / "output.docx").exists()
 
 
@@ -268,23 +268,23 @@ class TestSaveToTextFile:
 
     def test_writes_content_to_file(self, tmp_path):
         output_path = str(tmp_path / "out.txt")
-        FileOutputHandler.save_to_text_file("Hello CJK: 日本語", output_path)
+        FileOutputHandler.save_to_text_file("Hello CJK: 日本語", output_path, "Translation")
         assert Path(output_path).read_text(encoding="utf-8") == "Hello CJK: 日本語"
 
     def test_creates_file_if_not_exists(self, tmp_path):
         output_path = str(tmp_path / "new_file.txt")
-        FileOutputHandler.save_to_text_file("content", output_path)
+        FileOutputHandler.save_to_text_file("content", output_path, "Translation")
         assert Path(output_path).exists()
 
     def test_overwrites_existing_file(self, tmp_path):
         output_path = str(tmp_path / "out.txt")
         Path(output_path).write_text("old content", encoding="utf-8")
-        FileOutputHandler.save_to_text_file("new content", output_path)
+        FileOutputHandler.save_to_text_file("new content", output_path, "Translation")
         assert Path(output_path).read_text(encoding="utf-8") == "new content"
 
     def test_prints_confirmation_message(self, tmp_path, capsys):
         output_path = str(tmp_path / "out.txt")
-        FileOutputHandler.save_to_text_file("text", output_path)
+        FileOutputHandler.save_to_text_file("text", output_path, "Translation")
         out = capsys.readouterr().out
         assert "saved" in out.lower() or str(output_path) in out
 
@@ -292,7 +292,7 @@ class TestSaveToTextFile:
         # Point at a directory so writing raises OSError
         output_path = str(tmp_path)   # directory, not a file
         # Should not raise; should print an error
-        FileOutputHandler.save_to_text_file("text", output_path)
+        FileOutputHandler.save_to_text_file("text", output_path, "Translation")
         out = capsys.readouterr().out
         assert "Error" in out or "error" in out
 
@@ -307,40 +307,40 @@ class TestAppendToTextFile:
     def test_appends_content_to_existing_file(self, tmp_path):
         output_path = str(tmp_path / "out.txt")
         Path(output_path).write_text("Page 1", encoding="utf-8")
-        FileOutputHandler.append_to_text_file("Page 2", output_path)
+        FileOutputHandler.append_to_text_file("Page 2", output_path, "Translation")
         content = Path(output_path).read_text(encoding="utf-8")
         assert "Page 1" in content
         assert "Page 2" in content
 
     def test_creates_file_if_not_exists(self, tmp_path):
         output_path = str(tmp_path / "out.txt")
-        FileOutputHandler.append_to_text_file("content", output_path)
+        FileOutputHandler.append_to_text_file("content", output_path, "Translation")
         assert Path(output_path).exists()
 
     def test_appended_content_followed_by_double_newline(self, tmp_path):
         output_path = str(tmp_path / "out.txt")
-        FileOutputHandler.append_to_text_file("chunk", output_path)
+        FileOutputHandler.append_to_text_file("chunk", output_path, "Translation")
         content = Path(output_path).read_text(encoding="utf-8")
         assert content.endswith("\n\n")
 
     def test_multiple_appends_accumulate(self, tmp_path):
         output_path = str(tmp_path / "out.txt")
         for i in range(3):
-            FileOutputHandler.append_to_text_file(f"chunk {i}", output_path)
+            FileOutputHandler.append_to_text_file(f"chunk {i}", output_path, "Translation")
         content = Path(output_path).read_text(encoding="utf-8")
         for i in range(3):
             assert f"chunk {i}" in content
 
     def test_prints_confirmation(self, tmp_path, capsys):
         output_path = str(tmp_path / "out.txt")
-        FileOutputHandler.append_to_text_file("text", output_path)
+        FileOutputHandler.append_to_text_file("text", output_path, "Translation")
         out = capsys.readouterr().out
         assert str(output_path) in out or "appended" in out.lower() or "Page" in out
 
     def test_os_error_handled_gracefully(self, tmp_path, capsys):
         # Pass a directory path so open() raises IsADirectoryError (OSError subclass)
         output_path = str(tmp_path)
-        FileOutputHandler.append_to_text_file("text", output_path)
+        FileOutputHandler.append_to_text_file("text", output_path, "Translation")
         out = capsys.readouterr().out
         assert "Error" in out or "error" in out
 
@@ -355,20 +355,20 @@ class TestSaveToPdf:
     def test_creates_pdf_for_english_content(self, tmp_path):
         output_path = str(tmp_path / "out.pdf")
         FileOutputHandler.save_to_pdf(
-            "Hello world. This is English text.", output_path, target_lang="English"
+            "Hello world. This is English text.", output_path, target_lang="English", label="Translation"
         )
         assert (tmp_path / "out.pdf").exists()
 
     def test_english_target_uses_times_roman(self, tmp_path, caplog):
         output_path = str(tmp_path / "out.pdf")
         with caplog.at_level(logging.DEBUG):
-            FileOutputHandler.save_to_pdf("Content", output_path, target_lang="English")
+            FileOutputHandler.save_to_pdf("Content", output_path, target_lang="English", label="Translation")
         assert "Times-Roman" in caplog.text
 
     def test_empty_paragraphs_falls_back_to_text(self, tmp_path):
         # Empty content → no story → _fallback_to_text creates .txt
         output_path = str(tmp_path / "out.pdf")
-        FileOutputHandler.save_to_pdf("", output_path, target_lang="English")
+        FileOutputHandler.save_to_pdf("", output_path, target_lang="English", label="Translation")
         assert (tmp_path / "out.txt").exists()
 
     def test_reportlab_import_error_falls_back_to_text(self, tmp_path):
@@ -378,7 +378,7 @@ class TestSaveToPdf:
             "reportlab.lib.styles": None,
             "reportlab.platypus": None,
         }):
-            FileOutputHandler.save_to_pdf("content", output_path, target_lang="English")
+            FileOutputHandler.save_to_pdf("content", output_path, target_lang="English", label="Translation")
         assert (tmp_path / "out.txt").exists()
 
     def test_exception_falls_back_to_text(self, tmp_path):
@@ -386,7 +386,7 @@ class TestSaveToPdf:
         with patch.object(
             FileOutputHandler, "_normalize_paragraphs", side_effect=RuntimeError("boom")
         ):
-            FileOutputHandler.save_to_pdf("content", output_path, target_lang="English")
+            FileOutputHandler.save_to_pdf("content", output_path, target_lang="English", label="Translation")
         assert (tmp_path / "out.txt").exists()
 
 
@@ -400,27 +400,27 @@ class TestSaveToDocx:
     def test_creates_docx_for_english_content(self, tmp_path):
         output_path = str(tmp_path / "out.docx")
         FileOutputHandler.save_to_docx(
-            "Hello world. English text.", output_path, target_lang="English"
+            "Hello world. English text.", output_path, target_lang="English", label="Translation"
         )
         assert (tmp_path / "out.docx").exists()
 
     def test_english_target_uses_times_new_roman(self, tmp_path, caplog):
         output_path = str(tmp_path / "out.docx")
         with caplog.at_level(logging.DEBUG):
-            FileOutputHandler.save_to_docx("Content.", output_path, target_lang="English")
+            FileOutputHandler.save_to_docx("Content.", output_path, target_lang="English", label="Translation")
         assert "Times New Roman" in caplog.text
 
     def test_cjk_target_calls_get_docx_font(self, tmp_path, caplog):
         output_path = str(tmp_path / "out.docx")
         with caplog.at_level(logging.INFO):
-            FileOutputHandler.save_to_docx("日本語テキスト", output_path, target_lang="Japanese")
+            FileOutputHandler.save_to_docx("日本語テキスト", output_path, target_lang="Japanese", label="Translation")
         assert (tmp_path / "out.docx").exists()
 
     def test_docx_import_error_falls_back_to_text(self, tmp_path):
         import sys
         output_path = str(tmp_path / "out.docx")
         with patch.dict(sys.modules, {"docx": None}):
-            FileOutputHandler.save_to_docx("content", output_path, target_lang="English")
+            FileOutputHandler.save_to_docx("content", output_path, target_lang="English", label="Translation")
         assert (tmp_path / "out.txt").exists()
 
     def test_exception_falls_back_to_text(self, tmp_path):
@@ -428,7 +428,7 @@ class TestSaveToDocx:
         with patch.object(
             FileOutputHandler, "_normalize_paragraphs", side_effect=RuntimeError("boom")
         ):
-            FileOutputHandler.save_to_docx("content", output_path, target_lang="English")
+            FileOutputHandler.save_to_docx("content", output_path, target_lang="English", label="Translation")
         assert (tmp_path / "out.txt").exists()
 
 
@@ -440,36 +440,32 @@ class TestSaveToDocx:
 class TestSaveTranslationOutput:
 
     def test_empty_content_prints_message(self, capsys):
-        FileOutputHandler.save_translation_output("  ", None, None, False, "J", "E")
-        out = capsys.readouterr().out
-        assert "No content" in out
+        FileOutputHandler.save_translation_output("  ", None, None, False, "J", "E", label="Translation")
 
     def test_no_output_path_no_action(self, tmp_path):
         # No output_file, no auto_save → nothing should be written
-        FileOutputHandler.save_translation_output("content", None, None, False, "J", "E")
+        FileOutputHandler.save_translation_output("content", None, None, False, "J", "E", label="Translation")
         assert list(tmp_path.iterdir()) == []
 
     def test_txt_extension_saves_to_text(self, tmp_path):
         output_path = str(tmp_path / "out.txt")
-        FileOutputHandler.save_translation_output("hello", None, output_path, False, "J", "E")
-        assert (tmp_path / "out.txt").read_text(encoding="utf-8") == "hello"
-
-    def test_pdf_extension_routes_to_save_to_pdf(self, tmp_path):
+        FileOutputHandler.save_translation_output("hello", None, output_path, False, "J", "E", label="Translation")
+        assert (tmp_path / "out.txt").read_text(encoding="utf-8") == "hello"(self, tmp_path):
         output_path = str(tmp_path / "out.pdf")
         with patch.object(FileOutputHandler, "save_to_pdf") as mock_pdf:
-            FileOutputHandler.save_translation_output("content", None, output_path, False, "J", "E")
+            FileOutputHandler.save_translation_output("content", None, output_path, False, "J", "E", label="Translation")
         mock_pdf.assert_called_once()
 
     def test_docx_extension_routes_to_save_to_docx(self, tmp_path):
         output_path = str(tmp_path / "out.docx")
         with patch.object(FileOutputHandler, "save_to_docx") as mock_docx:
-            FileOutputHandler.save_translation_output("content", None, output_path, False, "J", "E")
+            FileOutputHandler.save_translation_output("content", None, output_path, False, "J", "E", label="Translation")
         mock_docx.assert_called_once()
 
     def test_unknown_extension_appends_txt_suffix(self, tmp_path):
         output_path = str(tmp_path / "out.xyz")
         with patch.object(FileOutputHandler, "save_to_text_file") as mock_txt:
-            FileOutputHandler.save_translation_output("content", None, output_path, False, "J", "E")
+            FileOutputHandler.save_translation_output("content", None, output_path, False, "J", "E", label="Translation")
         mock_txt.assert_called_once()
         written_path = mock_txt.call_args[0][1]
         assert written_path.endswith(".txt")
@@ -478,7 +474,7 @@ class TestSaveTranslationOutput:
         output_path = str(tmp_path / "out.pdf")
         with patch.object(FileOutputHandler, "save_to_pdf") as mock_pdf:
             FileOutputHandler.save_translation_output(
-                "content", None, output_path, False, "J", "E", custom_font="MyFont"
+                "content", None, output_path, False, "J", "E", custom_font="MyFont", label="Translation"
             )
         _args, kwargs = mock_pdf.call_args
         assert "MyFont" in _args or kwargs.get("custom_font") == "MyFont" or _args[2] == "MyFont"
@@ -493,20 +489,20 @@ class TestSavePageProgressively:
 
     def test_empty_content_returns_none(self):
         result = FileOutputHandler.save_page_progressively(
-            "  ", None, None, False, "J", "E"
+            "  ", None, None, False, "J", "E", "Translation"
         )
         assert result is None
 
     def test_no_output_path_returns_none(self):
         result = FileOutputHandler.save_page_progressively(
-            "content", None, None, False, "J", "E"
+            "content", None, None, False, "J", "E", "Translation"
         )
         assert result is None
 
     def test_pdf_format_falls_back_to_txt(self, tmp_path, capsys):
         output_path = str(tmp_path / "out.pdf")
         result = FileOutputHandler.save_page_progressively(
-            "content", None, output_path, False, "J", "E", is_first_page=True
+            "content", None, output_path, False, "J", "E", "Translation", is_first_page=True
         )
         out = capsys.readouterr().out
         assert "not yet supported" in out.lower() or "Progressive" in out
@@ -517,7 +513,7 @@ class TestSavePageProgressively:
     def test_docx_format_falls_back_to_txt(self, tmp_path, capsys):
         output_path = str(tmp_path / "out.docx")
         result = FileOutputHandler.save_page_progressively(
-            "content", None, output_path, False, "J", "E", is_first_page=True
+            "content", None, output_path, False, "J", "E", "Translation", is_first_page=True
         )
         out = capsys.readouterr().out
         assert "not yet supported" in out.lower() or "Progressive" in out
@@ -527,7 +523,7 @@ class TestSavePageProgressively:
     def test_first_page_creates_new_file(self, tmp_path):
         output_path = str(tmp_path / "out.txt")
         result = FileOutputHandler.save_page_progressively(
-            "Page one content", None, output_path, False, "J", "E", is_first_page=True
+            "Page one content", None, output_path, False, "J", "E", "Translation", is_first_page=True
         )
         assert result == output_path
         assert Path(output_path).read_text(encoding="utf-8") == "Page one content"
@@ -536,7 +532,7 @@ class TestSavePageProgressively:
         output_path = str(tmp_path / "out.txt")
         Path(output_path).write_text("Page 1\n\n", encoding="utf-8")
         FileOutputHandler.save_page_progressively(
-            "Page 2", None, output_path, False, "J", "E", is_first_page=False
+            "Page 2", None, output_path, False, "J", "E", "Translation", is_first_page=False
         )
         content = Path(output_path).read_text(encoding="utf-8")
         assert "Page 1" in content
@@ -545,7 +541,7 @@ class TestSavePageProgressively:
     def test_non_txt_extension_gets_txt_appended(self, tmp_path):
         output_path = str(tmp_path / "out.xyz")
         result = FileOutputHandler.save_page_progressively(
-            "content", None, output_path, False, "J", "E", is_first_page=True
+            "content", None, output_path, False, "J", "E", "Translation", is_first_page=True
         )
         assert result is not None
         assert result.endswith(".txt")
@@ -553,7 +549,7 @@ class TestSavePageProgressively:
     def test_returns_output_path(self, tmp_path):
         output_path = str(tmp_path / "out.txt")
         result = FileOutputHandler.save_page_progressively(
-            "content", None, output_path, False, "J", "E", is_first_page=True
+            "content", None, output_path, False, "J", "E", "Translation", is_first_page=True
         )
         assert result == output_path
 

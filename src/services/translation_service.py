@@ -424,6 +424,7 @@ class TranslationService(BaseService):
                             opts.auto_save,
                             source_language,
                             target_language,
+                            "Translation",
                             is_first_page=(i == first_index),
                         )
 
@@ -440,6 +441,7 @@ class TranslationService(BaseService):
                             opts.auto_save,
                             source_language,
                             target_language,
+                            "Translation",
                             is_first_page=(i == first_index),
                         )
                     continue

@@ -374,6 +374,7 @@ class SandboxProcessor(_CommandMixin):
                     media=embedded_media,
                     table_registry=docx_table_registry,
                     font_size=opts.font_size,
+                    label="Translation",
                 )
 
         except ImportError as e:
@@ -424,6 +425,7 @@ class SandboxProcessor(_CommandMixin):
                     target_language,
                     opts.custom_font,
                     font_size=opts.font_size,
+                    label="Translation",
                 )
 
         except KeyboardInterrupt:
@@ -472,6 +474,7 @@ class SandboxProcessor(_CommandMixin):
                 target_language,
                 opts.custom_font,
                 font_size=opts.font_size,
+                label="Translation",
             )
 
     def process_image_translation_folder(
@@ -520,6 +523,7 @@ class SandboxProcessor(_CommandMixin):
                     "\n\n".join(combined_parts), None, opts.output_file, opts.auto_save,
                     source_language, target_language, opts.custom_font,
                     font_size=opts.font_size,
+                    label="Translation",
                 )
             return
 
@@ -584,6 +588,7 @@ class SandboxProcessor(_CommandMixin):
                 "\n\n".join(combined_parts_p), None, opts.output_file, opts.auto_save,
                 source_language, target_language, opts.custom_font,
                 font_size=opts.font_size,
+                label="Translation",
             )
 
     def process_image(self, file_path: str, target_language: str, output_file: Optional[str] = None, vertical: bool = False, spread: bool = False, passes: int = 1) -> None:
@@ -599,6 +604,7 @@ class SandboxProcessor(_CommandMixin):
                 self.file_output.save_translation_output(
                     extracted_text, file_path, output_file, False,
                     target_language, target_language,
+                    label="Transcription",
                 )
 
         except Exception as e:
@@ -643,6 +649,7 @@ class SandboxProcessor(_CommandMixin):
                 self.file_output.save_translation_output(
                     "\n\n".join(combined_parts), None, output_file, False,
                     target_language, target_language,
+                    label="Transcription",
                 )
             return
 
@@ -705,6 +712,7 @@ class SandboxProcessor(_CommandMixin):
             self.file_output.save_translation_output(
                 "\n\n".join(combined_parts_p), None, output_file, False,
                 target_language, target_language,
+                label="Transcription",
             )
 
     def process_prompt(
@@ -746,10 +754,9 @@ class SandboxProcessor(_CommandMixin):
     @staticmethod
     def _save_text_file(text: str, output_file: str, label: str = "Output") -> None:
         """Write *text* to *output_file*, then print the saved path."""
-        output_path = os.path.abspath(output_file)
-        with open(output_path, 'w', encoding='utf-8') as f:
+        with open(output_file, 'w', encoding='utf-8') as f:
             f.write(text)
-        print(f"{label} saved to: {os.path.basename(output_path)}")
+        print(f"{label} saved to: {os.path.basename(output_file)}")
 
 
 

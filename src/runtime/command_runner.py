@@ -464,7 +464,7 @@ class _CommandMixin:
             raise CLIError("Input file is required for transcribe command. Use -i option.")
 
         input_path = os.path.abspath(args.input_file)
-        output_file = getattr(args, 'output_file', None)
+        output_file = self._resolve_output_path(args)
         vertical = getattr(args, 'vertical', False)
         spread = getattr(args, 'spread', False)
         passes = getattr(args, 'passes', 1)
@@ -498,7 +498,7 @@ class _CommandMixin:
         if not user_prompt_text.strip():
             raise CLIError("No prompt text provided.")
 
-        output_file_p = getattr(args, 'output_file', None)
+        output_file_p = self._resolve_output_path(args)
         self.process_prompt(user_prompt_text, system_prompt_text, output_file_p)
 
     def _run_transcription_review(self, args: argparse.Namespace) -> None:
@@ -554,7 +554,7 @@ class _CommandMixin:
                 "or -c to paste the text interactively."
             )
 
-        output_file_r = getattr(args, 'output_file', None)
+        output_file_r = self._resolve_output_path(args)
         self.process_transcription_review(text, language, kanbun=kanbun, kanbun_main=kanbun_main, output_file=output_file_r)
 
     def run(self, args: argparse.Namespace) -> None:

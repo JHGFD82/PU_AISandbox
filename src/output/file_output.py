@@ -179,21 +179,21 @@ class FileOutputHandler:
         Path(output_path).parent.mkdir(parents=True, exist_ok=True)
 
     @staticmethod
-    def _fallback_to_text(content: str, output_path: str) -> None:
+    def _fallback_to_text(content: str, output_path: str, label: str) -> None:
         """Fallback to text output when rich document generation fails."""
         text_output_path = str(Path(output_path).with_suffix('.txt'))
-        FileOutputHandler.save_to_text_file(content, text_output_path)
+        FileOutputHandler.save_to_text_file(content, text_output_path, label)
     
     @staticmethod
-    def save_to_text_file(content: str, output_path: str) -> None:
+    def save_to_text_file(content: str, output_path: str, label: str) -> None:
         """Save content to a text file."""
         try:
             with open(output_path, 'w', encoding='utf-8') as f:
                 f.write(content)
             FileOutputHandler._emit_message(
-                f"Translation saved to: {Path(output_path).name}",
+                f"{label} saved to: {Path(output_path).name}",
                 level=logging.INFO,
-                log_message=f'Translation saved to text file: {output_path}',
+                log_message=f'{label} saved to text file: {output_path}',
                 leading_newline=True,
             )
         except (OSError, UnicodeError) as e:
@@ -203,7 +203,7 @@ class FileOutputHandler:
             )
 
     @staticmethod
-    def append_to_text_file(content: str, output_path: str) -> None:
+    def append_to_text_file(content: str, output_path: str, label: str) -> None:
         """Append content to a text file."""
         try:
             with open(output_path, 'a', encoding='utf-8') as f:
@@ -211,7 +211,7 @@ class FileOutputHandler:
             FileOutputHandler._emit_message(
                 f"Page appended to: {Path(output_path).name}",
                 level=logging.INFO,
-                log_message=f'Translation appended to text file: {output_path}',
+                log_message=f'{label} appended to text file: {output_path}',
             )
         except (OSError, UnicodeError) as e:
             FileOutputHandler._emit_message(
@@ -223,7 +223,9 @@ class FileOutputHandler:
     def save_to_pdf(content: str, output_path: str, custom_font: Optional[str] = None,
                     target_lang: Optional[str] = None,
                     table_registry: Optional[dict] = None,
-                    font_size: Optional[int] = None) -> None:
+                    font_size: Optional[int] = None,
+                    *,
+                    label: str) -> None:
         """Save content to a PDF file using reportlab.
 
         If *table_registry* is provided, ``[TABLE_N]`` placeholder paragraphs
@@ -355,9 +357,9 @@ class FileOutputHandler:
             if story:
                 doc.build(story)
                 FileOutputHandler._emit_message(
-                    f"Translation saved to PDF: {Path(output_path).name}",
+                    f"{label} saved to PDF: {Path(output_path).name}",
                     level=logging.INFO,
-                    log_message=f'Translation saved to PDF file: {output_path}',
+                    log_message=f'{label} saved to PDF file: {output_path}',
                     leading_newline=True,
                 )
                 if font_name != 'Times-Roman':
@@ -368,7 +370,7 @@ class FileOutputHandler:
                     level=logging.ERROR,
                     log_message="No content could be processed for PDF generation",
                 )
-                FileOutputHandler._fallback_to_text(content, output_path)
+                FileOutputHandler._fallback_to_text(content, output_path, label)
             
         except ImportError:
             FileOutputHandler._emit_message(
@@ -376,7 +378,7 @@ class FileOutputHandler:
                 level=logging.WARNING,
                 log_message='reportlab not installed. Falling back to text file.',
             )
-            FileOutputHandler._fallback_to_text(content, output_path)
+            FileOutputHandler._fallback_to_text(content, output_path, label)
         except Exception as e:
             FileOutputHandler._emit_message(
                 f"Error generating PDF: {e}",
@@ -387,13 +389,15 @@ class FileOutputHandler:
                 "Falling back to text file for reliable CJK character support...",
                 level=logging.WARNING,
             )
-            FileOutputHandler._fallback_to_text(content, output_path)
+            FileOutputHandler._fallback_to_text(content, output_path, label)
     
     @staticmethod
     def save_to_docx(content: str, output_path: str, custom_font: Optional[str] = None,
                      target_lang: Optional[str] = None, media: Optional[List] = None,
                      table_registry: Optional[dict] = None,
-                     font_size: Optional[int] = None) -> None:
+                     font_size: Optional[int] = None,
+                     *,
+                     label: str) -> None:
         """Save content to a Word document using python-docx.
 
         If *media* is provided (a list of :class:`~src.models.embedded_media.EmbeddedMedia`
@@ -597,9 +601,9 @@ class FileOutputHandler:
             if len(doc.paragraphs) > 0:
                 doc.save(output_path)
                 FileOutputHandler._emit_message(
-                    f"Translation saved to Word document: {Path(output_path).name}",
+                    f"{label} saved to Word document: {Path(output_path).name}",
                     level=logging.INFO,
-                    log_message=f'Translation saved to Word document: {output_path}',
+                    log_message=f'{label} saved to Word document: {output_path}',
                     leading_newline=True,
                 )
                 if font_name != 'Times New Roman':
@@ -610,7 +614,7 @@ class FileOutputHandler:
                     level=logging.ERROR,
                     log_message="No content could be processed for Word document generation",
                 )
-                FileOutputHandler._fallback_to_text(content, output_path)
+                FileOutputHandler._fallback_to_text(content, output_path, label)
 
         except ImportError:
             FileOutputHandler._emit_message(
@@ -620,7 +624,7 @@ class FileOutputHandler:
             )
             print("pip install python-docx")
             FileOutputHandler._emit_message("Saving as text file instead.", level=logging.WARNING)
-            FileOutputHandler._fallback_to_text(content, output_path)
+            FileOutputHandler._fallback_to_text(content, output_path, label)
         except Exception as e:
             FileOutputHandler._emit_message(
                 f"Error generating Word document: {e}",
@@ -631,7 +635,7 @@ class FileOutputHandler:
                 "Falling back to text file for reliable CJK character support...",
                 level=logging.WARNING,
             )
-            FileOutputHandler._fallback_to_text(content, output_path)
+            FileOutputHandler._fallback_to_text(content, output_path, label)
     
     @staticmethod
     def save_translation_output(content: str, input_file: Optional[str], output_file: Optional[str],
@@ -639,7 +643,9 @@ class FileOutputHandler:
                               custom_font: Optional[str] = None,
                               media: Optional[List] = None,
                               table_registry: Optional[dict] = None,
-                              font_size: Optional[int] = None) -> None:
+                              font_size: Optional[int] = None,
+                              *,
+                              label: str) -> None:
         """Save translation output to file based on user preferences."""
         if not content.strip():
             FileOutputHandler._emit_message("No content to save.", level=logging.INFO)
@@ -664,6 +670,7 @@ class FileOutputHandler:
                 content, output_path, custom_font, target_lang,
                 table_registry=table_registry,
                 font_size=font_size,
+                label=label,
             )
             return
         if extension == '.docx':
@@ -671,6 +678,7 @@ class FileOutputHandler:
                 content, output_path, custom_font, target_lang,
                 media=media, table_registry=table_registry,
                 font_size=font_size,
+                label=label,
             )
             return
 
@@ -679,11 +687,12 @@ class FileOutputHandler:
         FileOutputHandler.save_to_text_file(
             FileOutputHandler._render_markdown_tables_as_ascii(content),
             output_path,
+            label=label,
         )
 
     @staticmethod
-    def save_page_progressively(content: str, input_file: Optional[str], output_file: Optional[str], 
-                               auto_save: bool, source_lang: str, target_lang: str, is_first_page: bool = False,
+    def save_page_progressively(content: str, input_file: Optional[str], output_file: Optional[str],
+                               auto_save: bool, source_lang: str, target_lang: str, label: str, is_first_page: bool = False,
                                custom_font: Optional[str] = None) -> Optional[str]:
         """Save a single page progressively to output file. Returns the output path."""
         _ = custom_font
@@ -726,8 +735,8 @@ class FileOutputHandler:
         
         # Save first page or append subsequent pages
         if is_first_page:
-            FileOutputHandler.save_to_text_file(content, output_path)
+            FileOutputHandler.save_to_text_file(content, output_path, label)
         else:
-            FileOutputHandler.append_to_text_file(content, output_path)
+            FileOutputHandler.append_to_text_file(content, output_path, label)
         
         return output_path
