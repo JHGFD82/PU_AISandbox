@@ -53,7 +53,7 @@ class _CommandMixin:
         def _detect_and_validate_file(self, file_path: str) -> str: ...
         def translate_custom_text(self, source_language: str, target_language: str, abstract: bool, opts: OutputOptions) -> None: ...
         def process_image_translation_folder(self, folder_path: str, source_language: str, target_language: str, opts: OutputOptions, workers: int = 1, spread: bool = False) -> None: ...
-        def translate_document(self, file_path: str, source_language: str, target_language: str, page_nums: Optional[str], abstract: bool, opts: OutputOptions, workers: int = 1, spread: bool = False) -> None: ...
+        def translate_document(self, file_path: str, source_language: str, target_language: str, page_nums: Optional[str], abstract: bool, opts: OutputOptions, workers: int = 1, spread: bool = False, scanned: bool = False) -> None: ...
         def process_image_folder(self, folder_path: str, target_language: str, output_file: Optional[str] = None, vertical: bool = False, spread: bool = False, passes: int = 1, workers: int = 1) -> None: ...
         def process_image(self, file_path: str, target_language: str, output_file: Optional[str] = None, vertical: bool = False, spread: bool = False, passes: int = 1) -> None: ...
         def process_prompt(self, user_prompt: str, system_prompt: Optional[str] = None, output_file: Optional[str] = None) -> None: ...
@@ -176,6 +176,22 @@ class _CommandMixin:
         source_language: str = lang_tuple[0]
         target_language: str = lang_tuple[1]
 
+        # --scanned compatibility checks
+        if getattr(args, 'scanned', False):
+            _scanned_input: Optional[str] = getattr(args, 'input_file', None)
+            if not _scanned_input:
+                raise CLIError("--scanned requires a file input (-i).")
+            if getattr(args, 'custom_text', False):
+                raise CLIError("Cannot use --scanned with custom text input (-c).")
+            _scanned_ext = os.path.splitext(_scanned_input)[1].lower()
+            if _scanned_ext != '.pdf':
+                raise CLIError(
+                    f"--scanned is only valid for PDF files (got '{_scanned_ext}'). "
+                    "For image files, the translate command routes through OCR automatically."
+                )
+            if getattr(args, 'preserve_media', False):
+                raise CLIError("Cannot combine --scanned with --preserve-media.")
+
         # --preserve-media compatibility checks — raise an error immediately so
         # the user can correct their command before any tokens are spent.
         if getattr(args, 'preserve_media', False):
@@ -294,6 +310,19 @@ class _CommandMixin:
                     )
                     return
                 elif file_type_dr == 'pdf':
+                    if getattr(args, 'scanned', False):
+                        spread_dr = getattr(args, 'spread', False)
+                        sys_p, usr_p = self.image_translation_service.build_prompts(
+                            source_language, target_language, spread=spread_dr
+                        )
+                        self._dry_run_display(
+                            self.image_translation_service._get_model(), sys_p, usr_p,
+                            note="Scanned PDF: each page will be rendered as an image and attached to the user message",
+                            temperature=getattr(args, 'temperature', None),
+                            top_p=getattr(args, 'top_p', None),
+                            max_tokens=getattr(args, 'max_tokens', None),
+                        )
+                        return
                     with open(file_path_dr, 'rb') as f:
                         first_page = next(iter(self.pdf_processor.process_pdf(f)), None)
                         page_text_dr = self.pdf_processor.process_page(first_page) if first_page else "[no text found in PDF]"
@@ -371,6 +400,7 @@ class _CommandMixin:
                     opts,
                     workers=workers,
                     spread=spread,
+                    scanned=getattr(args, 'scanned', False),
                 )
         else:
             raise CLIError("No input specified. Use -i for file input or -c for custom text.")

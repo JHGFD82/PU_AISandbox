@@ -96,9 +96,12 @@ Translation:
   python main.py heller translate CE -i doc.pdf -w 4            Translate 4 pages in parallel
   python main.py heller translate JE -i spread.jpg --spread     Image is a two-page spread (images only)
   python main.py heller translate CE -i doc.docx -o out.docx --preserve-media  Carry images from source Word doc into output
+  python main.py heller translate JE -i scanned_book.pdf --scanned            Treat PDF pages as scanned images (OCR+translate via vision model)
+  python main.py heller translate JE -i scanned_book.pdf --scanned -w 4       Scanned PDF with 4 parallel workers
     Note: -w > 1 passes untranslated source text as context (not prior translation) and
     disables --progressive-save. Each page's context_length_exceeded splitting still works.
     --preserve-media requires a .docx input and a .docx output file (-o out.docx).
+    --scanned is only valid for PDF inputs; incompatible with --preserve-media.
 
 Transcription (OCR):
   python main.py heller transcribe E -i image.jpg
@@ -242,7 +245,13 @@ Transcription review (OCR error detection):
             'Workers > 1 uses untranslated source text as context and disables progressive save.'
         ),
     )
-    translate_parser.add_argument('--spread', dest='spread', action='store_true', help='Image is a two-page spread (two facing pages scanned together); only applies to image file inputs')
+    translate_parser.add_argument('--spread', dest='spread', action='store_true', help='Image is a two-page spread (two facing pages scanned together); applies to image file inputs and --scanned PDFs')
+    translate_parser.add_argument(
+        '--scanned',
+        dest='scanned',
+        action='store_true',
+        help='Treat the PDF as a scanned image document: each page is rendered as an image and processed via the OCR+translation pipeline (vision model). PDF only.',
+    )
     translate_parser.add_argument(
         '--preserve-media',
         dest='preserve_media',

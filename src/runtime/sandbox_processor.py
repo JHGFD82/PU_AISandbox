@@ -2,6 +2,7 @@
 
 import logging
 import os
+import tempfile
 from concurrent.futures import ThreadPoolExecutor, as_completed as futures_as_completed
 from typing import Optional, List, Tuple, TypedDict
 
@@ -190,6 +191,7 @@ class SandboxProcessor(_CommandMixin):
         opts: OutputOptions = OutputOptions(),
         workers: int = 1,
         spread: bool = False,
+        scanned: bool = False,
     ) -> None:
         """Translate a document file (PDF, Word document, or text file)."""
         file_path = os.path.abspath(file_path)
@@ -211,6 +213,46 @@ class SandboxProcessor(_CommandMixin):
             except Exception as e:
                 logger.debug(f"Error processing image: {e}", exc_info=True)
                 raise CLIError(f"Error processing image: {e}") from e
+            return
+
+        # --scanned: render each PDF page as a PNG and route through the
+        # combined OCR+translation pipeline (same as image folder mode).
+        if file_type == 'pdf' and scanned:
+            try:
+                import fitz  # type: ignore[import]
+            except ImportError as exc:
+                raise CLIError(
+                    "PyMuPDF (pymupdf) is required for --scanned. Install it with: pip install pymupdf"
+                ) from exc
+            print("Scanned PDF — rendering pages as images for OCR+translation.")
+            try:
+                with tempfile.TemporaryDirectory() as tmpdir:
+                    doc = fitz.open(file_path)
+                    total_pages = len(doc)
+                    page_indices: List[int] = []
+                    for start, end in _parse_page_ranges(page_nums):
+                        actual_end = min(end, total_pages - 1) if end is not None else total_pages - 1
+                        if start >= total_pages:
+                            raise CLIError(f"Page {start + 1} does not exist. PDF has {total_pages} pages.")
+                        page_indices.extend(range(start, actual_end + 1))
+                    logger.info(f"Rendering {len(page_indices)} page(s) from scanned PDF.")
+                    for i, page_idx in enumerate(page_indices):
+                        pix = doc[page_idx].get_pixmap(dpi=200)  # type: ignore[union-attr]
+                        pix.save(os.path.join(tmpdir, f"page_{i:04d}.png"))
+                    doc.close()
+                    self.process_image_translation_folder(
+                        tmpdir,
+                        source_language,
+                        target_language,
+                        opts,
+                        workers=workers,
+                        spread=spread,
+                    )
+            except CLIError:
+                raise
+            except Exception as e:
+                logger.debug(f"Error processing scanned PDF: {e}", exc_info=True)
+                raise CLIError(f"Error processing scanned PDF: {e}") from e
             return
 
         abstract_text: Optional[str] = self._collect_multiline("Abstract text") or None if abstract else None
