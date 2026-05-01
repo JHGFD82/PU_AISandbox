@@ -9,7 +9,9 @@ import pytest
 from src.errors import CLIError
 from src.models import OutputOptions
 from src.output.file_output import FileOutputHandler
-from src.runtime.sandbox_processor import SandboxProcessor, _collect_image_files, _parse_page_ranges
+from src.runtime.sandbox_processor import SandboxProcessor
+from src.runtime.document_handler import _parse_page_ranges
+from src.runtime.image_handler import _collect_image_files
 
 
 # ---------------------------------------------------------------------------
@@ -228,7 +230,7 @@ class TestProcessTextBasedFile:
         proc = _make_processor(monkeypatch)
         # Mock DocxProcessor to avoid needing a real docx file
         monkeypatch.setattr(
-            "src.runtime.sandbox_processor.DocxProcessor.process_docx_with_pages",
+            "src.runtime.document_handler.DocxProcessor.process_docx_with_pages",
             lambda f, target_page_size: ["Page one text"],
         )
         f = tmp_path / "doc.docx"
@@ -253,7 +255,7 @@ class TestProcessTextBasedFile:
     def test_page_range_beyond_document_raises_cli_error(self, tmp_path, monkeypatch):
         proc = _make_processor(monkeypatch)
         monkeypatch.setattr(
-            "src.runtime.sandbox_processor.TxtProcessor.process_txt_with_pages",
+            "src.runtime.document_handler.TxtProcessor.process_txt_with_pages",
             lambda f, target_page_size: ["Only one page"],
         )
         f = tmp_path / "file.txt"
@@ -655,7 +657,7 @@ class TestProcessTextBasedFilePageRange:
         """When page_nums='1-5' but doc only has 2 pages, actual_end is clamped to 1."""
         proc = _make_processor(monkeypatch)
         monkeypatch.setattr(
-            "src.runtime.sandbox_processor.TxtProcessor.process_txt_with_pages",
+            "src.runtime.document_handler.TxtProcessor.process_txt_with_pages",
             lambda f, target_page_size: ["Page one", "Page two"],
         )
         f = tmp_path / "short.txt"
@@ -673,7 +675,7 @@ class TestProcessTextBasedFilePageRange:
         """page_nums='1-2' with 3-page doc — end_page=1 (0-based) is within range."""
         proc = _make_processor(monkeypatch)
         monkeypatch.setattr(
-            "src.runtime.sandbox_processor.TxtProcessor.process_txt_with_pages",
+            "src.runtime.document_handler.TxtProcessor.process_txt_with_pages",
             lambda f, target_page_size: ["Page one", "Page two", "Page three"],
         )
         f = tmp_path / "three.txt"
