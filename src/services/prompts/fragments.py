@@ -22,12 +22,15 @@ TABLE_HINT_SYSTEM = (
     "TABLES: If the content includes any tabular data (rows and columns of information), "
     "you MUST represent it as a GitHub-Flavored Markdown table using pipe characters and a "
     "separator row (| --- | --- |). Do not flatten tables into plain prose or lists. "
-    "Preserve the original column structure exactly."
+    "Preserve the original column structure exactly. "
+    "Each row MUST be on its own separate line. "
+    "Never use <br>, <br/>, or any HTML tags inside table cells or anywhere in the output."
 )
 
 TABLE_HINT_USER = (
     "TABLES REMINDER: Render any tabular data as a Markdown table (pipe-separated, with a "
-    "| --- | separator row). Do not convert tables to prose."
+    "| --- | separator row). Each row must be on its own line. "
+    "Do not use <br> or any HTML tags. Do not convert tables to prose."
 )
 
 

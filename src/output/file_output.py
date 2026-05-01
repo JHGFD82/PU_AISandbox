@@ -65,6 +65,8 @@ class FileOutputHandler:
     @staticmethod
     def _parse_md_table_block(block: str) -> Optional[List[List[str]]]:
         """Return a grid of cell strings if *block* is a Markdown table; otherwise None."""
+        # Normalise <br> variants that models sometimes emit instead of real newlines.
+        block = re.sub(r'<br\s*/?>', '\n', block, flags=re.IGNORECASE)
         lines = [line.strip() for line in block.strip().splitlines() if line.strip()]
         if len(lines) < 2:
             return None
