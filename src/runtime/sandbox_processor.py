@@ -236,9 +236,9 @@ class SandboxProcessor(_CommandMixin):
                             raise CLIError(f"Page {start + 1} does not exist. PDF has {total_pages} pages.")
                         page_indices.extend(range(start, actual_end + 1))
                     logger.info(f"Rendering {len(page_indices)} page(s) from scanned PDF.")
-                    for i, page_idx in enumerate(page_indices):
-                        pix = doc[page_idx].get_pixmap(dpi=200)  # type: ignore[union-attr]
-                        pix.save(os.path.join(tmpdir, f"page_{i:04d}.png"))
+                    for page_idx in page_indices:
+                        pix = doc[page_idx].get_pixmap(dpi=300)  # type: ignore[union-attr]
+                        pix.save(os.path.join(tmpdir, f"page_{page_idx + 1:04d}.png"))
                     doc.close()
                     self.process_image_translation_folder(
                         tmpdir,
