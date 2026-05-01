@@ -8,6 +8,7 @@ from typing import List, Optional
 from datetime import datetime
 
 from .font_resolver import get_docx_font, get_pdf_font
+from ..settings import DEFAULT_FONT_SIZE
 
 # PDF page margins (in points, 72 pts = 1 inch)
 PDF_MARGINS = {
@@ -219,7 +220,8 @@ class FileOutputHandler:
     @staticmethod
     def save_to_pdf(content: str, output_path: str, custom_font: Optional[str] = None,
                     target_lang: Optional[str] = None,
-                    table_registry: Optional[dict] = None) -> None:
+                    table_registry: Optional[dict] = None,
+                    font_size: Optional[int] = None) -> None:
         """Save content to a PDF file using reportlab.
 
         If *table_registry* is provided, ``[TABLE_N]`` placeholder paragraphs
@@ -241,6 +243,8 @@ class FileOutputHandler:
                 bottomMargin=PDF_MARGINS['bottom']
             )
             
+            fs = font_size if font_size is not None else DEFAULT_FONT_SIZE
+
             # Create story (content container)
             story: list[Flowable] = []
             styles = getSampleStyleSheet()
@@ -259,9 +263,9 @@ class FileOutputHandler:
                     'CJKNormal',
                     parent=styles['Normal'],
                     fontName=font_name,
-                    fontSize=12,
-                    leading=18,  # 1.5 leading (12pt * 1.5 = 18pt)
-                    spaceAfter=12,
+                    fontSize=fs,
+                    leading=round(fs * 1.5),
+                    spaceAfter=fs,
                     encoding='utf-8'
                 )
                 logging.debug(f"Created paragraph style with font: {font_name}")
@@ -274,9 +278,9 @@ class FileOutputHandler:
                 'FallbackCJK',
                 parent=styles['Normal'],
                 fontName='Times-Roman',
-                fontSize=12,
-                leading=18,
-                spaceAfter=12
+                fontSize=fs,
+                leading=round(fs * 1.5),
+                spaceAfter=fs
             )
 
             # Extract any inline Markdown tables the model returned and merge
@@ -304,7 +308,7 @@ class FileOutputHandler:
                                 ('GRID',       (0, 0), (-1, -1), 0.5, colors.black),
                                 ('BACKGROUND', (0, 0), (-1, 0),  colors.lightgrey),
                                 ('FONTNAME',   (0, 0), (-1, -1), font_name),
-                                ('FONTSIZE',   (0, 0), (-1, -1), 10),
+                                ('FONTSIZE',   (0, 0), (-1, -1), max(fs - 2, 6)),
                                 ('TOPPADDING',    (0, 0), (-1, -1), 4),
                                 ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
                             ]))
@@ -386,7 +390,8 @@ class FileOutputHandler:
     @staticmethod
     def save_to_docx(content: str, output_path: str, custom_font: Optional[str] = None,
                      target_lang: Optional[str] = None, media: Optional[List] = None,
-                     table_registry: Optional[dict] = None) -> None:
+                     table_registry: Optional[dict] = None,
+                     font_size: Optional[int] = None) -> None:
         """Save content to a Word document using python-docx.
 
         If *media* is provided (a list of :class:`~src.models.embedded_media.EmbeddedMedia`
@@ -404,6 +409,7 @@ class FileOutputHandler:
 
             # Create a new document
             doc = Document()
+            fs = font_size if font_size is not None else DEFAULT_FONT_SIZE
 
             # Set up margins (similar to PDF margins)
             sections = doc.sections
@@ -538,7 +544,7 @@ class FileOutputHandler:
                                         for para in cell.paragraphs:
                                             for run in para.runs:
                                                 run.font.name = font_name
-                                                run.font.size = Pt(12)
+                                                run.font.size = Pt(fs)
                             logging.debug(
                                 f"Inserted Word table for '{clean_text.strip()}' "
                                 f"({len(rows)} row(s) × {n_cols} col(s))"
@@ -562,11 +568,11 @@ class FileOutputHandler:
                     if paragraph.runs:
                         for run in paragraph.runs:
                             run.font.name = font_name
-                            run.font.size = Pt(12)
+                            run.font.size = Pt(fs)
                     else:
                         run = paragraph.add_run(clean_text)
                         run.font.name = font_name
-                        run.font.size = Pt(12)
+                        run.font.size = Pt(fs)
 
                     logging.debug(f"Successfully added paragraph {i} with font {font_name}")
                 except Exception as paragraph_error:
@@ -630,7 +636,8 @@ class FileOutputHandler:
                               auto_save: bool, source_lang: str, target_lang: str,
                               custom_font: Optional[str] = None,
                               media: Optional[List] = None,
-                              table_registry: Optional[dict] = None) -> None:
+                              table_registry: Optional[dict] = None,
+                              font_size: Optional[int] = None) -> None:
         """Save translation output to file based on user preferences."""
         if not content.strip():
             FileOutputHandler._emit_message("No content to save.", level=logging.INFO)
@@ -654,12 +661,14 @@ class FileOutputHandler:
             FileOutputHandler.save_to_pdf(
                 content, output_path, custom_font, target_lang,
                 table_registry=table_registry,
+                font_size=font_size,
             )
             return
         if extension == '.docx':
             FileOutputHandler.save_to_docx(
                 content, output_path, custom_font, target_lang,
                 media=media, table_registry=table_registry,
+                font_size=font_size,
             )
             return
 

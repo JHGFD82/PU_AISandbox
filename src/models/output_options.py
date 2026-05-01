@@ -17,6 +17,9 @@ class OutputOptions:
         auto_save:        When True, auto-generate a timestamped output file.
         progressive_save: When True, save each page immediately after translation.
         custom_font:      Custom font name for PDF/Word output (None = default).
+        preserve_media:   When True, images from the source document are reinserted
+                          into the output Word document.
+        font_size:        Body font size in points for PDF/Word output (None = default 9pt).
     """
 
     output_file: Optional[str] = None
@@ -24,3 +27,4 @@ class OutputOptions:
     progressive_save: bool = False
     custom_font: Optional[str] = None
     preserve_media: bool = False
+    font_size: Optional[int] = None

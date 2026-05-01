@@ -373,6 +373,7 @@ class _CommandMixin:
             progressive_save=getattr(args, 'progressive_save', False),
             custom_font=getattr(args, 'custom_font', None),
             preserve_media=getattr(args, 'preserve_media', False),
+            font_size=getattr(args, 'font_size', None),
         )
         workers = getattr(args, 'workers', 1)
         spread = getattr(args, 'spread', False)

@@ -59,5 +59,8 @@ TRANSCRIPTION_REVIEW_TEMPERATURE: float = _s["transcription_review"]["temperatur
 TRANSCRIPTION_REVIEW_TOP_P: float = _s["transcription_review"]["top_p"]
 TRANSCRIPTION_REVIEW_MAX_TOKENS: int = _s["transcription_review"]["max_tokens"]
 
+# ── Output formatting ─────────────────────────────────────────────────────────
+DEFAULT_FONT_SIZE: int = _s["output"]["default_font_size"]
+
 # ── Budget ─────────────────────────────────────────────────────────────────────
 BUDGET_WARNING_THRESHOLD: int = _s["budget"]["warning_threshold_pct"]

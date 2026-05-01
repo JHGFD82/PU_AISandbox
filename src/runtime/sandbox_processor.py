@@ -373,6 +373,7 @@ class SandboxProcessor(_CommandMixin):
                     opts.custom_font,
                     media=embedded_media,
                     table_registry=docx_table_registry,
+                    font_size=opts.font_size,
                 )
 
         except ImportError as e:
@@ -422,6 +423,7 @@ class SandboxProcessor(_CommandMixin):
                     source_language,
                     target_language,
                     opts.custom_font,
+                    font_size=opts.font_size,
                 )
 
         except KeyboardInterrupt:
@@ -469,6 +471,7 @@ class SandboxProcessor(_CommandMixin):
                 source_language,
                 target_language,
                 opts.custom_font,
+                font_size=opts.font_size,
             )
 
     def process_image_translation_folder(
@@ -516,6 +519,7 @@ class SandboxProcessor(_CommandMixin):
                 self.file_output.save_translation_output(
                     "\n\n".join(combined_parts), None, opts.output_file, opts.auto_save,
                     source_language, target_language, opts.custom_font,
+                    font_size=opts.font_size,
                 )
             return
 
@@ -579,6 +583,7 @@ class SandboxProcessor(_CommandMixin):
             self.file_output.save_translation_output(
                 "\n\n".join(combined_parts_p), None, opts.output_file, opts.auto_save,
                 source_language, target_language, opts.custom_font,
+                font_size=opts.font_size,
             )
 
     def process_image(self, file_path: str, target_language: str, output_file: Optional[str] = None, vertical: bool = False, spread: bool = False, passes: int = 1) -> None:

@@ -41,5 +41,8 @@ temperature = 0.1          # Low temperature for precise, analytical error detec
 top_p = 0.5                # Focused nucleus sampling
 max_tokens = 4000          # JSON output; increase for very long transcriptions
 
+[output]
+default_font_size = 9         # Default body font size (points) for PDF and Word output
+
 [budget]
 warning_threshold_pct = 80    # Warn when monthly spend exceeds this percentage of the limit

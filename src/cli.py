@@ -227,6 +227,7 @@ Transcription review (OCR error detection):
         help='Save each page immediately (text output only)',
     )
     translate_parser.add_argument('-f', '--font', dest='custom_font', type=str, help='Custom font name (must be in fonts/)')
+    translate_parser.add_argument('--font-size', dest='font_size', type=int, default=None, metavar='PT', help='Body font size in points for PDF/Word output (default: 9)')
     translate_parser.add_argument(
         '--kanbun',
         dest='kanbun',
