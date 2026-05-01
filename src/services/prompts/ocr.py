@@ -19,6 +19,7 @@ class OcrPromptSpec:
     kanbun: bool = False
     kanbun_main: bool = False
     spread: bool = False
+    tables: bool = False
     system_note: Optional[str] = None
     user_note: Optional[str] = None
 
@@ -43,6 +44,7 @@ class OcrPromptSpec:
             F.OCR_SPREAD_NOTE if self.spread else None,
             F.ADDITIONAL_INSTRUCTIONS.format(note=kanbun_note) if kanbun_note else None,
             F.OCR_RULES,
+            F.TABLE_HINT_SYSTEM if self.tables else None,
             F.ADDITIONAL_INSTRUCTIONS.format(note=self.system_note) if self.system_note else None,
         ]
         return "\n\n".join(s for s in sections if s)
@@ -60,6 +62,7 @@ class OcrPromptSpec:
             ("SCRIPT REMINDER: " + script_note) if script_note else None,
             F.OCR_VERTICAL_REINFORCEMENT if self.vertical else None,
             F.OCR_USER_RULES,
+            F.TABLE_HINT_USER if self.tables else None,
             F.ADDITIONAL_NOTES.format(note=self.user_note) if self.user_note else None,
         ]
         return "\n\n".join(s for s in parts if s)

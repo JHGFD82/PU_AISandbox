@@ -289,6 +289,10 @@ class _CommandMixin:
         if getattr(args, 'kanbun', False):
             self.translation_service.kanbun = True
 
+        if getattr(args, 'preserve_tables', False):
+            self.translation_service.tables = True
+            self.image_translation_service.tables = True
+
         if getattr(args, 'dry_run', False):
             model_dr = self.translation_service._get_model()
             abstract_text_dr: Optional[str] = None
@@ -433,6 +437,9 @@ class _CommandMixin:
 
         if getattr(args, 'kanbun_main', False):
             self.image_processor_service.kanbun_main = True
+
+        if getattr(args, 'preserve_tables', False):
+            self.image_processor_service.tables = True
 
         if getattr(args, 'dry_run', False):
             vertical_dr = getattr(args, 'vertical', False)

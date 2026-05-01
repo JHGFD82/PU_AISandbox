@@ -22,6 +22,7 @@ class TranslationPromptSpec:
     system_note: Optional[str] = None
     user_note: Optional[str] = None
     has_table_markers: bool = False
+    tables: bool = False
 
     def _formatting_fragment(self) -> str:
         key = "file" if self.output_format.lower() in ("pdf", "txt", "file", "docx") else "console"
@@ -47,6 +48,7 @@ class TranslationPromptSpec:
             self._context_spec(),
             F.ADDITIONAL_INSTRUCTIONS.format(note=pair_note) if pair_note else None,
             F.ADDITIONAL_INSTRUCTIONS.format(note=F.KANBUN_NOTE) if self.kanbun else None,
+            F.TABLE_HINT_SYSTEM if self.tables else None,
             F.ADDITIONAL_INSTRUCTIONS.format(note=self.system_note) if self.system_note else None,
         ]
         return "\n\n".join(s for s in sections if s)
@@ -62,6 +64,7 @@ class TranslationPromptSpec:
             F.TRANSLATION_TABLE_MARKER_RULE if self.has_table_markers else None,
             F.TRANSLATION_FOOTNOTE_RULE,
             F.TRANSLATION_NO_META_COMMENTARY,
+            F.TABLE_HINT_USER if self.tables else None,
             F.ADDITIONAL_NOTES.format(note=self.user_note) if self.user_note else None,
         ]
         # Trailing newline preserved for backward compatibility: the caller

@@ -17,6 +17,7 @@ class ImageTranslationPromptSpec:
     target_language: str
     vertical: bool = False
     spread: bool = False
+    tables: bool = False
     system_note: Optional[str] = None
     user_note: Optional[str] = None
 
@@ -35,6 +36,7 @@ class ImageTranslationPromptSpec:
             ),
             F.IMAGE_TRANSLATION_TRANSCRIPTION_RULES,
             F.IMAGE_TRANSLATION_TRANSLATION_RULES.format(target=self.target_language),
+            F.TABLE_HINT_SYSTEM if self.tables else None,
             F.ADDITIONAL_INSTRUCTIONS.format(note=self.system_note) if self.system_note else None,
         ]
         return "\n\n".join(s for s in sections if s)
@@ -49,6 +51,8 @@ class ImageTranslationPromptSpec:
             target=self.target_language,
             vertical_note=vertical_note,
         )
+        if self.tables:
+            prompt += F.TABLE_HINT_USER
         if self.user_note:
             prompt += F.ADDITIONAL_NOTES.format(note=self.user_note)
         return prompt

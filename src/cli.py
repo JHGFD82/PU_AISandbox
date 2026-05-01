@@ -253,8 +253,13 @@ Transcription review (OCR error detection):
         help='Treat the PDF as a scanned image document: each page is rendered as an image and processed via the OCR+translation pipeline (vision model). PDF only.',
     )
     translate_parser.add_argument(
-        '--preserve-media',
-        dest='preserve_media',
+        '--preserve-tables',
+        dest='preserve_tables',
+        action='store_true',
+        help='Hint to the model that tabular data should be returned as Markdown tables; the output layer renders them as proper tables in PDF/DOCX or ASCII in TXT.',
+    )
+    translate_parser.add_argument(
+        '--preserve-media',        dest='preserve_media',
         action='store_true',
         help='Carry embedded images from a .docx source into the translated .docx output (requires -i *.docx and -o *.docx)',
     )
@@ -285,6 +290,12 @@ Transcription review (OCR error detection):
         help='Image contains kanbun (漢文): transcribe ONLY the large main-line kanji; omit okurigana, furigana, kaeriten, and other small annotations',
     )
     transcribe_parser.add_argument('-P', '--passes', dest='passes', type=int, default=DEFAULT_OCR_PASSES, metavar='N', help='Number of OCR passes (default: 1). Passes > 1 send the image and prior transcription back to the model for review and correction.')
+    transcribe_parser.add_argument(
+        '--preserve-tables',
+        dest='preserve_tables',
+        action='store_true',
+        help='Hint to the model that tabular data should be returned as Markdown tables; the output layer renders them as proper tables in PDF/DOCX or ASCII in TXT.',
+    )
     transcribe_parser.add_argument(
         '-w', '--workers',
         dest='workers',

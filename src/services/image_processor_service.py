@@ -34,6 +34,7 @@ class ImageProcessorService(BaseService):
         self.image_processor = ImageProcessor()
         self.kanbun: bool = False
         self.kanbun_main: bool = False
+        self.tables: bool = False
         # Set to True in parallel mode to suppress per-image console output
         self._suppress_inline_print: bool = False
     
@@ -58,6 +59,7 @@ class ImageProcessorService(BaseService):
             spread=spread,
             kanbun=self.kanbun,
             kanbun_main=self.kanbun_main,
+            tables=self.tables,
             system_note=self.system_note,
             user_note=self.user_note,
         )

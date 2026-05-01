@@ -62,6 +62,99 @@ class FileOutputHandler:
         return paragraphs
 
     @staticmethod
+    def _parse_md_table_block(block: str) -> Optional[List[List[str]]]:
+        """Return a grid of cell strings if *block* is a Markdown table; otherwise None."""
+        lines = [line.strip() for line in block.strip().splitlines() if line.strip()]
+        if len(lines) < 2:
+            return None
+        pipe_re = re.compile(r'^\|.*\|$')
+        sep_re = re.compile(r'^\|[\s\-\|:]+\|$')
+        if not all(pipe_re.match(line) for line in lines):
+            return None
+        if not any(sep_re.match(line) for line in lines):
+            return None
+        rows: List[List[str]] = []
+        for line in lines:
+            if sep_re.match(line):
+                continue
+            cells = [cell.strip() for cell in line[1:-1].split('|')]
+            rows.append(cells)
+        return rows if rows else None
+
+    @staticmethod
+    def _extract_markdown_tables(content: str) -> tuple[str, dict[str, List[List[str]]]]:
+        """Replace Markdown table blocks with ``[MD_TABLE_N]`` placeholder tokens.
+
+        Returns the modified content and a registry mapping each token to its
+        row/cell grid, ready to be merged into an existing table_registry.
+        """
+        registry: dict[str, List[List[str]]] = {}
+        counter = 0
+        new_blocks: list[str] = []
+        for block in content.split('\n\n'):
+            rows = FileOutputHandler._parse_md_table_block(block)
+            if rows is not None:
+                counter += 1
+                key = f"[MD_TABLE_{counter}]"
+                registry[key] = rows
+                new_blocks.append(key)
+            else:
+                new_blocks.append(block)
+        return '\n\n'.join(new_blocks), registry
+
+    @staticmethod
+    def _render_table_as_ascii(rows: List[List[str]]) -> str:
+        """Render a row/cell grid as an ASCII box table."""
+        if not rows:
+            return ''
+        n_cols = max(len(row) for row in rows)
+        padded = [row + [''] * (n_cols - len(row)) for row in rows]
+        col_widths = [
+            max(max(len(padded[r][c]) for r in range(len(padded))), 3)
+            for c in range(n_cols)
+        ]
+        sep = '+' + '+'.join('-' * (w + 2) for w in col_widths) + '+'
+        lines = [sep]
+        for i, row in enumerate(padded):
+            cells = ' | '.join(cell.ljust(col_widths[j]) for j, cell in enumerate(row))
+            lines.append(f'| {cells} |')
+            if i == 0:
+                lines.append(sep)
+        lines.append(sep)
+        return '\n'.join(lines)
+
+    @staticmethod
+    def _render_markdown_tables_as_ascii(content: str) -> str:
+        """Replace Markdown table blocks with ASCII art tables (for plain-text output)."""
+        new_blocks: list[str] = []
+        for block in content.split('\n\n'):
+            rows = FileOutputHandler._parse_md_table_block(block)
+            if rows is not None:
+                new_blocks.append(FileOutputHandler._render_table_as_ascii(rows))
+            else:
+                new_blocks.append(block)
+        return '\n\n'.join(new_blocks)
+
+    @staticmethod
+    def _apply_docx_table_borders(table) -> None:  # type: ignore[no-untyped-def]
+        """Apply thin (0.5 pt) black borders to all sides of a python-docx Table."""
+        try:
+            from docx.oxml.ns import qn
+            from docx.oxml import OxmlElement
+            tbl_pr = table._tbl.tblPr
+            tbl_borders = OxmlElement('w:tblBorders')
+            for side in ('top', 'left', 'bottom', 'right', 'insideH', 'insideV'):
+                el = OxmlElement(f'w:{side}')
+                el.set(qn('w:val'), 'single')
+                el.set(qn('w:sz'), '4')   # 4 × 1/8 pt = 0.5 pt
+                el.set(qn('w:space'), '0')
+                el.set(qn('w:color'), '000000')
+                tbl_borders.append(el)
+            tbl_pr.append(tbl_borders)
+        except Exception as _be:
+            logging.warning(f"Could not apply table borders: {_be}")
+
+    @staticmethod
     def _resolve_output_path(
         input_file: Optional[str],
         output_file: Optional[str],
@@ -185,6 +278,13 @@ class FileOutputHandler:
                 leading=18,
                 spaceAfter=12
             )
+
+            # Extract any inline Markdown tables the model returned and merge
+            # them into the table_registry so the existing rendering path handles them.
+            content, _md_reg = FileOutputHandler._extract_markdown_tables(content)
+            if _md_reg:
+                table_registry = dict(table_registry) if table_registry else {}
+                table_registry.update(_md_reg)
 
             # Split content into paragraphs and add to story
             for i, clean_text in enumerate(FileOutputHandler._normalize_paragraphs(content), start=1):
@@ -398,6 +498,12 @@ class FileOutputHandler:
                     _do_insert_image(frac_sorted[frac_cursor])
                     frac_cursor += 1
 
+            # Extract any inline Markdown tables and merge into table_registry.
+            content, _md_reg = FileOutputHandler._extract_markdown_tables(content)
+            if _md_reg:
+                table_registry = dict(table_registry) if table_registry else {}
+                table_registry.update(_md_reg)
+
             translated_paras = FileOutputHandler._normalize_paragraphs(content)
             total_paras = len(translated_paras) or 1
 
@@ -423,6 +529,7 @@ class FileOutputHandler:
                         try:
                             n_cols = max(len(row) for row in rows)
                             tbl = doc.add_table(rows=len(rows), cols=n_cols)
+                            FileOutputHandler._apply_docx_table_borders(tbl)
                             for r_idx, row in enumerate(rows):
                                 for c_idx, cell_text in enumerate(row):
                                     if c_idx < n_cols:
@@ -558,7 +665,10 @@ class FileOutputHandler:
 
         if extension != '.txt':
             output_path = f"{output_path}.txt"
-        FileOutputHandler.save_to_text_file(content, output_path)
+        FileOutputHandler.save_to_text_file(
+            FileOutputHandler._render_markdown_tables_as_ascii(content),
+            output_path,
+        )
 
     @staticmethod
     def save_page_progressively(content: str, input_file: Optional[str], output_file: Optional[str], 

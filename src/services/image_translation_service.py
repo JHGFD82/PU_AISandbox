@@ -44,6 +44,7 @@ class ImageTranslationService(BaseService):
     ):
         super().__init__(api_key, professor, token_tracker, token_tracker_file, model, temperature, top_p, max_tokens)
         self.image_processor = ImageProcessor()
+        self.tables: bool = False
         # Set to True in parallel mode to suppress per-image console output
         self._suppress_inline_print: bool = False
 
@@ -75,6 +76,7 @@ class ImageTranslationService(BaseService):
             target_language=target_language,
             vertical=vertical,
             spread=spread,
+            tables=self.tables,
         )
         return spec.system_prompt()
 
@@ -84,6 +86,7 @@ class ImageTranslationService(BaseService):
             target_language=target_language,
             vertical=vertical,
             spread=spread,
+            tables=self.tables,
         )
         return spec.user_prompt()
 
@@ -97,6 +100,7 @@ class ImageTranslationService(BaseService):
             target_language=target_language,
             vertical=vertical,
             spread=spread,
+            tables=self.tables,
             system_note=self.system_note,
             user_note=self.user_note,
         )

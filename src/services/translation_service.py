@@ -48,6 +48,7 @@ class TranslationService(BaseService):
         # Set to True in parallel mode to suppress per-page console output
         self._suppress_inline_print: bool = False
         self.kanbun: bool = False
+        self.tables: bool = False
         # Tracks image-only (blank) pages skipped during a translation run
         self._blank_page_count: int = 0
         self._blank_page_lock = threading.Lock()
@@ -93,6 +94,7 @@ class TranslationService(BaseService):
             system_note=self.system_note,
             user_note=self.user_note,
             has_table_markers=has_table_markers,
+            tables=self.tables,
         )
         return spec.system_prompt(), spec.user_prompt()
     
