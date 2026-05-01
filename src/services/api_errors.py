@@ -25,11 +25,15 @@ def is_transient_error(error: Exception) -> bool:
     deadline / overload responses (e.g. Google 'Deadline expired').
     """
     msg = str(error).lower()
+    error_type = type(error).__name__.lower()
     return (
         "503" in msg
         or "unavailable" in msg
         or "deadline expired" in msg
         or "internalservererror" in msg
+        or "internalservererror" in error_type
+        or "internal server error" in msg
+        or "500" in msg
         or "502" in msg
         or "bad gateway" in msg
         or "504" in msg
