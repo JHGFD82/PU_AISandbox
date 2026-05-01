@@ -383,9 +383,7 @@ class TestSaveToPdf:
 
     def test_exception_falls_back_to_text(self, tmp_path):
         output_path = str(tmp_path / "out.pdf")
-        with patch.object(
-            FileOutputHandler, "_normalize_paragraphs", side_effect=RuntimeError("boom")
-        ):
+        with patch("src.output.pdf_builder._normalize_paragraphs", side_effect=RuntimeError("boom")):
             FileOutputHandler.save_to_pdf("content", output_path, target_lang="English", label="Translation")
         assert (tmp_path / "out.txt").exists()
 
@@ -425,9 +423,7 @@ class TestSaveToDocx:
 
     def test_exception_falls_back_to_text(self, tmp_path):
         output_path = str(tmp_path / "out.docx")
-        with patch.object(
-            FileOutputHandler, "_normalize_paragraphs", side_effect=RuntimeError("boom")
-        ):
+        with patch("src.output.docx_builder._normalize_paragraphs", side_effect=RuntimeError("boom")):
             FileOutputHandler.save_to_docx("content", output_path, target_lang="English", label="Translation")
         assert (tmp_path / "out.txt").exists()
 
@@ -566,7 +562,7 @@ class TestSaveToPdfDeepPaths:
     def test_non_english_target_calls_get_pdf_font(self, tmp_path, caplog):
         # Exercises the `else` branch (lines 141-142): get_pdf_font is invoked
         output_path = str(tmp_path / "out.pdf")
-        with patch("src.output.file_output.get_pdf_font", return_value="Helvetica") as mock_gpf:
+        with patch("src.output.pdf_builder.get_pdf_font", return_value="Helvetica") as mock_gpf:
             with caplog.at_level(logging.DEBUG):
                 FileOutputHandler.save_to_pdf("Content.", output_path, target_lang="Japanese", label="Translation")
         mock_gpf.assert_called_once()
@@ -575,7 +571,7 @@ class TestSaveToPdfDeepPaths:
     def test_non_times_roman_font_logs_used_font(self, tmp_path, caplog):
         # Covers the `if font_name != 'Times-Roman':` True branch inside `if story:`
         output_path = str(tmp_path / "out.pdf")
-        with patch("src.output.file_output.get_pdf_font", return_value="Helvetica"):
+        with patch("src.output.pdf_builder.get_pdf_font", return_value="Helvetica"):
             with caplog.at_level(logging.DEBUG):
                 FileOutputHandler.save_to_pdf("Content here.", output_path, target_lang="Japanese", label="Translation")
         assert "Used font: Helvetica" in caplog.text
@@ -652,9 +648,7 @@ class TestSaveToDocxDeepPaths:
         # Covers lines 272-274: else-branch of `if paragraph.runs:`
         # When add_paragraph("") returns a paragraph with no runs
         output_path = str(tmp_path / "out.docx")
-        with patch.object(
-            FileOutputHandler, "_normalize_paragraphs", return_value=[""]
-        ):
+        with patch("src.output.docx_builder._normalize_paragraphs", return_value=[""]):
             FileOutputHandler.save_to_docx("any content", output_path, target_lang="English", label="Translation")
         # File saved (paragraph with empty text still counts toward len(doc.paragraphs))
         assert (tmp_path / "out.docx").exists() or (tmp_path / "out.txt").exists()
