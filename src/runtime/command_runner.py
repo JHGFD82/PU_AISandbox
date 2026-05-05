@@ -141,6 +141,15 @@ class _CommandMixin:
             service.user_note = _inline_usr
 
     @staticmethod
+    def _sampling_kwargs(args: argparse.Namespace) -> dict:
+        """Return temperature/top_p/max_tokens from args for _dry_run_display."""
+        return {
+            'temperature': getattr(args, 'temperature', None),
+            'top_p': getattr(args, 'top_p', None),
+            'max_tokens': getattr(args, 'max_tokens', None),
+        }
+
+    @staticmethod
     def _dry_run_display(model: str, system_prompt: str, user_prompt: str, note: Optional[str] = None,
                          temperature: Optional[float] = None, top_p: Optional[float] = None,
                          max_tokens: Optional[int] = None) -> None:
@@ -182,12 +191,10 @@ class _CommandMixin:
         """Handle the 'translate' command."""
         language_code = args.language_code
 
-        if not isinstance(language_code, tuple):
+        if not isinstance(language_code, tuple) or len(language_code) != 2:
             raise CLIError("Translation requires a 2-character language code (e.g., CE, JE, KE)")
 
         lang_tuple = cast(Tuple[str, str], language_code)
-        if len(lang_tuple) != 2:
-            raise CLIError("Translation requires a 2-character language code (e.g., CE, JE, KE)")
 
         source_language: str = lang_tuple[0]
         target_language: str = lang_tuple[1]
@@ -320,9 +327,7 @@ class _CommandMixin:
                     self._dry_run_display(
                         self.image_translation_service._get_model(), sys_p, usr_p,
                         note="Image content would be base64-encoded and attached to the user message",
-                        temperature=getattr(args, 'temperature', None),
-                        top_p=getattr(args, 'top_p', None),
-                        max_tokens=getattr(args, 'max_tokens', None),
+                        **self._sampling_kwargs(args),
                     )
                     return
                 elif file_type_dr == 'pdf':
@@ -334,9 +339,7 @@ class _CommandMixin:
                         self._dry_run_display(
                             self.image_translation_service._get_model(), sys_p, usr_p,
                             note="Scanned PDF: each page will be rendered as an image and attached to the user message",
-                            temperature=getattr(args, 'temperature', None),
-                            top_p=getattr(args, 'top_p', None),
-                            max_tokens=getattr(args, 'max_tokens', None),
+                            **self._sampling_kwargs(args),
                         )
                         return
                     with open(file_path_dr, 'rb') as f:
@@ -373,10 +376,7 @@ class _CommandMixin:
             else:
                 output_format_dr = 'console'
             sys_p, usr_p = self.translation_service.build_prompts(combined, source_language, target_language, output_format=output_format_dr, context_type=context_type_dr)
-            self._dry_run_display(model_dr, sys_p, usr_p,
-                                  temperature=getattr(args, 'temperature', None),
-                                  top_p=getattr(args, 'top_p', None),
-                                  max_tokens=getattr(args, 'max_tokens', None))
+            self._dry_run_display(model_dr, sys_p, usr_p, **self._sampling_kwargs(args))
             return
 
         opts = OutputOptions(
@@ -457,10 +457,7 @@ class _CommandMixin:
             note = "Image content would be base64-encoded and attached to the user message"
             if passes_dr > 1:
                 note += f"; {passes_dr} OCR passes would run sequentially"
-            self._dry_run_display(model_dr, sys_p, usr_p, note=note,
-                                  temperature=getattr(args, 'temperature', None),
-                                  top_p=getattr(args, 'top_p', None),
-                                  max_tokens=getattr(args, 'max_tokens', None))
+            self._dry_run_display(model_dr, sys_p, usr_p, note=note, **self._sampling_kwargs(args))
             return
 
         if not args.input_file:
@@ -524,9 +521,7 @@ class _CommandMixin:
             self._dry_run_display(
                 model_dr, sys_p, usr_p,
                 note="Transcription text would be appended to the user prompt at runtime",
-                temperature=getattr(args, 'temperature', None),
-                top_p=getattr(args, 'top_p', None),
-                max_tokens=getattr(args, 'max_tokens', None),
+                **self._sampling_kwargs(args),
             )
             return
 
