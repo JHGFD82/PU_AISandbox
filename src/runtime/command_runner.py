@@ -171,7 +171,8 @@ class _CommandMixin:
 
         if output_file_arg:
             if not os.path.isabs(output_file_arg) and input_file_arg:
-                input_dir = os.path.dirname(os.path.abspath(input_file_arg))
+                abs_input = os.path.abspath(input_file_arg)
+                input_dir = abs_input if os.path.isdir(abs_input) else os.path.dirname(abs_input)
                 return os.path.join(input_dir, output_file_arg)
             return os.path.abspath(output_file_arg)
 
