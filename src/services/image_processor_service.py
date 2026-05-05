@@ -35,8 +35,6 @@ class ImageProcessorService(BaseService):
         self.kanbun: bool = False
         self.kanbun_main: bool = False
         self.tables: bool = False
-        # Set to True in parallel mode to suppress per-image console output
-        self._suppress_inline_print: bool = False
     
     def _get_model(self) -> str:
         """Get the model to use for OCR, preferring custom model if specified and supports vision."""

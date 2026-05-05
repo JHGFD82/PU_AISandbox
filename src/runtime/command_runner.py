@@ -11,7 +11,7 @@ import argparse
 import logging
 import os
 import sys
-from typing import TYPE_CHECKING, Any, Optional, Tuple, cast
+from typing import TYPE_CHECKING, Any, Optional, Tuple
 
 from ..errors import CLIError
 from ..models import OutputOptions
@@ -194,10 +194,8 @@ class _CommandMixin:
         if not isinstance(language_code, tuple) or len(language_code) != 2:
             raise CLIError("Translation requires a 2-character language code (e.g., CE, JE, KE)")
 
-        lang_tuple = cast(Tuple[str, str], language_code)
-
-        source_language: str = lang_tuple[0]
-        target_language: str = lang_tuple[1]
+        source_language: str = language_code[0]
+        target_language: str = language_code[1]
 
         # --scanned compatibility checks
         if getattr(args, 'scanned', False):

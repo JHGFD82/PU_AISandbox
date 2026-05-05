@@ -9,7 +9,7 @@ from collections.abc import Iterator as ABCIterator
 
 from ..models import (
     model_uses_max_completion_tokens, model_has_fixed_parameters,
-    resolve_model, maybe_sync_model_pricing,
+    resolve_model, maybe_sync_model_pricing, get_model_max_completion_tokens,
 )
 from ..tracking.token_tracker import TokenTracker
 from .api_errors import APISignal, classify_api_error, is_transient_error
@@ -59,6 +59,22 @@ class BaseService:
         )
         self.system_note: Optional[str] = None
         self.user_note: Optional[str] = None
+        self._suppress_inline_print: bool = False
+
+    def _resolve_sampling_params(
+        self,
+        model: str,
+        default_temperature: float,
+        default_top_p: float,
+        default_max_tokens: int,
+    ) -> tuple[float, float, int]:
+        """Resolve temperature, top_p, and max_tokens, preferring custom overrides."""
+        temperature = self.custom_temperature if self.custom_temperature is not None else default_temperature
+        top_p = self.custom_top_p if self.custom_top_p is not None else default_top_p
+        max_tokens = self.custom_max_tokens if self.custom_max_tokens is not None else get_model_max_completion_tokens(model, default_max_tokens)
+        if self.custom_temperature is not None or self.custom_top_p is not None:
+            logging.debug(f"Sampling params: temperature={temperature}, top_p={top_p}")
+        return temperature, top_p, max_tokens
 
     def _get_model(self) -> str:
         """Resolve and return the model to use, syncing pricing if needed.
@@ -160,7 +176,7 @@ class BaseService:
             # shows running totals, so demote per-call token info to DEBUG.
             _token_level = (
                 logging.DEBUG
-                if getattr(self, "_suppress_inline_print", False)
+                if self._suppress_inline_print
                 else logging.INFO
             )
             logging.log(

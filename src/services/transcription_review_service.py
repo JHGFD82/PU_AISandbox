@@ -7,7 +7,6 @@ from typing import Any, Optional
 
 from ..models import (
     get_model_system_role,
-    get_model_max_completion_tokens,
 )
 from ..tracking.token_tracker import TokenTracker
 from .api_errors import handle_api_errors
@@ -69,9 +68,9 @@ class TranscriptionReviewService(BaseService):
         system_prompt: str,
         user_prompt: str,
     ) -> Any:
-        temperature = self.custom_temperature if self.custom_temperature is not None else TRANSCRIPTION_REVIEW_TEMPERATURE
-        top_p = self.custom_top_p if self.custom_top_p is not None else TRANSCRIPTION_REVIEW_TOP_P
-        max_tokens = self.custom_max_tokens if self.custom_max_tokens is not None else get_model_max_completion_tokens(model, TRANSCRIPTION_REVIEW_MAX_TOKENS)
+        temperature, top_p, max_tokens = self._resolve_sampling_params(
+            model, TRANSCRIPTION_REVIEW_TEMPERATURE, TRANSCRIPTION_REVIEW_TOP_P, TRANSCRIPTION_REVIEW_MAX_TOKENS
+        )
         messages = [
             {"role": system_role, "content": system_prompt},
             {"role": "user", "content": user_prompt},

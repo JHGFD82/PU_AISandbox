@@ -45,8 +45,6 @@ class ImageTranslationService(BaseService):
         super().__init__(api_key, professor, token_tracker, token_tracker_file, model, temperature, top_p, max_tokens)
         self.image_processor = ImageProcessor()
         self.tables: bool = False
-        # Set to True in parallel mode to suppress per-image console output
-        self._suppress_inline_print: bool = False
 
     def _get_model(self) -> str:
         """Get model to use, preferring the catalog image_translation default."""
