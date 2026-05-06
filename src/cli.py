@@ -53,14 +53,9 @@ def create_argument_parser(
 ) -> argparse.ArgumentParser:
     """Create and configure the command-line argument parser."""
     parser = argparse.ArgumentParser(
-        description='Translate documents between Chinese, Japanese, Korean, and English using Princeton AI Sandbox',
+        description='Princeton University AI Sandbox — document processing and AI prompt tools',
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""\nLanguage codes:
-  Two characters for translation (source→target): CE, EC, JE, EJ, KE, EK, JK, KJ, SE, TE, ...
-  One character  for transcription (OCR):          E (English), C (Chinese), S (Simplified Chinese),
-                                                    T (Traditional Chinese), J (Japanese), K (Korean)
-
-Usage / reporting:
+        epilog="""\nUsage / reporting:
   python main.py heller usage report              Current month report + budget status
   python main.py heller usage report --all-time   Above + all-time totals across all archived months
   python main.py heller usage report 2025-07      Report for a specific archived month
@@ -74,52 +69,13 @@ Global commands (no professor required):
 
 Specifying a model (-m / --model):
   Already in catalog — use the bare model name:
-    python main.py heller translate CE -m gpt-4o
-    python main.py heller translate CE -m gpt-4o-mini
+    python main.py heller prompt -m gpt-4o
+    python main.py heller prompt -m gpt-4o-mini
   Not yet in catalog — use 'provider/model' to auto-register from PortKey:
-    python main.py heller translate CE -m openai/gpt-4o-new
-    python main.py heller translate CE -m google/gemini-2.5-pro
+    python main.py heller prompt -m openai/gpt-4o-new
+    python main.py heller prompt -m google/gemini-2.5-pro
   Supported auto-register providers: openai, google.
   For all other providers, add the model directly to src/model_catalog.json.
-
-Translation:
-  python main.py heller translate CE -i document.pdf
-  python main.py heller translate JE -i document.docx -p 1-5   Specific page range
-  python main.py heller translate KE -c                         Custom text input
-  python main.py heller translate CE -i doc.pdf -a              Supply an abstract for context
-  python main.py heller translate CE -i doc.pdf -o out.docx     Save as Word document
-  python main.py heller translate CE -i doc.pdf --auto-save     Auto-save with timestamp
-  python main.py heller translate CE -i doc.pdf --progressive-save  Save each page immediately
-  python main.py heller translate CE -i doc.pdf -f MyFont       Custom font (must be in fonts/)
-  python main.py heller translate CE -i doc.pdf -m gpt-4o       Use a specific model
-  python main.py heller translate CE -i doc.pdf --dry-run       Preview prompt without API call
-  python main.py heller translate CE -i doc.pdf -n              Append ad-hoc notes to prompt
-  python main.py heller translate CE -i doc.pdf -w 4            Translate 4 pages in parallel
-  python main.py heller translate JE -i spread.jpg --spread     Image is a two-page spread (images only)
-  python main.py heller translate CE -i doc.docx -o out.docx --preserve-media  Carry images from source Word doc into output
-  python main.py heller translate JE -i scanned_book.pdf --scanned            Treat PDF pages as scanned images (OCR+translate via vision model)
-  python main.py heller translate JE -i scanned_book.pdf --scanned -w 4       Scanned PDF with 4 parallel workers
-    Note: -w > 1 passes untranslated source text as context (not prior translation) and
-    disables --progressive-save. Each page's context_length_exceeded splitting still works.
-    --preserve-media requires a .docx input and a .docx output file (-o out.docx).
-    --scanned is only valid for PDF inputs; incompatible with --preserve-media.
-
-Transcription (OCR):
-  python main.py heller transcribe E -i image.jpg
-  python main.py heller transcribe E -i image.jpg -o output.txt
-  python main.py heller transcribe E -i ./scans/                Folder of images (sorted by name)
-  python main.py heller transcribe E -i ./scans/ -o combined.txt  Combine all results into one file
-  python main.py heller transcribe E -i ./scans/ -w 4           Process 4 images in parallel
-    Note: -w only applies to folder mode; ignored for single-image input.
-  python main.py heller transcribe S -i scan.png                Simplified Chinese
-  python main.py heller transcribe T -i scan.png                Traditional Chinese
-  python main.py heller transcribe J -i scan.png                Japanese (kanji + kana)
-  python main.py heller transcribe C -i scan.png -m gpt-4o-mini Use a specific model
-  python main.py heller transcribe J -i scan.png -v             Vertical text layout
-  python main.py heller transcribe J -i scan.png --spread        Two-page spread (facing pages)
-  python main.py heller transcribe J -i scan.png --kanbun        Kanbun (漢文) with 返り点/送り仮名 annotations
-  python main.py heller transcribe E -i image.jpg --dry-run     Preview prompt without API call
-  python main.py heller transcribe E -i image.jpg -n            Append ad-hoc notes to prompt
 
 Custom prompt:
   python main.py heller prompt                   Interactive user prompt
@@ -128,12 +84,8 @@ Custom prompt:
   python main.py heller prompt -m gpt-4o-mini    Use a specific model
   python main.py heller prompt --dry-run         Preview prompt without API call
 
-Transcription review (OCR error detection):
-  python main.py heller transcription_review J -i transcription.txt   Review a saved Japanese transcription
-  python main.py heller transcription_review J -c                      Paste transcription text interactively
-  python main.py heller transcription_review J -i trans.txt -o report.json  Save JSON report to file
-  python main.py heller transcription_review J --kanbun -i kanbun.txt  Text contains kanbun annotations
-  python main.py heller transcription_review J -i trans.txt --dry-run  Preview prompt without API call
+Plugin commands (e.g. translate, transcribe) are registered by installed plugins.
+Run 'python main.py <professor> <command> --help' for plugin-specific usage.
         """,
     )
 
@@ -243,13 +195,15 @@ def main() -> None:
             raise CLIError(
                 "Professor name is required.\n"
                 "Usage: python main.py <professor_name> <command> [options]\n"
-                "\nAvailable commands:\n"
+                "\nBuilt-in commands:\n"
                 "  usage report [YYYY-MM] [--all-time]  Token usage report\n"
                 "  usage months                         List archived month files\n"
                 "  usage daily [YYYY-MM-DD]             Daily usage\n"
-                "  translate <code> -i <file>           Translate a document\n"
-                "  transcribe <lang> -i <image>         OCR an image\n"
-                "  transcription_review <lang> -i <file>  Review a transcription for OCR errors\n"
+                "  prompt                               Send a custom prompt\n"
+                + (
+                    "\nPlugin commands: " + ", ".join(sorted(_plugins)) + "\n"
+                    if _plugins else ""
+                ) +
                 "\nOr for global commands: python main.py --show-config | --list-models"
             )
 
@@ -257,13 +211,15 @@ def main() -> None:
         if not args.command:
             raise CLIError(
                 f"No command specified for professor '{args.professor}'.\n"
-                "\nAvailable commands:\n"
+                "\nBuilt-in commands:\n"
                 "  usage report [YYYY-MM] [--all-time]  Token usage report\n"
                 "  usage months                         List archived month files\n"
                 "  usage daily [YYYY-MM-DD]             Daily usage\n"
-                "  translate <code> -i <file>           Translate a document\n"
-                "  transcribe <lang> -i <image>         OCR an image\n"
-                "  transcription_review <lang> -i <file>  Review a transcription for OCR errors\n"
+                "  prompt                               Send a custom prompt\n"
+                + (
+                    "\nPlugin commands: " + ", ".join(sorted(_plugins)) + "\n"
+                    if _plugins else ""
+                ) +
                 "\nRun 'python main.py --help' for full usage information."
             )
 
