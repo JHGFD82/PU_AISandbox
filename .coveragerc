@@ -1,0 +1,8 @@
+[run]
+source = src
+omit =
+    plugins/*
+
+[report]
+omit =
+    plugins/*

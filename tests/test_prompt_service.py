@@ -58,7 +58,6 @@ def patch_model(monkeypatch):
     monkeypatch.setattr("src.services.base_service.resolve_model", lambda **_: "gpt-4o")
     monkeypatch.setattr("src.services.base_service.maybe_sync_model_pricing", lambda m: None)
     monkeypatch.setattr("src.services.prompt_service.get_model_system_role", lambda m: "system")
-    monkeypatch.setattr("src.services.prompt_service.get_model_max_completion_tokens", lambda m, d: d)
 
 
 # ---------------------------------------------------------------------------
