@@ -516,7 +516,7 @@ class TranslationService(BaseService):
         if not rows:
             return rows
 
-        from .prompts import fragments as F
+        from .prompts import translation_fragments as F
 
         md = TranslationService._rows_to_markdown(rows)
         system_prompt = F.TRANSLATION_TABLE_SYSTEM.format(

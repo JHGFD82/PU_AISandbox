@@ -3,7 +3,7 @@
 from dataclasses import dataclass, field
 from typing import Optional
 
-from . import fragments as F
+from . import ocr_fragments as F
 
 
 @dataclass
