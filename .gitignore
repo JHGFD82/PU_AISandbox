@@ -57,5 +57,11 @@ junit.xml
 # OS
 Thumbs.db
 
+# Plugins — each plugin is a separately cloned/developed git repo.
+# The plugins/ folder is committed (via .gitkeep) so it exists on a fresh
+# clone; the contents of each plugin repo are not tracked by the main repo.
+plugins/*
+!plugins/.gitkeep
+
 # External files
 Presentation/

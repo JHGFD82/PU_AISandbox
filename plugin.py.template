@@ -1,0 +1,113 @@
+# plugin.py.template — Copy this file to plugins/<your-plugin-name>/plugin.py
+# and implement the three required members.
+#
+# SETUP:
+#   mkdir plugins/myplugin
+#   cp plugin.py.template plugins/myplugin/plugin.py
+#   cd plugins/myplugin && git init
+#
+# The main repo's src/ package is always on sys.path when running from the
+# repository root, so you can import from it freely.
+# ─────────────────────────────────────────────────────────────────────────────
+
+from __future__ import annotations
+
+import argparse
+import sys
+from typing import Optional
+
+# ── Imports from the main repo ───────────────────────────────────────────────
+# These are available because the main repo root is on sys.path at runtime.
+from src.cli import _add_common_flags, _add_notes_flags       # shared flag helpers
+from src.config import get_api_key                             # API key resolution
+from src.errors import CLIError                                # standard error type
+from src.tracking.token_tracker import TokenTracker            # MANDATORY — see run()
+
+
+class MyPlugin:
+    """Replace 'MyPlugin' with a descriptive name for your mode."""
+
+    # ── Plugin identity ───────────────────────────────────────────────────────
+    # List every CLI subcommand this plugin handles.  Names must be unique
+    # across all installed plugins and must not clash with built-in commands
+    # (translate, transcribe, prompt, transcription_review, usage).
+    commands: list[str] = ["mycommand"]
+
+    # ── Argument registration ─────────────────────────────────────────────────
+    def register_subparsers(
+        self,
+        subparsers: argparse._SubParsersAction,
+    ) -> None:
+        """Add this plugin's subcommand(s) to the main parser."""
+        p = subparsers.add_parser(
+            "mycommand",
+            help="One-line description shown in python main.py --help",
+        )
+        # Required positional or keyword arguments specific to this mode:
+        p.add_argument(
+            "language_code",
+            type=str,
+            help="Example argument",
+        )
+        p.add_argument(
+            "-i", "--input",
+            dest="input_file",
+            type=str,
+            help="Input file path",
+        )
+        # Attach the standard flags every command should support:
+        _add_common_flags(p)   # -o, -m, -t, -T, -M, --dry-run
+        _add_notes_flags(p)    # -n, -ns, -nu, -nb
+
+    # ── Command execution ─────────────────────────────────────────────────────
+    def run(
+        self,
+        args: argparse.Namespace,
+        professor: str,
+        model: Optional[str],
+        temperature: Optional[float],
+        top_p: Optional[float],
+        max_tokens: Optional[int],
+    ) -> None:
+        """Execute the command.
+
+        TOKEN TRACKING IS MANDATORY.
+        Every API call this plugin makes must be associated with the
+        TokenTracker instance created below.  Omitting this violates the
+        plugin contract and will cause costs to go unrecorded.
+        """
+        # ── Mandatory setup ───────────────────────────────────────────────
+        api_key, professor_display = get_api_key(professor)
+        token_tracker = TokenTracker(professor=professor)   # MANDATORY
+
+        # ── Dry-run support ───────────────────────────────────────────────
+        # --dry-run must be respected: print prompts and return without
+        # making any API calls or spending any tokens.
+        if getattr(args, "dry_run", False):
+            print("[DRY RUN] mycommand — no API call will be made.")
+            # TODO: build and display prompts here instead.
+            return
+
+        # ── Real execution ────────────────────────────────────────────────
+        # Wire token_tracker into every service / API call you make.
+        # Example (replace with your actual service):
+        #
+        #   from src.services.my_service import MyService
+        #   svc = MyService(
+        #       api_key, professor,
+        #       token_tracker=token_tracker,
+        #       model=model,
+        #       temperature=temperature,
+        #       top_p=top_p,
+        #       max_tokens=max_tokens,
+        #   )
+        #   result = svc.run(args.language_code, args.input_file)
+        #   print(result)
+
+        raise NotImplementedError("Replace this with your plugin logic.")
+
+
+# ── Module-level instance — REQUIRED ─────────────────────────────────────────
+# The plugin loader imports this module and reads the 'plugin' attribute.
+# The object must implement the ModePlugin Protocol (commands, register_subparsers, run).
+plugin = MyPlugin()

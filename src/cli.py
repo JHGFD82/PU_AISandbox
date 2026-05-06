@@ -3,12 +3,14 @@
 import argparse
 import logging
 import sys
+from pathlib import Path
+from typing import Optional
 
 from dotenv import load_dotenv
 
 from .config import parse_language_code, parse_single_language_code, validate_page_nums
 from .errors import CLIError
-from .runtime import SandboxProcessor, handle_info_commands
+from .runtime import ModePlugin, SandboxProcessor, handle_info_commands, load_plugins
 from .services.constants import DEFAULT_PARALLEL_WORKERS
 from .settings import DEFAULT_OCR_PASSES
 
@@ -49,7 +51,9 @@ def _add_notes_flags(parser: argparse.ArgumentParser) -> None:
                         help='Inline note appended to both the system and user prompts')
 
 
-def create_argument_parser() -> argparse.ArgumentParser:
+def create_argument_parser(
+    plugins: Optional[dict[str, ModePlugin]] = None,
+) -> argparse.ArgumentParser:
     """Create and configure the command-line argument parser."""
     parser = argparse.ArgumentParser(
         description='Translate documents between Chinese, Japanese, Korean, and English using Princeton AI Sandbox',
@@ -366,6 +370,14 @@ Transcription review (OCR error detection):
     _add_common_flags(review_parser)
     _add_notes_flags(review_parser)
 
+    # Register plugin subcommands (each unique plugin object called once).
+    if plugins:
+        _seen: set[int] = set()
+        for _p in plugins.values():
+            if id(_p) not in _seen:
+                _seen.add(id(_p))
+                _p.register_subparsers(subparsers)
+
     return parser
 
 
@@ -373,8 +385,10 @@ def main() -> None:
     """Main entry point for the CLI application."""
     setup_logging()
 
+    _plugins = load_plugins(Path(__file__).parent.parent / "plugins")
+
     try:
-        parser = create_argument_parser()
+        parser = create_argument_parser(_plugins)
         args = parser.parse_args()
 
         # Handle global commands (no professor required)
@@ -422,6 +436,14 @@ def main() -> None:
             max_tokens = getattr(args, 'max_tokens', None)
             sandbox = SandboxProcessor(args.professor, model=model, temperature=temperature, top_p=top_p, max_tokens=max_tokens)
             sandbox.run(args)
+        elif _plugins and args.command in _plugins:
+            model = getattr(args, 'model', None)
+            temperature = getattr(args, 'temperature', None)
+            top_p = getattr(args, 'top_p', None)
+            max_tokens = getattr(args, 'max_tokens', None)
+            _plugins[args.command].run(
+                args, args.professor, model, temperature, top_p, max_tokens
+            )
         else:
             raise CLIError(f"Unknown command: {args.command}")
 
