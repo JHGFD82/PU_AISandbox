@@ -274,15 +274,6 @@ class TestPreserveMediaValidationPdfInput:
     def parser(self):
         return _make_parser()
 
-    def _run_validate(self, args_list):
-        """Parse args and run _run_translate validation."""
-        from src.runtime.command_runner import _CommandMixin
-        parser = _make_parser()
-        args = parser.parse_args(args_list)
-        mixin = _CommandMixin()
-        # Call the validation portion only (no API calls)
-        mixin._run_translate(args)  # will raise CLIError on validation failures
-
     def test_pdf_input_with_docx_output_no_longer_raises(self, tmp_path):
         """PDF input + .docx output should pass validation (no CLIError)."""
         import tempfile, os
@@ -301,8 +292,6 @@ class TestPreserveMediaValidationPdfInput:
         ])
 
         # Validation should not raise for pdf input + docx output
-        from src.runtime.command_runner import _CommandMixin
-        mixin = _CommandMixin()
         # Extract just the validation block
         import os as _os
         input_ext = _os.path.splitext(pdf_path)[1].lower()
@@ -314,16 +303,13 @@ class TestPreserveMediaValidationPdfInput:
 
     def test_txt_input_still_rejected(self, tmp_path):
         """Non-.docx, non-.pdf input should still raise CLIError."""
-        from src.runtime.command_runner import _CommandMixin
         import os as _os
-        mixin = _CommandMixin()
         input_ext = '.txt'
         # Replicate the validation check
         assert input_ext not in ('.docx', '.pdf')
 
     def test_pdf_output_still_rejected(self, tmp_path):
         """PDF output is still not supported with --preserve-media."""
-        from src.runtime.command_runner import _CommandMixin
         import fitz, os as _os
 
         pdf_path = str(tmp_path / "source.pdf")

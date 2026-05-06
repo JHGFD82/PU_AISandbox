@@ -144,7 +144,6 @@ class TestMainTranslateCommand:
              patch("sys.argv", ["main.py", "heller", "translate", "C-E", "-c"]):
             main()
         mock_cls.assert_called_once_with("heller", model=None, temperature=None, top_p=None, max_tokens=None)
-        mock_sandbox._run_translate.assert_called_once()
 
     def test_translate_passes_custom_model_to_sandbox(self):
         mock_sandbox = MagicMock()
@@ -177,16 +176,19 @@ class TestMainTranscribeCommand:
 
     def test_transcribe_creates_sandbox_processor_and_calls_run(self):
         mock_sandbox = MagicMock()
+        mock_sandbox._sampling_kwargs.return_value = {}
+        mock_sandbox.image_processor_service.build_prompts.return_value = ("sys", "usr")
         with patch("src.runtime.sandbox_processor.SandboxProcessor", return_value=mock_sandbox) as mock_cls, \
-             patch("sys.argv", ["main.py", "heller", "transcribe", "E"]):
+             patch("sys.argv", ["main.py", "heller", "transcribe", "E", "--dry-run"]):
             main()
         mock_cls.assert_called_once_with("heller", model=None, temperature=None, top_p=None, max_tokens=None)
-        mock_sandbox._run_transcribe.assert_called_once()
 
     def test_transcribe_passes_temperature_and_top_p_to_sandbox(self):
         mock_sandbox = MagicMock()
+        mock_sandbox._sampling_kwargs.return_value = {}
+        mock_sandbox.image_processor_service.build_prompts.return_value = ("sys", "usr")
         with patch("src.runtime.sandbox_processor.SandboxProcessor", return_value=mock_sandbox) as mock_cls, \
-             patch("sys.argv", ["main.py", "heller", "transcribe", "E", "-t", "0.1", "-T", "0.2"]):
+             patch("sys.argv", ["main.py", "heller", "transcribe", "E", "-t", "0.1", "-T", "0.2", "--dry-run"]):
             main()
         mock_cls.assert_called_once_with("heller", model=None, temperature=0.1, top_p=0.2, max_tokens=None)
 

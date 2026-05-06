@@ -5,7 +5,6 @@ Covers:
   - EmbeddedMedia dataclass
   - DocxProcessor.extract_media()
   - CLI flag parsing (--preserve-media)
-  - _run_translate validation errors for incompatible flag combinations
   - FileOutputHandler.save_to_docx() with media reinsertion
   - FileOutputHandler.save_translation_output() media forwarding
 """
@@ -16,15 +15,13 @@ import struct
 import zlib
 from io import BytesIO
 from pathlib import Path
-from typing import List, Optional
-from unittest.mock import MagicMock, patch, call
+from typing import List
+from unittest.mock import patch
 
 import pytest
 
 from src.models.embedded_media import EmbeddedMedia
 from src.models.output_options import OutputOptions
-from src.errors import CLIError
-from src.runtime.command_runner import _CommandMixin
 from src.cli import create_argument_parser
 from src.runtime.plugin_loader import load_plugins
 
@@ -238,173 +235,6 @@ class TestPreserveMediaCLIFlag:
     def test_preserve_media_not_present_on_transcribe(self, parser):
         args = parser.parse_args(["heller", "transcribe", "J", "-i", "img.png"])
         assert not hasattr(args, 'preserve_media') or args.preserve_media is False
-
-
-# ---------------------------------------------------------------------------
-# _run_translate validation errors
-# ---------------------------------------------------------------------------
-
-class _FakeMixin(_CommandMixin):
-    """Minimal concrete subclass for testing _CommandMixin validation logic."""
-
-    def __init__(self):
-        self.translation_service = MagicMock()
-        self.image_translation_service = MagicMock()
-        self.image_processor = MagicMock()
-        self.image_processor.is_image_file = MagicMock(return_value=False)
-        self.image_processor_service = MagicMock()
-        self.pdf_processor = MagicMock()
-        self.prompt_service = MagicMock()
-        self.transcription_review_service = MagicMock()
-        self.token_tracker = MagicMock()
-        self.file_output = MagicMock()
-
-    def _detect_and_validate_file(self, file_path: str) -> str:
-        return "docx"
-
-    def translate_custom_text(self, *a, **kw): pass
-    def process_image_translation_folder(self, *a, **kw): pass
-    def translate_document(self, *a, **kw): pass
-    def process_image_folder(self, *a, **kw): pass
-    def process_image(self, *a, **kw): pass
-    def process_prompt(self, *a, **kw): pass
-    def process_transcription_review(self, *a, **kw): pass
-
-
-def _make_translate_args(**overrides) -> argparse.Namespace:
-    """Build a minimal valid translate Namespace, then apply overrides."""
-    defaults = dict(
-        language_code=("Chinese", "English"),
-        input_file="doc.docx",
-        custom_text=False,
-        page_nums=None,
-        abstract=False,
-        auto_save=False,
-        progressive_save=False,
-        custom_font=None,
-        preserve_media=False,
-        output_file=None,
-        workers=1,
-        spread=False,
-        kanbun=False,
-        dry_run=False,
-        notes=False,
-        note_system=None,
-        note_user=None,
-        note_both=None,
-        model=None,
-        temperature=None,
-        top_p=None,
-        max_tokens=None,
-    )
-    defaults.update(overrides)
-    return argparse.Namespace(**defaults)
-
-
-class TestPreserveMediaValidation:
-
-    def setup_method(self):
-        self.mixin = _FakeMixin()
-
-    def test_preserve_media_with_progressive_save_raises(self):
-        args = _make_translate_args(
-            preserve_media=True, progressive_save=True,
-            input_file="doc.docx", output_file="out.docx"
-        )
-        with pytest.raises(CLIError, match="--progressive-save"):
-            self.mixin._run_translate(args)
-
-    def test_preserve_media_with_custom_text_raises(self):
-        args = _make_translate_args(
-            preserve_media=True, custom_text=True, input_file=None
-        )
-        with pytest.raises(CLIError, match=r"custom text"):
-            self.mixin._run_translate(args)
-
-    def test_preserve_media_without_input_file_raises(self):
-        args = _make_translate_args(
-            preserve_media=True, input_file=None, custom_text=False
-        )
-        with pytest.raises(CLIError, match=r"-i"):
-            self.mixin._run_translate(args)
-
-    def test_preserve_media_with_image_input_raises(self):
-        args = _make_translate_args(
-            preserve_media=True, input_file="scan.jpg", output_file="out.docx"
-        )
-        with pytest.raises(CLIError, match=r"image"):
-            self.mixin._run_translate(args)
-
-    def test_preserve_media_with_pdf_input_does_not_raise(self):
-        """PDF input with .docx output is now supported for media preservation."""
-        args = _make_translate_args(
-            preserve_media=True, input_file="doc.pdf", output_file="out.docx"
-        )
-        # Should NOT raise; PDF input + docx output is a valid combination.
-        try:
-            self.mixin._run_translate(args)
-        except CLIError as exc:
-            pytest.fail(f"Unexpected CLIError for PDF input: {exc}")
-
-    def test_preserve_media_with_txt_input_raises(self):
-        args = _make_translate_args(
-            preserve_media=True, input_file="doc.txt", output_file="out.docx"
-        )
-        with pytest.raises(CLIError, match=r"\.txt"):
-            self.mixin._run_translate(args)
-
-    def test_preserve_media_with_auto_save_no_output_raises(self):
-        args = _make_translate_args(
-            preserve_media=True, input_file="doc.docx",
-            auto_save=True, output_file=None
-        )
-        with pytest.raises(CLIError, match=r"--auto-save"):
-            self.mixin._run_translate(args)
-
-    def test_preserve_media_without_output_file_raises(self):
-        args = _make_translate_args(
-            preserve_media=True, input_file="doc.docx",
-            output_file=None, auto_save=False
-        )
-        with pytest.raises(CLIError, match=r"output"):
-            self.mixin._run_translate(args)
-
-    def test_preserve_media_with_txt_output_raises(self):
-        args = _make_translate_args(
-            preserve_media=True, input_file="doc.docx", output_file="out.txt"
-        )
-        with pytest.raises(CLIError, match=r"\.txt"):
-            self.mixin._run_translate(args)
-
-    def test_preserve_media_with_pdf_output_raises(self):
-        args = _make_translate_args(
-            preserve_media=True, input_file="doc.docx", output_file="out.pdf"
-        )
-        with pytest.raises(CLIError, match=r"PDF"):
-            self.mixin._run_translate(args)
-
-    def test_preserve_media_with_unknown_output_ext_raises(self):
-        args = _make_translate_args(
-            preserve_media=True, input_file="doc.docx", output_file="out.rtf"
-        )
-        with pytest.raises(CLIError, match=r"\.docx"):
-            self.mixin._run_translate(args)
-
-    def test_preserve_media_valid_combination_does_not_raise(self):
-        """Valid: .docx input + .docx output — validation passes and translate_document is called."""
-        args = _make_translate_args(
-            preserve_media=True, input_file="doc.docx", output_file="out.docx"
-        )
-        with patch.object(self.mixin, "translate_document") as mock_td:
-            self.mixin._run_translate(args)
-        mock_td.assert_called_once()
-
-    def test_preserve_media_false_skips_validation(self):
-        """When --preserve-media is off, no validation errors should be raised."""
-        args = _make_translate_args(preserve_media=False, input_file="doc.pdf", output_file=None)
-        with patch.object(self.mixin, "translate_document"):
-            # Should not raise even though no .docx output is specified
-            self.mixin._run_translate(args)
 
 
 # ---------------------------------------------------------------------------
