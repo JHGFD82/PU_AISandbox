@@ -54,16 +54,16 @@ python main.py heller usage daily               # Today's usage
 python main.py heller usage daily 2026-03-01    # Specific date
 
 # Translation
-python main.py heller translate CE -c                        # Custom text input
-python main.py heller translate CE -i test.pdf               # PDF translation
-python main.py heller translate CE -i test.docx              # Word document
-python main.py heller translate CE -i test.txt               # Plain text file
-python main.py heller translate CE -i test.pdf -p 1-5        # Page range
-python main.py heller translate CE -i test.pdf -p "4,15-17,20,30-55"  # Multi-range
-python main.py heller translate CE -i test.pdf -o out.docx   # Output as Word
-python main.py heller translate CE -i test.pdf -w 4          # 4 parallel workers
-python main.py heller translate CE -i test.docx -o out.docx --preserve-media  # Carry DOCX images into output Word doc
-python main.py heller translate CE -i test.pdf -o out.docx --preserve-media   # Carry PDF images into output Word doc
+python main.py heller translate C-E -c                        # Custom text input
+python main.py heller translate C-E -i test.pdf               # PDF translation
+python main.py heller translate C-E -i test.docx              # Word document
+python main.py heller translate C-E -i test.txt               # Plain text file
+python main.py heller translate C-E -i test.pdf -p 1-5        # Page range
+python main.py heller translate C-E -i test.pdf -p "4,15-17,20,30-55"  # Multi-range
+python main.py heller translate C-E -i test.pdf -o out.docx   # Output as Word
+python main.py heller translate C-E -i test.pdf -w 4          # 4 parallel workers
+python main.py heller translate C-E -i test.docx -o out.docx --preserve-media  # Carry DOCX images into output Word doc
+python main.py heller translate C-E -i test.pdf -o out.docx --preserve-media   # Carry PDF images into output Word doc
 
 # Transcription (OCR) — use single language char, not a pair
 python main.py heller transcribe E -i test.jpg               # OCR to console
@@ -87,7 +87,7 @@ python main.py heller prompt -s --dry-run                     # Preview prompts 
 ```
 
 ### Language Code Pattern
-Two-character codes: `CE` (Chinese→English), `JK` (Japanese→Korean), etc.
+Hyphen-separated pairs: `C-E` (Chinese→English), `J-K` (Japanese→Korean), etc.
 - Parsed in `parse_language_code()` using `LANGUAGE_MAP` from `src/config.py`
 - Validation ensures source ≠ target, valid language codes only
 

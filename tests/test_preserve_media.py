@@ -219,12 +219,12 @@ class TestPreserveMediaCLIFlag:
         return create_argument_parser()
 
     def test_preserve_media_defaults_to_false(self, parser):
-        args = parser.parse_args(["heller", "translate", "CE", "-i", "doc.docx", "-o", "out.docx"])
+        args = parser.parse_args(["heller", "translate", "C-E", "-i", "doc.docx", "-o", "out.docx"])
         assert args.preserve_media is False
 
     def test_preserve_media_flag_sets_true(self, parser):
         args = parser.parse_args([
-            "heller", "translate", "CE", "-i", "doc.docx", "-o", "out.docx", "--preserve-media"
+            "heller", "translate", "C-E", "-i", "doc.docx", "-o", "out.docx", "--preserve-media"
         ])
         assert args.preserve_media is True
 

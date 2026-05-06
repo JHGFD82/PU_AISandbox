@@ -141,7 +141,7 @@ class TestMainTranslateCommand:
     def test_translate_creates_sandbox_processor_and_calls_run(self):
         mock_sandbox = MagicMock()
         with patch("src.cli.SandboxProcessor", return_value=mock_sandbox) as mock_cls, \
-             patch("sys.argv", ["main.py", "heller", "translate", "CE", "-c"]):
+             patch("sys.argv", ["main.py", "heller", "translate", "C-E", "-c"]):
             main()
         mock_cls.assert_called_once_with("heller", model=None, temperature=None, top_p=None, max_tokens=None)
         mock_sandbox.run.assert_called_once()
@@ -149,21 +149,21 @@ class TestMainTranslateCommand:
     def test_translate_passes_custom_model_to_sandbox(self):
         mock_sandbox = MagicMock()
         with patch("src.cli.SandboxProcessor", return_value=mock_sandbox) as mock_cls, \
-             patch("sys.argv", ["main.py", "heller", "translate", "CE", "-c", "-m", "gpt-4o-mini"]):
+             patch("sys.argv", ["main.py", "heller", "translate", "C-E", "-c", "-m", "gpt-4o-mini"]):
             main()
         mock_cls.assert_called_once_with("heller", model="gpt-4o-mini", temperature=None, top_p=None, max_tokens=None)
 
     def test_translate_passes_temperature_to_sandbox(self):
         mock_sandbox = MagicMock()
         with patch("src.cli.SandboxProcessor", return_value=mock_sandbox) as mock_cls, \
-             patch("sys.argv", ["main.py", "heller", "translate", "CE", "-c", "-t", "0.2"]):
+             patch("sys.argv", ["main.py", "heller", "translate", "C-E", "-c", "-t", "0.2"]):
             main()
         mock_cls.assert_called_once_with("heller", model=None, temperature=0.2, top_p=None, max_tokens=None)
 
     def test_translate_passes_top_p_to_sandbox(self):
         mock_sandbox = MagicMock()
         with patch("src.cli.SandboxProcessor", return_value=mock_sandbox) as mock_cls, \
-             patch("sys.argv", ["main.py", "heller", "translate", "CE", "-c", "-T", "0.9"]):
+             patch("sys.argv", ["main.py", "heller", "translate", "C-E", "-c", "-T", "0.9"]):
             main()
         mock_cls.assert_called_once_with("heller", model=None, temperature=None, top_p=0.9, max_tokens=None)
 

@@ -93,67 +93,67 @@ class TestTranscribeSubcommand:
 class TestTranslateSubcommand:
 
     def test_command_set_to_translate(self, parser):
-        args = parser.parse_args(["heller", "translate", "JE", "-i", "doc.pdf"])
+        args = parser.parse_args(["heller", "translate", "J-E", "-i", "doc.pdf"])
         assert args.command == "translate"
 
     def test_language_code_is_tuple(self, parser):
-        args = parser.parse_args(["heller", "translate", "JE", "-i", "doc.pdf"])
+        args = parser.parse_args(["heller", "translate", "J-E", "-i", "doc.pdf"])
         assert args.language_code == ("Japanese", "English")
 
     def test_chinese_to_english(self, parser):
-        args = parser.parse_args(["heller", "translate", "CE", "-i", "doc.pdf"])
+        args = parser.parse_args(["heller", "translate", "C-E", "-i", "doc.pdf"])
         assert args.language_code == ("Chinese", "English")
 
     def test_same_language_pair_exits(self, parser):
         with pytest.raises(SystemExit):
-            parser.parse_args(["heller", "translate", "JJ", "-i", "doc.pdf"])
+            parser.parse_args(["heller", "translate", "J-J", "-i", "doc.pdf"])
 
     def test_abstract_flag_defaults_false(self, parser):
-        args = parser.parse_args(["heller", "translate", "JE", "-i", "doc.pdf"])
+        args = parser.parse_args(["heller", "translate", "J-E", "-i", "doc.pdf"])
         assert args.abstract is False
 
     def test_abstract_flag_set(self, parser):
-        args = parser.parse_args(["heller", "translate", "JE", "-i", "doc.pdf", "-a"])
+        args = parser.parse_args(["heller", "translate", "J-E", "-i", "doc.pdf", "-a"])
         assert args.abstract is True
 
     def test_dry_run_defaults_false(self, parser):
-        args = parser.parse_args(["heller", "translate", "JE", "-i", "doc.pdf"])
+        args = parser.parse_args(["heller", "translate", "J-E", "-i", "doc.pdf"])
         assert args.dry_run is False
 
     def test_dry_run_sets_true(self, parser):
-        args = parser.parse_args(["heller", "translate", "JE", "-i", "doc.pdf", "--dry-run"])
+        args = parser.parse_args(["heller", "translate", "J-E", "-i", "doc.pdf", "--dry-run"])
         assert args.dry_run is True
 
     def test_notes_flag_defaults_false(self, parser):
-        args = parser.parse_args(["heller", "translate", "JE", "-i", "doc.pdf"])
+        args = parser.parse_args(["heller", "translate", "J-E", "-i", "doc.pdf"])
         assert args.notes is False
 
     def test_notes_short_flag_sets_true(self, parser):
-        args = parser.parse_args(["heller", "translate", "JE", "-i", "doc.pdf", "-n"])
+        args = parser.parse_args(["heller", "translate", "J-E", "-i", "doc.pdf", "-n"])
         assert args.notes is True
 
     def test_notes_long_flag_sets_true(self, parser):
-        args = parser.parse_args(["heller", "translate", "JE", "-i", "doc.pdf", "--notes"])
+        args = parser.parse_args(["heller", "translate", "J-E", "-i", "doc.pdf", "--notes"])
         assert args.notes is True
 
     def test_temperature_defaults_none(self, parser):
-        args = parser.parse_args(["heller", "translate", "JE", "-i", "doc.pdf"])
+        args = parser.parse_args(["heller", "translate", "J-E", "-i", "doc.pdf"])
         assert args.temperature is None
 
     def test_temperature_short_flag_stored(self, parser):
-        args = parser.parse_args(["heller", "translate", "JE", "-i", "doc.pdf", "-t", "0.3"])
+        args = parser.parse_args(["heller", "translate", "J-E", "-i", "doc.pdf", "-t", "0.3"])
         assert args.temperature == pytest.approx(0.3)
 
     def test_top_p_defaults_none(self, parser):
-        args = parser.parse_args(["heller", "translate", "JE", "-i", "doc.pdf"])
+        args = parser.parse_args(["heller", "translate", "J-E", "-i", "doc.pdf"])
         assert args.top_p is None
 
     def test_top_p_short_flag_stored(self, parser):
-        args = parser.parse_args(["heller", "translate", "JE", "-i", "doc.pdf", "-T", "0.8"])
+        args = parser.parse_args(["heller", "translate", "J-E", "-i", "doc.pdf", "-T", "0.8"])
         assert args.top_p == pytest.approx(0.8)
 
     def test_top_p_long_flag_stored(self, parser):
-        args = parser.parse_args(["heller", "translate", "JE", "-i", "doc.pdf", "--top-p", "0.5"])
+        args = parser.parse_args(["heller", "translate", "J-E", "-i", "doc.pdf", "--top-p", "0.5"])
         assert args.top_p == pytest.approx(0.5)
 
 

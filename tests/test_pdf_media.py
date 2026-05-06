@@ -289,7 +289,7 @@ class TestPreserveMediaValidationPdfInput:
         from src.cli import create_argument_parser
         parser = create_argument_parser()
         args = parser.parse_args([
-            "heller", "translate", "CE",
+            "heller", "translate", "C-E",
             "-i", pdf_path,
             "-o", out_path,
             "--preserve-media",
@@ -328,7 +328,7 @@ class TestPreserveMediaValidationPdfInput:
 
         parser = create_argument_parser()
         args = parser.parse_args([
-            "heller", "translate", "CE",
+            "heller", "translate", "C-E",
             "-i", pdf_path,
             "-o", out_path,
             "--preserve-media",

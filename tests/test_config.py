@@ -130,35 +130,39 @@ class TestParseLanguageCode:
         with pytest.raises(argparse.ArgumentTypeError):
             parse_language_code("X")
 
-    # --- two characters (translation pair) ---
+    # --- hyphen-separated translation pair ---
 
     @pytest.mark.parametrize("code,expected", [
-        ("CE", ("Chinese", "English")),
-        ("JE", ("Japanese", "English")),
-        ("KE", ("Korean", "English")),
-        ("EJ", ("English", "Japanese")),
-        ("ST", ("Simplified Chinese", "Traditional Chinese")),
+        ("C-E", ("Chinese", "English")),
+        ("J-E", ("Japanese", "English")),
+        ("K-E", ("Korean", "English")),
+        ("E-J", ("English", "Japanese")),
+        ("S-T", ("Simplified Chinese", "Traditional Chinese")),
     ])
     def test_translation_pairs(self, code, expected):
         assert parse_language_code(code) == expected
 
     def test_translation_pair_lowercase(self):
-        assert parse_language_code("ce") == ("Chinese", "English")
+        assert parse_language_code("c-e") == ("Chinese", "English")
 
     def test_translation_pair_mixed_case(self):
-        assert parse_language_code("Ce") == ("Chinese", "English")
+        assert parse_language_code("C-e") == ("Chinese", "English")
 
     def test_same_source_and_target_rejected(self):
         with pytest.raises(argparse.ArgumentTypeError):
-            parse_language_code("JJ")
+            parse_language_code("J-J")
 
     def test_invalid_source_rejected(self):
         with pytest.raises(argparse.ArgumentTypeError):
-            parse_language_code("XE")
+            parse_language_code("X-E")
 
     def test_invalid_target_rejected(self):
         with pytest.raises(argparse.ArgumentTypeError):
-            parse_language_code("JX")
+            parse_language_code("J-X")
+
+    def test_legacy_two_char_rejected(self):
+        with pytest.raises(argparse.ArgumentTypeError):
+            parse_language_code("JE")
 
     def test_three_char_code_rejected(self):
         with pytest.raises(argparse.ArgumentTypeError):

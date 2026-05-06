@@ -10,6 +10,7 @@ from pathlib import Path
 
 _ROOT = Path(__file__).parent.parent  # src/ -> repo root
 _TOML_PATH = _ROOT / "settings.toml"
+_LOCAL_TOML_PATH = _ROOT / "settings.local.toml"
 
 try:
     with _TOML_PATH.open("rb") as _f:
@@ -19,6 +20,16 @@ except FileNotFoundError:
         f"settings.toml not found at {_TOML_PATH}. "
         "Copy settings.toml from the repository root and edit it to configure the sandbox."
     )
+
+# Merge settings.local.toml on top if present — only the keys you specify are overridden.
+if _LOCAL_TOML_PATH.exists():
+    with _LOCAL_TOML_PATH.open("rb") as _f:
+        _local = tomllib.load(_f)
+    for _section, _values in _local.items():
+        if _section in _s and isinstance(_s[_section], dict):
+            _s[_section].update(_values)
+        else:
+            _s[_section] = _values
 
 # ── Translation ────────────────────────────────────────────────────────────────
 TRANSLATION_TEMPERATURE: float = _s["translation"]["temperature"]
