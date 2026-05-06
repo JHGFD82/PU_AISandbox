@@ -1,0 +1,176 @@
+# prompts.toml — User prompt fragment overrides for PU AI Sandbox
+# ─────────────────────────────────────────────────────────────────────────────
+# HOW TO USE:
+#   1. Copy this file to prompts.toml in the repository root.
+#   2. Uncomment only the keys you want to override and replace the value.
+#   3. Leave all other keys absent — they fall back to the built-in defaults.
+#
+# prompts.toml is git-ignored and will not be committed.
+# Full default text for every key is in src/services/prompts/fragments.py.
+#
+# PLACEHOLDERS: Some fragments contain {placeholder} tokens that are filled
+# in at runtime. If you override such a fragment, you must keep the same
+# placeholders or the prompt will be missing information.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# [translation]
+# Fragments used when translating documents or custom text.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# [translation]
+
+# The role and overall task description sent to the model for every translation.
+# Placeholders: {source} (source language name), {target} (target language name)
+# role = """
+# Follow the instructions carefully. Please act as a professional translator from {source}
+# to {target}...
+# """
+
+# Instruction for how to handle the labeled input sections when no context is provided.
+# Placeholder: {target}
+# context_none = """
+# The input is labeled "--Current Page: ". Output only the {target} translation of that text.
+# Do not reproduce the "--Current Page: " label in your output.
+# """
+
+# Instruction when an abstract is provided as context.
+# Placeholder: {target}
+# context_abstract = """
+# The input has two labeled sections. "--Context: " contains the document abstract —
+# use it to inform the translation but do not translate or reproduce it.
+# "--Current Page: " is the text to translate.
+# Output only the {target} translation of "--Current Page: ".
+# Do not reproduce either label in your output.
+# """
+
+# Instruction when the end of the previous page is provided as context.
+# Placeholder: {target}
+# context_previous = """
+# The input has two labeled sections. "--Context: " contains the end of the previous page —
+# use it to maintain continuity but do not translate or reproduce it.
+# "--Current Page: " is the text to translate.
+# Output only the {target} translation of "--Current Page: ".
+# Do not reproduce either label in your output.
+# """
+
+# Formatting instruction injected when the output is being saved to a file.
+# formatting_file = "Use proper paragraph breaks and standard text formatting suitable for file output. Use actual line breaks (not \\n characters) to separate paragraphs and sections naturally."
+
+# Formatting instruction injected when the output is printed to the console.
+# formatting_console = 'You can format and line break the output yourself using "\\n" for line breaks in console output.'
+
+# The user-message base for translations without context.
+# Placeholders: {source}, {target}
+# user_base = 'Translate only the {source} text under "--Current Page: " to {target}, outputting only the translation with no other content.'
+
+# The user-message base for translations that include a context section.
+# Placeholders: {source}, {target}
+# user_base_with_context = """
+# Translate only the {source} text under "--Current Page: " to {target}.
+# Do not translate or reproduce the "--Context: " section.
+# Output only the translation with no other content.
+# """
+
+# Suppresses meta-commentary from the model (e.g. "This is the translation of...").
+# no_meta_commentary = 'Do not provide any prompts to the user, for example: "This is the translation of the current page.":'
+
+# Rule governing when to add a Footnotes section.
+# footnote_rule = """
+# IMPORTANT: Only add a "Footnotes:" section if there is actual explanatory footnote text
+# at the bottom of the page. Do NOT add "Footnotes:" for simple citation numbers like
+# (38), (39) within paragraphs.
+# """
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# [ocr]
+# Fragments used when transcribing (OCR) images.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# [ocr]
+
+# The system-prompt role and task description for OCR.
+# Placeholder: {target} (target language name)
+# system_base = """
+# You are an expert OCR assistant specializing in {target} text extraction from images.
+#
+# Your task is to transcribe all legibly visible text from the image exactly as it appears,
+# preserving layout, orientation (horizontal or vertical), and structure as closely as possible.
+# """
+
+# The rule block appended to the OCR system prompt.
+# rules = """
+# RULES:
+# - Extract ONLY text that is actually visible in the image — do NOT add, invent, or hallucinate any content
+# - Do NOT repeat text unless it genuinely appears multiple times in the image
+# ...
+# """
+
+# The base user message for OCR.
+# Placeholder: {target}
+# user_base = "Transcribe all legibly visible text from this image exactly as it appears in {target}."
+
+# The critical-rules block in the OCR user message.
+# user_rules = """
+# CRITICAL RULES FOR THIS IMAGE:
+# - Output ONLY text that is genuinely visible — do NOT invent, fill in, or hallucinate any characters or words
+# ...
+# """
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# [image_translation]
+# Fragments used when running combined image OCR + translation.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# [image_translation]
+
+# The role sent to the model for image translation tasks.
+# Placeholders: {source}, {target}
+# role = "You are an expert reader and translator specialising in {source} text found in images."
+
+# Rules governing the transcription step of image translation.
+# transcription_rules = """
+# TRANSCRIPTION RULES:
+# - Reproduce text exactly as it appears in the image — do not correct, modernise, or alter characters.
+# - Preserve line breaks, punctuation, numbering, and overall structure.
+# ...
+# """
+
+# Rules governing the translation step of image translation.
+# Placeholder: {target}
+# translation_rules = """
+# TRANSLATION RULES:
+# - Produce a fluent, scholarly {target} translation.
+# - Preserve the structure of the original (line breaks, stanzas, numbered items, etc.).
+# - For classical or archaic language, prefer a literary translation over a literal one.
+# - Do not add explanatory notes, commentary, or translator remarks.
+# """
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# [transcription_review]
+# Fragments used when reviewing an OCR transcription for errors.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# [transcription_review]
+
+# The reviewer role and task description.
+# Placeholder: {language}
+# role = """
+# You are an expert proofreader and language scholar specialising in {language} texts.
+# You will be given text that was produced by an AI transcription (OCR) system from a
+# historical or archival document. Your task is to review it for OCR errors, identify
+# the probable source, and report each error with one or more corrected candidates.
+# """
+
+# The step-by-step review methodology injected into the system prompt.
+# approach = """
+# REVIEW APPROACH:
+# 1. Assess whether the text makes sense as a whole.
+# 2. Identify the source type (genre, period, register) to establish interpretive context.
+# 3. Use that context to spot characters or words that are likely OCR misreadings.
+# 4. For each error, record the most probable correction(s) in descending confidence order.
+# """

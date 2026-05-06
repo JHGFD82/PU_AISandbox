@@ -611,3 +611,70 @@ TRANSCRIPTION_REVIEW_USER_BASE = (
 
 # Placeholders: {text}
 TRANSCRIPTION_REVIEW_TEXT_BLOCK = "\n\nTRANSCRIPTION:\n{text}"
+
+
+# ---------------------------------------------------------------------------
+# User override loader
+# ---------------------------------------------------------------------------
+
+def _load_user_overrides() -> None:
+    """Apply overrides from prompts.toml at the repository root, if present.
+
+    Only the keys listed in _MAP below are overridable.  Unknown sections or
+    keys are silently ignored.  The mapping is the authoritative contract
+    between this file and prompts.template.toml.
+    """
+    import tomllib
+    from pathlib import Path
+
+    # fragments.py lives at src/services/prompts/fragments.py
+    # three .parent calls reach the repo root
+    _toml_path = Path(__file__).parent.parent.parent.parent / "prompts.toml"
+    if not _toml_path.exists():
+        return
+
+    with _toml_path.open("rb") as _f:
+        _overrides = tomllib.load(_f)
+
+    _g = globals()
+
+    # Maps (toml_section, toml_key) → global constant name, or
+    # (global dict name, dict key) for entries inside dict constants.
+    _MAP: dict[tuple[str, str], "str | tuple[str, str]"] = {
+        # ── [translation] ────────────────────────────────────────────────
+        ("translation", "role"):                   "TRANSLATION_ROLE",
+        ("translation", "context_none"):           "TRANSLATION_CONTEXT_SPEC_NONE",
+        ("translation", "context_abstract"):       "TRANSLATION_CONTEXT_SPEC_ABSTRACT",
+        ("translation", "context_previous"):       "TRANSLATION_CONTEXT_SPEC_PREVIOUS",
+        ("translation", "formatting_file"):        ("TRANSLATION_FORMATTING", "file"),
+        ("translation", "formatting_console"):     ("TRANSLATION_FORMATTING", "console"),
+        ("translation", "user_base"):              "TRANSLATION_USER_BASE",
+        ("translation", "user_base_with_context"): "TRANSLATION_USER_BASE_WITH_CONTEXT",
+        ("translation", "no_meta_commentary"):     "TRANSLATION_NO_META_COMMENTARY",
+        ("translation", "footnote_rule"):          "TRANSLATION_FOOTNOTE_RULE",
+        # ── [ocr] ─────────────────────────────────────────────────────────
+        ("ocr", "system_base"): "OCR_SYSTEM_BASE",
+        ("ocr", "rules"):       "OCR_RULES",
+        ("ocr", "user_base"):   "OCR_USER_BASE",
+        ("ocr", "user_rules"):  "OCR_USER_RULES",
+        # ── [image_translation] ───────────────────────────────────────────
+        ("image_translation", "role"):                "IMAGE_TRANSLATION_ROLE",
+        ("image_translation", "transcription_rules"): "IMAGE_TRANSLATION_TRANSCRIPTION_RULES",
+        ("image_translation", "translation_rules"):   "IMAGE_TRANSLATION_TRANSLATION_RULES",
+        # ── [transcription_review] ────────────────────────────────────────
+        ("transcription_review", "role"):     "TRANSCRIPTION_REVIEW_ROLE",
+        ("transcription_review", "approach"): "TRANSCRIPTION_REVIEW_APPROACH",
+    }
+
+    for (section, key), target in _MAP.items():
+        if section not in _overrides or key not in _overrides[section]:
+            continue
+        value = _overrides[section][key]
+        if isinstance(target, tuple):
+            dict_name, dict_key = target
+            _g[dict_name][dict_key] = value
+        else:
+            _g[target] = value
+
+
+_load_user_overrides()
