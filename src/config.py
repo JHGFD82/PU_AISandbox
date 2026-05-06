@@ -3,9 +3,13 @@
 import argparse
 import os
 import re
+import tomllib
+from pathlib import Path
 from typing import Dict, Tuple, Union
 
-# Language mapping
+# Language mapping — built-in codes.
+# Additional codes can be added without touching this file: create a
+# languages.toml at the repository root (see languages.template.toml).
 LANGUAGE_MAP: Dict[str, str] = {
     'C': 'Chinese',
     'S': 'Simplified Chinese',
@@ -14,6 +18,14 @@ LANGUAGE_MAP: Dict[str, str] = {
     'K': 'Korean',
     'E': 'English',
 }
+
+# Merge user-defined language codes from languages.toml, if present.
+_languages_toml = Path(__file__).parent.parent / "languages.toml"
+if _languages_toml.exists():
+    with _languages_toml.open("rb") as _f:
+        _user_languages = tomllib.load(_f)
+    for _code, _name in _user_languages.get("languages", {}).items():
+        LANGUAGE_MAP[_code.upper()] = _name
 
 
 def make_safe_filename(name: str) -> str:

@@ -1,0 +1,39 @@
+# languages.toml — User-defined language code extensions for PU AI Sandbox
+# ─────────────────────────────────────────────────────────────────────────────
+# HOW TO USE:
+#   1. Copy this file to languages.toml in the repository root.
+#   2. Add your language codes under [languages].
+#   3. Each key is a single uppercase letter; the value is the full language name
+#      that will appear in prompts and output filenames.
+#
+# languages.toml is git-ignored and will not be committed.
+#
+# BUILT-IN CODES (always available, cannot be overridden here):
+#   C  → Chinese
+#   S  → Simplified Chinese
+#   T  → Traditional Chinese
+#   J  → Japanese
+#   K  → Korean
+#   E  → English
+#
+# NOTES:
+# - Keys must be exactly one character. Multi-character codes are not supported.
+# - Keys are case-insensitive on input but stored as uppercase internally.
+# - If a key conflicts with a built-in code, the built-in takes precedence.
+# - The full language name is used in prompts, so use the conventional English
+#   name (e.g. "Vietnamese", not "Tiếng Việt").
+# - After adding a code, run `python main.py --show-config` to confirm it
+#   appears in the language list.
+# ─────────────────────────────────────────────────────────────────────────────
+
+[languages]
+# Add your codes below. Examples:
+
+# V = "Vietnamese"
+# A = "Arabic"
+# F = "French"
+# G = "German"
+# R = "Russian"
+# P = "Portuguese"
+# I = "Italian"
+# H = "Hindi"
