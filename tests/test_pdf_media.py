@@ -19,6 +19,14 @@ from src.output.file_output import FileOutputHandler
 from src.processors.pdf_media_extractor import PdfMediaExtractor
 from src.models.embedded_media import EmbeddedMedia
 from src.errors import CLIError
+from src.cli import create_argument_parser
+from src.runtime.plugin_loader import load_plugins
+
+_PLUGINS_DIR = Path(__file__).parent.parent / "plugins"
+
+
+def _make_parser():
+    return create_argument_parser(load_plugins(_PLUGINS_DIR))
 
 
 # ---------------------------------------------------------------------------
@@ -264,14 +272,12 @@ class TestPdfMediaExtractorImportError:
 class TestPreserveMediaValidationPdfInput:
     @pytest.fixture
     def parser(self):
-        from src.cli import create_argument_parser
-        return create_argument_parser()
+        return _make_parser()
 
     def _run_validate(self, args_list):
         """Parse args and run _run_translate validation."""
-        from src.cli import create_argument_parser
         from src.runtime.command_runner import _CommandMixin
-        parser = create_argument_parser()
+        parser = _make_parser()
         args = parser.parse_args(args_list)
         mixin = _CommandMixin()
         # Call the validation portion only (no API calls)
@@ -286,8 +292,7 @@ class TestPreserveMediaValidationPdfInput:
         d = fitz.open(); d.new_page(); d.save(pdf_path); d.close()
         out_path = str(tmp_path / "out.docx")
 
-        from src.cli import create_argument_parser
-        parser = create_argument_parser()
+        parser = _make_parser()
         args = parser.parse_args([
             "heller", "translate", "C-E",
             "-i", pdf_path,
@@ -318,7 +323,6 @@ class TestPreserveMediaValidationPdfInput:
 
     def test_pdf_output_still_rejected(self, tmp_path):
         """PDF output is still not supported with --preserve-media."""
-        from src.cli import create_argument_parser
         from src.runtime.command_runner import _CommandMixin
         import fitz, os as _os
 
@@ -326,7 +330,7 @@ class TestPreserveMediaValidationPdfInput:
         d = fitz.open(); d.new_page(); d.save(pdf_path); d.close()
         out_path = str(tmp_path / "out.pdf")
 
-        parser = create_argument_parser()
+        parser = _make_parser()
         args = parser.parse_args([
             "heller", "translate", "C-E",
             "-i", pdf_path,

@@ -13,8 +13,17 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from pathlib import Path
 from src.services.prompts.transcription_review import TranscriptionReviewPromptSpec
 from src.services.transcription_review_service import TranscriptionReviewService
+from src.cli import create_argument_parser
+from src.runtime.plugin_loader import load_plugins
+
+_PLUGINS_DIR = Path(__file__).parent.parent / "plugins"
+
+
+def _make_parser():
+    return create_argument_parser(load_plugins(_PLUGINS_DIR))
 
 
 # ---------------------------------------------------------------------------
@@ -287,8 +296,7 @@ class TestTranscriptionReviewCLI:
 
     @pytest.fixture
     def parser(self):
-        from src.cli import create_argument_parser
-        return create_argument_parser()
+        return _make_parser()
 
     def test_subparser_exists(self, parser):
         """transcription_review is a recognised professor sub-command."""

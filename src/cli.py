@@ -8,11 +8,11 @@ from typing import Optional
 
 from dotenv import load_dotenv
 
-from .config import parse_language_code, parse_single_language_code, validate_page_nums
+from .config import parse_language_code, parse_single_language_code, validate_page_nums  # re-exported for plugins
 from .errors import CLIError
 from .runtime import ModePlugin, SandboxProcessor, handle_info_commands, load_plugins
-from .services.constants import DEFAULT_PARALLEL_WORKERS
-from .settings import DEFAULT_OCR_PASSES
+from .services.constants import DEFAULT_PARALLEL_WORKERS  # re-exported for plugins
+from .settings import DEFAULT_OCR_PASSES  # re-exported for plugins
 
 # Load environment variables
 load_dotenv()
@@ -202,126 +202,10 @@ Transcription review (OCR error detection):
         help='Date in YYYY-MM-DD format (defaults to today)',
     )
 
-    # ===== TRANSLATE COMMAND =====
-    translate_parser = subparsers.add_parser('translate', help='Translate documents or text')
-    translate_parser.add_argument(
-        'language_code',
-        type=parse_language_code,
-        help='Translation direction (CE, JE, KE, etc.)',
-    )
+    # translate, transcribe, and transcription_review are registered by their
+    # respective plugins (plugins/translation/ and plugins/transcription/).
 
-    # Input options
-    input_group = translate_parser.add_mutually_exclusive_group(required=False)
-    input_group.add_argument('-i', '--input', dest='input_file', type=str, help='Input file path (PDF, DOCX, TXT)')
-    input_group.add_argument('-c', '--custom', dest='custom_text', action='store_true', help='Input custom text')
-
-    # Translation options
-    translate_parser.add_argument(
-        '-p', '--page_nums',
-        dest='page_nums',
-        type=validate_page_nums,
-        help='Page numbers to process (e.g., "1" or "1-5")',
-    )
-    translate_parser.add_argument('-a', '--abstract', dest='abstract', action='store_true', help='Text has an abstract')
-    translate_parser.add_argument('--auto-save', dest='auto_save', action='store_true', help='Auto-save with timestamp')
-    translate_parser.add_argument(
-        '--progressive-save',
-        dest='progressive_save',
-        action='store_true',
-        help='Save each page immediately (text output only)',
-    )
-    translate_parser.add_argument('-f', '--font', dest='custom_font', type=str, help='Custom font name (must be in fonts/)')
-    translate_parser.add_argument('--font-size', dest='font_size', type=int, default=None, metavar='PT', help='Body font size in points for PDF/Word output (default: 9)')
-    translate_parser.add_argument(
-        '--kanbun',
-        dest='kanbun',
-        action='store_true',
-        help='Source text is kanbun (漢文): apply kundoku word-order reconstruction and Classical Chinese reading conventions',
-    )
-    translate_parser.add_argument(
-        '-w', '--workers',
-        dest='workers',
-        type=int,
-        default=DEFAULT_PARALLEL_WORKERS,
-        metavar='N',
-        help=(
-            'Number of parallel translation workers (default: %(default)s). '
-            'Each page is sent as an independent API call. '
-            'Workers > 1 uses untranslated source text as context and disables progressive save.'
-        ),
-    )
-    translate_parser.add_argument('--spread', dest='spread', action='store_true', help='Image is a two-page spread (two facing pages scanned together); applies to image file inputs and --scanned PDFs')
-    translate_parser.add_argument(
-        '--scanned',
-        dest='scanned',
-        action='store_true',
-        help='Treat the PDF as a scanned image document: each page is rendered as an image and processed via the OCR+translation pipeline (vision model). PDF only.',
-    )
-    translate_parser.add_argument(
-        '--preserve-tables',
-        dest='preserve_tables',
-        action='store_true',
-        help='Hint to the model that tabular data should be returned as Markdown tables; the output layer renders them as proper tables in PDF/DOCX or ASCII in TXT.',
-    )
-    translate_parser.add_argument(
-        '--preserve-media',        dest='preserve_media',
-        action='store_true',
-        help='Carry embedded images from a .docx source into the translated .docx output (requires -i *.docx and -o *.docx)',
-    )
-    translate_parser.add_argument(
-        '--toc',
-        dest='toc',
-        action='store_true',
-        help='Document contains a table of contents: normalize dot leaders (e.g. "............") to exactly five dots (.....) between section titles and page numbers',
-    )
-    _add_common_flags(translate_parser)
-    _add_notes_flags(translate_parser)
-
-    # ===== TRANSCRIBE COMMAND =====
-    transcribe_parser = subparsers.add_parser('transcribe', help='Transcribe images using OCR')
-    transcribe_parser.add_argument(
-        'language_code',
-        type=parse_single_language_code,
-        help='Target language: E (English), C (Chinese), S (Simplified Chinese), T (Traditional Chinese), J (Japanese), K (Korean)',
-    )
-    transcribe_parser.add_argument('-i', '--input', dest='input_file', type=str, required=False, help='Input image file path, or a folder of images to process in order')
-    transcribe_parser.add_argument('-v', '--vertical', dest='vertical', action='store_true', help='Text is predominantly vertical (top-to-bottom, right-to-left columns)')
-    transcribe_parser.add_argument('--spread', dest='spread', action='store_true', help='Image is a two-page spread (two facing pages scanned together)')
-    kanbun_group = transcribe_parser.add_mutually_exclusive_group()
-    kanbun_group.add_argument(
-        '--kanbun',
-        dest='kanbun',
-        action='store_true',
-        help='Image contains kanbun (漢文): preserve 返り点, 送り仮名, and other kundoku annotations exactly as written',
-    )
-    kanbun_group.add_argument(
-        '--kanbun-main',
-        dest='kanbun_main',
-        action='store_true',
-        help='Image contains kanbun (漢文): transcribe ONLY the large main-line kanji; omit okurigana, furigana, kaeriten, and other small annotations',
-    )
-    transcribe_parser.add_argument('-P', '--passes', dest='passes', type=int, default=DEFAULT_OCR_PASSES, metavar='N', help='Number of OCR passes (default: 1). Passes > 1 send the image and prior transcription back to the model for review and correction.')
-    transcribe_parser.add_argument(
-        '--preserve-tables',
-        dest='preserve_tables',
-        action='store_true',
-        help='Hint to the model that tabular data should be returned as Markdown tables; the output layer renders them as proper tables in PDF/DOCX or ASCII in TXT.',
-    )
-    transcribe_parser.add_argument(
-        '-w', '--workers',
-        dest='workers',
-        type=int,
-        default=DEFAULT_PARALLEL_WORKERS,
-        metavar='N',
-        help=(
-            'Number of parallel OCR workers when processing a folder of images (default: %(default)s). '
-            'Ignored for single-image input. Multi-pass OCR within each image always runs sequentially.'
-        ),
-    )
-    _add_common_flags(transcribe_parser)
-    _add_notes_flags(transcribe_parser)
-
-    # ===== PROMPT COMMAND =====
+    # ===== PROMPT COMMAND (built-in) =====
     prompt_parser = subparsers.add_parser('prompt', help='Send a custom prompt to the AI model')
     prompt_parser.add_argument(
         '-s', '--system',
@@ -330,45 +214,6 @@ Transcription review (OCR error detection):
         help='Prompt for a system (developer) prompt before the user prompt',
     )
     _add_common_flags(prompt_parser)
-
-    # ===== TRANSCRIPTION REVIEW COMMAND =====
-    review_parser = subparsers.add_parser(
-        'transcription_review',
-        help='Review AI transcription output for OCR errors (returns JSON report)',
-    )
-    review_parser.add_argument(
-        'language_code',
-        type=parse_single_language_code,
-        help='Language of the transcription: E (English), C (Chinese), S (Simplified Chinese), T (Traditional Chinese), J (Japanese), K (Korean)',
-    )
-    review_input_group = review_parser.add_mutually_exclusive_group(required=False)
-    review_input_group.add_argument(
-        '-i', '--input',
-        dest='input_file',
-        type=str,
-        help='Path to a text file containing the transcription result to review',
-    )
-    review_input_group.add_argument(
-        '-c', '--custom',
-        dest='custom_text',
-        action='store_true',
-        help='Paste the transcription text interactively (end with --- on its own line)',
-    )
-    review_kanbun_group = review_parser.add_mutually_exclusive_group()
-    review_kanbun_group.add_argument(
-        '--kanbun',
-        dest='kanbun',
-        action='store_true',
-        help='Text contains kanbun (漢文) with kundoku annotations (返り点, 送り仮名)',
-    )
-    review_kanbun_group.add_argument(
-        '--kanbun-main',
-        dest='kanbun_main',
-        action='store_true',
-        help='Transcription was produced in main-character-only mode (okurigana, furigana, kaeriten were omitted intentionally — do not flag their absence as errors)',
-    )
-    _add_common_flags(review_parser)
-    _add_notes_flags(review_parser)
 
     # Register plugin subcommands (each unique plugin object called once).
     if plugins:
@@ -429,7 +274,7 @@ def main() -> None:
         if args.command == 'usage':
             if handle_info_commands(args):
                 return
-        elif args.command in ('translate', 'transcribe', 'prompt', 'transcription_review'):
+        elif args.command == 'prompt':
             model = getattr(args, 'model', None)
             temperature = getattr(args, 'temperature', None)
             top_p = getattr(args, 'top_p', None)

@@ -5,14 +5,19 @@ Validates that all subcommands, flags, and type callbacks are correctly wired
 without actually invoking any runtime logic or API calls.
 """
 
+from pathlib import Path
+
 import pytest
 
 from src.cli import create_argument_parser
+from src.runtime.plugin_loader import load_plugins
+
+_PLUGINS_DIR = Path(__file__).parent.parent / "plugins"
 
 
 @pytest.fixture
 def parser():
-    return create_argument_parser()
+    return create_argument_parser(load_plugins(_PLUGINS_DIR))
 
 
 # ---------------------------------------------------------------------------

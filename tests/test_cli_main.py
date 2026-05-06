@@ -140,29 +140,29 @@ class TestMainTranslateCommand:
 
     def test_translate_creates_sandbox_processor_and_calls_run(self):
         mock_sandbox = MagicMock()
-        with patch("src.cli.SandboxProcessor", return_value=mock_sandbox) as mock_cls, \
+        with patch("src.runtime.sandbox_processor.SandboxProcessor", return_value=mock_sandbox) as mock_cls, \
              patch("sys.argv", ["main.py", "heller", "translate", "C-E", "-c"]):
             main()
         mock_cls.assert_called_once_with("heller", model=None, temperature=None, top_p=None, max_tokens=None)
-        mock_sandbox.run.assert_called_once()
+        mock_sandbox._run_translate.assert_called_once()
 
     def test_translate_passes_custom_model_to_sandbox(self):
         mock_sandbox = MagicMock()
-        with patch("src.cli.SandboxProcessor", return_value=mock_sandbox) as mock_cls, \
+        with patch("src.runtime.sandbox_processor.SandboxProcessor", return_value=mock_sandbox) as mock_cls, \
              patch("sys.argv", ["main.py", "heller", "translate", "C-E", "-c", "-m", "gpt-4o-mini"]):
             main()
         mock_cls.assert_called_once_with("heller", model="gpt-4o-mini", temperature=None, top_p=None, max_tokens=None)
 
     def test_translate_passes_temperature_to_sandbox(self):
         mock_sandbox = MagicMock()
-        with patch("src.cli.SandboxProcessor", return_value=mock_sandbox) as mock_cls, \
+        with patch("src.runtime.sandbox_processor.SandboxProcessor", return_value=mock_sandbox) as mock_cls, \
              patch("sys.argv", ["main.py", "heller", "translate", "C-E", "-c", "-t", "0.2"]):
             main()
         mock_cls.assert_called_once_with("heller", model=None, temperature=0.2, top_p=None, max_tokens=None)
 
     def test_translate_passes_top_p_to_sandbox(self):
         mock_sandbox = MagicMock()
-        with patch("src.cli.SandboxProcessor", return_value=mock_sandbox) as mock_cls, \
+        with patch("src.runtime.sandbox_processor.SandboxProcessor", return_value=mock_sandbox) as mock_cls, \
              patch("sys.argv", ["main.py", "heller", "translate", "C-E", "-c", "-T", "0.9"]):
             main()
         mock_cls.assert_called_once_with("heller", model=None, temperature=None, top_p=0.9, max_tokens=None)
@@ -177,15 +177,15 @@ class TestMainTranscribeCommand:
 
     def test_transcribe_creates_sandbox_processor_and_calls_run(self):
         mock_sandbox = MagicMock()
-        with patch("src.cli.SandboxProcessor", return_value=mock_sandbox) as mock_cls, \
+        with patch("src.runtime.sandbox_processor.SandboxProcessor", return_value=mock_sandbox) as mock_cls, \
              patch("sys.argv", ["main.py", "heller", "transcribe", "E"]):
             main()
         mock_cls.assert_called_once_with("heller", model=None, temperature=None, top_p=None, max_tokens=None)
-        mock_sandbox.run.assert_called_once()
+        mock_sandbox._run_transcribe.assert_called_once()
 
     def test_transcribe_passes_temperature_and_top_p_to_sandbox(self):
         mock_sandbox = MagicMock()
-        with patch("src.cli.SandboxProcessor", return_value=mock_sandbox) as mock_cls, \
+        with patch("src.runtime.sandbox_processor.SandboxProcessor", return_value=mock_sandbox) as mock_cls, \
              patch("sys.argv", ["main.py", "heller", "transcribe", "E", "-t", "0.1", "-T", "0.2"]):
             main()
         mock_cls.assert_called_once_with("heller", model=None, temperature=0.1, top_p=0.2, max_tokens=None)

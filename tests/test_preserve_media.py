@@ -26,6 +26,13 @@ from src.models.output_options import OutputOptions
 from src.errors import CLIError
 from src.runtime.command_runner import _CommandMixin
 from src.cli import create_argument_parser
+from src.runtime.plugin_loader import load_plugins
+
+_PLUGINS_DIR = Path(__file__).parent.parent / "plugins"
+
+
+def _make_parser():
+    return create_argument_parser(load_plugins(_PLUGINS_DIR))
 
 
 def _make_1x1_png() -> bytes:
@@ -216,7 +223,7 @@ class TestPreserveMediaCLIFlag:
 
     @pytest.fixture
     def parser(self):
-        return create_argument_parser()
+        return _make_parser()
 
     def test_preserve_media_defaults_to_false(self, parser):
         args = parser.parse_args(["heller", "translate", "C-E", "-i", "doc.docx", "-o", "out.docx"])
