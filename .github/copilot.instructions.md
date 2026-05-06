@@ -95,19 +95,22 @@ Hyphen-separated pairs: `C-E` (Chinese→English), `J-K` (Japanese→Korean), et
 
 ### Progressive Saving
 - **Text format only**: `--progressive-save` saves each page immediately as it finishes
-- **Incompatible with parallel mode**: `--progressive-save` is silently disabled (with a printed warning) when `workers > 1`
+- **Incompatible with parallel mode**: `--progressive-save` is disabled with a printed warning when `workers > 1`
 - **Incompatible with --preserve-media**: combining these two raises a `CLIError` immediately.
 
 ### Media Preservation (`--preserve-media`)
 - **Flag**: `--preserve-media` (boolean, translate command only)
 - **Scope**: `.docx` or `.pdf` input with a `.docx` output (`-o`). Images extracted from the source are reinserted into the output Word document at proportional positions.
 - **Incompatible combinations** (all raise `CLIError` before any API call):
-  - `--progressive-save` — cannot combine
-  - `-c` / `--custom` — pasted text has no embedded media
-  - Non-`.docx`, non-`.pdf` input (TXT, image) — only DOCX and PDF extraction are implemented
-  - No output path or `--auto-save` without `-o` — auto-save defaults to `.txt`
-  - `.txt` output extension — cannot embed images
-  - `.pdf` output extension — PDF output not yet implemented (use `.docx`)
+
+  | Condition | Reason |
+  |-----------|--------|
+  | `--progressive-save` | Cannot combine with media preservation |
+  | `-c` / `--custom` | Pasted text has no embedded media |
+  | Non-`.docx`, non-`.pdf` input (TXT, image) | Only DOCX and PDF extraction are implemented |
+  | No `-o` output path (auto-save without explicit path) | Auto-save defaults to `.txt`, which cannot embed images |
+  | `.txt` output extension | Cannot embed images in plain text |
+  | `.pdf` output extension | PDF output not yet implemented; use `.docx` |
 - **DOCX extraction**: `DocxProcessor.extract_media(file_obj)` — iterates paragraph runs, finds `w:drawing` → `a:blip` elements, reads `ImagePart.blob`, records `position_fraction` (para_idx / total_paras), and EMU dimensions from `wp:extent`.
 - **PDF extraction**: `PdfMediaExtractor.extract_media(file_obj)` (`src/processors/pdf_media_extractor.py`) — uses PyMuPDF (`fitz`); iterates pages, deduplicates by xref, computes `position_fraction = (page_index + y_frac) / total_pages`, converts pixel dims to EMU (12700 EMU/px at 72 DPI), skips images < 512 bytes.
 - **Reinsertion**: `FileOutputHandler.save_to_docx(..., media=...)` — images are inserted using proportional positioning: each image is appended immediately after the translated paragraph whose cumulative fraction (`i / total_paras`) first meets or exceeds the image's `position_fraction`.
@@ -117,14 +120,24 @@ Hyphen-separated pairs: `C-E` (Chinese→English), `J-K` (Japanese→Korean), et
 
 ### Parallel Processing
 - **Flag**: `-w N` / `--workers N` (default: `1` = sequential). The default is defined as `DEFAULT_PARALLEL_WORKERS` in `src/services/constants.py`.
-- **Translation (`-w N`)**: Each page is sent as an independent `ThreadPoolExecutor` worker. Previous-page context is the **untranslated source text** of the prior page (not the prior translation). `context_length_exceeded` recursive splitting still works within each worker.
-- **Transcription folder mode (`-w N`)**: Each image in a folder is dispatched to a separate worker. Multi-pass OCR (`-P N`) still runs sequentially within each worker. Workers have no effect for single-image input.
+
+**Per-command behaviour:**
+- **Translation**: Each page is sent as an independent `ThreadPoolExecutor` worker. Previous-page context is the **untranslated source text** of the prior page (not the prior translation). `context_length_exceeded` recursive splitting still works within each worker.
+- **Transcription folder mode**: Each image in a folder is dispatched to a separate worker. Multi-pass OCR (`-P N`) still runs sequentially within each worker. Workers have no effect for single-image input.
 - **Prompt command**: No `-w` flag — always a single call.
 - **Custom text (`-c`)**: `-w` is accepted but ignored (not paginated).
-- **Temp files**: Results are written to numbered temp files so RAM stays bounded for large documents; temp directory is deleted in a `finally` block.
-- **Rate limiting**: `PAGE_DELAY_SECONDS` between pages is removed in parallel mode; let the API handle rate limiting.
-- **Thread safety**: `TokenTracker.record_usage()` is protected by an internal `threading.Lock`, so concurrent workers cannot corrupt token counts.
-- **Worker capping**: If `workers > page_count`, the executor is silently capped to the number of pages (logged at INFO level).
+
+**Worker capping:**
+- If `workers > page_count`, the executor is capped to the number of pages (logged at INFO level).
+
+**Temp files:**
+- Results are written to numbered temp files so RAM stays bounded for large documents; temp directory is deleted in a `finally` block.
+
+**Rate limiting:**
+- `PAGE_DELAY_SECONDS` between pages is removed in parallel mode; the API handles rate limiting.
+
+**Thread safety:**
+- `TokenTracker.record_usage()` is protected by an internal `threading.Lock`, so concurrent workers cannot corrupt token counts.
 
 ### Error Handling Pattern
 - **API Failures**: Automatic retries with exponential backoff in `TranslationService`
