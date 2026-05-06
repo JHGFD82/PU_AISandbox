@@ -174,3 +174,87 @@
 # 3. Use that context to spot characters or words that are likely OCR misreadings.
 # 4. For each error, record the most probable correction(s) in descending confidence order.
 # """
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# [language_pair_notes]
+# Pair-specific guidance injected into the translation system prompt when the
+# source → target language combination matches.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# [language_pair_notes]
+
+# Keys are "SourceLanguage|TargetLanguage" (exact full language names as they
+# appear in LANGUAGE_MAP, separated by a pipe character).  Both directions of
+# a pair should normally have entries.
+#
+# The value is appended to the translation system prompt under a
+# "LANGUAGE-PAIR NOTES:" header when the combination matches.
+#
+# Built-in pairs (defined in fragments.py; override or add here):
+#   Japanese|Korean, Korean|Japanese
+#
+# To add a new pair, uncomment and edit one of the examples below.
+
+# "Vietnamese|English" = """
+# Vietnamese uses a tonal Latin-alphabet writing system.  When translating to
+# English, preserve diacritics faithfully in any untranslated proper nouns
+# (e.g. Hà Nội, not Ha Noi).
+# """
+
+# "Arabic|English" = """
+# Arabic is written right-to-left.  Transliterate proper nouns using the
+# Library of Congress romanisation standard unless a well-known English form
+# exists (e.g. Cairo, not al-Qāhirah).
+# """
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# [ocr_script_guidance]
+# Script-specific notes injected into OCR (transcription) system prompts.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# [ocr_script_guidance]
+
+# Keys are exact target language names as they appear in LANGUAGE_MAP.
+# The value is appended under a "SCRIPT NOTES:" header in the OCR system
+# prompt when the target language matches.
+#
+# Built-in languages (defined in fragments.py; override or add here):
+#   Chinese, Simplified Chinese, Traditional Chinese, Japanese, Korean, English
+#
+# Adding a key for a language not in the built-in list is safe as long as the
+# same name is used in the language code mapping (see languages.template.toml).
+
+# "Vietnamese" = """
+# The text uses the Vietnamese Latin-based script (Chữ Quốc ngữ).
+# Transcribe all diacritical marks exactly as they appear — tonal marks and
+# vowel modifiers are semantically significant and must not be omitted.
+# """
+
+# "Arabic" = """
+# The text uses the Arabic script, written right-to-left.
+# Transcribe each character in its contextual form exactly as it appears,
+# including vowel diacritics (harakat) if present.
+# """
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# [image_translation_script_guidance]
+# Script-specific notes injected into image-translation system prompts.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# [image_translation_script_guidance]
+
+# Keys are exact source language names.  Same structure as [ocr_script_guidance]
+# but used by image-translation prompts, which are keyed by source language
+# rather than target language.
+#
+# Built-in languages (defined in fragments.py; override or add here):
+#   Chinese, Simplified Chinese, Traditional Chinese, Japanese, Korean, English
+
+# "Vietnamese" = """
+# The source text uses the Vietnamese Latin-based script (Chữ Quốc ngữ).
+# All tonal and vowel diacritics are semantically significant — transcribe
+# them exactly before translating.
+# """

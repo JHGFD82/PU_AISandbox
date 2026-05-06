@@ -676,5 +676,25 @@ def _load_user_overrides() -> None:
         else:
             _g[target] = value
 
+    # ── [language_pair_notes] ─────────────────────────────────────────────
+    # Keys are "SourceLanguage|TargetLanguage" strings; split on "|" to
+    # produce the tuple key used by LANGUAGE_PAIR_NOTES.
+    for pair_key, value in _overrides.get("language_pair_notes", {}).items():
+        if "|" in pair_key:
+            source, target = pair_key.split("|", 1)
+            _g["LANGUAGE_PAIR_NOTES"][(source.strip(), target.strip())] = value
+
+    # ── [ocr_script_guidance] ─────────────────────────────────────────────
+    # Keys are exact language names (e.g. "Vietnamese"); values are the
+    # script-guidance strings injected into OCR system prompts.
+    for lang, value in _overrides.get("ocr_script_guidance", {}).items():
+        _g["OCR_SCRIPT_GUIDANCE"][lang] = value
+
+    # ── [image_translation_script_guidance] ───────────────────────────────
+    # Same structure as ocr_script_guidance but keyed by source language;
+    # values are injected into image-translation system prompts.
+    for lang, value in _overrides.get("image_translation_script_guidance", {}).items():
+        _g["IMAGE_TRANSLATION_SCRIPT_GUIDANCE"][lang] = value
+
 
 _load_user_overrides()

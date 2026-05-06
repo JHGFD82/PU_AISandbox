@@ -7,7 +7,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from ..config import load_professor_config
+from ..config import load_professor_config, LANGUAGE_MAP
 from ..models.catalog import load_model_catalog, get_pricing_unit
 from ..errors import CLIError
 from ..tracking.token_tracker import TokenTracker, get_usage_data_path, get_archive_dir
@@ -56,6 +56,21 @@ def show_professor_config() -> None:
     print("\n" + "=" * 60)
     print("Usage: python main.py <professor> <command> [options]")
     print("       python main.py --help")
+
+    # Language map — reflects any additions from languages.toml
+    _BUILT_IN = {'C', 'S', 'T', 'J', 'K', 'E'}
+    user_codes = {k: v for k, v in LANGUAGE_MAP.items() if k not in _BUILT_IN}
+    print("\n" + "=" * 60)
+    print("Language codes (built-in):")
+    for code, name in sorted(LANGUAGE_MAP.items()):
+        if code in _BUILT_IN:
+            print(f"  {code}  {name}")
+    if user_codes:
+        print("Language codes (from languages.toml):")
+        for code, name in sorted(user_codes.items()):
+            print(f"  {code}  {name}")
+    else:
+        print("  (add languages.toml to define extra codes — see languages.template.toml)")
 
 
 def list_available_models() -> None:
