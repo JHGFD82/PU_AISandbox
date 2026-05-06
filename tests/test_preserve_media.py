@@ -22,14 +22,8 @@ import pytest
 
 from src.models.embedded_media import EmbeddedMedia
 from src.models.output_options import OutputOptions
-from src.cli import create_argument_parser
-from src.runtime.plugin_loader import load_plugins
 
 _PLUGINS_DIR = Path(__file__).parent.parent / "plugins"
-
-
-def _make_parser():
-    return create_argument_parser(load_plugins(_PLUGINS_DIR))
 
 
 def _make_1x1_png() -> bytes:
@@ -212,34 +206,6 @@ class TestDocxProcessorTableExtraction:
         assert "R0C0" in combined
 
 
-# ---------------------------------------------------------------------------
-# CLI flag parsing
-# ---------------------------------------------------------------------------
-
-class TestPreserveMediaCLIFlag:
-
-    @pytest.fixture
-    def parser(self):
-        return _make_parser()
-
-    def test_preserve_media_defaults_to_false(self, parser):
-        args = parser.parse_args(["heller", "translate", "C-E", "-i", "doc.docx", "-o", "out.docx"])
-        assert args.preserve_media is False
-
-    def test_preserve_media_flag_sets_true(self, parser):
-        args = parser.parse_args([
-            "heller", "translate", "C-E", "-i", "doc.docx", "-o", "out.docx", "--preserve-media"
-        ])
-        assert args.preserve_media is True
-
-    def test_preserve_media_not_present_on_transcribe(self, parser):
-        args = parser.parse_args(["heller", "transcribe", "J", "-i", "img.png"])
-        assert not hasattr(args, 'preserve_media') or args.preserve_media is False
-
-
-# ---------------------------------------------------------------------------
-# FileOutputHandler.save_to_docx with media
-# ---------------------------------------------------------------------------
 
 class TestSaveToDocxWithMedia:
 

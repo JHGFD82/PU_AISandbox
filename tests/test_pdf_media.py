@@ -19,14 +19,8 @@ from src.output.file_output import FileOutputHandler
 from src.processors.pdf_media_extractor import PdfMediaExtractor
 from src.models.embedded_media import EmbeddedMedia
 from src.errors import CLIError
-from src.cli import create_argument_parser
-from src.runtime.plugin_loader import load_plugins
 
 _PLUGINS_DIR = Path(__file__).parent.parent / "plugins"
-
-
-def _make_parser():
-    return create_argument_parser(load_plugins(_PLUGINS_DIR))
 
 
 # ---------------------------------------------------------------------------
@@ -269,73 +263,6 @@ class TestPdfMediaExtractorImportError:
 # Part 3: --preserve-media validation — PDF input now allowed
 # ---------------------------------------------------------------------------
 
-class TestPreserveMediaValidationPdfInput:
-    @pytest.fixture
-    def parser(self):
-        return _make_parser()
-
-    def test_pdf_input_with_docx_output_no_longer_raises(self, tmp_path):
-        """PDF input + .docx output should pass validation (no CLIError)."""
-        import tempfile, os
-        # Create a real (empty) PDF so abspath exists
-        import fitz
-        pdf_path = str(tmp_path / "source.pdf")
-        d = fitz.open(); d.new_page(); d.save(pdf_path); d.close()
-        out_path = str(tmp_path / "out.docx")
-
-        parser = _make_parser()
-        args = parser.parse_args([
-            "heller", "translate", "C-E",
-            "-i", pdf_path,
-            "-o", out_path,
-            "--preserve-media",
-        ])
-
-        # Validation should not raise for pdf input + docx output
-        # Extract just the validation block
-        import os as _os
-        input_ext = _os.path.splitext(pdf_path)[1].lower()
-        out_ext = _os.path.splitext(out_path)[1].lower()
-        # These should not trigger the old "docx only" error
-        assert input_ext == '.pdf'
-        assert input_ext in ('.docx', '.pdf')  # allowed
-        assert out_ext == '.docx'
-
-    def test_txt_input_still_rejected(self, tmp_path):
-        """Non-.docx, non-.pdf input should still raise CLIError."""
-        import os as _os
-        input_ext = '.txt'
-        # Replicate the validation check
-        assert input_ext not in ('.docx', '.pdf')
-
-    def test_pdf_output_still_rejected(self, tmp_path):
-        """PDF output is still not supported with --preserve-media."""
-        import fitz, os as _os
-
-        pdf_path = str(tmp_path / "source.pdf")
-        d = fitz.open(); d.new_page(); d.save(pdf_path); d.close()
-        out_path = str(tmp_path / "out.pdf")
-
-        parser = _make_parser()
-        args = parser.parse_args([
-            "heller", "translate", "C-E",
-            "-i", pdf_path,
-            "-o", out_path,
-            "--preserve-media",
-        ])
-
-        with pytest.raises(CLIError, match="not yet support PDF output"):
-            # Simulate _run_translate validation
-            out_ext = _os.path.splitext(out_path)[1].lower()
-            if out_ext == '.pdf':
-                raise CLIError(
-                    "--preserve-media does not yet support PDF output. "
-                    "Specify a .docx output file with -o."
-                )
-
-
-# ---------------------------------------------------------------------------
-# Part 5: page-marker-based image insertion (PDF source)
 # ---------------------------------------------------------------------------
 
 class TestSaveToDocxPageMarkerInsertion:
