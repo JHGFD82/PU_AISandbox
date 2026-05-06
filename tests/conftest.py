@@ -33,24 +33,5 @@ def _no_sleep():
     with patch("time.sleep"):
         yield
 
-from src.services.image_processor_service import ImageProcessorService
-from src.services.image_translation_service import ImageTranslationService
-from src.services.translation_service import TranslationService
 
 
-@pytest.fixture
-def ocr_service():
-    """ImageProcessorService with a fake key and mocked token tracker."""
-    return ImageProcessorService(api_key="test-api-key", token_tracker=MagicMock())
-
-
-@pytest.fixture
-def image_translation_service():
-    """ImageTranslationService with a fake key and mocked token tracker."""
-    return ImageTranslationService(api_key="test-api-key", token_tracker=MagicMock())
-
-
-@pytest.fixture
-def translation_service():
-    """TranslationService with a fake key and mocked token tracker."""
-    return TranslationService(api_key="test-api-key", token_tracker=MagicMock())

@@ -63,16 +63,8 @@ class TestSandboxProcessorInit:
     def test_init_sets_professor_name(self, monkeypatch, tmp_path):
         monkeypatch.setattr("src.runtime.sandbox_processor.get_api_key",
                             lambda name: ("fake-key", "Dr. Smith"))
-        # Prevent all service constructors from doing real work
-        for cls in (
-            "src.runtime.sandbox_processor.TranslationService",
-            "src.runtime.sandbox_processor.ImageProcessorService",
-            "src.runtime.sandbox_processor.ImageTranslationService",
-            "src.runtime.sandbox_processor.PromptService",
-            "src.runtime.sandbox_processor.TranscriptionReviewService",
-        ):
-            monkeypatch.setattr(cls, MagicMock(return_value=MagicMock()), raising=False)
-
+        monkeypatch.setattr("src.runtime.sandbox_processor.PromptService",
+                            MagicMock(return_value=MagicMock()), raising=False)
         monkeypatch.setattr("src.runtime.sandbox_processor.TokenTracker",
                             MagicMock(return_value=MagicMock()))
 

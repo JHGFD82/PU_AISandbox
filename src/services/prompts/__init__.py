@@ -1,18 +1,7 @@
-"""Prompt schema classes for all services.
+"""Prompt schema classes for the built-in prompt service.
 
-Each spec class holds the parameters for a prompt and assembles the final
-strings by referencing named constants from the fragment library.  Services
-create a spec, then call its methods to obtain (system_prompt, user_prompt).
+Translation, OCR, image-translation, and transcription-review prompt specs
+have been moved to the respective plugin repos.
 """
 
-from .translation import TranslationPromptSpec
-from .ocr import OcrPromptSpec
-from .image_translation import ImageTranslationPromptSpec
-from .transcription_review import TranscriptionReviewPromptSpec
-
-__all__ = [
-    "TranslationPromptSpec",
-    "OcrPromptSpec",
-    "ImageTranslationPromptSpec",
-    "TranscriptionReviewPromptSpec",
-]
+__all__: list[str] = []

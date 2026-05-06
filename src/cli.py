@@ -8,11 +8,8 @@ from typing import Optional
 
 from dotenv import load_dotenv
 
-from .config import parse_language_code, parse_single_language_code, validate_page_nums  # re-exported for plugins
 from .errors import CLIError
 from .runtime import ModePlugin, SandboxProcessor, handle_info_commands, load_plugins
-from .services.constants import DEFAULT_PARALLEL_WORKERS  # re-exported for plugins
-from .settings import DEFAULT_OCR_PASSES  # re-exported for plugins
 
 # Load environment variables
 load_dotenv()
