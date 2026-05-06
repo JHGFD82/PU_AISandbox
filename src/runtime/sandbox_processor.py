@@ -1,7 +1,8 @@
 """Runtime processing orchestration: wires services and delegates to handler mixins."""
 
 import logging
-from typing import TYPE_CHECKING, Optional, TypedDict
+import sys
+from typing import Optional, TypedDict
 
 from ..config import get_api_key
 from ..errors import CLIError
@@ -15,21 +16,7 @@ from .command_runner import _CommandMixin
 from .document_handler import _DocumentHandlerMixin
 from .image_handler import _ImageHandlerMixin
 
-if TYPE_CHECKING:
-    from ..services.image_processor_service import ImageProcessorService
-    from ..services.image_translation_service import ImageTranslationService
-    from ..services.transcription_review_service import TranscriptionReviewService
-    from ..services.translation_service import TranslationService
-
 logger = logging.getLogger(__name__)
-
-# Services provided by plugins (loaded lazily via __getattr__).
-_LAZY_SERVICES: dict[str, str] = {
-    "translation_service": "..services.translation_service.TranslationService",
-    "image_processor_service": "..services.image_processor_service.ImageProcessorService",
-    "image_translation_service": "..services.image_translation_service.ImageTranslationService",
-    "transcription_review_service": "..services.transcription_review_service.TranscriptionReviewService",
-}
 
 
 class _SvcKwargs(TypedDict, total=False):
@@ -76,21 +63,24 @@ class SandboxProcessor(_DocumentHandlerMixin, _ImageHandlerMixin, _CommandMixin)
             raise CLIError(f"Configuration error: {e}") from e
 
     def __getattr__(self, name: str):
-        """Lazily instantiate plugin-provided services on first access."""
-        if name == "translation_service":
-            from ..services.translation_service import TranslationService
-            val = TranslationService(self._api_key, self.professor_name, **self._svc_kwargs)
-        elif name == "image_processor_service":
-            from ..services.image_processor_service import ImageProcessorService
-            val = ImageProcessorService(self._api_key, self.professor_name, **self._svc_kwargs)
-        elif name == "image_translation_service":
-            from ..services.image_translation_service import ImageTranslationService
-            val = ImageTranslationService(self._api_key, self.professor_name, **self._svc_kwargs)
-        elif name == "transcription_review_service":
-            from ..services.transcription_review_service import TranscriptionReviewService
-            val = TranscriptionReviewService(self._api_key, self.professor_name, **self._svc_kwargs)
-        else:
+        """Lazily instantiate plugin-provided services on first access.
+
+        Any plugin that injects a module into ``sys.modules`` under the key
+        ``src.services.<name>`` and exports a class whose name is the
+        PascalCase form of ``<name>`` will be instantiated automatically —
+        no changes to this file required.
+        """
+        module_name = f"src.services.{name}"
+        module = sys.modules.get(module_name)
+        if module is None:
             raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
+        class_name = "".join(part.capitalize() for part in name.split("_"))
+        cls = getattr(module, class_name, None)
+        if cls is None:
+            raise AttributeError(
+                f"Service module '{module_name}' has no class '{class_name}'"
+            )
+        val = cls(self._api_key, self.professor_name, **self._svc_kwargs)
         # Cache on the instance so __getattr__ is only called once per service.
         object.__setattr__(self, name, val)
         return val
