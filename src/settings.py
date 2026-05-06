@@ -5,6 +5,7 @@ import time and exposes each value as a typed module-level constant so other
 modules can import them directly.
 """
 
+import sys
 import tomllib
 from pathlib import Path
 
@@ -31,23 +32,6 @@ if _LOCAL_TOML_PATH.exists():
         else:
             _s[_section] = _values
 
-# ── Translation ────────────────────────────────────────────────────────────────
-TRANSLATION_TEMPERATURE: float = _s["translation"]["temperature"]
-TRANSLATION_TOP_P: float = _s["translation"]["top_p"]
-TRANSLATION_MAX_TOKENS: int = _s["translation"]["max_tokens"]
-CONTEXT_PERCENTAGE: float = _s["translation"]["context_percentage"]
-
-# ── OCR ────────────────────────────────────────────────────────────────────────
-OCR_TEMPERATURE: float = _s["ocr"]["temperature"]
-OCR_TOP_P: float = _s["ocr"]["top_p"]
-OCR_MAX_TOKENS: int = _s["ocr"]["max_tokens"]
-OCR_FREQUENCY_PENALTY: float = _s["ocr"]["frequency_penalty"]
-OCR_PRESENCE_PENALTY: float = _s["ocr"]["presence_penalty"]
-
-# ── Image translation ──────────────────────────────────────────────────────────
-IMAGE_TRANSLATION_TEMPERATURE: float = _s["image_translation"]["temperature"]
-IMAGE_TRANSLATION_MAX_TOKENS: int = _s["image_translation"]["max_tokens"]
-
 # ── Custom prompt ──────────────────────────────────────────────────────────────
 DEFAULT_SYSTEM_PROMPT: str = _s["prompt"]["default_system_prompt"]
 PROMPT_TEMPERATURE: float = _s["prompt"]["temperature"]
@@ -65,13 +49,30 @@ DEFAULT_OCR_PASSES: int = _s["processing"]["default_ocr_passes"]
 DEFAULT_PAGE_SIZE: int = _s["processing"]["default_page_size"]
 MAX_PARALLEL_WORKERS: int = _s["processing"]["max_parallel_workers"]
 
-# ── Transcription review ───────────────────────────────────────────────────────
-TRANSCRIPTION_REVIEW_TEMPERATURE: float = _s["transcription_review"]["temperature"]
-TRANSCRIPTION_REVIEW_TOP_P: float = _s["transcription_review"]["top_p"]
-TRANSCRIPTION_REVIEW_MAX_TOKENS: int = _s["transcription_review"]["max_tokens"]
+# ── Transcription review (plugin) ─────────────────────────────────────────────
+# TRANSCRIPTION_REVIEW_* constants are provided by the transcription plugin.
+# Access via src.settings.__getattr__ which searches pu_plugin.*.settings.
 
 # ── Output formatting ─────────────────────────────────────────────────────────
 DEFAULT_FONT_SIZE: int = _s["output"]["default_font_size"]
 
 # ── Budget ─────────────────────────────────────────────────────────────────────
 BUDGET_WARNING_THRESHOLD: int = _s["budget"]["warning_threshold_pct"]
+
+
+def __getattr__(name: str):
+    """Delegate plugin-specific settings lookups to registered plugin settings modules.
+
+    Any plugin that registers a module as ``pu_plugin.<name>.settings`` via
+    ``_register()`` will have its constants available via ``from src.settings
+    import <CONSTANT>`` without any changes to this file.
+    """
+    for mod_name, mod in sys.modules.items():
+        if (
+            mod_name.startswith("pu_plugin.") and
+            mod_name.endswith(".settings") and
+            mod is not None and
+            hasattr(mod, name)
+        ):
+            return getattr(mod, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
