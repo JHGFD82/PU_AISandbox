@@ -14,8 +14,12 @@ If a required professor environment variable (`PROF_[ID]_NAME`, `PROF_[ID]_KEY`)
 - **Plugin System**: All user-facing commands (translate, transcribe, transcription_review, prompt) are implemented as plugins in `plugins/`. `src/cli.py` discovers and loads them via `src/runtime/plugin_loader.py` at startup. Only `usage` is built-in.
 
 ### Plugin Architecture
-- **Discovery**: `load_plugins()` scans `plugins/*/plugin.py` at startup. Each plugin exposes a module-level `plugin` object implementing the `ModePlugin` protocol (`commands`, `register_subparsers`, `run`).
-- **Contract**: Every plugin must create a `TokenTracker(professor=professor)` and pass it to all service calls. See `plugins/prompt/plugin.py` for the reference implementation.
+**Mandatory requirements** (every plugin must satisfy all of these):
+1. Place plugin code at `plugins/<name>/plugin.py`.
+2. Expose a module-level `plugin` object that implements the `ModePlugin` protocol (`commands`, `register_subparsers`, `run`).
+3. Inside `run()`, create a `TokenTracker(professor=professor)` and pass it to every service call.
+
+**Conventions** (follow these to stay consistent with existing plugins):
 - **Bundled plugins**: `plugins/prompt/` ships with the main repo (tracked by git) and serves as the canonical template for new plugins.
 - **External plugins**: `plugins/translation/` and `plugins/transcription/` are separate git repos cloned in. Their contents are git-ignored by the main repo.
 - **Adding a new plugin**: Copy `plugins/prompt/`, rename the class and `commands` list, implement `register_subparsers` and `run`. No changes to `src/` are required.
@@ -77,7 +81,7 @@ For translate, transcribe, and transcription_review command examples, see the RE
 
 ### Error Handling Pattern
 - **API Failures**: Automatic retries with exponential backoff in `TranslationService`
-- **Graceful Degradation**: Failed pages get error messages, processing continues
+- **Graceful Degradation**: If an individual unit of work (e.g., a document page or a single file in a batch) fails during processing, an error message is logged for that unit and processing continues with the remaining units.
 
 ### Thread Safety
 - `TokenTracker.record_usage()` is protected by an internal `threading.Lock`, so concurrent plugin workers cannot corrupt token counts.
