@@ -3,12 +3,22 @@
 ## Project Overview
 Academic translation tool for Princeton University faculty to translate between Chinese, Japanese, Korean, and English using Azure OpenAI API. Features professor-specific API key management, per-professor token tracking, and privacy-friendly configuration.
 
+If a required professor environment variable (`PROF_[ID]_NAME`, `PROF_[ID]_KEY`) is missing or invalid, `get_api_key()` raises `ValueError`, which is caught and re-raised as `CLIError` with a descriptive message. The process terminates with exit code 1.
+
 ## Architecture Pattern
 **Multi-Professor Service Architecture**: Each professor has isolated API keys and token tracking through environment-based configuration.
 
 - **Entry Point**: `main.py` → `src/cli.py` (controller/parser) → runtime handlers in `src/runtime/`
 - **Core Services**: `TranslationService` and `ImageProcessorService` in `src/services/`, `TokenTracker` in `src/tracking/`, processors in `src/processors/`, `FileOutputHandler` in `src/output/`
 - **Configuration**: Environment variables (`.env`) for professor configs, `model_catalog.json` for model pricing
+- **Plugin System**: All user-facing commands (translate, transcribe, transcription_review, prompt) are implemented as plugins in `plugins/`. `src/cli.py` discovers and loads them via `src/runtime/plugin_loader.py` at startup. Only `usage` is built-in.
+
+### Plugin Architecture
+- **Discovery**: `load_plugins()` scans `plugins/*/plugin.py` at startup. Each plugin exposes a module-level `plugin` object implementing the `ModePlugin` protocol (`commands`, `register_subparsers`, `run`).
+- **Contract**: Every plugin must create a `TokenTracker(professor=professor)` and pass it to all service calls. See `plugins/prompt/plugin.py` for the reference implementation.
+- **Bundled plugins**: `plugins/prompt/` ships with the main repo (tracked by git) and serves as the canonical template for new plugins.
+- **External plugins**: `plugins/translation/` and `plugins/transcription/` are separate git repos cloned in. Their contents are git-ignored by the main repo.
+- **Adding a new plugin**: Copy `plugins/prompt/`, rename the class and `commands` list, implement `register_subparsers` and `run`. No changes to `src/` are required.
 
 ## Professor Configuration System
 The system uses a specific environment variable pattern:
@@ -100,7 +110,7 @@ Hyphen-separated pairs: `C-E` (Chinese→English), `J-K` (Japanese→Korean), et
 
 ### Media Preservation (`--preserve-media`)
 - **Flag**: `--preserve-media` (boolean, translate command only)
-- **Scope**: `.docx` or `.pdf` input with a `.docx` output (`-o`). Images extracted from the source are reinserted into the output Word document at proportional positions.
+- **Scope**: Valid only when the input is `.docx` or `.pdf` **and** the output (`-o`) is `.docx`. Images extracted from the source are reinserted into the output Word document at proportional positions.
 - **Incompatible combinations** (all raise `CLIError` before any API call):
 
   | Condition | Reason |
@@ -111,6 +121,8 @@ Hyphen-separated pairs: `C-E` (Chinese→English), `J-K` (Japanese→Korean), et
   | No `-o` output path (auto-save without explicit path) | Auto-save defaults to `.txt`, which cannot embed images |
   | `.txt` output extension | Cannot embed images in plain text |
   | `.pdf` output extension | PDF output not yet implemented; use `.docx` |
+
+  **Quick rule**: `--preserve-media` requires `.docx` or `.pdf` input **and** an explicit `-o` path ending in `.docx`. Any other combination is invalid.
 - **DOCX extraction**: `DocxProcessor.extract_media(file_obj)` — iterates paragraph runs, finds `w:drawing` → `a:blip` elements, reads `ImagePart.blob`, records `position_fraction` (para_idx / total_paras), and EMU dimensions from `wp:extent`.
 - **PDF extraction**: `PdfMediaExtractor.extract_media(file_obj)` (`src/processors/pdf_media_extractor.py`) — uses PyMuPDF (`fitz`); iterates pages, deduplicates by xref, computes `position_fraction = (page_index + y_frac) / total_pages`, converts pixel dims to EMU (12700 EMU/px at 72 DPI), skips images < 512 bytes.
 - **Reinsertion**: `FileOutputHandler.save_to_docx(..., media=...)` — images are inserted using proportional positioning: each image is appended immediately after the translated paragraph whose cumulative fraction (`i / total_paras`) first meets or exceeds the image's `position_fraction`.
@@ -122,9 +134,13 @@ Hyphen-separated pairs: `C-E` (Chinese→English), `J-K` (Japanese→Korean), et
 - **Flag**: `-w N` / `--workers N` (default: `1` = sequential). The default is defined as `DEFAULT_PARALLEL_WORKERS` in `src/services/constants.py`.
 
 **Per-command behaviour:**
+
 - **Translation**: Each page is sent as an independent `ThreadPoolExecutor` worker. Previous-page context is the **untranslated source text** of the prior page (not the prior translation). `context_length_exceeded` recursive splitting still works within each worker.
-- **Transcription folder mode**: Each image in a folder is dispatched to a separate worker. Multi-pass OCR (`-P N`) still runs sequentially within each worker. Workers have no effect for single-image input.
+
+- **Transcription (folder mode)**: Each image in a folder is dispatched to a separate worker. Multi-pass OCR (`-P N`) still runs sequentially within each worker. Workers have no effect for single-image input.
+
 - **Prompt command**: No `-w` flag — always a single call.
+
 - **Custom text (`-c`)**: `-w` is accepted but ignored (not paginated).
 
 **Worker capping:**
@@ -199,12 +215,13 @@ Hyphen-separated pairs: `C-E` (Chinese→English), `J-K` (Japanese→Korean), et
 
 ## Custom Prompt Command
 - **Command**: `python main.py <professor> prompt` — sends a freeform prompt without translation framing
+- **Implemented as a plugin**: `plugins/prompt/plugin.py` — ships with the main repo and serves as the reference template for new plugins
 - **Fully interactive**: no text arguments; user types input at runtime and ends with `---` on its own line
 - **System prompt**: `-s/--system` is a boolean flag; when set, the system prompt is collected first, then the user prompt
 - **Output**: response printed to console; optionally saved with `-o`
 - **Dry run**: `--dry-run` shows prompt structure without making an API call
-- **Token tracking**: usage tracked via the same `TokenTracker` as translation
-- **Interactive helper**: `SandboxProcessor._collect_multiline(label)` is the shared static method used by all interactive `---`-terminated input (translate `-c`, prompt, and abstract input)
+- **Token tracking**: usage tracked via `TokenTracker` created inside the plugin's `run()` method
+- **Interactive helper**: `_collect_multiline(label)` is a module-level helper in `plugins/prompt/plugin.py`; translation's `-c` mode uses its own equivalent in the translation plugin
 
 ## External Dependencies
 - **PortKey**: Uses `SANDBOX_ENDPOINT` and `SANDBOX_API_VERSION` from config
@@ -234,5 +251,5 @@ Use `python main.py --show-config` to validate professor configuration without m
   - **Subject**: `<type>(<scope>): <short summary>` (imperative mood, ≤ 72 chars)
   - **Types**: `feat`, `fix`, `refactor`, `docs`, `test`, `chore`, `perf`, `ci`, `build`
   - **Body sections**: `Why:`, `What changed:`, `Notes:` (when relevant)
-- After making code changes, **propose a commit message** in this format for the user to review.
+- After making **any** code changes, always propose a commit message in this format before ending the response.
 - **The user handles all git commits themselves. Never run `git commit` or `git add`.**
