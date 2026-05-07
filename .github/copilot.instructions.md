@@ -1,7 +1,7 @@
 # PU AI Sandbox - AI Coding Assistant Instructions
 
 ## Project Overview
-Academic translation tool for Princeton University faculty to translate between Chinese, Japanese, Korean, and English using Azure OpenAI API. Features professor-specific API key management, per-professor token tracking, and privacy-friendly configuration.
+Modular AI sandbox platform for Princeton University faculty. Provides professor-specific API key management, per-professor token tracking, and a plugin-based command architecture for AI-powered workflows.
 
 If a required professor environment variable (`PROF_[ID]_NAME`, `PROF_[ID]_KEY`) is missing or invalid, `get_api_key()` raises `ValueError`, which is caught and re-raised as `CLIError` with a descriptive message. The process terminates with exit code 1.
 
@@ -63,138 +63,24 @@ python main.py heller usage months              # List all archived month files
 python main.py heller usage daily               # Today's usage
 python main.py heller usage daily 2026-03-01    # Specific date
 
-# Translation
-python main.py heller translate C-E -c                        # Custom text input
-python main.py heller translate C-E -i test.pdf               # PDF translation
-python main.py heller translate C-E -i test.docx              # Word document
-python main.py heller translate C-E -i test.txt               # Plain text file
-python main.py heller translate C-E -i test.pdf -p 1-5        # Page range
-python main.py heller translate C-E -i test.pdf -p "4,15-17,20,30-55"  # Multi-range
-python main.py heller translate C-E -i test.pdf -o out.docx   # Output as Word
-python main.py heller translate C-E -i test.pdf -w 4          # 4 parallel workers
-python main.py heller translate C-E -i test.docx -o out.docx --preserve-media  # Carry DOCX images into output Word doc
-python main.py heller translate C-E -i test.pdf -o out.docx --preserve-media   # Carry PDF images into output Word doc
-
-# Transcription (OCR) — use single language char, not a pair
-python main.py heller transcribe E -i test.jpg               # OCR to console
-python main.py heller transcribe E -i test.jpg -o output.txt # OCR to file
-python main.py heller transcribe E -i test.jpg -m gpt-4o-mini # Specific model
-python main.py heller transcribe E -i ./scans/ -w 4          # Folder OCR, 4 parallel workers
-
-# Transcription review (OCR error detection) — use single language char
-python main.py heller transcription_review J -i transcription.txt   # Review a saved Japanese transcription
-python main.py heller transcription_review J -c                      # Paste transcription text interactively
-python main.py heller transcription_review J -i trans.txt -o report.json  # Save JSON report to file
-python main.py heller transcription_review J --kanbun -i kanbun.txt  # Text contains kanbun annotations
-python main.py heller transcription_review J -i trans.txt --dry-run  # Preview prompt without API call
-
 # Custom prompts (fully interactive — text entered at runtime, end with ---)
-python main.py heller prompt                                  # User prompt only
-python main.py heller prompt -s                               # System prompt first, then user prompt
-python main.py heller prompt -o response.txt                  # Save response to file
-python main.py heller prompt -m gpt-4o-mini                   # Use specific model
-python main.py heller prompt -s --dry-run                     # Preview prompts without API call
+python main.py heller prompt                    # User prompt only
+python main.py heller prompt -s                 # System prompt first, then user prompt
+python main.py heller prompt -o response.txt    # Save response to file
+python main.py heller prompt -m gpt-4o-mini     # Use specific model
+python main.py heller prompt -s --dry-run       # Preview prompts without API call
 ```
 
-### Language Code Pattern
-Hyphen-separated pairs: `C-E` (Chinese→English), `J-K` (Japanese→Korean), etc.
-- Parsed in `parse_language_code()` using `LANGUAGE_MAP` from `src/config.py`
-- Validation ensures source ≠ target, valid language codes only
+For translate, transcribe, and transcription_review command examples, see the README in each plugin repo.
 
 ## Critical Implementation Details
 
-### Progressive Saving
-- **Text format only**: `--progressive-save` saves each page immediately as it finishes
-- **Incompatible with parallel mode**: `--progressive-save` is disabled with a printed warning when `workers > 1`
-- **Incompatible with --preserve-media**: combining these two raises a `CLIError` immediately.
-
-### Media Preservation (`--preserve-media`)
-- **Flag**: `--preserve-media` (boolean, translate command only)
-- **Scope**: Valid only when the input is `.docx` or `.pdf` **and** the output (`-o`) is `.docx`. Images extracted from the source are reinserted into the output Word document at proportional positions.
-- **Incompatible combinations** (all raise `CLIError` before any API call):
-
-  | Condition | Reason |
-  |-----------|--------|
-  | `--progressive-save` | Cannot combine with media preservation |
-  | `-c` / `--custom` | Pasted text has no embedded media |
-  | Non-`.docx`, non-`.pdf` input (TXT, image) | Only DOCX and PDF extraction are implemented |
-  | No `-o` output path (auto-save without explicit path) | Auto-save defaults to `.txt`, which cannot embed images |
-  | `.txt` output extension | Cannot embed images in plain text |
-  | `.pdf` output extension | PDF output not yet implemented; use `.docx` |
-
-  **Quick rule**: `--preserve-media` requires `.docx` or `.pdf` input **and** an explicit `-o` path ending in `.docx`. Any other combination is invalid.
-- **DOCX extraction**: `DocxProcessor.extract_media(file_obj)` — iterates paragraph runs, finds `w:drawing` → `a:blip` elements, reads `ImagePart.blob`, records `position_fraction` (para_idx / total_paras), and EMU dimensions from `wp:extent`.
-- **PDF extraction**: `PdfMediaExtractor.extract_media(file_obj)` (`src/processors/pdf_media_extractor.py`) — uses PyMuPDF (`fitz`); iterates pages, deduplicates by xref, computes `position_fraction = (page_index + y_frac) / total_pages`, converts pixel dims to EMU (12700 EMU/px at 72 DPI), skips images < 512 bytes.
-- **Reinsertion**: `FileOutputHandler.save_to_docx(..., media=...)` — images are inserted using proportional positioning: each image is appended immediately after the translated paragraph whose cumulative fraction (`i / total_paras`) first meets or exceeds the image's `position_fraction`.
-- **Data model**: `src/models/embedded_media.py` — `EmbeddedMedia` dataclass (`data`, `content_type`, `position_fraction`, `width_emu`, `height_emu`)
-- **Pipeline flow**: `_run_translate` validates → `translate_document` extracts media via `DocxProcessor` or `PdfMediaExtractor` (before translation) → `save_translation_output` forwards media → `save_to_docx` reinserts
-- **Dependencies**: `python-docx` (DOCX extraction/reinsertion), `pymupdf` (PDF extraction)
-
-### Parallel Processing
-- **Flag**: `-w N` / `--workers N` (default: `1` = sequential). The default is defined as `DEFAULT_PARALLEL_WORKERS` in `src/services/constants.py`.
-
-**Per-command behaviour:**
-
-- **Translation**: Each page is sent as an independent `ThreadPoolExecutor` worker. Previous-page context is the **untranslated source text** of the prior page (not the prior translation). `context_length_exceeded` recursive splitting still works within each worker.
-
-- **Transcription (folder mode)**: Each image in a folder is dispatched to a separate worker. Multi-pass OCR (`-P N`) still runs sequentially within each worker. Workers have no effect for single-image input.
-
-- **Prompt command**: No `-w` flag — always a single call.
-
-- **Custom text (`-c`)**: `-w` is accepted but ignored (not paginated).
-
-**Worker capping:**
-- If `workers > page_count`, the executor is capped to the number of pages (logged at INFO level).
-
-**Temp files:**
-- Results are written to numbered temp files so RAM stays bounded for large documents; temp directory is deleted in a `finally` block.
-
-**Rate limiting:**
-- `PAGE_DELAY_SECONDS` between pages is removed in parallel mode; the API handles rate limiting.
-
-**Thread safety:**
-- `TokenTracker.record_usage()` is protected by an internal `threading.Lock`, so concurrent workers cannot corrupt token counts.
-
 ### Error Handling Pattern
 - **API Failures**: Automatic retries with exponential backoff in `TranslationService`
-- **Progressive Saving**: Text-only (no PDF/Word support), saves each page immediately
 - **Graceful Degradation**: Failed pages get error messages, processing continues
 
-### File Output Strategy
-- **Text Files**: Direct UTF-8 output with proper paragraph breaks
-- **PDF Files**: Uses `reportlab` with CJK font support from `fonts/` directory
-- **Word Documents**: Uses `python-docx` with CJK font support, professional formatting (1.5 line spacing, proper margins)
-- **Auto-save**: Timestamped filenames with language codes, placed in source file directory
-- **Absolute Path Resolution**: Input files converted to absolute paths to ensure output placement regardless of execution directory
-
-### PDF Processing Specifics
-- **CJK Optimization**: Custom `LAParams` in `PDFProcessor` for better CJK text extraction
-- **Context Preservation**: Previous page context (65% of content) passed to translation
-- **Page Range Support**: 1-based user input converted to 0-based internally; supports multi-range syntax `"4,15-17,20,30-55"` via `_parse_page_ranges()` (replaces `_parse_page_nums`)
-
-### Output Format Support
-- **Text Files (.txt)**: Direct UTF-8 output, supports progressive saving
-- **PDF Files (.pdf)**: Uses `reportlab` with CJK font validation via `_get_cjk_font()`
-- **Word Documents (.docx)**: Uses `python-docx` with CJK font selection via `_get_docx_font()`
-- **Path Resolution**: Input files converted to absolute paths in CLI for consistent output placement
-- **Progressive Save Limitation**: Only text format supports progressive saving; PDF/Word fall back to text
-
-### Input File Support
-- **PDF Files (.pdf)**: Full text extraction with page range support via `PDFProcessor`
-- **Word Documents (.docx)**: Text-only extraction via `DocxProcessor`, split into logical sections
-- **Text Files (.txt)**: Direct UTF-8 processing via `TxtProcessor`, automatic paragraph detection
-- **Image Files (.jpg, .jpeg, .png, .gif, .bmp, .webp)**: OCR via `ImageProcessorService` with vision-capable models
-- **Legacy PDF Argument**: `--input_PDF` maintained for backward compatibility, use `-i/--input` for new code
-- **File Type Detection**: Automatic detection based on file extension; images automatically trigger OCR instead of translation
-
-### Image OCR Processing
-- **Automatic Detection**: Image files are detected by extension and routed to OCR automatically
-- **Language Code**: Use single character (E, C, S, T, J, K) for target language, not translation pairs (CE, JE)
-- **Vision Model Validation**: Automatically selects and validates vision-capable models from `model_catalog.json`
-- **Token Tracking**: OCR usage tracked in same file as translation via shared `TokenTracker`
-- **Output**: Extracted text printed to console and optionally saved to file with `-o` flag
-- **Model Selection**: Use `-m/--model` to specify which model to use (e.g., `gpt-4o`, `gpt-4o-mini`, `gpt-5`)
-- **Example**: `python main.py professor transcribe E -i image.jpg -o extracted.txt -m gpt-4o-mini`
+### Thread Safety
+- `TokenTracker.record_usage()` is protected by an internal `threading.Lock`, so concurrent plugin workers cannot corrupt token counts.
 
 ### Model Selection and Configuration
 - **Default Models**: `OCR_MODEL=gpt-4o-mini` for OCR, `DEFAULT_MODEL=gpt-4o` for translation
@@ -203,15 +89,8 @@ Hyphen-separated pairs: `C-E` (Chinese→English), `J-K` (Japanese→Korean), et
 - **Other Providers**: Add the model manually to `src/model_catalog.json`; edit the file directly following the template schema
 - **Provider Slug Mapping**: PortKey uses different slugs for some providers (e.g. `google` → `vertex-ai`). These mappings live in `model_catalog.json` under `config.provider_map`, not in code.
 - **List Models**: `python main.py --list-models` shows all catalog models with pricing and vision support
-- **Vision Validation**: ImageProcessorService automatically validates model supports vision, falls back to defaults if not
-- **Model Priority**: Custom model → OCR_MODEL/DEFAULT_MODEL → first available vision-capable model
 - **Configuration**: Models and pricing defined in `src/model_catalog.json` (git-ignored; copy from `src/model_catalog.template.json` to set up) with `supports_vision` boolean flag
 - **No CLI catalog management**: There are no CLI commands to add/update/sync models. Use `provider/model` with `-m` for auto-registration, or edit the JSON directly.
-
-### File Path Handling
-- **Input Path Resolution**: `os.path.abspath()` applied to input files in runtime processing methods
-- **Output Path Resolution**: User-specified output paths converted to absolute paths in CLI `run()` method
-- **Directory Placement**: Output files placed in same directory as source file via `generate_output_filename()`
 
 ## Custom Prompt Command
 - **Command**: `python main.py <professor> prompt` — sends a freeform prompt without translation framing
@@ -226,13 +105,11 @@ Hyphen-separated pairs: `C-E` (Chinese→English), `J-K` (Japanese→Korean), et
 ## External Dependencies
 - **PortKey**: Uses `SANDBOX_ENDPOINT` and `SANDBOX_API_VERSION` from config
 - **Font Management**: Custom fonts in `fonts/` directory for PDF and Word output
-- **Document Generation**: `reportlab` for PDF, `python-docx` for Word documents
-- **Image Processing**: `ImageProcessor` for image-to-data-url conversion, `ImageProcessorService` for OCR
 - **Princeton-Specific**: API keys from Princeton's AI Sandbox service
 
 ## Common Patterns to Follow
 - **Safe Name Usage**: Always use `make_safe_filename()` for file operations
-- **Professor Context**: Pass professor name to `TokenTracker` and `TranslationService`
+- **Professor Context**: Pass professor name to `TokenTracker` and any service calls
 - **Configuration Loading**: Use `load_professor_config()` for env var parsing
 - **Error Messages**: Include available professors and suggest both full/safe names
 - **Logging**: Use structured logging with professor context where applicable
@@ -241,10 +118,9 @@ Hyphen-separated pairs: `C-E` (Chinese→English), `J-K` (Japanese→Korean), et
 Use `python main.py --show-config` to validate professor configuration without making API calls.
 
 ## Test Coverage Notes
-- **Parallel translation**: `tests/test_parallel_translation.py` — order correctness, context passing, temp file cleanup, worker capping, progressive-save warning, context-length splitting inside workers
-- **Parallel OCR**: `tests/test_parallel_ocr.py` — folder mode order, worker exceptions, multi-pass forwarding, worker capping, empty folder error
 - **Thread safety**: `tests/test_token_tracker.py::TestConcurrentRecordUsage` — 16 concurrent `record_usage()` calls, exact token count, call count, session history length
-- **Media preservation**: `tests/test_preserve_media.py` — `EmbeddedMedia` dataclass, `DocxProcessor.extract_media()`, CLI flag parsing, all incompatible-flag `CLIError` cases, `save_to_docx()` with positional reinsertion, `save_translation_output()` media forwarding
+- **Plugin loading**: `tests/test_plugin_loader.py` — discovery, `ModePlugin` protocol validation, error handling for malformed plugins
+- **Core services and processors**: tests in `tests/` cover `TranslationService`, `ImageProcessorService`, processors in `src/processors/`, and `FileOutputHandler` — these all live in the main repo even though they are invoked by external plugins
 
 ## Git Commit Workflow
 - A `.gitmessage` template exists at the repo root — always follow its format when writing commits:
