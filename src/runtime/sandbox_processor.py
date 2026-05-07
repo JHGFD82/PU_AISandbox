@@ -10,7 +10,6 @@ from ..models import OutputOptions  # noqa: F401 — used in type hints across h
 from ..output.file_output import FileOutputHandler
 from ..processors.image_processor import ImageProcessor
 from ..processors.pdf_processor import PDFProcessor
-from ..services.prompt_service import PromptService
 from ..tracking.token_tracker import TokenTracker
 from .command_runner import _CommandMixin
 from .document_handler import _DocumentHandlerMixin
@@ -54,7 +53,6 @@ class SandboxProcessor(_DocumentHandlerMixin, _ImageHandlerMixin, _CommandMixin)
             # translation_service, image_processor_service, image_translation_service,
             # and transcription_review_service are loaded lazily via __getattr__ so that
             # SandboxProcessor can be instantiated without the plugin service files present.
-            self.prompt_service = PromptService(api_key, professor_name, **self._svc_kwargs)
 
             self.image_processor = ImageProcessor()
             self.pdf_processor = PDFProcessor()
@@ -84,22 +82,6 @@ class SandboxProcessor(_DocumentHandlerMixin, _ImageHandlerMixin, _CommandMixin)
         # Cache on the instance so __getattr__ is only called once per service.
         object.__setattr__(self, name, val)
         return val
-
-    def process_prompt(
-        self,
-        user_prompt: str,
-        system_prompt: Optional[str] = None,
-        output_file: Optional[str] = None,
-    ) -> None:
-        """Send a custom prompt and print (and optionally save) the response."""
-        try:
-            response = self.prompt_service.send_prompt(user_prompt, system_prompt)
-            print("\n" + response)
-            if output_file:
-                FileOutputHandler.save_to_text_file(response, output_file, label="Response")
-        except Exception as e:
-            logger.error(f"Error sending prompt: {e}", exc_info=True)
-            raise CLIError(f"Error sending prompt: {e}") from e
 
     def process_transcription_review(
         self,

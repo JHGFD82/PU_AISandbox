@@ -46,7 +46,6 @@ def _make_processor(monkeypatch) -> SandboxProcessor:
     proc.translation_service = MagicMock()
     proc.image_processor_service = MagicMock()
     proc.image_translation_service = MagicMock()
-    proc.prompt_service = MagicMock()
     proc.transcription_review_service = MagicMock()
     proc.image_processor = MagicMock()
     proc.pdf_processor = MagicMock()
@@ -260,31 +259,8 @@ class TestProcessTextBasedFile:
 
 
 # ---------------------------------------------------------------------------
-# process_prompt / process_transcription_review / _save_text_file
+# process_transcription_review / _save_text_file
 # ---------------------------------------------------------------------------
-
-class TestProcessPrompt:
-
-    def test_delegates_to_prompt_service_and_prints(self, monkeypatch, capsys):
-        proc = _make_processor(monkeypatch)
-        proc.prompt_service.send_prompt.return_value = "The response text"
-        proc.process_prompt("my question")
-        out = capsys.readouterr().out
-        assert "The response text" in out
-
-    def test_saves_to_output_file(self, monkeypatch, tmp_path, capsys):
-        proc = _make_processor(monkeypatch)
-        proc.prompt_service.send_prompt.return_value = "saved response"
-        out_file = str(tmp_path / "response.txt")
-        proc.process_prompt("my question", output_file=out_file)
-        assert (tmp_path / "response.txt").read_text() == "saved response"
-
-    def test_exception_wrapped_as_cli_error(self, monkeypatch):
-        proc = _make_processor(monkeypatch)
-        proc.prompt_service.send_prompt.side_effect = RuntimeError("network fail")
-        with pytest.raises(CLIError, match="Error sending prompt"):
-            proc.process_prompt("question")
-
 
 class TestProcessTranscriptionReview:
 

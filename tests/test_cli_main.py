@@ -130,29 +130,6 @@ class TestMainUsageCommand:
 
 
 # ---------------------------------------------------------------------------
-# main() — professor + prompt command
-# ---------------------------------------------------------------------------
-
-
-class TestMainPromptCommand:
-
-    def test_prompt_creates_sandbox_processor_and_calls_run(self):
-        mock_sandbox = MagicMock()
-        with patch("src.cli.SandboxProcessor", return_value=mock_sandbox) as mock_cls, \
-             patch("sys.argv", ["main.py", "heller", "prompt"]):
-            main()
-        mock_cls.assert_called_once_with("heller", model=None, temperature=None, top_p=None, max_tokens=None)
-        mock_sandbox.run.assert_called_once()
-
-    def test_prompt_passes_model_temperature_top_p(self):
-        mock_sandbox = MagicMock()
-        with patch("src.cli.SandboxProcessor", return_value=mock_sandbox) as mock_cls, \
-             patch("sys.argv", ["main.py", "heller", "prompt", "-m", "gpt-4o", "-t", "1.0", "-T", "0.8"]):
-            main()
-        mock_cls.assert_called_once_with("heller", model="gpt-4o", temperature=1.0, top_p=0.8, max_tokens=None)
-
-
-# ---------------------------------------------------------------------------
 # main() — unknown command → sys.exit(1)
 # ---------------------------------------------------------------------------
 

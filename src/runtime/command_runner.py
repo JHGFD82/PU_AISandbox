@@ -10,29 +10,19 @@ Python MRO.
 import argparse
 import logging
 import os
-import sys
-from typing import TYPE_CHECKING, Any, Optional, Tuple
+from typing import Any, Optional, Tuple
 
 from ..errors import CLIError
-
-if TYPE_CHECKING:
-    from ..services.prompt_service import PromptService
 
 logger = logging.getLogger(__name__)
 
 
 class _CommandMixin:
-    """Mixin that adds CLI command dispatch to SandboxProcessor.
+    """Mixin that adds helper methods to SandboxProcessor.
 
     All instance-method references to ``self.*`` resolve on the concrete
     ``SandboxProcessor`` subclass via normal Python MRO.
     """
-
-    if TYPE_CHECKING:
-        # Attributes and processing methods provided by the SandboxProcessor subclass.
-        prompt_service: "PromptService"
-
-        def process_prompt(self, user_prompt: str, system_prompt: Optional[str] = None, output_file: Optional[str] = None) -> None: ...
 
     @staticmethod
     def _collect_multiline(label: str) -> str:
@@ -161,44 +151,3 @@ class _CommandMixin:
             return os.path.abspath(output_file_arg)
 
         return None
-
-    def _run_prompt(self, args: argparse.Namespace) -> None:
-        system_prompt_text: Optional[str] = None
-        if getattr(args, 'include_system_prompt', False):
-            system_prompt_text = self._collect_multiline("System prompt") or None
-
-        if getattr(args, 'dry_run', False):
-            model_dr = self.prompt_service._get_model()
-            sys_p, usr_p = self.prompt_service.build_prompts(
-                "[Interactive prompt — text would be entered at runtime]",
-                system_prompt_text,
-            )
-            self._dry_run_display(model_dr, sys_p, usr_p)
-            return
-
-        user_prompt_text = self._collect_multiline("User prompt")
-        if not user_prompt_text.strip():
-            raise CLIError("No prompt text provided.")
-
-        output_file_p = self._resolve_output_path(args)
-        self.process_prompt(user_prompt_text, system_prompt_text, output_file_p)
-
-    def run(self, args: argparse.Namespace) -> None:
-        """Run the application with the given arguments."""
-        _dispatch = {
-            'prompt': self._run_prompt,
-        }
-        try:
-            handler = _dispatch.get(args.command)
-            if handler is None:
-                raise CLIError(f"Unknown command: {args.command}")
-            handler(args)
-        except CLIError as e:
-            print(f"Error: {e}", file=sys.stderr)
-            sys.exit(1)
-        except KeyboardInterrupt:
-            print("\nOperation cancelled.", file=sys.stderr)
-            sys.exit(130)
-        except Exception as e:
-            logger.error(f"Unexpected error: {e}", exc_info=True)
-            sys.exit(1)

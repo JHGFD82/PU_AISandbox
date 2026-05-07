@@ -3,7 +3,7 @@
 import argparse
 import sys
 from typing import Optional
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import patch
 
 import pytest
 
@@ -16,12 +16,9 @@ from src.errors import CLIError
 # ---------------------------------------------------------------------------
 
 class _FakeMixin(_CommandMixin):
-    """Concrete subclass of _CommandMixin with stub processing methods."""
+    """Concrete subclass of _CommandMixin for testing its static helpers."""
 
     def __init__(self):
-        self.prompt_service = MagicMock()
-
-    def process_prompt(self, user_prompt, system_prompt=None, output_file=None):
         pass
 
 
@@ -203,117 +200,6 @@ class TestResolveOutputPath:
         import os
         assert os.path.isabs(result)
         assert result.endswith("out.txt")
-
-
-# ---------------------------------------------------------------------------
-# run() dispatch
-# ---------------------------------------------------------------------------
-
-class TestRunDispatch:
-
-    def _make_args(self, command: str, **kwargs):
-        return argparse.Namespace(command=command, **kwargs)
-
-    def test_unknown_command_prints_to_stderr_and_exits(self):
-        mixin = _make_mixin()
-        args = argparse.Namespace(command="bogus")
-        with pytest.raises(SystemExit) as exc_info:
-            mixin.run(args)
-        assert exc_info.value.code == 1
-
-    def test_keyboard_interrupt_exits_130(self, monkeypatch):
-        mixin = _make_mixin()
-
-        def raise_interrupt(args):
-            raise KeyboardInterrupt
-
-        monkeypatch.setattr(mixin, "_run_prompt", raise_interrupt)
-        args = argparse.Namespace(command="prompt")
-        with pytest.raises(SystemExit) as exc_info:
-            mixin.run(args)
-        assert exc_info.value.code == 130
-
-    def test_unexpected_exception_exits_1(self, monkeypatch):
-        mixin = _make_mixin()
-
-        def boom(args):
-            raise RuntimeError("unexpected")
-
-        monkeypatch.setattr(mixin, "_run_prompt", boom)
-        args = argparse.Namespace(command="prompt")
-        with pytest.raises(SystemExit) as exc_info:
-            mixin.run(args)
-        assert exc_info.value.code == 1
-
-    def test_cli_error_prints_and_exits_1(self, monkeypatch):
-        mixin = _make_mixin()
-
-        def raise_cli(args):
-            raise CLIError("bad args")
-
-        monkeypatch.setattr(mixin, "_run_prompt", raise_cli)
-        args = argparse.Namespace(command="prompt")
-        with pytest.raises(SystemExit) as exc_info:
-            mixin.run(args)
-        assert exc_info.value.code == 1
-
-
-# ---------------------------------------------------------------------------
-# _run_prompt
-# ---------------------------------------------------------------------------
-
-class TestRunPrompt:
-
-    def _make_prompt_args(self, **overrides):
-        defaults = {
-            "output_file": None,
-            "include_system_prompt": False,
-            "dry_run": False,
-        }
-        defaults.update(overrides)
-        return argparse.Namespace(**defaults)
-
-    def test_calls_process_prompt_with_collected_text(self, monkeypatch):
-        mixin = _make_mixin()
-        inputs = iter(["user text here", "---"])
-        monkeypatch.setattr("builtins.input", lambda *_: next(inputs))
-        called_with = []
-        monkeypatch.setattr(mixin, "process_prompt", lambda *a, **kw: called_with.append((a, kw)))
-        args = self._make_prompt_args()
-        mixin._run_prompt(args)
-        assert called_with
-        assert "user text here" in called_with[0][0][0]
-
-    def test_include_system_prompt_flag_collects_system_text(self, monkeypatch):
-        mixin = _make_mixin()
-        # First collect is system, second is user
-        seq = iter(["my system", "---", "my user", "---"])
-        monkeypatch.setattr("builtins.input", lambda *_: next(seq))
-        captured = []
-        monkeypatch.setattr(mixin, "process_prompt", lambda *a, **kw: captured.append((a, kw)))
-        args = self._make_prompt_args(include_system_prompt=True)
-        mixin._run_prompt(args)
-        assert captured
-        # system_prompt passed as second positional arg
-        assert "my system" in str(captured[0])
-
-    def test_dry_run_does_not_call_process_prompt(self, monkeypatch):
-        mixin = _make_mixin()
-        mixin.prompt_service._get_model = MagicMock(return_value="gpt-4o")
-        mixin.prompt_service.build_prompts = MagicMock(return_value=("sys", "usr"))
-        called = []
-        monkeypatch.setattr(mixin, "process_prompt", lambda *a, **kw: called.append(True))
-        args = self._make_prompt_args(dry_run=True)
-        mixin._run_prompt(args)
-        assert not called
-
-    def test_empty_user_prompt_raises_cli_error(self, monkeypatch):
-        mixin = _make_mixin()
-        inputs = iter(["---"])  # Empty — just the sentinel
-        monkeypatch.setattr("builtins.input", lambda *_: next(inputs))
-        args = self._make_prompt_args()
-        with pytest.raises(CLIError, match="No prompt"):
-            mixin._run_prompt(args)
 
 
 # ---------------------------------------------------------------------------

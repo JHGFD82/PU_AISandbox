@@ -9,7 +9,7 @@ from typing import Optional
 from dotenv import load_dotenv
 
 from .errors import CLIError
-from .runtime import ModePlugin, SandboxProcessor, handle_info_commands, load_plugins
+from .runtime import ModePlugin, handle_info_commands, load_plugins
 
 # Load environment variables
 load_dotenv()
@@ -151,18 +151,8 @@ Run 'python main.py <professor> <command> --help' for plugin-specific usage.
         help='Date in YYYY-MM-DD format (defaults to today)',
     )
 
-    # translate, transcribe, and transcription_review are registered by their
-    # respective plugins (plugins/translation/ and plugins/transcription/).
-
-    # ===== PROMPT COMMAND (built-in) =====
-    prompt_parser = subparsers.add_parser('prompt', help='Send a custom prompt to the AI model')
-    prompt_parser.add_argument(
-        '-s', '--system',
-        dest='include_system_prompt',
-        action='store_true',
-        help='Prompt for a system (developer) prompt before the user prompt',
-    )
-    _add_common_flags(prompt_parser)
+    # translate, transcribe, transcription_review, and prompt are all registered
+    # by their respective plugins in plugins/.
 
     # Register plugin subcommands (each unique plugin object called once).
     if plugins:
@@ -199,7 +189,6 @@ def main() -> None:
                 "  usage report [YYYY-MM] [--all-time]  Token usage report\n"
                 "  usage months                         List archived month files\n"
                 "  usage daily [YYYY-MM-DD]             Daily usage\n"
-                "  prompt                               Send a custom prompt\n"
                 + (
                     "\nPlugin commands: " + ", ".join(sorted(_plugins)) + "\n"
                     if _plugins else ""
@@ -215,7 +204,6 @@ def main() -> None:
                 "  usage report [YYYY-MM] [--all-time]  Token usage report\n"
                 "  usage months                         List archived month files\n"
                 "  usage daily [YYYY-MM-DD]             Daily usage\n"
-                "  prompt                               Send a custom prompt\n"
                 + (
                     "\nPlugin commands: " + ", ".join(sorted(_plugins)) + "\n"
                     if _plugins else ""
@@ -227,13 +215,6 @@ def main() -> None:
         if args.command == 'usage':
             if handle_info_commands(args):
                 return
-        elif args.command == 'prompt':
-            model = getattr(args, 'model', None)
-            temperature = getattr(args, 'temperature', None)
-            top_p = getattr(args, 'top_p', None)
-            max_tokens = getattr(args, 'max_tokens', None)
-            sandbox = SandboxProcessor(args.professor, model=model, temperature=temperature, top_p=top_p, max_tokens=max_tokens)
-            sandbox.run(args)
         elif _plugins and args.command in _plugins:
             model = getattr(args, 'model', None)
             temperature = getattr(args, 'temperature', None)
