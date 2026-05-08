@@ -30,16 +30,6 @@ def make_safe_filename(name: str) -> str:
     return safe_name.lower()
 
 
-def validate_page_nums(value: str) -> str:
-    """Validate page numbers input format for CLI arguments."""
-    if not re.match(r"^\d+(-\d+)?(\s*,\s*\d+(-\d+)?)*$", value):
-        raise argparse.ArgumentTypeError(
-            "Invalid page selection. Use a page number (5), a range (1-10), "
-            "or a comma-separated mix (4,15-17,20,30-55)."
-        )
-    return value
-
-
 def _language_keys_str() -> str:
     """Return a human-readable list of valid language keys derived from LANGUAGE_MAP."""
     return ', '.join(sorted(LANGUAGE_MAP.keys()))
