@@ -34,4 +34,19 @@ def _no_sleep():
         yield
 
 
+@pytest.fixture(autouse=True)
+def _register_base_languages():
+    """Populate LANGUAGE_MAP with the four built-in codes for every test.
+
+    In production, plugins call register_language() at import time.  The test
+    suite doesn't load plugins, so we seed the registry here to keep tests that
+    exercise parse_language_code / parse_single_language_code working correctly.
+    """
+    from src.config import register_language
+    register_language('en', 'English')
+    register_language('zh', 'Chinese')
+    register_language('jp', 'Japanese')
+    register_language('kr', 'Korean')
+
+
 

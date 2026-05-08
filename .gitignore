@@ -9,9 +9,6 @@
 # Local settings overrides (user-specific, not committed)
 settings.local.toml
 
-# Local language code extensions (user-specific, not committed)
-languages.toml
-
 # Python
 __pycache__/
 *.py[cod]

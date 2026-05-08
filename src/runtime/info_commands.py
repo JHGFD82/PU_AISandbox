@@ -57,20 +57,10 @@ def show_professor_config() -> None:
     print("Usage: python main.py <professor> <command> [options]")
     print("       python main.py --help")
 
-    # Language map — reflects any additions from languages.toml
-    _BUILT_IN = {'en', 'zh', 'jp', 'kr'}
-    user_codes = {k: v for k, v in LANGUAGE_MAP.items() if k not in _BUILT_IN}
     print("\n" + "=" * 60)
-    print("Language codes (built-in):")
+    print("Language codes (install a plugin to add more):")
     for code, name in sorted(LANGUAGE_MAP.items()):
-        if code in _BUILT_IN:
-            print(f"  {code}  {name}")
-    if user_codes:
-        print("Language codes (from languages.toml):")
-        for code, name in sorted(user_codes.items()):
-            print(f"  {code}  {name}")
-    else:
-        print("  (add languages.toml to define extra codes — see languages.template.toml)")
+        print(f"  {code}  {name}")
 
 
 def list_available_models() -> None:

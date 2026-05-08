@@ -3,27 +3,23 @@
 import argparse
 import os
 import re
-import tomllib
-from pathlib import Path
 from typing import Dict, Tuple, Union
 
-# Language mapping — built-in codes (short lowercase).
-# Additional codes can be added without touching this file: create a
-# languages.toml at the repository root (see languages.template.toml).
-LANGUAGE_MAP: Dict[str, str] = {
-    'en': 'English',
-    'zh': 'Chinese',
-    'jp': 'Japanese',
-    'kr': 'Korean',
-}
+# Language registry — starts empty; populated by plugins at import time via
+# register_language().  The framework needs this dict and the parser functions
+# here (argparse type= hooks must be importable from src), but the *entries*
+# are entirely the responsibility of each language plugin.
+LANGUAGE_MAP: Dict[str, str] = {}
 
-# Merge user-defined language codes from languages.toml, if present.
-_languages_toml = Path(__file__).parent.parent / "languages.toml"
-if _languages_toml.exists():
-    with _languages_toml.open("rb") as _f:
-        _user_languages = tomllib.load(_f)
-    for _code, _name in _user_languages.get("languages", {}).items():
-        LANGUAGE_MAP[_code.lower()] = _name
+# Tracks which codes were registered by plugins.
+_PLUGIN_LANGUAGES: set[str] = set()
+
+
+def register_language(code: str, name: str) -> None:
+    """Register a language code into LANGUAGE_MAP, called by plugins at import time."""
+    code = code.lower()
+    LANGUAGE_MAP[code] = name
+    _PLUGIN_LANGUAGES.add(code)
 
 
 def make_safe_filename(name: str) -> str:
