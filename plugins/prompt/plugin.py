@@ -35,18 +35,51 @@ Plugin contract (three required members)
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import logging
 import os
+import sys
+from pathlib import Path
 from typing import Optional
+
+# ── Plugin directory ──────────────────────────────────────────────────────────
+
+_PLUGIN_DIR = Path(__file__).parent
+
+
+# ── Module registration ────────────────────────────────────────────────────────
+
+def _register(module_name: str, rel_path: str) -> None:
+    """Inject a plugin-owned module into sys.modules under its src.* namespace."""
+    if module_name in sys.modules:
+        return
+    path = _PLUGIN_DIR / rel_path
+    if not path.exists():
+        return
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    if spec and spec.loader:
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules[module_name] = mod
+        spec.loader.exec_module(mod)  # type: ignore[union-attr]
+    # Expose the module as an attribute on its parent package so attribute-path
+    # lookups (e.g. pytest monkeypatch) work correctly.
+    parts = module_name.rsplit(".", 1)
+    if len(parts) == 2:
+        parent = sys.modules.get(parts[0])
+        if parent is not None:
+            setattr(parent, parts[1], sys.modules[module_name])
+
+
+_register("src.services.prompt_service", "src/services/prompt_service.py")
 
 # ── Imports from the main repo ────────────────────────────────────────────────
 # These are available because the main repo root is always on sys.path.
-from src.cli import _add_common_flags          # shared flag helper
-from src.config import get_api_key             # API key resolution
-from src.errors import CLIError                # standard user-facing error
-from src.output.file_output import FileOutputHandler
-from src.services.prompt_service import PromptService
-from src.tracking.token_tracker import TokenTracker  # MANDATORY — see run()
+from src.cli import _add_common_flags          # shared flag helper  # noqa: E402
+from src.config import get_api_key             # API key resolution  # noqa: E402
+from src.errors import CLIError                # standard user-facing error  # noqa: E402
+from src.output.file_output import FileOutputHandler  # noqa: E402
+from src.services.prompt_service import PromptService  # noqa: E402
+from src.tracking.token_tracker import TokenTracker  # MANDATORY — see run()  # noqa: E402
 
 logger = logging.getLogger(__name__)
 

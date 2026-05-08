@@ -131,7 +131,7 @@ _register(
 # These resolve because the main PU_AISandbox root is on sys.path at runtime.
 
 from src.cli import _add_common_flags, _add_notes_flags           # noqa: E402
-from src.config import parse_language_code, validate_page_nums, LANGUAGE_MAP, register_language    # noqa: E402
+from src.config import parse_language_code, LANGUAGE_MAP, register_language    # noqa: E402
 from src.errors import CLIError                                    # noqa: E402
 from src.models import OutputOptions                               # noqa: E402
 from src.processors.constants import IMAGE_EXTENSIONS             # noqa: E402
@@ -140,6 +140,7 @@ from src.processors.pdf_processor import generate_process_text    # noqa: E402
 from src.processors.txt_processor import TxtProcessor             # noqa: E402
 from src.services.constants import DEFAULT_PARALLEL_WORKERS       # noqa: E402
 from src.settings import DEFAULT_PAGE_SIZE                        # noqa: E402
+from .utils import validate_page_nums                             # noqa: E402
 
 # Register this plugin's source language into the shared language registry.
 register_language('en', 'English')
