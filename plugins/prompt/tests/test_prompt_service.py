@@ -34,7 +34,7 @@ class _Choice:
 
 
 class _FakeResponse:
-    def __init__(self, content="hello", model="gpt-4o"):
+    def __init__(self, content: object = "hello", model: str = "gpt-4o"):
         self.id = "resp-1"
         self.model = model
         self.usage = _Usage()
