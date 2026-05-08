@@ -58,7 +58,7 @@ def show_professor_config() -> None:
     print("       python main.py --help")
 
     # Language map — reflects any additions from languages.toml
-    _BUILT_IN = {'C', 'S', 'T', 'J', 'K', 'E'}
+    _BUILT_IN = {'en', 'zh', 'jp', 'kr'}
     user_codes = {k: v for k, v in LANGUAGE_MAP.items() if k not in _BUILT_IN}
     print("\n" + "=" * 60)
     print("Language codes (built-in):")

@@ -7,16 +7,14 @@ import tomllib
 from pathlib import Path
 from typing import Dict, Tuple, Union
 
-# Language mapping — built-in codes.
+# Language mapping — built-in codes (short lowercase).
 # Additional codes can be added without touching this file: create a
 # languages.toml at the repository root (see languages.template.toml).
 LANGUAGE_MAP: Dict[str, str] = {
-    'C': 'Chinese',
-    'S': 'Simplified Chinese',
-    'T': 'Traditional Chinese',
-    'J': 'Japanese',
-    'K': 'Korean',
-    'E': 'English',
+    'en': 'English',
+    'zh': 'Chinese',
+    'jp': 'Japanese',
+    'kr': 'Korean',
 }
 
 # Merge user-defined language codes from languages.toml, if present.
@@ -25,7 +23,7 @@ if _languages_toml.exists():
     with _languages_toml.open("rb") as _f:
         _user_languages = tomllib.load(_f)
     for _code, _name in _user_languages.get("languages", {}).items():
-        LANGUAGE_MAP[_code.upper()] = _name
+        LANGUAGE_MAP[_code.lower()] = _name
 
 
 def make_safe_filename(name: str) -> str:
@@ -52,53 +50,52 @@ def _language_keys_str() -> str:
 
 
 def parse_single_language_code(value: str) -> str:
-    """Parse a single language code (e.g. E, C, J, K) for transcribe/OCR commands."""
-    lang_char = value.upper()
-    if len(lang_char) != 1 or lang_char not in LANGUAGE_MAP:
+    """Parse a single language code (e.g. en, zh, jp, kr) for transcribe/OCR commands."""
+    code = value.strip().lower()
+    if code not in LANGUAGE_MAP:
         raise argparse.ArgumentTypeError(
             f"Invalid language code '{value}'. Use one of: {_language_keys_str()}."
         )
-    return LANGUAGE_MAP[lang_char]
+    return LANGUAGE_MAP[code]
 
 
 def parse_language_code(value: str) -> Union[str, Tuple[str, str]]:
     """Parse language code for OCR or translation commands.
 
     Accepted formats:
-      Single code  — "E", "J"       → OCR/transcription target language
-      Hyphen pair  — "J-E", "C-E"   → translation source-target pair
+      Single code  — "en", "jp"         → OCR/transcription target language (full name)
+      Hyphen pair  — "jp-en", "zh-en"   → translation source-target pair (code tuple)
+
+    Translation pairs return ``(source_code, target_code)`` — shortcodes, not full names.
+    Each plugin's ``run()`` resolves codes to full names via ``LANGUAGE_MAP`` before
+    passing them to the service layer.
     """
     valid_keys = _language_keys_str()
 
-    # Normalise: strip whitespace, upper-case
-    value = value.strip().upper()
+    # Normalise: strip whitespace, lower-case
+    value = value.strip().lower()
 
-    # Single character → OCR path
-    if len(value) == 1:
-        if value not in LANGUAGE_MAP:
-            raise argparse.ArgumentTypeError(f"Invalid language code '{value}'. Use one of: {valid_keys}.")
-        return LANGUAGE_MAP[value]
-
-    # Hyphen-separated pair — e.g. "J-E"
+    # Hyphen-separated pair — e.g. "jp-en"
     if '-' in value:
         parts = value.split('-')
-        if len(parts) != 2 or not all(len(p) == 1 for p in parts):
+        if len(parts) != 2:
             raise argparse.ArgumentTypeError(
-                f"Invalid language pair '{value}'. Use source-target format, e.g. J-E or C-E."
+                f"Invalid language pair '{value}'. Use source-target format, e.g. jp-en or zh-en."
             )
-        source_char, target_char = parts
-        if source_char not in LANGUAGE_MAP:
-            raise argparse.ArgumentTypeError(f"Invalid source language '{source_char}'. Use one of: {valid_keys}.")
-        if target_char not in LANGUAGE_MAP:
-            raise argparse.ArgumentTypeError(f"Invalid target language '{target_char}'. Use one of: {valid_keys}.")
-        if source_char == target_char:
+        source_code, target_code = parts
+        if source_code not in LANGUAGE_MAP:
+            raise argparse.ArgumentTypeError(f"Invalid source language '{source_code}'. Use one of: {valid_keys}.")
+        if target_code not in LANGUAGE_MAP:
+            raise argparse.ArgumentTypeError(f"Invalid target language '{target_code}'. Use one of: {valid_keys}.")
+        if source_code == target_code:
             raise argparse.ArgumentTypeError("Source and target languages cannot be the same.")
-        return LANGUAGE_MAP[source_char], LANGUAGE_MAP[target_char]
+        return source_code, target_code
 
-    raise argparse.ArgumentTypeError(
-        f"Language code must be a single letter ({valid_keys}) for OCR, "
-        f"or a hyphen-separated pair (e.g. J-E, C-E) for translation."
-    )
+    # Single code → OCR path (returns full name)
+    if value not in LANGUAGE_MAP:
+        raise argparse.ArgumentTypeError(f"Invalid language code '{value}'. Use one of: {valid_keys}.")
+    return LANGUAGE_MAP[value]
+
 
 
 _PROF_NAME_PATTERN = re.compile(r'^PROF_(.+?)_NAME$')

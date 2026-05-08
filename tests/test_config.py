@@ -78,26 +78,24 @@ class TestMakeSafeFilename:
 class TestParseSingleLanguageCode:
 
     @pytest.mark.parametrize("code,expected", [
-        ("E", "English"),
-        ("C", "Chinese"),
-        ("S", "Simplified Chinese"),
-        ("T", "Traditional Chinese"),
-        ("J", "Japanese"),
-        ("K", "Korean"),
+        ("en", "English"),
+        ("zh", "Chinese"),
+        ("jp", "Japanese"),
+        ("kr", "Korean"),
     ])
-    def test_valid_uppercase_codes(self, code, expected):
+    def test_valid_lowercase_codes(self, code, expected):
         assert parse_single_language_code(code) == expected
 
-    def test_lowercase_accepted(self):
-        assert parse_single_language_code("j") == "Japanese"
+    def test_uppercase_accepted(self):
+        assert parse_single_language_code("JP") == "Japanese"
 
     def test_invalid_code_raises(self):
         with pytest.raises(argparse.ArgumentTypeError):
-            parse_single_language_code("X")
+            parse_single_language_code("xx")
 
-    def test_two_char_code_rejected(self):
+    def test_old_single_char_rejected(self):
         with pytest.raises(argparse.ArgumentTypeError):
-            parse_single_language_code("JE")
+            parse_single_language_code("J")
 
     def test_empty_string_rejected(self):
         with pytest.raises(argparse.ArgumentTypeError):
@@ -105,68 +103,61 @@ class TestParseSingleLanguageCode:
 
 
 # ---------------------------------------------------------------------------
-# parse_language_code  (single char → OCR, two chars → translation pair)
+# parse_language_code  (single code → OCR full name, hyphen pair → code tuple)
 # ---------------------------------------------------------------------------
 
 class TestParseLanguageCode:
 
-    # --- single character (OCR mode) ---
+    # --- single code (OCR mode, returns full name) ---
 
     @pytest.mark.parametrize("code,expected", [
-        ("J", "Japanese"),
-        ("E", "English"),
-        ("C", "Chinese"),
-        ("S", "Simplified Chinese"),
-        ("T", "Traditional Chinese"),
-        ("K", "Korean"),
+        ("jp", "Japanese"),
+        ("en", "English"),
+        ("zh", "Chinese"),
+        ("kr", "Korean"),
     ])
     def test_single_code_ocr_mode(self, code, expected):
         assert parse_language_code(code) == expected
 
-    def test_single_lowercase_accepted(self):
-        assert parse_language_code("j") == "Japanese"
+    def test_single_uppercase_accepted(self):
+        assert parse_language_code("JP") == "Japanese"
 
     def test_single_invalid_raises(self):
         with pytest.raises(argparse.ArgumentTypeError):
-            parse_language_code("X")
+            parse_language_code("xx")
 
-    # --- hyphen-separated translation pair ---
+    # --- hyphen-separated translation pair (returns code tuple) ---
 
     @pytest.mark.parametrize("code,expected", [
-        ("C-E", ("Chinese", "English")),
-        ("J-E", ("Japanese", "English")),
-        ("K-E", ("Korean", "English")),
-        ("E-J", ("English", "Japanese")),
-        ("S-T", ("Simplified Chinese", "Traditional Chinese")),
+        ("zh-en", ("zh", "en")),
+        ("jp-en", ("jp", "en")),
+        ("kr-en", ("kr", "en")),
+        ("en-jp", ("en", "jp")),
     ])
     def test_translation_pairs(self, code, expected):
         assert parse_language_code(code) == expected
 
-    def test_translation_pair_lowercase(self):
-        assert parse_language_code("c-e") == ("Chinese", "English")
+    def test_translation_pair_uppercase_accepted(self):
+        assert parse_language_code("ZH-EN") == ("zh", "en")
 
-    def test_translation_pair_mixed_case(self):
-        assert parse_language_code("C-e") == ("Chinese", "English")
+    def test_translation_pair_mixed_case_accepted(self):
+        assert parse_language_code("Zh-En") == ("zh", "en")
 
     def test_same_source_and_target_rejected(self):
         with pytest.raises(argparse.ArgumentTypeError):
-            parse_language_code("J-J")
+            parse_language_code("jp-jp")
 
     def test_invalid_source_rejected(self):
         with pytest.raises(argparse.ArgumentTypeError):
-            parse_language_code("X-E")
+            parse_language_code("xx-en")
 
     def test_invalid_target_rejected(self):
         with pytest.raises(argparse.ArgumentTypeError):
-            parse_language_code("J-X")
+            parse_language_code("jp-xx")
 
-    def test_legacy_two_char_rejected(self):
+    def test_triple_part_rejected(self):
         with pytest.raises(argparse.ArgumentTypeError):
-            parse_language_code("JE")
-
-    def test_three_char_code_rejected(self):
-        with pytest.raises(argparse.ArgumentTypeError):
-            parse_language_code("JEK")
+            parse_language_code("jp-en-kr")
 
     def test_empty_string_rejected(self):
         with pytest.raises(argparse.ArgumentTypeError):
