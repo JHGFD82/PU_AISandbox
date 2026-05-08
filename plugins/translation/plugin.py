@@ -543,8 +543,8 @@ class TranslationPlugin:
         if not isinstance(language_code, tuple) or len(language_code) != 2:
             raise CLIError("Translation requires a language pair (e.g. jp-en).")
         source_code, target_code = language_code
-        source_language = LANGUAGE_MAP.get(source_code, source_code)
-        target_language = LANGUAGE_MAP.get(target_code, target_code)
+        source_language = LANGUAGE_MAP[source_code]
+        target_language = LANGUAGE_MAP[target_code]
 
         # Apply any destination-side peer guidance injected by DispatchPlugin.
         # (args._peer_guidance is set by DispatchPlugin.run() when the target
