@@ -152,3 +152,34 @@ class TestMainUnknownCommand:
             mock_parser_factory.return_value = mock_parser
             main()
         assert exc_info.value.code == 1
+
+
+# ---------------------------------------------------------------------------
+# main() — plugin command route (lines 218-225)
+# ---------------------------------------------------------------------------
+
+
+class TestMainPluginCommand:
+    """Covers the `elif _plugins and args.command in _plugins` branch."""
+
+    def test_plugin_run_is_called(self):
+        fake_plugin = MagicMock()
+        fake_args = Namespace(
+            show_config=False,
+            list_models=False,
+            professor="heller",
+            command="translate",
+            model=None,
+            temperature=None,
+            top_p=None,
+            max_tokens=None,
+        )
+        with patch("src.cli.load_plugins", return_value={"translate": fake_plugin}), \
+             patch("src.cli.create_argument_parser") as mock_parser_factory:
+            mock_parser = MagicMock()
+            mock_parser.parse_args.return_value = fake_args
+            mock_parser_factory.return_value = mock_parser
+            main()
+        fake_plugin.run.assert_called_once_with(
+            fake_args, "heller", None, None, None, None
+        )

@@ -891,3 +891,74 @@ class TestProcessImageTranslationFolderEdgeCases:
         opts = OutputOptions(auto_save=True)
         proc.process_image_translation_folder(str(folder), "Japanese", "English", opts=opts, workers=2)
         proc.file_output.save_translation_output.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# SandboxProcessor.__getattr__ — lazy service loader
+# ---------------------------------------------------------------------------
+
+class TestSandboxProcessorGetattr:
+
+    def _make_bare_proc(self):
+        """Return a SandboxProcessor bypassing __init__, with only the bare minimum set."""
+        proc = SandboxProcessor.__new__(SandboxProcessor)
+        proc._api_key = "fake-key"
+        proc.professor_name = "test"
+        proc._svc_kwargs = {}
+        return proc
+
+    def test_raises_attribute_error_when_no_module_in_sys_modules(self):
+        import sys
+        proc = self._make_bare_proc()
+        # Ensure the key is absent
+        sys.modules.pop("src.services.nonexistent_service", None)
+        with pytest.raises(AttributeError, match="has no attribute 'nonexistent_service'"):
+            _ = proc.nonexistent_service
+
+    def test_raises_attribute_error_when_class_missing_from_module(self):
+        import sys
+        import types
+        proc = self._make_bare_proc()
+        fake_mod = types.ModuleType("src.services.no_class_service")
+        # Module exists but has no matching class
+        sys.modules["src.services.no_class_service"] = fake_mod
+        try:
+            with pytest.raises(AttributeError, match="has no class 'NoClassService'"):
+                _ = proc.no_class_service
+        finally:
+            sys.modules.pop("src.services.no_class_service", None)
+
+    def test_instantiates_class_from_module(self):
+        import sys
+        import types
+        proc = self._make_bare_proc()
+        fake_mod = types.ModuleType("src.services.my_service")
+        instance = MagicMock()
+        fake_cls = MagicMock(return_value=instance)
+        fake_mod.MyService = fake_cls
+        sys.modules["src.services.my_service"] = fake_mod
+        try:
+            result = proc.my_service
+            assert result is instance
+            fake_cls.assert_called_once_with("fake-key", "test")
+        finally:
+            sys.modules.pop("src.services.my_service", None)
+
+    def test_result_is_cached_on_instance(self):
+        import sys
+        import types
+        proc = self._make_bare_proc()
+        fake_mod = types.ModuleType("src.services.cached_service")
+        instance = MagicMock()
+        fake_cls = MagicMock(return_value=instance)
+        fake_mod.CachedService = fake_cls
+        sys.modules["src.services.cached_service"] = fake_mod
+        try:
+            first = proc.cached_service
+            second = proc.cached_service
+            assert first is second
+            # Class constructor called only once
+            assert fake_cls.call_count == 1
+        finally:
+            sys.modules.pop("src.services.cached_service", None)
+

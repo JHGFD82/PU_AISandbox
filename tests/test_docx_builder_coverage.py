@@ -16,18 +16,15 @@ from src.models.embedded_media import EmbeddedMedia
 class TestApplyDocxTableBordersException:
 
     def test_exception_logged_as_warning(self, caplog):
-        """When the OxmlElement work raises, a warning is logged instead of crashing."""
+        """When OxmlElement work raises, a warning is logged instead of crashing."""
         from src.output.docx_builder import _apply_docx_table_borders
 
         bad_table = MagicMock()
-        bad_table._tbl.tblPr = MagicMock(
-            side_effect=AttributeError("no tblPr")
-        )
-        # Should not raise
+        # Make tblPr.append raise so the except branch is triggered
+        bad_table._tbl.tblPr.append.side_effect = RuntimeError("xml error")
         with caplog.at_level(logging.WARNING):
             _apply_docx_table_borders(bad_table)
-        # The warning may or may not appear depending on whether docx is importable;
-        # the key check is that it didn't raise.
+        assert any("Could not apply table borders" in r.message for r in caplog.records)
 
 
 # ---------------------------------------------------------------------------
@@ -160,3 +157,70 @@ class TestFallbackToText:
         txt = tmp_path / "output.txt"
         assert txt.exists()
         assert "Hello world" in txt.read_text(encoding="utf-8")
+
+
+# ---------------------------------------------------------------------------
+# save_to_docx — table_registry path (lines 177-203)
+# ---------------------------------------------------------------------------
+
+class TestSaveToDocxTableRegistry:
+
+    def test_table_placeholder_replaced_with_word_table(self, tmp_path):
+        """When table_registry is provided, [TABLE_1] is replaced by a Word Table."""
+        from src.output.docx_builder import save_to_docx
+        content = "[TABLE_1]\n\nSome other paragraph"
+        registry = {"[TABLE_1]": [["Header A", "Header B"], ["Row 1", "Row 2"]]}
+        out = tmp_path / "with_table.docx"
+        # Should not raise
+        save_to_docx(content, str(out), table_registry=registry, label="Test")
+        assert out.exists()
+
+    def test_table_registry_exception_falls_back_to_plain_text_para(self, tmp_path, monkeypatch):
+        """When table insertion raises, the placeholder is written as plain text."""
+        from src.output import docx_builder
+
+        # Make add_table raise after docx is imported
+        with patch("docx.Document") as mock_doc_cls:
+            mock_doc = MagicMock()
+            mock_doc_cls.return_value = mock_doc
+            mock_doc.sections = []
+            mock_doc.add_table.side_effect = RuntimeError("table error")
+            mock_doc.add_paragraph = MagicMock()
+            mock_doc.add_paragraph.return_value = MagicMock(
+                paragraph_format=MagicMock(), runs=[]
+            )
+            mock_doc.save = MagicMock()
+
+            content = "[TABLE_1]\n\nExtra paragraph"
+            registry = {"[TABLE_1]": [["A", "B"]]}
+            out = tmp_path / "tbl_fail.docx"
+            docx_builder.save_to_docx(content, str(out), table_registry=registry, label="Test")
+        # Verify add_paragraph was called for the fallback plain-text para
+        mock_doc.add_paragraph.assert_called()
+
+
+# ---------------------------------------------------------------------------
+# save_to_docx — PIL fallback when add_picture first fails (lines 117-135)
+# ---------------------------------------------------------------------------
+
+class TestSaveToDocxPILFallback:
+
+    def _make_media(self, fraction: float = 0.5) -> EmbeddedMedia:
+        """Return EmbeddedMedia with corrupt data to trigger add_picture failure."""
+        return EmbeddedMedia(
+            data=b"not-an-image",
+            content_type="image/png",
+            position_fraction=fraction,
+            width_emu=914400,
+            height_emu=914400,
+        )
+
+    def test_pil_conversion_failure_logs_warning(self, tmp_path, caplog):
+        """When add_picture fails AND PIL conversion fails, warning is logged."""
+        from src.output.docx_builder import save_to_docx
+        # Corrupt data will fail both add_picture and PIL decode
+        media = [self._make_media()]
+        out = tmp_path / "pil_fail.docx"
+        with caplog.at_level(logging.WARNING):
+            save_to_docx("Para one\n\nPara two", str(out), media=media, label="Test")
+        # Should not raise; warning logged for the failed image
