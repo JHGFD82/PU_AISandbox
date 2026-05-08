@@ -65,6 +65,7 @@ Thumbs.db
 plugins/*
 !plugins/.gitkeep
 !plugins/prompt/
+!plugins/translation/
 
 # External files
 Presentation/

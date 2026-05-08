@@ -1,0 +1,12 @@
+# settings.toml — Translation plugin settings
+# Edit this file to change default behaviour. Changes take effect on the next run.
+
+[translation]
+temperature = 0.5          # 0.0 = fully deterministic, 2.0 = maximum creativity
+top_p = 0.5                # Nucleus sampling threshold (lower = more focused output)
+max_tokens = 4000          # Maximum response tokens (increase for very long pages)
+context_percentage = 0.65  # Fraction of the previous page passed as context (0.0–1.0)
+
+[image_translation]
+temperature = 0.3          # Slightly creative to handle ambiguous characters via context
+max_tokens = 8000          # Higher budget: output includes both transcript and translation
