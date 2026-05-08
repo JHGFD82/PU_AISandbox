@@ -88,11 +88,22 @@ def _load_one(
 
     for cmd in p.commands:
         if cmd in result:
-            logger.warning(
-                "Plugin '%s': command '%s' already registered by another plugin "
-                "— skipped.",
-                plugin_name,
-                cmd,
-            )
+            existing = result[cmd]
+            if hasattr(existing, "handles") and hasattr(p, "handles"):
+                # Both plugins declare ownership lists — merge into a DispatchPlugin.
+                from .dispatch_plugin import DispatchPlugin
+                if not isinstance(existing, DispatchPlugin):
+                    dispatcher = DispatchPlugin(cmd, existing)
+                    result[cmd] = dispatcher
+                else:
+                    dispatcher = existing
+                dispatcher._absorb(p, plugin_name)
+            else:
+                logger.warning(
+                    "Plugin '%s': command '%s' already registered by another plugin "
+                    "— skipped.",
+                    plugin_name,
+                    cmd,
+                )
             continue
         result[cmd] = p
