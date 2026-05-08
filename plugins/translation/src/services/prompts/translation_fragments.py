@@ -8,9 +8,8 @@ Used by:
 All string content, no logic. Variables use str.format() placeholders.
 
 This file is the authoritative home for translation-mode prompts and ships
-with PU_AISandbox_Translation.  The override contract (prompts.toml sections
-[translation], [image_translation], [language_pair_notes],
-[image_translation_script_guidance]) is also defined here.
+with PU_AISandbox_Translation.  To change prompt text, edit the constants
+directly and open a pull request.
 """
 
 # ---------------------------------------------------------------------------
@@ -247,68 +246,3 @@ IMAGE_TRANSLATION_SCRIPT_GUIDANCE: dict[str, str] = {
 }
 
 
-# ---------------------------------------------------------------------------
-# User override loader
-# ---------------------------------------------------------------------------
-
-def _load_user_overrides() -> None:
-    """Apply overrides from prompts.toml, if present.
-
-    Looks for prompts.toml at the repository root (four .parent calls from
-    this file's location: src/services/prompts/translation_fragments.py).
-    In a plugin repo cloned into plugins/<name>/, the path resolves to the
-    main repo root, which is the correct location.
-
-    Only the keys listed in _MAP / the dict loops below are overridable.
-    Unknown sections or keys are silently ignored.
-    """
-    import tomllib
-    from pathlib import Path
-
-    _toml_path = Path(__file__).parent.parent.parent.parent / "prompts.toml"
-    if not _toml_path.exists():
-        return
-
-    with _toml_path.open("rb") as _f:
-        _overrides = tomllib.load(_f)
-
-    _g = globals()
-
-    _MAP: dict[tuple[str, str], "str | tuple[str, str]"] = {
-        # ── [translation] ────────────────────────────────────────────────
-        ("translation", "role"):                   "TRANSLATION_ROLE",
-        ("translation", "context_none"):           "TRANSLATION_CONTEXT_SPEC_NONE",
-        ("translation", "context_abstract"):       "TRANSLATION_CONTEXT_SPEC_ABSTRACT",
-        ("translation", "context_previous"):       "TRANSLATION_CONTEXT_SPEC_PREVIOUS",
-        ("translation", "formatting_file"):        ("TRANSLATION_FORMATTING", "file"),
-        ("translation", "formatting_console"):     ("TRANSLATION_FORMATTING", "console"),
-        ("translation", "user_base"):              "TRANSLATION_USER_BASE",
-        ("translation", "user_base_with_context"): "TRANSLATION_USER_BASE_WITH_CONTEXT",
-        ("translation", "no_meta_commentary"):     "TRANSLATION_NO_META_COMMENTARY",
-        ("translation", "footnote_rule"):          "TRANSLATION_FOOTNOTE_RULE",
-        # ── [image_translation] ───────────────────────────────────────────
-        ("image_translation", "role"):                "IMAGE_TRANSLATION_ROLE",
-        ("image_translation", "transcription_rules"): "IMAGE_TRANSLATION_TRANSCRIPTION_RULES",
-        ("image_translation", "translation_rules"):   "IMAGE_TRANSLATION_TRANSLATION_RULES",
-    }
-
-    for (section, key), target in _MAP.items():
-        if section not in _overrides or key not in _overrides[section]:
-            continue
-        value = _overrides[section][key]
-        if isinstance(target, tuple):
-            dict_name, dict_key = target
-            _g[dict_name][dict_key] = value
-        else:
-            _g[target] = value
-
-    for pair_key, value in _overrides.get("language_pair_notes", {}).items():
-        if "|" in pair_key:
-            source, target = pair_key.split("|", 1)
-            _g["LANGUAGE_PAIR_NOTES"][(source.strip(), target.strip())] = value
-
-    for lang, value in _overrides.get("image_translation_script_guidance", {}).items():
-        _g["IMAGE_TRANSLATION_SCRIPT_GUIDANCE"][lang] = value
-
-
-_load_user_overrides()

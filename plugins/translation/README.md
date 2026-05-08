@@ -53,16 +53,6 @@ max_tokens = 8000
 
 The plugin searches upward from its own directory for the nearest `settings.toml` containing `[translation]` or `[image_translation]`, so edits to the root-level `settings.toml` in the main repo are also picked up.
 
-### `prompts.toml` (optional)
-
-Override built-in prompt fragments without editing source code. Use the template from an installed language plugin (e.g. `plugins/translation-ea/prompts.template.toml`):
-
-```bash
-cp plugins/translation-ea/prompts.template.toml prompts.toml
-```
-
-Place `prompts.toml` in the PU_AISandbox root. It is git-ignored and will not be committed. Fragment defaults live in `plugins/translation/src/services/prompts/translation_fragments.py`.
-
 ---
 
 ## Usage

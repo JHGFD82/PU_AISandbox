@@ -9,9 +9,6 @@
 # Local settings overrides (user-specific, not committed)
 settings.local.toml
 
-# Local prompt fragment overrides (user-specific, not committed)
-prompts.toml
-
 # Local language code extensions (user-specific, not committed)
 languages.toml
 
