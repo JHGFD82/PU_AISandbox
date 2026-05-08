@@ -1,8 +1,13 @@
 [run]
-source = src
-omit =
-    plugins/*
+source =
+    src
+    plugins/translation/utils.py
+    plugins/translation/src
+    plugins/translation/plugin.py
+    plugins/prompt/src
+    plugins/prompt/plugin.py
 
 [report]
 omit =
-    plugins/*
+    plugins/*/tests/*
+    plugins/*/conftest.py
