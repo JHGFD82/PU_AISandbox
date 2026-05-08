@@ -15,9 +15,11 @@ TEMPLATE GUIDE FOR EXTERNAL PLUGIN AUTHORS
 ------------------------------------------
 Clone this file into your plugin directory and adapt it:
 
-  1. Change ``handles`` to the full language names your plugin owns as
-     *source* languages (as returned by ``parse_language_code``, e.g.
-     ``["Japanese", "Chinese"]``).
+  1. Change ``handles`` to the shortcodes your plugin owns as *source*
+     languages (matching the keys in ``LANGUAGE_MAP``, e.g.
+     ``["jp", "zh"]``).  ``handles`` uses shortcodes—the same strings the
+     user types on the command line—so plugin authors can see at a glance
+     which CLI codes belong to their plugin.
 
   2. **Remove the sys.modules injection block.**  The base plugin registers
      those modules at load time; they are already present in sys.modules
@@ -129,7 +131,7 @@ _register(
 # These resolve because the main PU_AISandbox root is on sys.path at runtime.
 
 from src.cli import _add_common_flags, _add_notes_flags           # noqa: E402
-from src.config import parse_language_code, validate_page_nums    # noqa: E402
+from src.config import parse_language_code, validate_page_nums, LANGUAGE_MAP    # noqa: E402
 from src.errors import CLIError                                    # noqa: E402
 from src.models import OutputOptions                               # noqa: E402
 from src.processors.constants import IMAGE_EXTENSIONS             # noqa: E402
@@ -386,9 +388,11 @@ class TranslationPlugin:
     commands: list[str] = ["translate"]
 
     # Languages this plugin owns as source languages.
+    # ``handles`` stores the shortcodes that users type on the command line
+    # (e.g. ``en`` for English), matching the keys in ``LANGUAGE_MAP``.
     # The plugin loader reads this to merge multiple translation plugins into a
     # unified dispatch system rather than treating them as command conflicts.
-    handles: list[str] = ["English"]
+    handles: list[str] = ["en"]
 
     # ── Argument registration ──────────────────────────────────────────────────
 
@@ -491,7 +495,7 @@ class TranslationPlugin:
         p.add_argument(
             "language_code",
             type=parse_language_code,
-            help="Translation direction as a source-target pair (e.g. J-E, C-E, K-E)",
+            help="Translation direction as a source-target pair (e.g. jp-en, zh-en, kr-en)",
         )
         self.register_command_flags(p)
 
@@ -533,8 +537,10 @@ class TranslationPlugin:
 
         language_code = args.language_code
         if not isinstance(language_code, tuple) or len(language_code) != 2:
-            raise CLIError("Translation requires a language pair (e.g. J-E).")
-        source_language, target_language = language_code
+            raise CLIError("Translation requires a language pair (e.g. jp-en).")
+        source_code, target_code = language_code
+        source_language = LANGUAGE_MAP.get(source_code, source_code)
+        target_language = LANGUAGE_MAP.get(target_code, target_code)
 
         # Apply any destination-side peer guidance injected by DispatchPlugin.
         # (args._peer_guidance is set by DispatchPlugin.run() when the target
