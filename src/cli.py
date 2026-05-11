@@ -22,7 +22,7 @@ def setup_logging() -> None:
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 
-def _add_common_flags(parser: argparse.ArgumentParser) -> None:
+def add_common_flags(parser: argparse.ArgumentParser) -> None:
     """Add flags shared by translate, transcribe, and prompt subparsers."""
     parser.add_argument('-o', '--output', dest='output_file', type=str, help='Output file path')
     parser.add_argument('-m', '--model', dest='model', type=str, help='Model to use (e.g., gpt-4o, gpt-4o-mini)')
@@ -32,7 +32,7 @@ def _add_common_flags(parser: argparse.ArgumentParser) -> None:
     parser.add_argument('--dry-run', dest='dry_run', action='store_true', help='Print the prompt(s) that would be sent without making any API calls')
 
 
-def _add_notes_flags(parser: argparse.ArgumentParser) -> None:
+def add_notes_flags(parser: argparse.ArgumentParser) -> None:
     """Add the interactive and inline notes flags to a subparser."""
     parser.add_argument(
         '-n', '--notes',

@@ -79,7 +79,7 @@ _register(
 # These are available because the main PU_AISandbox root is on sys.path
 # when running from that repo's root directory.
 
-from src.cli import _add_common_flags, _add_notes_flags           # noqa: E402
+from src.cli import add_common_flags, add_notes_flags           # noqa: E402
 from src.config import parse_single_language_code, register_language  # noqa: E402
 from src.errors import CLIError                                    # noqa: E402
 
@@ -114,8 +114,8 @@ class TranscriptionPlugin:
             required=False,
             help="Input image file path, or a folder of images to process in order",
         )
-        _add_common_flags(tr)
-        _add_notes_flags(tr)
+        add_common_flags(tr)
+        add_notes_flags(tr)
 
         # ── transcription_review ──────────────────────────────────────────────
         rv = subparsers.add_parser(
@@ -140,8 +140,8 @@ class TranscriptionPlugin:
             action="store_true",
             help="Paste the transcription text interactively (end with --- on its own line)",
         )
-        _add_common_flags(rv)
-        _add_notes_flags(rv)
+        add_common_flags(rv)
+        add_notes_flags(rv)
 
     # ── Command execution ─────────────────────────────────────────────────────
 

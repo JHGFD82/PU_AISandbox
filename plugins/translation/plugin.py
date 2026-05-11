@@ -130,7 +130,7 @@ _register(
 # ── Main-repo imports ──────────────────────────────────────────────────────────
 # These resolve because the main PU_AISandbox root is on sys.path at runtime.
 
-from src.cli import _add_common_flags, _add_notes_flags           # noqa: E402
+from src.cli import add_common_flags, add_notes_flags           # noqa: E402
 from src.config import parse_language_code, LANGUAGE_MAP, register_language    # noqa: E402
 from src.errors import CLIError                                    # noqa: E402
 from src.models import OutputOptions                               # noqa: E402
@@ -482,8 +482,8 @@ class TranslationPlugin:
                  "(e.g. '............') to exactly five dots (.....) between "
                  "section titles and page numbers",
         )
-        _add_common_flags(parser)
-        _add_notes_flags(parser)
+        add_common_flags(parser)
+        add_notes_flags(parser)
 
     def register_subparsers(
         self,

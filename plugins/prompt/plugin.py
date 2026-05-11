@@ -74,7 +74,7 @@ _register("src.services.prompt_service", "src/services/prompt_service.py")
 
 # ── Imports from the main repo ────────────────────────────────────────────────
 # These are available because the main repo root is always on sys.path.
-from src.cli import _add_common_flags          # shared flag helper  # noqa: E402
+from src.cli import add_common_flags          # shared flag helper  # noqa: E402
 from src.config import get_api_key             # API key resolution  # noqa: E402
 from src.errors import CLIError                # standard user-facing error  # noqa: E402
 from src.output.file_output import FileOutputHandler  # noqa: E402
@@ -110,7 +110,7 @@ class PromptPlugin:
             action="store_true",
             help="Prompt for a system (developer) prompt before the user prompt",
         )
-        _add_common_flags(p)   # -o, -m, -t, -T, -M, --dry-run
+        add_common_flags(p)   # -o, -m, -t, -T, -M, --dry-run
 
     # ── Command execution ─────────────────────────────────────────────────────
     def run(
