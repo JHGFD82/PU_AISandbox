@@ -1,0 +1,14 @@
+# settings.toml — Transcription base plugin settings
+# Edit this file to change default behaviour. Changes take effect on the next run.
+
+[ocr]
+temperature = 0.0          # Fully deterministic — reduces hallucination in transcription
+top_p = 0.1                # Very low to prevent the model from inventing characters
+max_tokens = 4000
+frequency_penalty = 0.5    # Penalizes repeating the same tokens
+presence_penalty = 0.3     # Encourages output diversity
+
+[transcription_review]
+temperature = 0.1          # Low temperature for precise, analytical error detection
+top_p = 0.5                # Focused nucleus sampling
+max_tokens = 4000          # JSON output; increase for very long transcriptions

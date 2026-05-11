@@ -60,6 +60,7 @@ plugins/*
 !plugins/.gitkeep
 !plugins/prompt/
 !plugins/translation/
+!plugins/transcription/
 
 # External files
 Presentation/
