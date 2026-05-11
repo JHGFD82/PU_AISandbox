@@ -19,9 +19,11 @@ main.py
   → src/tracking/         per-professor token accounting + pricing (model_catalog.json)
   → src/output/           text / PDF / Word document output
   → plugins/
-      prompt/             bundled reference plugin (ships with this repo)
-      translation/        separate git repo — clone into plugins/translation/
-      transcription/      separate git repo — clone into plugins/transcription/
+      prompt/             bundled plugin (ships with this repo)
+      translation/        bundled plugin — base English translation (ships with this repo)
+      transcription/      bundled plugin — base English OCR (ships with this repo)
+      translation-ea/     optional: separate git repo — EA language translation
+      transcription-ea/   optional: separate git repo — EA language OCR
 ```
 
 `src/cli.py` decides *what* to run. Plugins decide *how* to run it. Only the `usage` subcommand is built in.
@@ -76,16 +78,18 @@ cp src/model_catalog.template.json src/model_catalog.json
 
 For OpenAI or Google models, pricing is fetched automatically on first use — no manual edits needed. For all other providers, add entries directly to `src/model_catalog.json` following the template schema.
 
-### 4. Install plugins
+### 4. Install optional plugins
 
-The `prompt` plugin is bundled in this repo and loads automatically. For translation and transcription, clone their repos into `plugins/`:
+The `prompt`, `translation`, and `transcription` plugins are bundled in this repo and load automatically.
+
+For East Asian language support (Japanese, Chinese, Korean), clone the EA extension plugins:
 
 ```bash
-git clone <translation-repo-url> plugins/translation
-git clone <transcription-repo-url> plugins/transcription
+git clone https://github.com/JHGFD82/PU_AISandbox_Translation_EA plugins/translation-ea
+git clone https://github.com/JHGFD82/PU_AISandbox_Transcription_EA plugins/transcription-ea
 ```
 
-Each plugin repo has its own README with command-specific setup and usage examples.
+Each EA plugin repo has its own README with command-specific setup and usage examples.
 
 ### 5. Verify everything works
 
@@ -194,7 +198,7 @@ Prices are per 1,000,000 tokens (default `pricing_unit`). Set `"supports_vision"
    cp plugin.py.template plugins/myplugin/plugin.py
    ```
 2. Edit `plugin.py`: rename `MyPlugin`, set `commands`, implement `register_subparsers` and `run`.
-3. Inside `run()`, create `TokenTracker(professor=professor)` and pass it to every service call.
+3. Inside `run()`, pass `professor` to services that need it — they handle token tracking internally.
 4. No changes to `src/` are needed — the plugin is discovered automatically at startup.
 
 See `plugins/prompt/plugin.py` for the canonical working example.
