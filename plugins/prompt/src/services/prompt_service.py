@@ -1,17 +1,49 @@
-"""Custom prompt service for direct AI interaction."""
+"""Custom prompt service for direct AI interaction.
+
+Template notes for plugin authors
+----------------------------------
+All prompt text belongs in ``src/services/prompts/fragments.py``, not here.
+Import the constants you need and assemble them in ``build_prompts()`` below.
+
+Basic assembly (single constant)::
+
+    from .prompts.fragments import DEFAULT_SYSTEM_PROMPT
+    ...  # use DEFAULT_SYSTEM_PROMPT directly
+
+Multi-part assembly (joining several fragments)::
+
+    from .prompts.fragments import ROLE_BLOCK, FORMAT_INSTRUCTION, SAFETY_REMINDER
+
+    system = "\n\n".join([ROLE_BLOCK, FORMAT_INSTRUCTION, SAFETY_REMINDER])
+
+Runtime substitution (``str.format()`` placeholders)::
+
+    from .prompts.fragments import PERSONA_BLOCK
+
+    system = PERSONA_BLOCK.format(name=professor, role="researcher",
+                                  institution="Princeton")
+
+Conditional inclusion::
+
+    from .prompts.fragments import BASE_SYSTEM, STRICT_MODE_ADDENDUM
+
+    system = BASE_SYSTEM
+    if args.strict:
+        system = "\n\n".join([system, STRICT_MODE_ADDENDUM])
+"""
 
 import logging
 from typing import Any, Optional
 
-from ..models import (
+from ..models import (  # type: ignore[import]
     get_model_system_role,
 )
-from ..tracking.token_tracker import TokenTracker
-from .api_errors import handle_api_errors
-from .base_service import BaseService
+from ..tracking.token_tracker import TokenTracker  # type: ignore[import]
+from .api_errors import handle_api_errors  # type: ignore[import]
+from .base_service import BaseService  # type: ignore[import]
 
 
-from ..settings import (
+from ..settings import (  # type: ignore[import]
     DEFAULT_SYSTEM_PROMPT,
     PROMPT_MAX_TOKENS,
     PROMPT_TEMPERATURE,
