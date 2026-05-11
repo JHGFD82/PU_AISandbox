@@ -3,7 +3,9 @@
 ## Project Overview
 Modular AI sandbox platform for Princeton University faculty. Provides professor-specific API key management, per-professor token tracking, and a plugin-based command architecture for AI-powered workflows.
 
-If a required professor environment variable (`PROF_[ID]_NAME`, `PROF_[ID]_KEY`) is missing or invalid, `get_api_key()` raises `ValueError`, which is caught and re-raised as `CLIError` with a descriptive message. The process terminates with exit code 1.
+If a required professor environment variable (`PROF_[ID]_NAME`, `PROF_[ID]_KEY`) is missing or invalid (empty string, missing entirely, or contains only whitespace), `get_api_key()` raises `ValueError`, which is caught and re-raised as `CLIError` with a descriptive message. The process terminates with exit code 1.
+
+If a professor exceeds their monthly token budget, `TokenTracker` logs a warning at each threshold (e.g., 80%, 100%) but does **not** halt processing — all API calls continue. To stop usage, the professor's API key must be revoked externally.
 
 ## Architecture Pattern
 **Multi-Professor Service Architecture**: Each professor has isolated API keys and token tracking through environment-based configuration.
@@ -14,15 +16,23 @@ If a required professor environment variable (`PROF_[ID]_NAME`, `PROF_[ID]_KEY`)
 - **Plugin System**: All user-facing commands (translate, transcribe, transcription_review, prompt) are implemented as plugins in `plugins/`. `src/cli.py` discovers and loads them via `src/runtime/plugin_loader.py` at startup. Only `usage` is built-in.
 
 ### Plugin Architecture
-**Mandatory requirements** (every plugin must satisfy all of these):
-1. Place plugin code at `plugins/<name>/plugin.py`.
-2. Expose a module-level `plugin` object that implements the `ModePlugin` protocol (`commands`, `register_subparsers`, `run`).
-3. Inside `run()`, create a `TokenTracker(professor=professor)` and pass it to every service call.
 
-**Conventions** (follow these to stay consistent with existing plugins):
-- **Bundled plugins**: `plugins/prompt/` ships with the main repo (tracked by git) and serves as the canonical template for new plugins.
-- **External plugins**: `plugins/translation/` and `plugins/transcription/` are separate git repos cloned in. Their contents are git-ignored by the main repo.
-- **Adding a new plugin**: Copy `plugins/prompt/`, rename the class and `commands` list, implement `register_subparsers` and `run`. No changes to `src/` are required.
+**Step 1 — File location**: Place plugin code at `plugins/<name>/plugin.py`.
+
+**Step 2 — Protocol**: Expose a module-level `plugin` object that implements the `ModePlugin` protocol:
+- `commands: list[str]` — command names this plugin handles
+- `register_subparsers(subparsers)` — adds argparse subcommands
+- `run(args, professor, model, temperature, top_p, max_tokens)` — executes the command
+
+**Step 3 — Token tracking**: Inside `run()`, pass `professor` to any service that writes to `TokenTracker`. Services obtain a tracker internally; do not construct `TokenTracker` directly in the plugin.
+
+**Conventions**:
+| Type | Location | Git status | Use as template? |
+|------|----------|------------|------------------|
+| Bundled | `plugins/prompt/`, `plugins/translation/`, `plugins/transcription/` | Tracked by main repo | `plugins/prompt/` is the canonical template |
+| External (EA) | `plugins/translation-ea/`, `plugins/transcription-ea/` | Separate repos, git-ignored | Reference only — extend the matching bundled plugin |
+
+**Adding a new plugin**: Copy `plugins/prompt/`, rename the class and `commands` list, implement `register_subparsers` and `run`. No changes to `src/` are required.
 
 ## Professor Configuration System
 The system uses a specific environment variable pattern:
