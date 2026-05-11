@@ -12,6 +12,9 @@ tests can import them via their src.services.* names.
 import importlib.util
 import sys
 from pathlib import Path
+from unittest.mock import MagicMock
+
+import pytest
 
 # This file lives at plugins/translation/conftest.py.
 # parents[0] = plugins/translation/
@@ -67,3 +70,22 @@ _register(
     "src.services.image_translation_service",
     "src/services/image_translation_service.py",
 )
+
+
+@pytest.fixture(autouse=True)
+def _mock_token_tracker(monkeypatch):
+    """Prevent real TokenTracker instances from writing to data/ during tests.
+
+    All service constructors that receive no explicit token_tracker fall back to
+    ``TokenTracker(professor=..., data_file=...)`` inside BaseService.__init__.
+    Patching it here keeps test runs side-effect-free without requiring every
+    call site to pass a mock explicitly.
+    """
+    def _make_tracker(**_):
+        tracker = MagicMock()
+        usage = MagicMock()
+        usage.total_cost = 0.0
+        tracker.record_usage.return_value = usage
+        return tracker
+
+    monkeypatch.setattr("src.services.base_service.TokenTracker", _make_tracker)
