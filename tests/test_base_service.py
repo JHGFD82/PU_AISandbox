@@ -264,3 +264,43 @@ class TestRunWithRetry:
             svc._run_with_retry(body, "gpt-4o", return_signal_on_error=False)
         # Should have retried (content filter retries up to MAX_RETRIES-1)
         assert len(calls) >= 2
+
+
+# ---------------------------------------------------------------------------
+# _resolve_sampling_params — debug logging branch (line 76)
+# ---------------------------------------------------------------------------
+
+class TestResolveSamplingParams:
+
+    def test_debug_logged_when_custom_temperature_set(self, monkeypatch, caplog):
+        svc = _make_svc(monkeypatch, custom_temperature=0.3)
+        with caplog.at_level(logging.DEBUG):
+            svc._resolve_sampling_params("gpt-4o", 1.0, 1.0, 1000)
+        assert any("Sampling params" in r.message for r in caplog.records)
+
+    def test_debug_logged_when_custom_top_p_set(self, monkeypatch, caplog):
+        svc = _make_svc(monkeypatch, custom_top_p=0.8)
+        with caplog.at_level(logging.DEBUG):
+            svc._resolve_sampling_params("gpt-4o", 1.0, 1.0, 1000)
+        assert any("Sampling params" in r.message for r in caplog.records)
+
+    def test_no_debug_when_no_custom_sampling_params(self, monkeypatch, caplog):
+        svc = _make_svc(monkeypatch)
+        with caplog.at_level(logging.DEBUG):
+            svc._resolve_sampling_params("gpt-4o", 1.0, 1.0, 1000)
+        assert not any("Sampling params" in r.message for r in caplog.records)
+
+    def test_returns_custom_values_when_set(self, monkeypatch):
+        svc = _make_svc(monkeypatch, custom_temperature=0.5, custom_top_p=0.7, custom_max_tokens=256)
+        temp, top_p, max_tok = svc._resolve_sampling_params("gpt-4o", 1.0, 1.0, 1000)
+        assert temp == 0.5
+        assert top_p == 0.7
+        assert max_tok == 256
+
+    def test_falls_back_to_defaults_when_none(self, monkeypatch):
+        svc = _make_svc(monkeypatch)
+        temp, top_p, max_tok = svc._resolve_sampling_params("gpt-4o", 0.9, 0.95, 500)
+        assert temp == 0.9
+        assert top_p == 0.95
+        assert max_tok == 500  # _make_svc patches get_model_max_completion_tokens to return default
+

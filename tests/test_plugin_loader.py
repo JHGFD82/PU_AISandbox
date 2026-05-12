@@ -162,3 +162,45 @@ class TestDispatchMerging:
         assert "already registered" in caplog.text
         # first plugin wins
         assert "translate" in result
+
+    def test_three_plugins_with_handles_third_warns(self, tmp_path, caplog):
+        """Two plugins with handles merge into a DispatchPlugin.  A third plugin
+        with handles is not absorbed (DispatchPlugin has no 'handles' attribute)
+        and emits a conflict warning instead."""
+        import logging
+        for name, handles in [("alpha", ["en"]), ("beta", ["jp"]), ("gamma", ["zh"])]:
+            _write_plugin(tmp_path, name, f"""
+                class _P:
+                    commands = ["translate"]
+                    handles = {handles!r}
+                    def register_subparsers(self, sp): pass
+                    def run(self, *a, **k): pass
+                    def register_command_flags(self, p): pass
+                plugin = _P()
+            """)
+        with caplog.at_level(logging.WARNING, logger="src.runtime.plugin_loader"):
+            result = load_plugins(tmp_path)
+        from src.runtime.dispatch_plugin import DispatchPlugin
+        assert isinstance(result["translate"], DispatchPlugin)
+        assert "en" in result["translate"].source_registry
+        assert "jp" in result["translate"].source_registry
+        # gamma was already-registered, so it warns rather than absorbs
+        assert "already registered" in caplog.text
+
+
+# ---------------------------------------------------------------------------
+# spec=None branch in _load_one
+# ---------------------------------------------------------------------------
+
+class TestLoadOneSpecNone:
+
+    def test_skips_plugin_when_spec_is_none(self, tmp_path, caplog, monkeypatch):
+        """If spec_from_file_location returns None the plugin is skipped with a warning."""
+        import logging
+        import importlib.util as _ilu
+        _write_plugin(tmp_path, "specnone", "plugin = object()")
+        monkeypatch.setattr(_ilu, "spec_from_file_location", lambda *a, **k: None)
+        with caplog.at_level(logging.WARNING, logger="src.runtime.plugin_loader"):
+            result = load_plugins(tmp_path)
+        assert result == {}
+        assert "could not create import spec" in caplog.text

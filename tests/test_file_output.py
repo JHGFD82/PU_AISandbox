@@ -704,3 +704,46 @@ class TestSaveToDocxDeepPaths:
                 FileOutputHandler.save_to_docx("content", output_path, target_lang="English", label="Translation")
 
         assert "Added paragraph" in caplog.text or "Error processing paragraph" in caplog.text
+
+
+# ---------------------------------------------------------------------------
+# pdf_builder — inline markdown table extraction and paragraph error fallback
+# ---------------------------------------------------------------------------
+
+
+class TestPdfBuilderInlineMarkdownAndParagraphError:
+
+    def test_inline_markdown_table_in_content_merges_into_registry(self, tmp_path, caplog):
+        """Content containing a markdown table triggers _extract_markdown_tables,
+        setting _md_reg non-empty and executing the table_registry merge (lines 89-90)."""
+        output_path = str(tmp_path / "out.pdf")
+        content = (
+            "Paragraph before.\n\n"
+            "| Column A | Column B |\n|---|---|\n| Row 1A | Row 1B |\n\n"
+            "Paragraph after."
+        )
+        with caplog.at_level(logging.DEBUG):
+            FileOutputHandler.save_to_pdf(content, output_path, target_lang="English", label="Translation")
+        assert (tmp_path / "out.pdf").exists() or (tmp_path / "out.txt").exists()
+        assert any("Inserted PDF table" in r.message or "Paragraph" in r.message
+                   for r in caplog.records)
+
+    def test_paragraph_error_in_pdf_builder_logs_warning(self, tmp_path, caplog):
+        """Patching reportlab.platypus.Table to raise during table rendering
+        triggers the table-error except branch in pdf_builder (lines 118-119)."""
+        from reportlab.platypus import Table as RealTable
+
+        def bad_table(*args, **kwargs):
+            raise Exception("table render error")
+
+        output_path = str(tmp_path / "out.pdf")
+        # Provide a table_registry entry so the table-rendering path is entered.
+        table_registry = {"[TABLE_1]": [["Col A", "Col B"], ["val 1", "val 2"]]}
+        with patch("reportlab.platypus.Table", side_effect=bad_table):
+            with caplog.at_level(logging.WARNING):
+                FileOutputHandler.save_to_pdf(
+                    "[TABLE_1]", output_path,
+                    target_lang="English", label="Translation",
+                    table_registry=table_registry,
+                )
+        assert any("Could not render PDF table" in r.message for r in caplog.records)

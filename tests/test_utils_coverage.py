@@ -195,3 +195,40 @@ class TestParseTextIntoParagraphs:
         content = "  Para one  \n\n  Para two  "
         result = BaseTextProcessor.parse_text_into_paragraphs(content)
         assert result == ["Para one", "Para two"]
+
+
+# ===========================================================================
+# src/services/parallel_utils.py — cap_worker_count
+# ===========================================================================
+
+from src.services.parallel_utils import cap_worker_count
+
+
+class TestCapWorkerCount:
+
+    def test_no_cap_when_workers_within_limits(self, caplog):
+        with caplog.at_level(logging.INFO):
+            result = cap_worker_count(3, 10, 20)
+        assert result == 3
+        assert not any(r.levelno == logging.INFO for r in caplog.records
+                       if "capped" in r.message)
+
+    def test_workers_capped_by_item_count(self, caplog):
+        """actual == item_count triggers the item-count reason branch."""
+        with caplog.at_level(logging.INFO):
+            result = cap_worker_count(10, 3, 20, item_label="image", container_label="folder")
+        assert result == 3
+        assert any("3 image(s)" in r.message for r in caplog.records)
+
+    def test_workers_capped_by_max_workers(self, caplog):
+        """actual == max_workers (not item_count) triggers the settings-cap reason branch."""
+        with caplog.at_level(logging.INFO):
+            result = cap_worker_count(10, 20, 5)
+        assert result == 5
+        assert any("max_parallel_workers=5" in r.message for r in caplog.records)
+
+    def test_returns_min_of_all_three(self):
+        assert cap_worker_count(8, 4, 6) == 4
+        assert cap_worker_count(8, 6, 4) == 4
+        assert cap_worker_count(3, 6, 4) == 3
+

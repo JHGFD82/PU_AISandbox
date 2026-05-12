@@ -228,3 +228,75 @@ class TestCollectNotesBranches:
         assert "USER PROMPT" not in out
         assert sys_note == "note text"
 
+
+# ---------------------------------------------------------------------------
+# _apply_inline_notes
+# ---------------------------------------------------------------------------
+
+class _Svc:
+    """Minimal service stand-in for _apply_inline_notes tests."""
+
+
+class TestApplyInlineNotes:
+
+    def test_note_both_sets_system_and_user(self):
+        args = argparse.Namespace(note_both="shared", note_system=None, note_user=None)
+        svc = _Svc()
+        _CommandMixin._apply_inline_notes(svc, args)
+        assert svc.system_note == "shared"
+        assert svc.user_note == "shared"
+
+    def test_note_system_overrides_both_for_system_slot(self):
+        """note_system takes precedence over note_both for the system slot."""
+        args = argparse.Namespace(note_both="both_text", note_system="sys_only", note_user=None)
+        svc = _Svc()
+        _CommandMixin._apply_inline_notes(svc, args)
+        assert svc.system_note == "sys_only"
+        assert svc.user_note == "both_text"
+
+    def test_note_user_sets_only_user(self):
+        args = argparse.Namespace(note_both=None, note_system=None, note_user="usr_text")
+        svc = _Svc()
+        _CommandMixin._apply_inline_notes(svc, args)
+        assert svc.user_note == "usr_text"
+        assert not hasattr(svc, "system_note")
+
+    def test_no_notes_leaves_service_unchanged(self):
+        args = argparse.Namespace(note_both=None, note_system=None, note_user=None)
+        svc = _Svc()
+        _CommandMixin._apply_inline_notes(svc, args)
+        assert not hasattr(svc, "system_note")
+        assert not hasattr(svc, "user_note")
+
+    def test_missing_note_attrs_default_to_none(self):
+        """Args without note attributes should not raise."""
+        args = argparse.Namespace()
+        svc = _Svc()
+        _CommandMixin._apply_inline_notes(svc, args)
+        assert not hasattr(svc, "system_note")
+        assert not hasattr(svc, "user_note")
+
+
+# ---------------------------------------------------------------------------
+# _sampling_kwargs
+# ---------------------------------------------------------------------------
+
+class TestSamplingKwargs:
+
+    def test_returns_all_three_keys_from_args(self):
+        args = argparse.Namespace(temperature=0.7, top_p=0.9, max_tokens=512)
+        result = _CommandMixin._sampling_kwargs(args)
+        assert result == {"temperature": 0.7, "top_p": 0.9, "max_tokens": 512}
+
+    def test_returns_none_when_attrs_absent(self):
+        args = argparse.Namespace()
+        result = _CommandMixin._sampling_kwargs(args)
+        assert result == {"temperature": None, "top_p": None, "max_tokens": None}
+
+    def test_none_values_propagate(self):
+        args = argparse.Namespace(temperature=None, top_p=None, max_tokens=None)
+        result = _CommandMixin._sampling_kwargs(args)
+        assert result["temperature"] is None
+        assert result["top_p"] is None
+        assert result["max_tokens"] is None
+

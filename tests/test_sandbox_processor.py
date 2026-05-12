@@ -352,6 +352,25 @@ class TestProcessImageFolder:
         proc.process_image_folder(str(tmp_path), "English", output_file="out.txt")
         proc.file_output.save_translation_output.assert_called_once()
 
+    def test_parallel_path_saves_output_file(self, tmp_path, monkeypatch):
+        """Parallel workers > 1 with output_file set exercises the parallel output branch."""
+        proc = _make_processor(monkeypatch)
+        img = tmp_path / "scan.jpg"
+        img.write_bytes(b"fake")
+        # Stub out run_folder_parallel so we don't spin up real threads
+        fake_results = {0: ("scan.jpg", "OCR result")}
+        monkeypatch.setattr(
+            "src.runtime.image_handler.run_folder_parallel",
+            lambda *a, **k: fake_results,
+        )
+        monkeypatch.setattr(
+            "src.runtime.image_handler.cap_worker_count",
+            lambda *a, **k: 2,
+        )
+        proc.image_processor_service._get_model.return_value = "gpt-4o"
+        proc.process_image_folder(str(tmp_path), "English", output_file="out.txt", workers=2)
+        proc.file_output.save_translation_output.assert_called_once()
+
 
 # ---------------------------------------------------------------------------
 # process_image_translation

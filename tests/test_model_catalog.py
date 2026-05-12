@@ -639,6 +639,28 @@ class TestSaveModelCatalogExceptionPath:
         with pytest.raises(OSError, match="simulated replace failure"):
             save_model_catalog(SAMPLE_CATALOG)
 
+    def test_unlink_oserror_is_suppressed_and_original_exception_reraised(
+        self, monkeypatch, tmp_path
+    ):
+        """If both os.replace and os.unlink fail, the OSError from unlink is
+        suppressed and the original replace failure is re-raised."""
+        import tempfile as _tempfile
+
+        output_file = tmp_path / "model_catalog.json"
+        monkeypatch.setattr(catalog_module, "get_model_catalog_path", lambda: output_file)
+
+        def bad_replace(src, dst):
+            raise OSError("simulated replace failure")
+
+        def bad_unlink(path):
+            raise OSError("simulated unlink failure")
+
+        monkeypatch.setattr(catalog_module.os, "replace", bad_replace)
+        monkeypatch.setattr(catalog_module.os, "unlink", bad_unlink)
+
+        with pytest.raises(OSError, match="simulated replace failure"):
+            save_model_catalog(SAMPLE_CATALOG)
+
 
 # ---------------------------------------------------------------------------
 # _fetch_model_pricing — zero-price raises RuntimeError (pricing.py line 46)
