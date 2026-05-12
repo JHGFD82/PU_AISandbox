@@ -22,8 +22,7 @@ ENV/
 .idea/
 
 # VS Code
-.vscode/settings.json
-.vscode/launch.json
+.vscode/
 
 # Local test folder
 example_docs/
@@ -64,3 +63,6 @@ plugins/*
 
 # External files
 Presentation/
+
+# Pytest cache
+.pytest_cache/
