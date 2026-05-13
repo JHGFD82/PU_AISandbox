@@ -86,6 +86,23 @@ def _load_one(
         )
         return
 
+    # Tag the plugin object with its source name so supersession can find it.
+    p._pu_plugin_name = plugin_name  # type: ignore[attr-defined]
+
+    # If this plugin declares supersession, evict the superseded plugin's commands
+    # before registering new ones.  The superseded plugin's commands are removed
+    # entirely so the superseding plugin can re-register them without conflict.
+    for superseded in getattr(p, "supersedes", []):
+        for cmd in [k for k, v in result.items()
+                    if getattr(v, "_pu_plugin_name", None) == superseded]:
+            logger.debug(
+                "Plugin '%s': superseding command '%s' previously registered by '%s'.",
+                plugin_name,
+                cmd,
+                superseded,
+            )
+            del result[cmd]
+
     for cmd in p.commands:
         if cmd in result:
             existing = result[cmd]

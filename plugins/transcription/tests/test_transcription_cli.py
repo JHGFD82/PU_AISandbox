@@ -4,24 +4,33 @@ Tests for the base transcription plugin CLI flag parsing and validation logic.
 This plugin registers English only.  Tests verify:
   - transcribe and transcription_review commands work with 'en'
   - EA-only flags (--kanbun, --kanbun-main, --spread, --vertical,
-    --passes, --preserve-tables, --workers) are NOT present
+    --passes, --preserve-tables, --workers) are NOT present on the base plugin
   - Language codes outside 'en' are rejected
 """
 
+import importlib.util
+import sys
 from pathlib import Path
 
 import pytest
 
 from src.cli import create_argument_parser
-from src.runtime.plugin_loader import load_plugins
 
-# Load plugins from this plugin's own directory (not the whole plugins/ folder).
-# This ensures the test exercises the base plugin in isolation.
-_PLUGIN_DIR = Path(__file__).resolve().parents[2]
+# Absolute path to this plugin's entry point.  Loading via spec_from_file_location
+# ensures EA is never pulled in even when both plugins are installed side-by-side.
+_BASE_PLUGIN_FILE = Path(__file__).resolve().parents[1] / "plugin.py"
 
 
 def _make_parser():
-    return create_argument_parser(load_plugins(_PLUGIN_DIR))
+    """Build a parser backed by the base transcription plugin only (no EA)."""
+    spec = importlib.util.spec_from_file_location(
+        "pu_plugin.transcription.plugin", _BASE_PLUGIN_FILE
+    )
+    mod = importlib.util.module_from_spec(spec)  # type: ignore[arg-type]
+    sys.modules["pu_plugin.transcription.plugin"] = mod
+    spec.loader.exec_module(mod)  # type: ignore[union-attr]
+    p = mod.plugin
+    return create_argument_parser({cmd: p for cmd in p.commands})
 
 
 # ---------------------------------------------------------------------------

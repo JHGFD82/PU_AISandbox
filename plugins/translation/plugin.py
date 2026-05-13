@@ -140,7 +140,6 @@ from src.processors.pdf_processor import generate_process_text    # noqa: E402
 from src.processors.txt_processor import TxtProcessor             # noqa: E402
 from src.services.constants import DEFAULT_PARALLEL_WORKERS       # noqa: E402
 from src.settings import DEFAULT_PAGE_SIZE                        # noqa: E402
-from .utils import validate_page_nums                             # noqa: E402
 
 # Register this plugin's source language into the shared language registry.
 register_language('en', 'English')
@@ -411,6 +410,7 @@ class TranslationPlugin:
         External plugins should follow the same pattern: one method for flags,
         called from both register_subparsers() and as the DispatchPlugin hook.
         """
+        from plugins.translation.utils import validate_page_nums  # noqa: PLC0415
         input_group = parser.add_mutually_exclusive_group(required=False)
         input_group.add_argument(
             "-i", "--input",

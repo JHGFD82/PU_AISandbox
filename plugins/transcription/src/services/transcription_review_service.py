@@ -12,7 +12,6 @@ from ..models import (
     get_model_system_role,
 )
 from ..tracking.token_tracker import TokenTracker
-from .api_errors import handle_api_errors
 from .base_service import BaseService
 from .prompts import TranscriptionReviewPromptSpec
 from ..settings import (
@@ -108,7 +107,6 @@ class TranscriptionReviewService(BaseService):
 
         return json.dumps(data, ensure_ascii=False, indent=2)
 
-    @handle_api_errors
     def review_transcription(
         self,
         text: str,
@@ -135,11 +133,12 @@ class TranscriptionReviewService(BaseService):
         model = self._resolve_model("transcription_review")
         system_role = get_model_system_role(model)
 
-        response = self._call_api(model, system_role, system_prompt, user_prompt)
-        self._record_response_usage(response, model, critical=False)
+        def body(_attempt: int) -> Optional[str]:
+            response = self._call_api(model, system_role, system_prompt, user_prompt)
+            self._record_response_usage(response, model, critical=False)
+            raw = ""
+            if response.choices and response.choices[0].message:
+                raw = response.choices[0].message.content or ""
+            return self._inject_model_and_validate(raw, model, language)
 
-        raw = ""
-        if response.choices and response.choices[0].message:
-            raw = response.choices[0].message.content or ""
-
-        return self._inject_model_and_validate(raw, model, language)
+        return self._run_with_retry(body, model, "transcription_review")
