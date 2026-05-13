@@ -1,3 +1,7 @@
 {
-  "ignore": ["tests/"]
+  "ignore": [
+    "tests/",
+    "plugins/translation/src/",
+    "plugins/transcription/src/"
+  ]
 }
