@@ -11,8 +11,17 @@ This plugin ships with the main PU_AISandbox repo.  It serves two roles:
      English destination-side guidance.  It also houses _execute_translate(),
      the shared execution helper that all translation plugins delegate to.
 
-TEMPLATE GUIDE FOR EXTERNAL PLUGIN AUTHORS
-------------------------------------------
+This is a **standalone plugin** — it registers the ``translate`` command.
+If you are adding support for additional languages, write an **extension
+plugin** instead (see "TEMPLATE GUIDE" below and docs/plugin-authoring-guide.md).
+
+TEMPLATE GUIDE FOR EXTENSION PLUGIN AUTHORS
+--------------------------------------------
+Extension plugins extend the ``translate`` command with new source languages.
+They **must not** call ``register_subparsers()`` — the ``translate`` command
+already exists.  Doing so would cause a conflict and your plugin would be
+silently skipped by the loader.
+
 Clone this file into your plugin directory and adapt it:
 
   1. Change ``handles`` to the shortcodes your plugin owns as *source*
@@ -29,8 +38,10 @@ Clone this file into your plugin directory and adapt it:
      not from this plugin.
 
   4. Add your language-specific CLI flags in ``register_command_flags()``.
-     Do *not* re-add ``language_code`` or any flag already in the base
-     parser — those are added by the base plugin or DispatchPlugin.
+     Do *not* implement ``register_subparsers()`` — extension plugins use
+     ``register_command_flags()`` only.  Do *not* re-add ``language_code``
+     or any flag already in the base parser — those are added by the base
+     plugin or DispatchPlugin.
 
   5. In ``run()``, append your variant notes *before* calling
      ``_execute_translate``::

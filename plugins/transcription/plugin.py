@@ -3,10 +3,17 @@
 Provides the ``transcribe`` command (OCR image transcription) and the
 ``transcription_review`` command (OCR error review) for English text.
 
-This plugin ships with the main PU_AISandbox repo and handles English OCR.
-For East Asia language support (Chinese, Japanese, Korean) with kanbun,
-vertical script, multi-pass, and parallel-worker options, install the
-``transcription-ea`` plugin by cloning it into ``plugins/transcription-ea/``.
+This is a **standalone plugin** — it registers the ``transcribe`` and
+``transcription_review`` commands.  For East Asia language support (Chinese,
+Japanese, Korean) with kanbun, vertical script, multi-pass, and
+parallel-worker options, install the ``transcription-ea`` **extension plugin**
+by cloning it into ``plugins/transcription-ea/``.
+
+Extension plugins for transcription must **not** call ``register_subparsers()``
+— the commands already exist.  They hook in by declaring ``handles`` (the
+source-language tokens they own) and implementing ``register_command_flags()``
+to append their flags to the shared parser.  Calling ``register_subparsers()``
+would cause a conflict and the plugin would be silently skipped.
 
 ARCHITECTURE — sys.modules injection
 --------------------------------------

@@ -1,6 +1,6 @@
 # Translation Plugin (Base)
 
-Built-in translation plugin that ships with [PU AI Sandbox](https://github.com/princeton-oit/PU_AISandbox). It serves two roles:
+Built-in translation plugin that ships with [PU AI Sandbox](https://github.com/princeton-oit/PU_AISandbox). It is a **standalone plugin** — it registers the `translate` command and serves two roles:
 
 1. **Service owner** — injects the shared service layer (`TranslationService`, `ImageTranslationService`, prompt specs, and `translation_fragments`) into `sys.modules` so that any other translation plugin can use them without bundling copies.
 
@@ -12,20 +12,22 @@ This plugin does not need to be cloned or installed separately — it is part of
 
 ## Dispatch Model
 
-When an additional language plugin (e.g. `plugins/translation-ea/`) is also installed, the plugin loader merges both plugins into a `DispatchPlugin`. The base plugin always drives translations whose **source** language is English. Other plugins contribute EA or other-language routing.
+When an **extension plugin** (e.g. `plugins/translation-ea/`) is also installed, the plugin loader merges both plugins into a `DispatchPlugin`. The base plugin always drives translations whose **source** language is English. Extension plugins contribute routing for their declared languages.
 
-See [dispatch_plugin.py](../../src/runtime/dispatch_plugin.py) for the framework implementation.
+Extension plugins must **not** call `register_subparsers()` — the `translate` command is already registered by this base plugin. They hook in by declaring `handles` (the source-language shortcodes they own) and implementing `register_command_flags()`. Calling `register_subparsers()` would cause a command conflict and the extension plugin would be silently skipped by the loader.
+
+See [dispatch_plugin.py](../../src/runtime/dispatch_plugin.py) for the framework implementation and [docs/plugin-authoring-guide.md](../../docs/plugin-authoring-guide.md) for the full authoring guide.
 
 ---
 
-## Adding a New Language Plugin
+## Adding a New Language Extension Plugin
 
-This plugin's `plugin.py` is also the reference template for external plugin authors. Key steps:
+This plugin's `plugin.py` is also the reference template for extension plugin authors. Key steps:
 
 1. Clone `plugins/translation/plugin.py` into your new plugin directory.
 2. Remove the `sys.modules` injection block — the base plugin already handles that.
-3. Set `handles` to the full language names your plugin owns as *source* languages.
-4. Add your language-specific CLI flags in `register_command_flags()`.
+3. Set `handles` to the source-language shortcodes your plugin owns.
+4. Implement `register_command_flags()` to add your language-specific CLI flags. **Do not implement `register_subparsers()`.**
 5. In `run()`, append your variant notes (if any) before calling `_base_module._execute_translate()`.
 6. Optionally implement `get_peer_guidance(token)` to contribute destination-side conventions.
 

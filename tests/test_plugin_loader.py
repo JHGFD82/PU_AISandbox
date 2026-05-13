@@ -83,6 +83,48 @@ class TestLoadPlugins:
         assert result == {}
         assert "missing required attributes" in caplog.text
 
+    def test_loads_extension_plugin_without_register_subparsers(self, tmp_path):
+        """Extension plugins with handles+register_command_flags but no register_subparsers
+        must be accepted by the loader (they hook into an existing command)."""
+        _write_plugin(tmp_path, "base", """
+            class _P:
+                commands = ["translate"]
+                handles = ["en"]
+                def register_subparsers(self, sp): pass
+                def run(self, *a, **k): pass
+            plugin = _P()
+        """)
+        _write_plugin(tmp_path, "extension", """
+            class _P:
+                commands = ["translate"]
+                handles = ["jp"]
+                def register_command_flags(self, p): pass
+                def run(self, *a, **k): pass
+            plugin = _P()
+        """)
+        result = load_plugins(tmp_path)
+        from src.runtime.dispatch_plugin import DispatchPlugin
+        assert isinstance(result["translate"], DispatchPlugin)
+        assert "en" in result["translate"].source_registry
+        assert "jp" in result["translate"].source_registry
+
+    def test_skips_extension_plugin_missing_handles(self, tmp_path, caplog):
+        """A plugin with register_command_flags but no handles is not a valid extension
+        plugin and must be skipped."""
+        import logging
+        _write_plugin(tmp_path, "broken_ext", """
+            class _P:
+                commands = ["translate"]
+                # has register_command_flags but no handles — invalid
+                def register_command_flags(self, p): pass
+                def run(self, *a, **k): pass
+            plugin = _P()
+        """)
+        with caplog.at_level(logging.WARNING, logger="src.runtime.plugin_loader"):
+            result = load_plugins(tmp_path)
+        assert result == {}
+        assert "missing required attributes" in caplog.text
+
     def test_skips_plugin_with_empty_commands(self, tmp_path, caplog):
         import logging
         _write_plugin(tmp_path, "emptycmds", """

@@ -68,14 +68,17 @@ def _load_one(
         )
         return
 
+    _has_standalone_interface = hasattr(p, "register_subparsers")
+    _has_extension_interface = hasattr(p, "handles") and hasattr(p, "register_command_flags")
     if not (
         hasattr(p, "commands")
-        and hasattr(p, "register_subparsers")
+        and (_has_standalone_interface or _has_extension_interface)
         and hasattr(p, "run")
     ):
         logger.warning(
-            "Plugin '%s': 'plugin' object is missing required attributes "
-            "(commands, register_subparsers, run) — skipped.",
+            "Plugin '%s': 'plugin' object is missing required attributes — skipped. "
+            "Standalone plugins need (commands, register_subparsers, run). "
+            "Extension plugins need (commands, handles, register_command_flags, run).",
             plugin_name,
         )
         return

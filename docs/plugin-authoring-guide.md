@@ -4,6 +4,18 @@ Plugins are self-contained directories under `plugins/`. The core never needs to
 
 ---
 
+## Plugin Types
+
+There are two kinds of plugins:
+
+**Standalone plugins** introduce a new, independent CLI command. They implement `register_subparsers()` to create the command parser, and their `run()` is called directly by the CLI router. The built-in `prompt`, `translation`, and `transcription` plugins are all standalone plugins.
+
+**Extension plugins** extend an existing command with additional language or domain support. Instead of introducing a new command, they declare `handles` (the source-language shortcodes they own) and implement `register_command_flags()` to append their flags to the base plugin's shared parser. The plugin loader detects the `handles` overlap and automatically merges them into a `DispatchPlugin` at startup. `translation-ea` and `transcription-ea` are examples of extension plugins.
+
+> **Extension plugins must not call `register_subparsers()`.** They hook into the base standalone plugin's parser — they must never register a parallel command. Doing so would cause the plugin to conflict with the base plugin and be silently skipped.
+
+---
+
 ## Quick Start
 
 ```bash
@@ -107,9 +119,9 @@ sandbox.my_service.do_something(...)   # lazily instantiated
 
 ---
 
-## Extending an Existing Command (DispatchPlugin)
+## Writing an Extension Plugin (DispatchPlugin)
 
-To add language support to an existing command like `translate`:
+To add language support to an existing command like `translate`, write an **extension plugin** — one that hooks into the existing `translate` command rather than registering a new one:
 
 1. **Declare `handles`** — the shortcodes your plugin owns as source languages:
 
@@ -119,7 +131,7 @@ To add language support to an existing command like `translate`:
        handles: list[str] = ["jp", "zh"]   # shortcodes you own
    ```
 
-2. **Do not re-register base parser flags.** Implement `register_command_flags(parser)` instead of `register_subparsers()` — the loader calls this to append your flags to the shared parser:
+2. **Do not implement `register_subparsers()`.** Extension plugins must implement `register_command_flags(parser)` instead. The loader calls this to append your flags to the shared parser. Implementing `register_subparsers()` would create a command conflict and your plugin would be silently dropped.
 
    ```python
    def register_command_flags(self, parser: argparse.ArgumentParser) -> None:
@@ -214,11 +226,21 @@ def use_template_catalog(_use_template_catalog):
 
 ## Checklist
 
+**All plugins:**
 - [ ] `plugin.py` at `plugins/myplugin/plugin.py`
 - [ ] Module-level `plugin = MyPlugin()` at the bottom of `plugin.py`
 - [ ] `commands` list declared on the class
 - [ ] `TokenTracker(professor=professor)` created in `run()` and passed to every service
 - [ ] Services injected into `sys.modules` before any import that needs them
 - [ ] Languages registered via `register_language()` at module level
-- [ ] `register_subparsers()` or `register_command_flags()` implemented (not both, unless standalone)
 - [ ] Tests in `plugins/myplugin/tests/`
+
+**Standalone plugins** (new independent command):
+- [ ] `register_subparsers()` implemented
+- [ ] Do *not* declare `handles` unless this plugin is also intended as a dispatch primary
+
+**Extension plugins** (extending an existing command):
+- [ ] `handles` declared with the source-language shortcodes this plugin owns
+- [ ] `register_command_flags()` implemented — **not** `register_subparsers()`
+- [ ] No `sys.modules` injection — the base standalone plugin handles that
+- [ ] `run()` delegates to the base plugin's shared executor (e.g. `_execute_translate`)
