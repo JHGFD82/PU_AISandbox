@@ -16,8 +16,7 @@ from tqdm import tqdm
 from pdfminer.pdfpage import PDFPage
 
 from ..models import (
-    resolve_model, get_model_system_role,
-    maybe_sync_model_pricing,
+    get_model_system_role,
     OutputOptions,
 )
 from .api_errors import APISignal

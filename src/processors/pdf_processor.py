@@ -59,7 +59,7 @@ def generate_process_text(abstract_text: str, page_text: str, previous_page: str
             context_parts.append(f"Previous numbering ended with: {numbered_lines[-1]}")
     
     if context_parts:
-        context = f"--Context: \n" + "\n".join(context_parts)
+        context = "--Context: \n" + "\n".join(context_parts)
     else:
         context = ""
     

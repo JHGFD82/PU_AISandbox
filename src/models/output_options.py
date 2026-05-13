@@ -1,6 +1,6 @@
 """Output configuration for file-producing commands."""
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional
 
 

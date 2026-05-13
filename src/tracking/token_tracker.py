@@ -9,8 +9,8 @@ from typing import Dict, Any, List, Optional
 from dataclasses import dataclass, asdict
 
 from ..models.catalog import (
-    load_model_catalog, get_model_pricing, get_pricing_unit,
-    get_monthly_limit, save_model_catalog,
+    get_model_pricing, get_pricing_unit,
+    get_monthly_limit,
 )
 from ..console import print_banner, print_subsection
 from ..settings import BUDGET_WARNING_THRESHOLD

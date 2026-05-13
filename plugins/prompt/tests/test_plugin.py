@@ -13,11 +13,8 @@ from __future__ import annotations
 
 import argparse
 import sys
-import types
-from io import StringIO
 from pathlib import Path
-from typing import Optional
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -26,14 +23,14 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-import plugins.prompt.plugin as plugin_mod
-from plugins.prompt.plugin import (
+import plugins.prompt.plugin as plugin_mod  # noqa: E402
+from plugins.prompt.plugin import (  # noqa: E402
     PromptPlugin,
     _collect_multiline,
     _dry_run_display,
     _resolve_output_path,
 )
-from src.errors import CLIError
+from src.errors import CLIError  # noqa: E402
 
 
 # ---------------------------------------------------------------------------

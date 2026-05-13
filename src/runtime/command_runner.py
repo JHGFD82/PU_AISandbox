@@ -12,7 +12,6 @@ import logging
 import os
 from typing import Any, Optional, Tuple
 
-from ..errors import CLIError
 
 logger = logging.getLogger(__name__)
 

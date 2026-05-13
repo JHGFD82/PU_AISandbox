@@ -4,7 +4,6 @@ import argparse
 import logging
 import os
 from datetime import datetime
-from pathlib import Path
 from typing import Optional
 
 from ..config import load_professor_config, LANGUAGE_MAP
@@ -51,7 +50,7 @@ def show_professor_config() -> None:
         if archived_months:
             print(f"    Archives:     {', '.join(archived_months)}")
         else:
-            print(f"    Archives:     none")
+            print("    Archives:     none")
 
     print("\n" + "=" * 60)
     print("Usage: python main.py <professor> <command> [options]")

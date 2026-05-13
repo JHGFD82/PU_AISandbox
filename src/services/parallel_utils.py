@@ -4,7 +4,9 @@ import logging
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed as futures_as_completed
 from contextlib import contextmanager
-from typing import Any, Callable, Dict, Generator, List, Optional, Tuple
+from typing import Any, Callable, Dict, Generator, List, Tuple
+
+from tqdm import tqdm
 
 
 def cap_worker_count(
@@ -63,8 +65,6 @@ def run_folder_parallel(
     baseline_tokens = usage_data["total_usage"].get("total_tokens", 0)
     baseline_cost = usage_data["total_usage"].get("total_cost", 0.0)
 
-    from tqdm import tqdm  # local import avoids circular dependency at module level
-
     with tqdm_logging():
         with ThreadPoolExecutor(max_workers=actual_workers) as executor:
             future_map = {
@@ -84,9 +84,6 @@ def run_folder_parallel(
                     update_pbar_postfix(pbar, usage_data, baseline_tokens, baseline_cost)
                     pbar.update(1)
     return results
-
-
-from tqdm import tqdm
 
 
 class _TqdmLoggingHandler(logging.Handler):

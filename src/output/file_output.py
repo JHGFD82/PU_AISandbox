@@ -17,7 +17,6 @@ from ._output_utils import (
 )
 from .docx_builder import _apply_docx_table_borders, save_to_docx
 from .pdf_builder import save_to_pdf
-from ..settings import DEFAULT_FONT_SIZE
 
 
 def generate_output_filename(input_file: str, source_lang: str, target_lang: str, extension: str = '.txt') -> str:

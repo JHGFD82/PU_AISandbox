@@ -2,7 +2,7 @@
 
 import logging
 from pathlib import Path
-from typing import List, Optional
+from typing import Optional
 
 from .font_resolver import get_pdf_font
 from ._output_utils import _emit_message, _normalize_paragraphs, _extract_markdown_tables, save_to_text_file
