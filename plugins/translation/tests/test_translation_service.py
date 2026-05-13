@@ -11,7 +11,7 @@ Covers:
 
 import sys
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -113,7 +113,7 @@ class TestRowsToMarkdown:
         result = TranslationService._rows_to_markdown([["A"], ["B", "C"]])
         lines = result.splitlines()
         # All lines should have the same number of | separators
-        pipe_counts = [l.count("|") for l in lines]
+        pipe_counts = [line.count("|") for line in lines]
         assert len(set(pipe_counts)) == 1
 
 
@@ -505,13 +505,21 @@ class TestTranslateTableGrid:
 
     def _make_response(self, content: str):
         class _Usage:
-            prompt_tokens = 5; completion_tokens = 10; total_tokens = 15
+            prompt_tokens = 5
+            completion_tokens = 10
+            total_tokens = 15
         class _Message:
             def __init__(self, c): self.content = c
         class _Choice:
-            def __init__(self, c): self.message = _Message(c); self.finish_reason = "stop"
+            def __init__(self, c):
+                self.message = _Message(c)
+                self.finish_reason = "stop"
         class _Resp:
-            def __init__(self, c): self.id = "r"; self.model = "gpt-4o"; self.usage = _Usage(); self.choices = [_Choice(c)]
+            def __init__(self, c):
+                self.id = "r"
+                self.model = "gpt-4o"
+                self.usage = _Usage()
+                self.choices = [_Choice(c)]
         return _Resp(content)
 
     def test_empty_rows_returns_empty_immediately(self, monkeypatch):
@@ -987,8 +995,6 @@ class TestTranslateTextPagesExtended:
         assert len(saved_calls) == 1
 
     def test_workers_gt1_delegates_to_parallel(self, monkeypatch):
-        import sys
-        from src.models import OutputOptions
         svc = _make_svc(monkeypatch)
         parallel_calls: list = []
 
@@ -1048,18 +1054,24 @@ class TestProcessImageTranslationRetryPaths:
 
     def _resp_with_content(self, content):
         class _Usage:
-            prompt_tokens = 5; completion_tokens = 10; total_tokens = 15
+            prompt_tokens = 5
+            completion_tokens = 10
+            total_tokens = 15
 
         class _Msg:
             def __init__(self, c): self.content = c
 
         class _Choice:
-            def __init__(self, c): self.message = _Msg(c); self.finish_reason = "stop"
+            def __init__(self, c):
+                self.message = _Msg(c)
+                self.finish_reason = "stop"
 
         class _Resp:
             def __init__(self, c):
-                self.id = "r"; self.model = "gpt-4o"
-                self.usage = _Usage(); self.choices = [_Choice(c)]
+                self.id = "r"
+                self.model = "gpt-4o"
+                self.usage = _Usage()
+                self.choices = [_Choice(c)]
 
         return _Resp(content)
 
