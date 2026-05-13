@@ -17,10 +17,14 @@ logger = logging.getLogger(__name__)
 
 
 class _CommandMixin:
-    """Mixin that adds helper methods to SandboxProcessor.
+    """CLI-to-processor bridge mixin for SandboxProcessor.
 
-    All instance-method references to ``self.*`` resolve on the concrete
-    ``SandboxProcessor`` subclass via normal Python MRO.
+    Provides interactive helpers (multiline input, notes collection), inline-note
+    application, dry-run display, and output-path resolution.  All ``self.*``
+    references resolve on the concrete ``SandboxProcessor`` subclass via Python MRO.
+
+    Methods are intentionally static or take ``args`` as a parameter so they can
+    be called from plugin ``run()`` methods without constructing a full processor.
     """
 
     @staticmethod

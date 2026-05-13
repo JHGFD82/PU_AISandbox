@@ -90,7 +90,16 @@ register_language('en', 'English')
 
 
 class TranscriptionPlugin:
-    """OCR transcription and transcription-review mode plugin (base, English only)."""
+    """OCR transcription and transcription-review mode plugin (base, English only).
+
+    Registers two commands:
+    - ``transcribe``            — OCR an image file or folder of images
+    - ``transcription_review``  — Review prior transcription output for OCR errors
+
+    This base plugin handles English only.  Install ``transcription-ea`` for
+    East Asian language support (Japanese, Chinese, Korean) including multi-pass,
+    kanbun, and vertical-script options.
+    """
 
     commands: list[str] = ["transcribe", "transcription_review"]
 

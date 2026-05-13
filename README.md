@@ -28,6 +28,14 @@ main.py
 
 `src/cli.py` decides *what* to run. Plugins decide *how* to run it. Only the `usage` subcommand is built in.
 
+For deeper documentation, see the `docs/` folder:
+
+- [`docs/architecture.md`](docs/architecture.md) — request lifecycle, component descriptions, data-flow diagrams
+- [`docs/cli-reference.md`](docs/cli-reference.md) — full flag reference for all commands
+- [`docs/configuration.md`](docs/configuration.md) — `.env`, `model_catalog.json`, `settings.toml` template and schema reference
+- [`docs/token-usage-guide.md`](docs/token-usage-guide.md) — token tracking, usage commands, budget settings, and troubleshooting
+- [`docs/plugin-authoring-guide.md`](docs/plugin-authoring-guide.md) — step-by-step guide to writing new plugins
+
 ---
 
 ## First-Run Setup
@@ -76,7 +84,7 @@ The catalog (`src/model_catalog.json`) is not tracked by git. Copy the template:
 cp src/model_catalog.template.json src/model_catalog.json
 ```
 
-For OpenAI or Google models, pricing is fetched automatically on first use — no manual edits needed. For all other providers, add entries directly to `src/model_catalog.json` following the template schema.
+For OpenAI or Google models, pricing is fetched automatically on first use — no manual edits needed. For all other providers, add entries directly to `src/model_catalog.json` following the template schema. See [`docs/configuration.md`](docs/configuration.md) for the full schema.
 
 ### 4. Install optional plugins
 
