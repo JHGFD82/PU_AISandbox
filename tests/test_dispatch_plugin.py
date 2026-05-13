@@ -220,11 +220,13 @@ class TestRun:
         dp.run(args, "test", None, None, None, None)
         assert args._peer_guidance == []
 
-    def test_raises_cli_error_on_non_tuple_language_code(self):
-        dp, _ = _make_dispatcher(["en"])
-        args = self._make_args("en")  # string, not tuple
-        with pytest.raises(CLIError, match="language-code pair"):
-            dp.run(args, "test", None, None, None, None)
+    def test_string_language_code_routes_to_owner(self):
+        # A plain string language_code (used by transcription plugins) should
+        # route to the plugin whose handles list contains that string.
+        dp, primary = _make_dispatcher(["English"])
+        args = self._make_args("English")  # string, not tuple
+        dp.run(args, "test", None, None, None, None)
+        primary.run.assert_called_once()
 
     def test_raises_cli_error_on_single_element_tuple(self):
         dp, _ = _make_dispatcher(["en"])

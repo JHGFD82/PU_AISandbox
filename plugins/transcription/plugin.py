@@ -102,6 +102,11 @@ class TranscriptionPlugin:
     """
 
     commands: list[str] = ["transcribe", "transcription_review"]
+    # ``handles`` lists the full language names (as returned by
+    # ``parse_single_language_code``) that this plugin services.  The
+    # plugin loader uses this to merge with other transcription plugins
+    # via DispatchPlugin, routing each language to the correct plugin.
+    handles: list[str] = ["English"]
 
     # ── Argument registration ─────────────────────────────────────────────────
 
@@ -109,48 +114,54 @@ class TranscriptionPlugin:
         self,
         subparsers: argparse._SubParsersAction,
     ) -> None:
+        # Guard against double-registration: DispatchPlugin calls this method
+        # once per managed command (one instance per command), so when two
+        # commands share the same primary plugin both instances will call this.
+        # The idempotency check ensures the parsers are only created once.
         # ── transcribe ────────────────────────────────────────────────────────
-        tr = subparsers.add_parser("transcribe", help="Transcribe images using OCR")
-        tr.add_argument(
-            "language_code",
-            type=parse_single_language_code,
-            help="Target language: en (English)",
-        )
-        tr.add_argument(
-            "-i", "--input",
-            dest="input_file",
-            type=str,
-            required=False,
-            help="Input image file path, or a folder of images to process in order",
-        )
-        add_common_flags(tr)
-        add_notes_flags(tr)
+        if "transcribe" not in subparsers.choices:
+            tr = subparsers.add_parser("transcribe", help="Transcribe images using OCR")
+            tr.add_argument(
+                "language_code",
+                type=parse_single_language_code,
+                help="Target language: en (English)",
+            )
+            tr.add_argument(
+                "-i", "--input",
+                dest="input_file",
+                type=str,
+                required=False,
+                help="Input image file path, or a folder of images to process in order",
+            )
+            add_common_flags(tr)
+            add_notes_flags(tr)
 
         # ── transcription_review ──────────────────────────────────────────────
-        rv = subparsers.add_parser(
-            "transcription_review",
-            help="Review AI transcription output for OCR errors (returns JSON report)",
-        )
-        rv.add_argument(
-            "language_code",
-            type=parse_single_language_code,
-            help="Language of the transcription: en (English)",
-        )
-        review_input_group = rv.add_mutually_exclusive_group(required=False)
-        review_input_group.add_argument(
-            "-i", "--input",
-            dest="input_file",
-            type=str,
-            help="Path to a text file containing the transcription result to review",
-        )
-        review_input_group.add_argument(
-            "-c", "--custom",
-            dest="custom_text",
-            action="store_true",
-            help="Paste the transcription text interactively (end with --- on its own line)",
-        )
-        add_common_flags(rv)
-        add_notes_flags(rv)
+        if "transcription_review" not in subparsers.choices:
+            rv = subparsers.add_parser(
+                "transcription_review",
+                help="Review AI transcription output for OCR errors (returns JSON report)",
+            )
+            rv.add_argument(
+                "language_code",
+                type=parse_single_language_code,
+                help="Language of the transcription: en (English)",
+            )
+            review_input_group = rv.add_mutually_exclusive_group(required=False)
+            review_input_group.add_argument(
+                "-i", "--input",
+                dest="input_file",
+                type=str,
+                help="Path to a text file containing the transcription result to review",
+            )
+            review_input_group.add_argument(
+                "-c", "--custom",
+                dest="custom_text",
+                action="store_true",
+                help="Paste the transcription text interactively (end with --- on its own line)",
+            )
+            add_common_flags(rv)
+            add_notes_flags(rv)
 
     # ── Command execution ─────────────────────────────────────────────────────
 

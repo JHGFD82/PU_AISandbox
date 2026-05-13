@@ -145,25 +145,35 @@ class DispatchPlugin:
     ) -> None:
         """Route execution to the plugin that owns the source token.
 
-        Reads ``args.language_code`` (must be a 2-tuple ``(source, target)``),
-        looks up the owning plugin for the source token, optionally collects
-        destination guidance from the plugin owning the target token, and
-        delegates to the owning plugin's ``run()``.
+        Reads ``args.language_code``, which may be either:
+
+        * a 2-tuple ``(source, target)`` as used by translation plugins — the
+          source token is the first element; or
+        * a plain string as used by transcription plugins — the string itself
+          is the source token.
+
+        Looks up the owning plugin for the source token, optionally collects
+        destination guidance from the plugin owning the target token (tuple
+        mode only), and delegates to the owning plugin's ``run()``.
 
         Raises
         ------
         CLIError
-            If ``args.language_code`` is not a 2-tuple, or if no plugin owns
-            the source token.
+            If ``args.language_code`` has an unexpected type, or if no plugin
+            owns the source token.
         """
         language_code = getattr(args, "language_code", None)
-        if not isinstance(language_code, tuple) or len(language_code) != 2:
+        if isinstance(language_code, tuple) and len(language_code) == 2:
+            source_token, dest_token = language_code
+        elif isinstance(language_code, str):
+            source_token = language_code
+            dest_token = None
+        else:
             raise CLIError(
-                f"Command '{self._command}' requires a language-code pair "
-                "(e.g. J-E).  Provide source and target separated by a hyphen."
+                f"Command '{self._command}' requires a language-code argument "
+                "(either a single code such as 'en', or a language-code pair "
+                "such as 'J-E')."
             )
-
-        source_token, dest_token = language_code
 
         owner = self.source_registry.get(source_token)
         if owner is None:
