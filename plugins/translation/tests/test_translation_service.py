@@ -1134,6 +1134,69 @@ class TestProcessImageTranslationRetryPaths:
 
 
 # ---------------------------------------------------------------------------
+# ImageTranslationService — blank image short-circuit
+# ---------------------------------------------------------------------------
+
+class TestProcessImageTranslationBlankShortCircuit:
+
+    def _patch_svc(self, monkeypatch) -> "ImageTranslationService":
+        monkeypatch.setattr(
+            "src.services.base_service.get_model_max_completion_tokens", lambda m, d: d
+        )
+        from src.services import image_translation_service as its_mod
+        monkeypatch.setattr(its_mod, "resolve_model", lambda **_: "gpt-4o")
+        monkeypatch.setattr(its_mod, "maybe_sync_model_pricing", lambda m: None)
+        monkeypatch.setattr(its_mod, "get_default_model", lambda _: "gpt-4o")
+        monkeypatch.setattr(its_mod, "model_supports_vision", lambda m: True)
+        monkeypatch.setattr(its_mod, "get_model_system_role", lambda m: "system")
+        svc = ImageTranslationService("fake-key")
+        monkeypatch.setattr(svc.image_processor, "local_image_to_data_url",
+                            lambda path: "data:image/jpeg;base64,abc")
+        return svc
+
+    def test_blank_image_returns_empty_tuple_without_api_call(self, monkeypatch):
+        """process_image_translation must return ('', '') immediately for blank images."""
+        svc = self._patch_svc(monkeypatch)
+        monkeypatch.setattr(svc.image_processor, "is_blank_image", lambda *a, **kw: True)
+        api_called = [False]
+
+        def _no_api(*a, **kw):
+            api_called[0] = True
+            raise AssertionError("API should not be called for blank images")
+
+        monkeypatch.setattr(svc, "_create_completion", _no_api)
+        transcript, translation = svc.process_image_translation("blank.png", "Japanese", "English")
+        assert transcript == ""
+        assert translation == ""
+        assert not api_called[0]
+
+    def test_non_blank_image_still_calls_api(self, monkeypatch):
+        """process_image_translation must proceed normally when image is not blank."""
+        svc = self._patch_svc(monkeypatch)
+        monkeypatch.setattr(svc.image_processor, "is_blank_image", lambda *a, **kw: False)
+
+        class _Usage:
+            prompt_tokens = 5
+            completion_tokens = 20
+            total_tokens = 25
+
+        class _Msg:
+            content = "[TRANSCRIPT]\n文字\n[TRANSLATION]\nText"
+
+        class _Choice:
+            message = _Msg()
+            finish_reason = "stop"
+
+        class _Resp:
+            id = "r"; model = "gpt-4o"; usage = _Usage(); choices = [_Choice()]
+
+        monkeypatch.setattr(svc, "_create_completion", lambda *a, **kw: _Resp())
+        transcript, translation = svc.process_image_translation("content.png", "Japanese", "English")
+        assert transcript == "文字"
+        assert translation == "Text"
+
+
+# ---------------------------------------------------------------------------
 # TranslationService — translate_text retry when content is None (line 118)
 # ---------------------------------------------------------------------------
 

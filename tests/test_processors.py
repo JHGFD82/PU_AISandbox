@@ -2,7 +2,8 @@
 Tests for document and image processor utilities (no API calls):
   - TxtProcessor.extract_raw_content, process_txt_with_pages
   - DocxProcessor.extract_raw_content, process_docx_with_pages
-  - ImageProcessor.is_image_file, validate_image_file, local_image_to_data_url
+  - ImageProcessor.is_image_file, validate_image_file, local_image_to_data_url,
+    is_blank_image
   - detect_numbered_content (all patterns)
   - generate_process_text (context selection, numbered-continuation hint)
   - PDFProcessor.__init__, _clean_text, parse_layout, process_page, process_pdf
@@ -257,6 +258,102 @@ class TestImageProcessor:
         img.write_bytes(b"\x00\x01\x02\x03")
         result = ImageProcessor().local_image_to_data_url(str(img))
         assert "application/octet-stream" in result
+
+    # --- is_blank_image ------------------------------------------------------
+
+    def test_blank_image_returns_true(self, tmp_path, monkeypatch):
+        """A pixmap of all-white samples is detected as blank."""
+        import sys
+        import types
+
+        img = tmp_path / "blank.png"
+        img.write_bytes(_make_tiny_png())
+
+        fake_gray_pix = types.SimpleNamespace(colorspace=None, samples=bytes([255] * 400))
+        fake_cs_gray = object()
+
+        class _FakeColorPix:
+            colorspace = types.SimpleNamespace(n=3)
+            samples = bytes([255] * 1200)
+
+        fake_fitz = types.ModuleType("fitz")
+        fake_fitz.csGRAY = fake_cs_gray
+        fake_fitz.Pixmap = lambda *a: fake_gray_pix if a[0] is fake_cs_gray else _FakeColorPix()
+        monkeypatch.setitem(sys.modules, "fitz", fake_fitz)
+
+        # Clear cached import in the processor module so it uses our mock
+        import importlib
+        import src.processors.image_processor as _mod
+        importlib.reload(_mod)
+        from src.processors.image_processor import ImageProcessor as _IP
+
+        assert _IP.is_blank_image(str(img)) is True
+
+    def test_non_blank_image_returns_false(self, tmp_path, monkeypatch):
+        """A pixmap with mixed dark/light pixels is not blank."""
+        import sys
+        import types
+
+        img = tmp_path / "content.png"
+        img.write_bytes(_make_tiny_png())
+
+        fake_pix = types.SimpleNamespace(colorspace=None, samples=bytes([0] * 200 + [255] * 200))
+        fake_fitz = types.ModuleType("fitz")
+        fake_fitz.csGRAY = object()
+        fake_fitz.Pixmap = lambda *a: fake_pix
+        monkeypatch.setitem(sys.modules, "fitz", fake_fitz)
+
+        import importlib
+        import src.processors.image_processor as _mod
+        importlib.reload(_mod)
+        from src.processors.image_processor import ImageProcessor as _IP
+
+        assert _IP.is_blank_image(str(img)) is False
+
+    def test_fitz_exception_returns_false(self, tmp_path, monkeypatch):
+        """Any fitz error returns False (safe fallback — always process)."""
+        import sys
+        import types
+
+        img = tmp_path / "err.png"
+        img.write_bytes(_make_tiny_png())
+
+        fake_fitz = types.ModuleType("fitz")
+        fake_fitz.csGRAY = object()
+
+        def _raise(*a):
+            raise RuntimeError("boom")
+
+        fake_fitz.Pixmap = _raise
+        monkeypatch.setitem(sys.modules, "fitz", fake_fitz)
+
+        import importlib
+        import src.processors.image_processor as _mod
+        importlib.reload(_mod)
+        from src.processors.image_processor import ImageProcessor as _IP
+
+        assert _IP.is_blank_image(str(img)) is False
+
+    def test_empty_pixmap_returns_true(self, tmp_path, monkeypatch):
+        """A pixmap with no sample data (zero-size image) is treated as blank."""
+        import sys
+        import types
+
+        img = tmp_path / "empty.png"
+        img.write_bytes(_make_tiny_png())
+
+        fake_pix = types.SimpleNamespace(colorspace=None, samples=bytes())
+        fake_fitz = types.ModuleType("fitz")
+        fake_fitz.csGRAY = object()
+        fake_fitz.Pixmap = lambda *a: fake_pix
+        monkeypatch.setitem(sys.modules, "fitz", fake_fitz)
+
+        import importlib
+        import src.processors.image_processor as _mod
+        importlib.reload(_mod)
+        from src.processors.image_processor import ImageProcessor as _IP
+
+        assert _IP.is_blank_image(str(img)) is True
 
 
 # ---------------------------------------------------------------------------

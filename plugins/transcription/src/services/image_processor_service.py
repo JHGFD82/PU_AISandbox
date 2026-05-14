@@ -178,6 +178,12 @@ class ImageProcessorService(BaseService):
 
         system_prompt, user_prompt = self._create_ocr_prompt(target_language)
 
+        if self.image_processor.is_blank_image(file_path):
+            logging.info(
+                f"Skipping blank image {os.path.basename(file_path)} — no API call made."
+            )
+            return ""
+
         try:
             data_url = self.image_processor.local_image_to_data_url(file_path)
         except Exception as e:
