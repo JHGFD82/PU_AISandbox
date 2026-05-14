@@ -221,6 +221,14 @@ IMAGE_TRANSLATION_SPREAD_NOTE = (
     "(or right-to-left for vertical text)."
 )
 
+IMAGE_TRANSLATION_NO_TEXT_INSTRUCTION = (
+    "IMPORTANT: Some pages may contain only illustrations, diagrams, photographs, or other "
+    "purely visual content with no readable text. If this image has no readable text — "
+    "no written characters, captions, labels, or inscriptions of any kind — respond with "
+    "the single token [NO_TEXT] and nothing else. Do not attempt to produce a [TRANSCRIPT] "
+    "or [TRANSLATION] section."
+)
+
 # ---------------------------------------------------------------------------
 # Language-pair-specific notes
 # Injected automatically by TranslationPromptSpec when the source/target

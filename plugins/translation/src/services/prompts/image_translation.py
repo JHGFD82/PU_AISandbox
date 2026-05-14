@@ -31,6 +31,7 @@ class ImageTranslationPromptSpec:
             ("SCRIPT NOTES:\n" + script_note) if script_note else None,
             F.IMAGE_TRANSLATION_VERTICAL_BLOCK if self.vertical else None,
             F.IMAGE_TRANSLATION_SPREAD_NOTE if self.spread else None,
+            F.IMAGE_TRANSLATION_NO_TEXT_INSTRUCTION,
             F.IMAGE_TRANSLATION_FORMAT_SPEC.format(
                 source=self.source_language, target=self.target_language
             ),

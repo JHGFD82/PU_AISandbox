@@ -132,9 +132,15 @@ class ImageTranslationService(BaseService):
     def _parse_response(self, content: str) -> tuple[str, str]:
         """Extract [TRANSCRIPT] and [TRANSLATION] sections from the model response.
 
+        Returns ("", "") when the model signals no readable text ([NO_TEXT]).
         Falls back to treating the full response as the translation if the
         expected section headers are absent.
         """
+        # Model signals no readable text on this page (illustration-only)
+        if content.strip() == "[NO_TEXT]":
+            logging.debug("Image page contains no readable text (illustration-only); skipping.")
+            return "", ""
+
         transcript_match = re.search(
             r"\[TRANSCRIPT\](.*?)(?=\[TRANSLATION\]|\Z)", content, re.DOTALL
         )

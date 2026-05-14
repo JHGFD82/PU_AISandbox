@@ -100,6 +100,7 @@ class _ImageHandlerMixin:
         # --- sequential path ---
         if workers <= 1:
             combined_parts: List[str] = []
+            blank_count = 0
             for idx, img_path in enumerate(image_files, start=1):
                 filename = os.path.basename(img_path)
                 print(f"[{idx}/{len(image_files)}] {filename}")
@@ -111,10 +112,22 @@ class _ImageHandlerMixin:
                     logger.error(f"Error processing '{filename}': {e}", exc_info=True)
                     print(f"  ERROR: {e}")
                     transcript, translation = "", f"[Error processing {filename}: {e}]"
+                if not transcript and not translation:
+                    blank_count += 1
+                    combined_parts.append(f"=== {filename} ===\n")
+                    continue
                 if transcript:
                     print_section("Transcript", transcript)
                 print_section("Translation", translation)
                 combined_parts.append(f"=== {filename} ===\n{translation}")
+            if blank_count:
+                unit_label = "page" if blank_count == 1 else "pages"
+                msg = (
+                    f"  {blank_count} image-only {unit_label}(s) had no readable text and were skipped"
+                    " (run with --verbose for details)."
+                )
+                print(msg)
+                logging.info(msg.strip())
             if opts.output_file or opts.auto_save:
                 self.file_output.save_translation_output(  # type: ignore[attr-defined]
                     "\n\n".join(combined_parts), None, opts.output_file, opts.auto_save,
@@ -148,13 +161,26 @@ class _ImageHandlerMixin:
 
         # Print and assemble in sorted-filename (original) order
         combined_parts_p: List[str] = []
+        blank_count_p = 0
         for idx in range(len(image_files)):
             filename, transcript, translation = results_map[idx]
             print(f"[{idx + 1}/{len(image_files)}] {filename}")
+            if not transcript and not translation:
+                blank_count_p += 1
+                combined_parts_p.append(f"=== {filename} ===\n")
+                continue
             if transcript:
                 print_section("Transcript", transcript)
             print_section("Translation", translation)
             combined_parts_p.append(f"=== {filename} ===\n{translation}")
+        if blank_count_p:
+            unit_label = "page" if blank_count_p == 1 else "pages"
+            msg = (
+                f"  {blank_count_p} image-only {unit_label}(s) had no readable text and were skipped"
+                " (run with --verbose for details)."
+            )
+            print(msg)
+            logging.info(msg.strip())
 
         if opts.output_file or opts.auto_save:
             self.file_output.save_translation_output(  # type: ignore[attr-defined]
