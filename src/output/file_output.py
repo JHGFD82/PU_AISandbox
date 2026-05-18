@@ -1,4 +1,4 @@
-"""File output handler: writes translations to .txt, .pdf, or .docx with CJK font support."""
+"""File output handler: writes translations to .txt, .pdf, .docx, .xlsx, .json, or .md with CJK font support."""
 
 import logging
 from pathlib import Path
@@ -16,6 +16,9 @@ from ._output_utils import (
     append_to_text_file,
 )
 from .docx_builder import _apply_docx_table_borders, save_to_docx
+from .excel_builder import save_to_excel
+from .json_builder import save_to_json
+from .markdown_builder import save_to_markdown
 from .pdf_builder import save_to_pdf
 
 
@@ -49,6 +52,9 @@ class FileOutputHandler:
     append_to_text_file              = staticmethod(append_to_text_file)
     save_to_pdf                      = staticmethod(save_to_pdf)
     save_to_docx                     = staticmethod(save_to_docx)
+    save_to_excel                    = staticmethod(save_to_excel)
+    save_to_json                     = staticmethod(save_to_json)
+    save_to_markdown                 = staticmethod(save_to_markdown)
 
     @staticmethod
     def _resolve_output_path(
@@ -122,6 +128,15 @@ class FileOutputHandler:
                 label=label,
             )
             return
+        if extension == '.xlsx':
+            FileOutputHandler.save_to_excel(content, output_path, label=label)
+            return
+        if extension == '.json':
+            FileOutputHandler.save_to_json(content, output_path, label=label)
+            return
+        if extension == '.md':
+            FileOutputHandler.save_to_markdown(content, output_path, label=label)
+            return
 
         if extension != '.txt':
             output_path = f"{output_path}.txt"
@@ -170,8 +185,29 @@ class FileOutputHandler:
                 level=logging.INFO,
             )
             output_path = str(Path(output_path).with_suffix('.txt'))
+        elif extension == '.xlsx':
+            _emit_message(
+                "Note: Progressive saving for Excel format not yet supported. Using text format.",
+                level=logging.INFO,
+            )
+            output_path = str(Path(output_path).with_suffix('.txt'))
+        elif extension == '.json':
+            _emit_message(
+                "Note: Progressive saving for JSON format not yet supported. Using text format.",
+                level=logging.INFO,
+            )
+            output_path = str(Path(output_path).with_suffix('.txt'))
 
-        if Path(output_path).suffix.lower() != '.txt':
+        current_ext = Path(output_path).suffix.lower()
+        if current_ext == '.md':
+            # Markdown can be progressively appended as plain text.
+            if is_first_page:
+                FileOutputHandler.save_to_markdown(content, output_path, label)
+            else:
+                FileOutputHandler.append_to_text_file(content, output_path, label)
+            return output_path
+
+        if current_ext != '.txt':
             output_path = f"{output_path}.txt"
 
         if is_first_page:
