@@ -147,6 +147,9 @@ from src.errors import CLIError                                    # noqa: E402
 from src.models import OutputOptions                               # noqa: E402
 from src.processors.constants import IMAGE_EXTENSIONS             # noqa: E402
 from src.processors.docx_processor import DocxProcessor           # noqa: E402
+from src.processors.excel_processor import ExcelProcessor         # noqa: E402
+from src.processors.json_processor import JsonProcessor           # noqa: E402
+from src.processors.markdown_processor import MarkdownProcessor   # noqa: E402
 from src.processors.pdf_processor import generate_process_text    # noqa: E402
 from src.processors.txt_processor import TxtProcessor             # noqa: E402
 from src.services.constants import DEFAULT_PARALLEL_WORKERS       # noqa: E402
@@ -320,6 +323,15 @@ def _execute_translate(
                 with open(file_path_dr, 'r', encoding='utf-8') as f:
                     pages_dr = TxtProcessor.process_txt_with_pages(f, target_page_size=DEFAULT_PAGE_SIZE)
                     page_text_dr = pages_dr[0] if pages_dr else "[no text found in file]"
+            elif file_type_dr == 'excel':
+                pages_dr = ExcelProcessor.process_excel_with_pages(file_path_dr, target_page_size=DEFAULT_PAGE_SIZE)
+                page_text_dr = pages_dr[0] if pages_dr else "[no data found in spreadsheet]"
+            elif file_type_dr == 'json':
+                pages_dr = JsonProcessor.process_json_with_pages(file_path_dr, target_page_size=DEFAULT_PAGE_SIZE)
+                page_text_dr = pages_dr[0] if pages_dr else "[no content found in JSON file]"
+            elif file_type_dr == 'markdown':
+                pages_dr = MarkdownProcessor.process_markdown_with_pages(file_path_dr, target_page_size=DEFAULT_PAGE_SIZE)
+                page_text_dr = pages_dr[0] if pages_dr else "[no content found in Markdown file]"
             else:
                 page_text_dr = f"[{source_language} text to translate]"
         elif args.custom_text:
@@ -337,7 +349,10 @@ def _execute_translate(
         auto_save_dr = getattr(args, 'auto_save', False)
         if output_file_dr:
             ext = output_file_dr.lower().rsplit('.', 1)[-1] if '.' in output_file_dr else ''
-            output_format_dr = {'pdf': 'pdf', 'docx': 'docx', 'txt': 'txt'}.get(ext, 'file')
+            output_format_dr = {
+                'pdf': 'pdf', 'docx': 'docx', 'txt': 'txt',
+                'xlsx': 'xlsx', 'json': 'json', 'md': 'md',
+            }.get(ext, 'file')
         elif auto_save_dr:
             output_format_dr = 'txt'
         else:

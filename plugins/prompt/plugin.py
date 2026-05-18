@@ -167,7 +167,7 @@ class PromptPlugin:
 
         output_file = _resolve_output_path(args)
         if output_file:
-            FileOutputHandler.save_to_text_file(response, output_file, label="Response")
+            _save_response(response, output_file)
 
 
 # ── Module-level instance — REQUIRED ─────────────────────────────────────────
@@ -227,3 +227,16 @@ def _resolve_output_path(args: argparse.Namespace) -> Optional[str]:
     if not output_file:
         return None
     return os.path.abspath(output_file)
+
+
+def _save_response(response: str, output_file: str) -> None:
+    """Save *response* to *output_file*, choosing the format by extension."""
+    ext = Path(output_file).suffix.lower()
+    if ext == '.json':
+        FileOutputHandler.save_to_json(response, output_file, label="Response")
+    elif ext == '.md':
+        FileOutputHandler.save_to_markdown(response, output_file, label="Response")
+    elif ext == '.xlsx':
+        FileOutputHandler.save_to_excel(response, output_file, label="Response")
+    else:
+        FileOutputHandler.save_to_text_file(response, output_file, label="Response")

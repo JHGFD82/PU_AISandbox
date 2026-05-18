@@ -7,5 +7,6 @@ pymupdf
 tqdm
 reportlab
 python-docx
+openpyxl
 pytest
 pytest-mock

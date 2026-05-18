@@ -8,6 +8,9 @@ from typing import Optional, List, Tuple
 from ..errors import CLIError
 from ..models import EmbeddedMedia, OutputOptions
 from ..processors.docx_processor import DocxProcessor
+from ..processors.excel_processor import ExcelProcessor
+from ..processors.json_processor import JsonProcessor
+from ..processors.markdown_processor import MarkdownProcessor
 from ..processors.pdf_media_extractor import PdfMediaExtractor
 from ..processors.txt_processor import TxtProcessor
 from ..settings import DEFAULT_PAGE_SIZE
@@ -16,9 +19,13 @@ logger = logging.getLogger(__name__)
 
 # Maps file extension → (file_type token, human-readable label).
 _EXT_TYPES: dict[str, tuple[str, str]] = {
-    '.pdf':  ('pdf',  'PDF file'),
-    '.docx': ('docx', 'Word document'),
-    '.txt':  ('txt',  'text file'),
+    '.pdf':  ('pdf',      'PDF file'),
+    '.docx': ('docx',     'Word document'),
+    '.txt':  ('txt',      'text file'),
+    '.xlsx': ('excel',    'Excel spreadsheet'),
+    '.xls':  ('excel',    'Excel spreadsheet'),
+    '.json': ('json',     'JSON file'),
+    '.md':   ('markdown', 'Markdown file'),
 }
 
 
@@ -85,7 +92,8 @@ class _DocumentHandlerMixin:
             return file_type
 
         raise CLIError(
-            "Unsupported file format. Supported formats: PDF, DOCX, TXT, or image files (JPG, PNG, etc.)"
+            "Unsupported file format. Supported formats: PDF, DOCX, TXT, XLSX, JSON, MD, "
+            "or image files (JPG, PNG, etc.)"
         )
 
     def _process_text_based_file(
@@ -125,6 +133,15 @@ class _DocumentHandlerMixin:
             with open(file_path, 'r', encoding='utf-8') as f:
                 all_pages = TxtProcessor.process_txt_with_pages(f, target_page_size=DEFAULT_PAGE_SIZE)
             file_label = "text file"
+        elif file_type == 'excel':
+            all_pages = ExcelProcessor.process_excel_with_pages(file_path, target_page_size=DEFAULT_PAGE_SIZE)
+            file_label = "Excel spreadsheet"
+        elif file_type == 'json':
+            all_pages = JsonProcessor.process_json_with_pages(file_path, target_page_size=DEFAULT_PAGE_SIZE)
+            file_label = "JSON file"
+        elif file_type == 'markdown':
+            all_pages = MarkdownProcessor.process_markdown_with_pages(file_path, target_page_size=DEFAULT_PAGE_SIZE)
+            file_label = "Markdown file"
         else:
             raise ValueError(f"Unsupported text file type: {file_type}")
 
@@ -270,6 +287,11 @@ class _DocumentHandlerMixin:
                                 rows, source_language, target_language
                             )
                         )
+            elif file_type in ('excel', 'json', 'markdown'):
+                document_text, _ = self._process_text_based_file(
+                    file_path, file_type, page_nums, abstract_text,
+                    source_language, target_language, opts, workers=workers,
+                )
             else:
                 raise CLIError(f"Cannot translate file type '{file_type}'.")
 
@@ -295,6 +317,10 @@ class _DocumentHandlerMixin:
             if "python-docx" in str(e):
                 raise CLIError(
                     "python-docx is required to process Word documents. Install it with: pip install python-docx"
+                ) from e
+            if "openpyxl" in str(e):
+                raise CLIError(
+                    "openpyxl is required to process Excel files. Install it with: pip install openpyxl"
                 ) from e
             raise CLIError(f"Import error: {e}") from e
         except Exception as e:
