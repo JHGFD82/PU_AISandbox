@@ -530,13 +530,36 @@ class TranslationPlugin:
     ) -> None:
         """Execute the translate command."""
         from src.runtime.sandbox_processor import SandboxProcessor
+        from src.services import parse_model_source, get_default_api_name, load_api_config
+        from src.errors import CLIError
+
+        # ── Resolve colon syntax and optional api_config ──────────────────
+        api_name: Optional[str] = None
+        bare_model = model
+
+        if model:
+            colon_api, colon_model = parse_model_source(model)
+            if colon_api:
+                api_name = colon_api
+                bare_model = colon_model
+
+        if api_name is None:
+            api_name = get_default_api_name()
+
+        api_config = None
+        if api_name:
+            try:
+                api_config = load_api_config(api_name)
+            except ValueError as e:
+                raise CLIError(str(e)) from e
 
         sandbox = SandboxProcessor(
             professor,
-            model=model,
+            model=bare_model,
             temperature=temperature,
             top_p=top_p,
             max_tokens=max_tokens,
+            api_config=api_config,
         )
 
         language_code = args.language_code

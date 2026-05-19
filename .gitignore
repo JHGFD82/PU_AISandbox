@@ -57,6 +57,7 @@ Thumbs.db
 # implementation and template for building new plugins.
 plugins/*
 !plugins/.gitkeep
+!plugins/external_api/
 !plugins/prompt/
 !plugins/translation/
 !plugins/transcription/

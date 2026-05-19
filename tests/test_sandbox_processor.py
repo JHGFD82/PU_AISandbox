@@ -924,6 +924,7 @@ class TestSandboxProcessorGetattr:
         proc._api_key = "fake-key"
         proc.professor_name = "test"
         proc._svc_kwargs = {}
+        proc._api_config = None
         return proc
 
     def test_raises_attribute_error_when_no_module_in_sys_modules(self):

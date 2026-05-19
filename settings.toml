@@ -24,3 +24,48 @@ default_font_size = 9         # Default body font size (points) for PDF and Word
 
 [budget]
 warning_threshold_pct = 80    # Warn when monthly spend exceeds this percentage of the limit
+
+# ── API endpoints ──────────────────────────────────────────────────────────────
+# Define named API endpoints here.  Each subsection name becomes the --api
+# identifier on the CLI (e.g. --api pu_sandbox) and the colon prefix in the
+# -m/--model flag (e.g. -m pu_sandbox:gpt-4o or -m della:qwen-preview).
+#
+# Optional: set a default API so bare model names are routed there automatically.
+# When unset (commented out), bare model names use the built-in Portkey service.
+#
+# [apis]
+# default = "pu_sandbox"   # Route all bare -m values here by default
+#
+# The API key for each entry must be set in your .env file as:
+#   EXTERNAL_API_<UPPERCASE_NAME>_KEY=your_key
+# (e.g. EXTERNAL_API_PU_SANDBOX_KEY=...)
+#
+# Available fields per entry:
+#   name              Human-readable label shown in --list-apis output
+#   base_url          Root URL for the API (required)
+#   openai_compatible Set true for OpenAI-compatible LLM endpoints (clusters, providers)
+#   default_model     Default model name for openai_compatible endpoints
+#   timeout           Request timeout in seconds (default: 30)
+#   verify_ssl        Set false to disable SSL verification (default: true)
+#
+# Example — PU AI Sandbox (OpenAI-compatible):
+# [apis.pu_sandbox]
+# name = "PU AI Sandbox"
+# base_url = "https://api.aisandbox.princeton.edu/v1"
+# openai_compatible = true
+# default_model = "gpt-4o"
+#
+# Example — self-hosted model cluster (OpenAI-compatible):
+# [apis.my_cluster]
+# name = "My GPU Cluster"
+# base_url = "http://my-cluster.example.com:8000/v1"
+# openai_compatible = true
+# default_model = "llama-3-70b"
+# verify_ssl = false
+#
+# Example — generic REST API (non-OpenAI-compatible):
+# [apis.data_service]
+# name = "Research Data Service"
+# base_url = "https://api.myresearch.edu"
+# openai_compatible = false
+# timeout = 60
