@@ -1,6 +1,5 @@
 """Service layer — AI API services."""
 
-from .api_call_service import APICallService
 from .api_config import (
     APIConfig,
     load_api_config,
@@ -11,7 +10,6 @@ from .api_config import (
 from .api_service import APIService
 
 __all__ = [
-    "APICallService",
     "APIConfig",
     "APIService",
     "load_api_config",
