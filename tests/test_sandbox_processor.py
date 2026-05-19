@@ -77,6 +77,55 @@ class TestSandboxProcessorInit:
         with pytest.raises(CLIError, match="Configuration error"):
             SandboxProcessor("nobody")
 
+    def test_colon_model_parsed_into_api_config(self, monkeypatch):
+        """Colon syntax in model string auto-resolves APIConfig without caller involvement."""
+        from src.services.api_config import APIConfig
+        fake_cfg = APIConfig(
+            api_name="hpc_cluster",
+            display_name="HPC Cluster",
+            base_url="https://cluster.example.com/v1",
+            api_key="key",
+            openai_compatible=True,
+            default_model=None,
+        )
+        monkeypatch.setattr("src.runtime.sandbox_processor.get_api_key",
+                            lambda name: ("fake-key", "Dr. Smith"))
+        monkeypatch.setattr("src.runtime.sandbox_processor.TokenTracker",
+                            MagicMock(return_value=MagicMock()))
+        monkeypatch.setattr(
+            "src.runtime.sandbox_processor.SandboxProcessor.__init__.__code__",
+            SandboxProcessor.__init__.__code__,
+            raising=False,
+        )
+        # Patch load_api_config inside the sandbox_processor module namespace
+        import src.runtime.sandbox_processor as _sp_mod
+        import src.services.api_config as _cfg_mod
+        original_load = _cfg_mod.load_api_config
+
+        def fake_load(name):
+            if name == "hpc_cluster":
+                return fake_cfg
+            return original_load(name)
+
+        monkeypatch.setattr(_cfg_mod, "load_api_config", fake_load)
+
+        proc = SandboxProcessor("smith", model="hpc_cluster:llama-3-70b")
+        assert proc._api_config is fake_cfg
+        assert proc._svc_kwargs["model"] == "llama-3-70b"
+
+    def test_bare_model_leaves_api_config_none_when_no_default(self, monkeypatch):
+        """Model without colon and no apis.default → _api_config stays None."""
+        monkeypatch.setattr("src.runtime.sandbox_processor.get_api_key",
+                            lambda name: ("fake-key", "Dr. Smith"))
+        monkeypatch.setattr("src.runtime.sandbox_processor.TokenTracker",
+                            MagicMock(return_value=MagicMock()))
+        import src.services.api_config as _cfg_mod
+        monkeypatch.setattr(_cfg_mod, "get_default_api_name", lambda: None)
+
+        proc = SandboxProcessor("smith", model="gpt-4o")
+        assert proc._api_config is None
+        assert proc._svc_kwargs["model"] == "gpt-4o"
+
 
 # ---------------------------------------------------------------------------
 # _parse_page_ranges
@@ -924,6 +973,7 @@ class TestSandboxProcessorGetattr:
         proc._api_key = "fake-key"
         proc.professor_name = "test"
         proc._svc_kwargs = {}
+        proc._api_config = None
         return proc
 
     def test_raises_attribute_error_when_no_module_in_sys_modules(self):

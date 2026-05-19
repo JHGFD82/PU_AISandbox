@@ -1,0 +1,23 @@
+{
+  "_doc": "Configure AI endpoint connections here. Each key under 'endpoints' becomes the colon prefix in the -m flag (e.g. 'hpc_cluster:model-name'). Set 'default' to an endpoint key to route bare -m values there instead of the built-in service. API keys are read from env vars: API_<UPPERCASE_KEY>_KEY. See _examples for configuration patterns.",
+  "_examples": {
+    "hpc_cluster": {
+      "name": "HPC Cluster",
+      "base_url": "http://my-cluster.internal:8000/v1",
+      "openai_compatible": true,
+      "default_model": "llama-3-70b-instruct",
+      "timeout": 30,
+      "verify_ssl": false
+    },
+    "cloud_provider": {
+      "name": "Cloud AI Provider",
+      "base_url": "https://api.your-provider.com/v1",
+      "openai_compatible": true,
+      "default_model": "model-name",
+      "timeout": 30,
+      "verify_ssl": true
+    }
+  },
+  "default": null,
+  "endpoints": {}
+}
