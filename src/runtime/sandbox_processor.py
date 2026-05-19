@@ -125,7 +125,7 @@ class SandboxProcessor(_DocumentHandlerMixin, _ImageHandlerMixin, _CommandMixin)
             )
         val = cls(self._api_key, self.professor_name, **self._svc_kwargs)
 
-        # When routing through an external API config, swap the Portkey client
+        # When routing to an alternate API endpoint, swap the Portkey client
         # with a standard OpenAI client so that any OpenAI-compatible endpoint
         # is used transparently — no changes to the service subclasses needed.
         api_config = object.__getattribute__(self, "_api_config")
@@ -136,8 +136,8 @@ class SandboxProcessor(_DocumentHandlerMixin, _ImageHandlerMixin, _CommandMixin)
                 base_url=api_config.base_url,
                 timeout=float(api_config.timeout),
             )
-            # Bypass the model catalog for external models: return the model
-            # name as-is rather than going through resolve_model().
+            # Bypass the model catalog for alternate endpoint models: return the
+            # model name as-is rather than going through resolve_model().
             configured_model: Optional[str] = self._svc_kwargs.get("model") or api_config.default_model
             if configured_model:
                 val._get_model = lambda: configured_model  # type: ignore[method-assign]

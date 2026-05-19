@@ -19,29 +19,30 @@ from src.services.api_config import (
 
 class TestEnvKeyFor:
     def test_underscore_name(self):
-        assert _env_key_for("pu_sandbox") == "EXTERNAL_API_PU_SANDBOX_KEY"
+        assert _env_key_for("della") == "API_DELLA_KEY"
 
     def test_hyphen_name(self):
-        assert _env_key_for("my-cluster") == "EXTERNAL_API_MY_CLUSTER_KEY"
+        assert _env_key_for("my-cluster") == "API_MY_CLUSTER_KEY"
 
     def test_already_upper(self):
-        assert _env_key_for("UPPER") == "EXTERNAL_API_UPPER_KEY"
+        assert _env_key_for("UPPER") == "API_UPPER_KEY"
 
     def test_mixed(self):
-        assert _env_key_for("My_Service-v2") == "EXTERNAL_API_MY_SERVICE_V2_KEY"
+        assert _env_key_for("My_Service-v2") == "API_MY_SERVICE_V2_KEY"
 
 
 # ---------------------------------------------------------------------------
-# Helpers — fake settings dict
+# Helpers — fake apis.json data
 # ---------------------------------------------------------------------------
 
-_SETTINGS_WITH_APIS = {
-    "apis": {
-        "pu_sandbox": {
-            "name": "PU AI Sandbox",
-            "base_url": "https://api.example.com/v1",
+_APIS_WITH_ENDPOINTS = {
+    "default": None,
+    "endpoints": {
+        "della": {
+            "name": "Della (Princeton HPC)",
+            "base_url": "https://della.example.com/v1",
             "openai_compatible": True,
-            "default_model": "gpt-4o",
+            "default_model": "qwen-preview",
             "timeout": 30,
             "verify_ssl": True,
         },
@@ -50,29 +51,29 @@ _SETTINGS_WITH_APIS = {
             "base_url": "https://data.example.com",
             "openai_compatible": False,
         },
-    }
+    },
 }
 
-_SETTINGS_WITH_DEFAULT = {
-    "apis": {
-        "default": "pu_sandbox",
-        "pu_sandbox": {
-            "name": "PU AI Sandbox",
-            "base_url": "https://api.example.com/v1",
+_APIS_WITH_DEFAULT = {
+    "default": "della",
+    "endpoints": {
+        "della": {
+            "name": "Della (Princeton HPC)",
+            "base_url": "https://della.example.com/v1",
             "openai_compatible": True,
-            "default_model": "gpt-4o",
+            "default_model": "qwen-preview",
         },
-    }
+    },
 }
 
-_SETTINGS_EMPTY = {}
+_APIS_EMPTY = {}
 
 
-def _patch_settings(settings: dict):
-    """Context manager that patches _load_raw_settings to return *settings*."""
+def _patch_apis(data: dict):
+    """Context manager that patches _load_apis_json to return *data*."""
     return patch(
-        "src.services.api_config._load_raw_settings",
-        return_value=settings,
+        "src.services.api_config._load_apis_json",
+        return_value=data,
     )
 
 
@@ -82,34 +83,34 @@ def _patch_settings(settings: dict):
 
 class TestLoadAPIConfig:
     def test_openai_compatible(self, monkeypatch):
-        monkeypatch.setenv("EXTERNAL_API_PU_SANDBOX_KEY", "test-key-123")
-        with _patch_settings(_SETTINGS_WITH_APIS):
-            cfg = load_api_config("pu_sandbox")
-        assert cfg.api_name == "pu_sandbox"
-        assert cfg.display_name == "PU AI Sandbox"
-        assert cfg.base_url == "https://api.example.com/v1"
+        monkeypatch.setenv("API_DELLA_KEY", "test-key-123")
+        with _patch_apis(_APIS_WITH_ENDPOINTS):
+            cfg = load_api_config("della")
+        assert cfg.api_name == "della"
+        assert cfg.display_name == "Della (Princeton HPC)"
+        assert cfg.base_url == "https://della.example.com/v1"
         assert cfg.api_key == "test-key-123"
         assert cfg.openai_compatible is True
-        assert cfg.default_model == "gpt-4o"
+        assert cfg.default_model == "qwen-preview"
         assert cfg.timeout == 30
         assert cfg.verify_ssl is True
 
     def test_generic_rest(self, monkeypatch):
-        monkeypatch.setenv("EXTERNAL_API_DATA_SERVICE_KEY", "rest-key")
-        with _patch_settings(_SETTINGS_WITH_APIS):
+        monkeypatch.setenv("API_DATA_SERVICE_KEY", "rest-key")
+        with _patch_apis(_APIS_WITH_ENDPOINTS):
             cfg = load_api_config("data_service")
         assert cfg.openai_compatible is False
         assert cfg.default_model is None
 
     def test_defaults_applied(self, monkeypatch):
-        """Fields not in settings.toml get sensible defaults."""
+        """Fields not in apis.json get sensible defaults."""
         minimal = {
-            "apis": {
+            "endpoints": {
                 "minimal": {"base_url": "http://localhost:8000"}
             }
         }
-        monkeypatch.setenv("EXTERNAL_API_MINIMAL_KEY", "k")
-        with _patch_settings(minimal):
+        monkeypatch.setenv("API_MINIMAL_KEY", "k")
+        with _patch_apis(minimal):
             cfg = load_api_config("minimal")
         assert cfg.display_name == "minimal"  # falls back to api_name
         assert cfg.openai_compatible is False
@@ -118,23 +119,23 @@ class TestLoadAPIConfig:
 
     def test_extra_fields_preserved(self, monkeypatch):
         """Unknown fields are captured in cfg.extra."""
-        settings = {
-            "apis": {
+        data = {
+            "endpoints": {
                 "fancy": {
                     "base_url": "http://x.com",
                     "custom_header": "Bearer xyz",
                 }
             }
         }
-        monkeypatch.setenv("EXTERNAL_API_FANCY_KEY", "k")
-        with _patch_settings(settings):
+        monkeypatch.setenv("API_FANCY_KEY", "k")
+        with _patch_apis(data):
             cfg = load_api_config("fancy")
         assert "custom_header" in cfg.extra
 
     def test_returns_api_config_instance(self, monkeypatch):
-        monkeypatch.setenv("EXTERNAL_API_PU_SANDBOX_KEY", "k")
-        with _patch_settings(_SETTINGS_WITH_APIS):
-            cfg = load_api_config("pu_sandbox")
+        monkeypatch.setenv("API_DELLA_KEY", "k")
+        with _patch_apis(_APIS_WITH_ENDPOINTS):
+            cfg = load_api_config("della")
         assert isinstance(cfg, APIConfig)
 
 
@@ -144,30 +145,30 @@ class TestLoadAPIConfig:
 
 class TestLoadAPIConfigErrors:
     def test_unknown_api_name(self):
-        with _patch_settings(_SETTINGS_WITH_APIS):
+        with _patch_apis(_APIS_WITH_ENDPOINTS):
             with pytest.raises(ValueError, match="not configured"):
                 load_api_config("nonexistent")
 
     def test_unknown_api_hints_available(self):
-        with _patch_settings(_SETTINGS_WITH_APIS):
-            with pytest.raises(ValueError, match="pu_sandbox"):
+        with _patch_apis(_APIS_WITH_ENDPOINTS):
+            with pytest.raises(ValueError, match="della"):
                 load_api_config("nonexistent")
 
     def test_missing_key_raises(self, monkeypatch):
-        monkeypatch.delenv("EXTERNAL_API_PU_SANDBOX_KEY", raising=False)
-        with _patch_settings(_SETTINGS_WITH_APIS):
-            with pytest.raises(ValueError, match="EXTERNAL_API_PU_SANDBOX_KEY"):
-                load_api_config("pu_sandbox")
+        monkeypatch.delenv("API_DELLA_KEY", raising=False)
+        with _patch_apis(_APIS_WITH_ENDPOINTS):
+            with pytest.raises(ValueError, match="API_DELLA_KEY"):
+                load_api_config("della")
 
     def test_missing_base_url_raises(self, monkeypatch):
-        settings = {"apis": {"bad": {"name": "Bad"}}}
-        monkeypatch.setenv("EXTERNAL_API_BAD_KEY", "k")
-        with _patch_settings(settings):
+        data = {"endpoints": {"bad": {"name": "Bad"}}}
+        monkeypatch.setenv("API_BAD_KEY", "k")
+        with _patch_apis(data):
             with pytest.raises(ValueError, match="base_url"):
                 load_api_config("bad")
 
-    def test_no_apis_configured(self):
-        with _patch_settings(_SETTINGS_EMPTY):
+    def test_no_endpoints_configured(self):
+        with _patch_apis(_APIS_EMPTY):
             with pytest.raises(ValueError, match="not configured"):
                 load_api_config("anything")
 
@@ -178,23 +179,16 @@ class TestLoadAPIConfigErrors:
 
 class TestListAPIs:
     def test_returns_names(self):
-        with _patch_settings(_SETTINGS_WITH_APIS):
+        with _patch_apis(_APIS_WITH_ENDPOINTS):
             names = list_apis()
-        assert set(names) == {"pu_sandbox", "data_service"}
+        assert set(names) == {"della", "data_service"}
 
-    def test_excludes_scalar_default_key(self):
-        """The 'default' scalar value must not appear in the API list."""
-        with _patch_settings(_SETTINGS_WITH_DEFAULT):
-            names = list_apis()
-        assert "default" not in names
-        assert "pu_sandbox" in names
-
-    def test_empty_when_no_section(self):
-        with _patch_settings(_SETTINGS_EMPTY):
+    def test_empty_when_no_endpoints_key(self):
+        with _patch_apis(_APIS_EMPTY):
             assert list_apis() == []
 
-    def test_empty_when_section_has_only_scalars(self):
-        with _patch_settings({"apis": {"default": "missing"}}):
+    def test_empty_when_endpoints_is_empty(self):
+        with _patch_apis({"default": None, "endpoints": {}}):
             assert list_apis() == []
 
 
@@ -204,19 +198,19 @@ class TestListAPIs:
 
 class TestGetDefaultApiName:
     def test_returns_default(self):
-        with _patch_settings(_SETTINGS_WITH_DEFAULT):
-            assert get_default_api_name() == "pu_sandbox"
+        with _patch_apis(_APIS_WITH_DEFAULT):
+            assert get_default_api_name() == "della"
 
-    def test_returns_none_when_not_set(self):
-        with _patch_settings(_SETTINGS_WITH_APIS):
+    def test_returns_none_when_null(self):
+        with _patch_apis(_APIS_WITH_ENDPOINTS):
             assert get_default_api_name() is None
 
     def test_returns_none_when_empty_string(self):
-        with _patch_settings({"apis": {"default": ""}}):
+        with _patch_apis({"default": "", "endpoints": {}}):
             assert get_default_api_name() is None
 
-    def test_returns_none_when_no_section(self):
-        with _patch_settings(_SETTINGS_EMPTY):
+    def test_returns_none_when_no_default_key(self):
+        with _patch_apis(_APIS_EMPTY):
             assert get_default_api_name() is None
 
 
@@ -231,8 +225,8 @@ class TestParseModelSource:
         assert model == "qwen-preview"
 
     def test_colon_with_provider_slash_model(self):
-        api, model = parse_model_source("pu_sandbox:openai/gpt-4o")
-        assert api == "pu_sandbox"
+        api, model = parse_model_source("my_cluster:openai/gpt-4o")
+        assert api == "my_cluster"
         assert model == "openai/gpt-4o"
 
     def test_bare_model_returns_none_api(self):
@@ -266,5 +260,3 @@ class TestParseModelSource:
         api, model = parse_model_source("  della  :  qwen  ")
         assert api == "della"
         assert model == "qwen"
-
-

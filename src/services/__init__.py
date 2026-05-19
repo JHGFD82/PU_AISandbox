@@ -7,11 +7,9 @@ from .api_config import (
     get_default_api_name,
     parse_model_source,
 )
-from .api_service import APIService
 
 __all__ = [
     "APIConfig",
-    "APIService",
     "load_api_config",
     "list_apis",
     "get_default_api_name",

@@ -1,0 +1,13 @@
+{
+  "default": null,
+  "endpoints": {
+    "della": {
+      "name": "Della (Princeton HPC)",
+      "base_url": "https://della.princeton.edu/api/v1",
+      "openai_compatible": true,
+      "default_model": "qwen-preview",
+      "timeout": 30,
+      "verify_ssl": true
+    }
+  }
+}
