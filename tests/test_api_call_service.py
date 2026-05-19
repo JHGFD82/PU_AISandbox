@@ -1,18 +1,18 @@
-"""Tests for plugins/external_api/src/services/external_api_call_service.py."""
+"""Tests for src/services/api_call_service.py."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
-from src.services.external_api_config import ExternalAPIConfig
-from src.services.external_api_call_service import ExternalAPICallService
+from src.services.api_config import APIConfig
+from src.services.api_call_service import APICallService
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _make_config(**kwargs) -> ExternalAPIConfig:
+def _make_config(**kwargs) -> APIConfig:
     defaults = dict(
         api_name="test",
         display_name="Test API",
@@ -25,10 +25,10 @@ def _make_config(**kwargs) -> ExternalAPIConfig:
         extra={},
     )
     defaults.update(kwargs)
-    return ExternalAPIConfig(**defaults)
+    return APIConfig(**defaults)
 
 
-def _make_svc(monkeypatch, **kwargs) -> ExternalAPICallService:
+def _make_svc(monkeypatch, **kwargs) -> APICallService:
     monkeypatch.setattr(
         "src.services.api_service.OpenAI",
         lambda **kw: MagicMock(),
@@ -36,7 +36,7 @@ def _make_svc(monkeypatch, **kwargs) -> ExternalAPICallService:
     tracker = MagicMock()
     tracker.record_usage.return_value = MagicMock(total_cost=0.001)
     cfg = _make_config(**kwargs)
-    return ExternalAPICallService(cfg, professor="test", token_tracker=tracker)
+    return APICallService(cfg, professor="test", token_tracker=tracker)
 
 
 # ---------------------------------------------------------------------------
@@ -54,7 +54,7 @@ class TestBuildMessages:
         svc = _make_svc(monkeypatch)
         msgs = svc.build_messages("Hello")
         assert msgs[0]["role"] == "system"
-        assert len(msgs[0]["content"]) > 0  # uses DEFAULT_SYSTEM_PROMPT
+        assert len(msgs[0]["content"]) > 0
         assert msgs[1]["content"] == "Hello"
 
     def test_two_messages_returned(self, monkeypatch):

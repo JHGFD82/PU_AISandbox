@@ -41,23 +41,43 @@ class SandboxProcessor(_DocumentHandlerMixin, _ImageHandlerMixin, _CommandMixin)
 
         Args:
             professor_name: Professor identifier for API key lookup and token tracking.
-            model:          Override model name.  May include colon syntax
-                            (``della:qwen-preview``) — the caller is responsible
-                            for stripping the prefix before passing it here.
+            model:          Override model name.  May include colon syntax such as
+                            ``della:qwen-preview`` — the processor automatically parses
+                            the api name prefix and loads the corresponding ``APIConfig``.
             temperature:    Sampling temperature override.
             top_p:          Nucleus-sampling top-p override.
             max_tokens:     Max completion tokens override.
-            api_config:     When provided, lazily-loaded ``BaseService`` instances
-                            will have their Portkey client replaced with an OpenAI
-                            client pointed at this API's ``base_url``.  This lets
-                            translation, transcription, and other services use any
-                            OpenAI-compatible endpoint transparently.
+            api_config:     Explicit ``APIConfig`` override.  If ``None`` and ``model``
+                            contains colon syntax, the config is resolved automatically.
+                            When set, lazily-loaded ``BaseService`` instances will have
+                            their Portkey client replaced with an OpenAI-compatible
+                            client pointed at this API's ``base_url``.
         """
         try:
             api_key, self.professor_display_name = get_api_key(professor_name)
             self.professor_name = professor_name
 
             logger.debug(f"Initializing processor for professor: {self.professor_display_name}")
+
+            # Parse colon syntax from model (e.g. "della:qwen-preview") when
+            # no explicit api_config has been supplied.
+            if api_config is None and model and ":" in model:
+                from ..services.api_config import parse_model_source, load_api_config, get_default_api_name
+                api_name, bare_model = parse_model_source(model)
+                if api_name:
+                    try:
+                        api_config = load_api_config(api_name)
+                        model = bare_model
+                    except ValueError as e:
+                        raise CLIError(f"API configuration error: {e}") from e
+            elif api_config is None:
+                from ..services.api_config import get_default_api_name, load_api_config
+                default = get_default_api_name()
+                if default:
+                    try:
+                        api_config = load_api_config(default)
+                    except ValueError:
+                        pass  # misconfigured default — fall through to sandbox
 
             self.token_tracker = TokenTracker(professor=professor_name)
             self._api_key = api_key
@@ -125,27 +145,6 @@ class SandboxProcessor(_DocumentHandlerMixin, _ImageHandlerMixin, _CommandMixin)
         # Cache on the instance so __getattr__ is only called once per service.
         object.__setattr__(self, name, val)
         return val
-
-    def process_transcription_review(
-        self,
-        text: str,
-        language: str,
-        kanbun: bool = False,
-        kanbun_main: bool = False,
-        output_file: Optional[str] = None,
-    ) -> None:
-        """Review a transcription for OCR errors and print (and optionally save) the JSON report."""
-        try:
-            result_json = self.transcription_review_service.review_transcription(
-                text, language, kanbun=kanbun, kanbun_main=kanbun_main
-            )
-            print("\n" + result_json)
-            if output_file:
-                FileOutputHandler.save_to_text_file(result_json, output_file, label="Review")
-        except Exception as e:
-            logger.error(f"Error during transcription review: {e}", exc_info=True)
-            raise CLIError(f"Error during transcription review: {e}") from e
-
 
     def process_transcription_review(
         self,

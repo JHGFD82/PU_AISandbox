@@ -8,6 +8,7 @@ from typing import Optional
 
 from dotenv import load_dotenv
 
+from .commands import api_call as _api_call_cmd
 from .errors import CLIError
 from .runtime import ModePlugin, handle_info_commands, load_plugins
 
@@ -154,6 +155,9 @@ Run 'python main.py <professor> <command> --help' for plugin-specific usage.
     # translate, transcribe, transcription_review, and prompt are all registered
     # by their respective plugins in plugins/.
 
+    # Register built-in commands that aren't handled by the plugin system.
+    _api_call_cmd.register_subparser(subparsers)
+
     # Register plugin subcommands (each unique plugin object called once).
     if plugins:
         _seen: set[int] = set()
@@ -215,6 +219,12 @@ def main() -> None:
         if args.command == 'usage':
             if handle_info_commands(args):
                 return
+        elif args.command == 'api-call':
+            model = getattr(args, 'model', None)
+            temperature = getattr(args, 'temperature', None)
+            top_p = getattr(args, 'top_p', None)
+            max_tokens = getattr(args, 'max_tokens', None)
+            _api_call_cmd.run(args, args.professor, model, temperature, top_p, max_tokens)
         elif _plugins and args.command in _plugins:
             model = getattr(args, 'model', None)
             temperature = getattr(args, 'temperature', None)

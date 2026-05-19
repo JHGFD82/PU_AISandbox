@@ -1,5 +1,6 @@
 """Service layer — AI API services."""
 
+from .api_call_service import APICallService
 from .api_config import (
     APIConfig,
     load_api_config,
@@ -15,6 +16,7 @@ from .api_service import APIService, APIService as ExternalAPIService
 
 __all__ = [
     # New names
+    "APICallService",
     "APIConfig",
     "APIService",
     "load_api_config",

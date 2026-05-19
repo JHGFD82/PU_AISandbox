@@ -1,14 +1,11 @@
-"""API call service — reference implementation.
+"""API call service — sends prompts to any configured OpenAI-compatible endpoint.
 
-This is a thin wrapper around ``APIService`` that assembles
-prompts from fragments and provides a clean interface for the plugin.
+This service wraps ``APIService`` with prompt-assembly helpers and provides
+a clean interface for the ``api-call`` command and any other code that needs
+to send a free-form prompt to a configured API.
 
-Template notes for plugin authors
-----------------------------------
-* Keep all prompt strings in ``prompts/fragments.py`` — never in here.
-* Override ``build_messages()`` to change how prompts are assembled.
-* For non-AI REST endpoints, replace ``chat_completion()`` with
-  ``self.svc.get()`` or ``self.svc.post()`` calls.
+All prompt text lives in ``src/services/prompts/api_call_fragments.py`` —
+never hard-code prompt strings in this file.
 """
 
 from __future__ import annotations
@@ -16,11 +13,10 @@ from __future__ import annotations
 import logging
 from typing import Any, Optional
 
-from src.services.api_config import APIConfig  # type: ignore[import]
-from src.services.api_service import APIService  # type: ignore[import]
-from src.tracking.token_tracker import TokenTracker  # type: ignore[import]
-
-from .prompts.fragments import DEFAULT_SYSTEM_PROMPT
+from .api_config import APIConfig
+from .api_service import APIService
+from ..tracking.token_tracker import TokenTracker
+from .prompts.api_call_fragments import DEFAULT_SYSTEM_PROMPT
 
 logger = logging.getLogger(__name__)
 
@@ -28,8 +24,8 @@ logger = logging.getLogger(__name__)
 class APICallService:
     """Sends prompts to an AI API endpoint and returns the response.
 
-    Wraps ``APIService`` with prompt-assembly helpers and a
-    simple ``send_prompt()`` entry point used by the plugin.
+    Wraps ``APIService`` with prompt-assembly helpers and a simple
+    ``send_prompt()`` entry point.
     """
 
     def __init__(
@@ -62,9 +58,6 @@ class APICallService:
 
         Override in a subclass to add RAG context, conversation history,
         or other dynamic content.
-
-        Returns:
-            Messages list ready to pass to ``chat_completion()``.
         """
         effective_system = system_prompt or DEFAULT_SYSTEM_PROMPT
         return [
@@ -82,7 +75,7 @@ class APICallService:
         Args:
             user_prompt:   The user's message.
             system_prompt: Optional system/developer prompt.  Falls back to
-                           ``DEFAULT_SYSTEM_PROMPT`` from fragments.py.
+                           ``DEFAULT_SYSTEM_PROMPT`` from api_call_fragments.py.
 
         Returns:
             The assistant's reply text.
@@ -93,7 +86,3 @@ class APICallService:
             f"({len(user_prompt)} chars)"
         )
         return self.svc.chat_completion(messages)
-
-
-# Backward compatibility alias
-ExternalAPICallService = APICallService

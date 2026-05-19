@@ -78,11 +78,6 @@ from src.cli import add_common_flags          # shared flag helper  # noqa: E402
 from src.config import get_api_key             # API key resolution  # noqa: E402
 from src.errors import CLIError                # standard user-facing error  # noqa: E402
 from src.output.file_output import FileOutputHandler  # noqa: E402
-from src.services import (                     # noqa: E402
-    parse_model_source,
-    get_default_api_name,
-    load_api_config,
-)
 from src.services.prompt_service import PromptService  # noqa: E402
 from src.tracking.token_tracker import TokenTracker  # MANDATORY — see run()  # noqa: E402
 
@@ -127,113 +122,6 @@ class PromptPlugin:
         top_p: Optional[float],
         max_tokens: Optional[int],
     ) -> None:
-        # ── Resolve colon syntax: api_name:model ──────────────────────────
-        api_name: Optional[str] = None
-        bare_model = model
-
-        if model:
-            colon_api, colon_model = parse_model_source(model)
-            if colon_api:
-                api_name = colon_api
-                bare_model = colon_model
-
-        if api_name is None:
-            api_name = get_default_api_name()
-
-        # ── Route to external API or built-in Portkey service ─────────────
-        if api_name:
-            return self._run_via_api(
-                args, professor, api_name, bare_model,
-                temperature, top_p, max_tokens,
-            )
-
-        return self._run_via_sandbox(
-            args, professor, bare_model,
-            temperature, top_p, max_tokens,
-        )
-
-    def _run_via_api(
-        self,
-        args: argparse.Namespace,
-        professor: str,
-        api_name: str,
-        model: Optional[str],
-        temperature: Optional[float],
-        top_p: Optional[float],
-        max_tokens: Optional[int],
-    ) -> None:
-        """Run the prompt command using a configured API endpoint."""
-        # Late import to avoid circular dependency when external_api plugin not loaded
-        from src.services.external_api_call_service import APICallService  # noqa: F401
-
-        try:
-            config = load_api_config(api_name)
-        except ValueError as e:
-            raise CLIError(str(e)) from e
-
-        token_tracker = TokenTracker(professor=professor)
-
-        # Import APICallService from wherever it was registered
-        from src.services.external_api_call_service import APICallService  # type: ignore[import]
-
-        svc = APICallService(
-            config,
-            professor=professor,
-            token_tracker=token_tracker,
-            model=model,
-            temperature=temperature,
-            top_p=top_p,
-            max_tokens=max_tokens,
-        )
-
-        system_prompt: Optional[str] = None
-        if getattr(args, "include_system_prompt", False):
-            system_prompt = _collect_multiline("System prompt") or None
-
-        if getattr(args, "dry_run", False):
-            messages = svc.build_messages(
-                "[Interactive prompt — text would be entered at runtime]",
-                system_prompt,
-            )
-            effective_model = model or config.default_model or "?"
-            sep = "=" * 70
-            print(f"\n{sep}")
-            print("  DRY RUN — No API call will be made")
-            print(f"  API:   {config.display_name} ({config.api_name})")
-            print(f"  Model: {effective_model}")
-            print(sep)
-            for msg in messages:
-                role = msg.get("role", "?").upper()
-                print(f"\n--- {role} " + "-" * (65 - len(role)))
-                print(msg.get("content", ""))
-            print(f"\n{sep}\n")
-            return
-
-        user_prompt = _collect_multiline("User prompt")
-        if not user_prompt.strip():
-            raise CLIError("No prompt text provided.")
-
-        try:
-            response = svc.send_prompt(user_prompt, system_prompt)
-        except Exception as e:
-            raise CLIError(f"Error sending prompt: {e}") from e
-
-        print("\n" + response)
-
-        output_file = _resolve_output_path(args)
-        if output_file:
-            FileOutputHandler.save_to_text_file(response, output_file, label="Response")
-
-    def _run_via_sandbox(
-        self,
-        args: argparse.Namespace,
-        professor: str,
-        model: Optional[str],
-        temperature: Optional[float],
-        top_p: Optional[float],
-        max_tokens: Optional[int],
-    ) -> None:
-        """Run the prompt command using the built-in Portkey/Sandbox service."""
         # ── Mandatory setup ───────────────────────────────────────────────
         api_key, _ = get_api_key(professor)
         token_tracker = TokenTracker(professor=professor)   # MANDATORY
