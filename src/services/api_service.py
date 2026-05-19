@@ -357,7 +357,3 @@ class APIService:
         if exc_name in ("APIConnectionError", "APITimeoutError", "InternalServerError", "RateLimitError"):
             return True
         return False
-
-
-# Backward compatibility alias
-ExternalAPIService = APIService

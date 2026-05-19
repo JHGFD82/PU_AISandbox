@@ -221,14 +221,6 @@ def parse_model_source(model: str) -> tuple[Optional[str], str]:
     return None, model
 
 
-# ── Backward compatibility aliases (deprecated) ────────────────────────────────
-# These will be removed in a future release. Update all callers to use the new names.
-
-ExternalAPIConfig = APIConfig
-load_external_api_config = load_api_config
-list_external_apis = list_apis
-
-
 def _get_apis_dict(settings: dict) -> dict:
     """Return the dict of named API entries from the ``[apis]`` section.
 

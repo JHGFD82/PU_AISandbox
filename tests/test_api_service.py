@@ -1,4 +1,4 @@
-"""Tests for src/services/api_service.py (and backward-compat shim external_api_service.py)."""
+"""Tests for src/services/api_service.py."""
 
 import time
 from typing import Any
@@ -10,8 +10,8 @@ import requests
 from src.services.api_config import APIConfig
 from src.services.api_service import APIService
 # Backward-compat shim
-from src.services.external_api_config import ExternalAPIConfig
-from src.services.external_api_service import ExternalAPIService
+from src.services.api_config import APIConfig
+from src.services.api_service import APIService
 
 
 # ---------------------------------------------------------------------------
@@ -33,8 +33,8 @@ def _make_config(openai_compatible: bool = True, **kwargs) -> APIConfig:
     return APIConfig(**defaults)
 
 
-def _make_svc(monkeypatch, openai_compatible: bool = True, **kwargs) -> ExternalAPIService:
-    """Create an ExternalAPIService with network clients mocked out."""
+def _make_svc(monkeypatch, openai_compatible: bool = True, **kwargs) -> APIService:
+    """Create an APIService with network clients mocked out."""
     cfg = _make_config(openai_compatible=openai_compatible, **kwargs)
     tracker = MagicMock()
     tracker.record_usage.return_value = MagicMock(total_cost=0.0012)
@@ -45,7 +45,7 @@ def _make_svc(monkeypatch, openai_compatible: bool = True, **kwargs) -> External
             lambda **kw: MagicMock(),
         )
 
-    svc = ExternalAPIService(cfg, professor="test", token_tracker=tracker)
+    svc = APIService(cfg, professor="test", token_tracker=tracker)
     return svc
 
 
@@ -63,7 +63,7 @@ def _openai_response(content: str = "Hello!", model: str = "gpt-4o") -> MagicMoc
 
 
 # ---------------------------------------------------------------------------
-# ExternalAPIService.__init__
+# APIService.__init__
 # ---------------------------------------------------------------------------
 
 class TestInit:
@@ -71,7 +71,7 @@ class TestInit:
         openai_cls = MagicMock()
         monkeypatch.setattr("src.services.api_service.OpenAI", openai_cls)
         cfg = _make_config(openai_compatible=True)
-        svc = ExternalAPIService(cfg)
+        svc = APIService(cfg)
         openai_cls.assert_called_once()
         assert svc._session is None
 
@@ -81,7 +81,7 @@ class TestInit:
             lambda **kw: MagicMock(),
         )
         cfg = _make_config(openai_compatible=False)
-        svc = ExternalAPIService(cfg)
+        svc = APIService(cfg)
         assert svc._openai_client is None
         assert svc._session is not None
 
@@ -95,7 +95,7 @@ class TestInit:
             lambda **kw: MagicMock(),
         )
         cfg = _make_config()
-        svc = ExternalAPIService(cfg, professor="prof")
+        svc = APIService(cfg, professor="prof")
         assert svc.token_tracker is not None
 
 
@@ -124,7 +124,7 @@ class TestChatCompletion:
             "src.services.api_service.OpenAI",
             lambda **kw: MagicMock(),
         )
-        svc = ExternalAPIService(cfg, token_tracker=tracker)
+        svc = APIService(cfg, token_tracker=tracker)
         with pytest.raises(ValueError, match="No model specified"):
             svc.chat_completion([{"role": "user", "content": "hi"}])
 
@@ -161,7 +161,7 @@ class TestChatCompletion:
 # ---------------------------------------------------------------------------
 
 class TestHTTPMethods:
-    def _rest_svc(self, monkeypatch) -> ExternalAPIService:
+    def _rest_svc(self, monkeypatch) -> APIService:
         return _make_svc(monkeypatch, openai_compatible=False)
 
     def test_get_json_response(self, monkeypatch):
@@ -237,31 +237,31 @@ class TestBuildUrl:
 
 class TestIsTransient:
     def test_connection_error(self):
-        assert ExternalAPIService._is_transient(requests.exceptions.ConnectionError())
+        assert APIService._is_transient(requests.exceptions.ConnectionError())
 
     def test_timeout_error(self):
-        assert ExternalAPIService._is_transient(requests.exceptions.Timeout())
+        assert APIService._is_transient(requests.exceptions.Timeout())
 
     def test_5xx_http_error(self):
         resp = MagicMock()
         resp.status_code = 503
         err = requests.exceptions.HTTPError(response=resp)
-        assert ExternalAPIService._is_transient(err)
+        assert APIService._is_transient(err)
 
     def test_4xx_not_transient(self):
         resp = MagicMock()
         resp.status_code = 400
         err = requests.exceptions.HTTPError(response=resp)
-        assert not ExternalAPIService._is_transient(err)
+        assert not APIService._is_transient(err)
 
     def test_openai_rate_limit(self):
         # Simulate an openai RateLimitError by matching on the class name string
         class RateLimitError(Exception):
             pass
-        assert ExternalAPIService._is_transient(RateLimitError("quota exceeded"))
+        assert APIService._is_transient(RateLimitError("quota exceeded"))
 
     def test_value_error_not_transient(self):
-        assert not ExternalAPIService._is_transient(ValueError("bad input"))
+        assert not APIService._is_transient(ValueError("bad input"))
 
 
 # ---------------------------------------------------------------------------

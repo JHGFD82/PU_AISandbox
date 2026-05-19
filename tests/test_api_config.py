@@ -1,4 +1,4 @@
-"""Tests for src/services/api_config.py (and backward-compat shim external_api_config.py)."""
+"""Tests for src/services/api_config.py."""
 
 import os
 from unittest.mock import patch
@@ -12,13 +12,6 @@ from src.services.api_config import (
     parse_model_source,
     _env_key_for,
 )
-# Backward-compat shim should also export old names
-from src.services.external_api_config import (
-    ExternalAPIConfig,
-    load_external_api_config,
-    list_external_apis,
-)
-
 
 # ---------------------------------------------------------------------------
 # _env_key_for
@@ -274,23 +267,4 @@ class TestParseModelSource:
         assert api == "della"
         assert model == "qwen"
 
-
-# ---------------------------------------------------------------------------
-# Backward-compat aliases (shim)
-# ---------------------------------------------------------------------------
-
-class TestBackwardCompatAliases:
-    def test_external_api_config_is_api_config(self):
-        assert ExternalAPIConfig is APIConfig
-
-    def test_load_external_api_config_works(self, monkeypatch):
-        monkeypatch.setenv("EXTERNAL_API_PU_SANDBOX_KEY", "k")
-        with _patch_settings(_SETTINGS_WITH_APIS):
-            cfg = load_external_api_config("pu_sandbox")
-        assert isinstance(cfg, APIConfig)
-
-    def test_list_external_apis_works(self):
-        with _patch_settings(_SETTINGS_WITH_APIS):
-            names = list_external_apis()
-        assert "pu_sandbox" in names
 

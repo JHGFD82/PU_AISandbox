@@ -7,15 +7,10 @@ from .api_config import (
     list_apis,
     get_default_api_name,
     parse_model_source,
-    # Backward compatibility aliases
-    APIConfig as ExternalAPIConfig,
-    load_api_config as load_external_api_config,
-    list_apis as list_external_apis,
 )
-from .api_service import APIService, APIService as ExternalAPIService
+from .api_service import APIService
 
 __all__ = [
-    # New names
     "APICallService",
     "APIConfig",
     "APIService",
@@ -23,11 +18,6 @@ __all__ = [
     "list_apis",
     "get_default_api_name",
     "parse_model_source",
-    # Backward compatibility aliases
-    "ExternalAPIConfig",
-    "ExternalAPIService",
-    "load_external_api_config",
-    "list_external_apis",
 ]
 
 # portkey_ai and the services that depend on it are optional — present in
