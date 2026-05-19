@@ -2,31 +2,31 @@
 
 Endpoint definitions live in ``apis.json`` at the repository root.  Each
 key inside ``"endpoints"`` becomes the identifier used in colon syntax on
-the CLI (e.g. ``-m della:qwen-preview``).
+the CLI (e.g. ``-m hpc_cluster:llama-3-70b``).
 
 Set ``"default"`` to route bare model names to a specific endpoint
 instead of the built-in Portkey service::
 
     {
-      "default": "della",
+      "default": "hpc_cluster",
       "endpoints": {
-        "della": {
-          "name": "Della (Princeton HPC)",
-          "base_url": "https://della.princeton.edu/api/v1",
+        "hpc_cluster": {
+          "name": "HPC Cluster",
+          "base_url": "http://my-cluster.internal:8000/v1",
           "openai_compatible": true,
-          "default_model": "qwen-preview"
+          "default_model": "llama-3-70b-instruct"
         }
       }
     }
 
 The API key for each endpoint is read from the environment variable
-``API_<UPPERCASE_NAME>_KEY`` (e.g. ``API_DELLA_KEY``).
+``API_<UPPERCASE_NAME>_KEY`` (e.g. ``API_HPC_CLUSTER_KEY``).
 
 Colon syntax on the CLI::
 
-    python main.py heller prompt -m della:qwen-preview
-    python main.py heller prompt -m my_cluster:llama-3-70b
-    python main.py heller prompt -m qwen-preview   # uses "default" if set
+    python main.py heller prompt -m hpc_cluster:llama-3-70b
+    python main.py heller prompt -m cloud_provider:model-name
+    python main.py heller prompt -m llama-3-70b   # uses "default" if set
 """
 
 from __future__ import annotations
@@ -57,7 +57,7 @@ class APIConfig:
     """Configuration for a single AI API endpoint.
 
     Attributes:
-        api_name:           The endpoint key from ``apis.json`` (e.g. ``della``).
+        api_name:           The endpoint key from ``apis.json`` (e.g. ``hpc_cluster``).
         display_name:       Human-readable name shown in logs and --list-apis output.
         base_url:           The root URL for the API (e.g. ``https://example.com/v1``).
         api_key:            Resolved API key (from environment variable).
@@ -84,8 +84,8 @@ def _env_key_for(api_name: str) -> str:
 
     Examples::
 
-        _env_key_for("della")        -> "API_DELLA_KEY"
-        _env_key_for("my-cluster")   -> "API_MY_CLUSTER_KEY"
+        _env_key_for("hpc_cluster")   -> "API_HPC_CLUSTER_KEY"
+        _env_key_for("cloud-provider") -> "API_CLOUD_PROVIDER_KEY"
     """
     safe = api_name.upper().replace("-", "_")
     return f"API_{safe}_KEY"
@@ -160,7 +160,7 @@ def get_default_api_name() -> Optional[str]:
 
     Reads the top-level ``"default"`` key::
 
-        { "default": "della", "endpoints": { ... } }
+        { "default": "hpc_cluster", "endpoints": { ... } }
 
     When set, bare model strings (no colon prefix) are routed to this endpoint
     instead of the built-in Portkey service.
@@ -177,8 +177,8 @@ def parse_model_source(model: str) -> tuple[Optional[str], str]:
     contain slashes for provider/model notation).
 
     Args:
-        model: A model string such as ``"della:qwen-preview"``,
-               ``"my_cluster:llama-3-70b"``, or bare ``"gpt-4o"``.
+        model: A model string such as ``"hpc_cluster:llama-3-70b"``,
+               ``"cloud_provider:model-name"``, or bare ``"gpt-4o"``.
 
     Returns:
         A ``(api_name, bare_model)`` tuple.  ``api_name`` is ``None`` when
@@ -186,10 +186,10 @@ def parse_model_source(model: str) -> tuple[Optional[str], str]:
 
     Examples::
 
-        parse_model_source("della:qwen-preview")        -> ("della", "qwen-preview")
-        parse_model_source("my_cluster:openai/gpt-4o")  -> ("my_cluster", "openai/gpt-4o")
-        parse_model_source("gpt-4o")                    -> (None, "gpt-4o")
-        parse_model_source("gpt-4o-mini")               -> (None, "gpt-4o-mini")
+        parse_model_source("hpc_cluster:llama-3-70b")    -> ("hpc_cluster", "llama-3-70b")
+        parse_model_source("cloud_provider:model-name")  -> ("cloud_provider", "model-name")
+        parse_model_source("gpt-4o")                     -> (None, "gpt-4o")
+        parse_model_source("gpt-4o-mini")                -> (None, "gpt-4o-mini")
     """
     if ":" in model:
         api_name, _, bare_model = model.partition(":")

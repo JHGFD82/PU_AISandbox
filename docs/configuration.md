@@ -1,12 +1,13 @@
 # Configuration & Templates
 
-Three files control how PU_AISandbox is configured. Two are git-ignored (you create them from templates); one is tracked.
+Four files control how PU_AISandbox is configured. Two are git-ignored (you create them from templates); two are tracked.
 
 | File | Tracked | Template | Purpose |
 |------|---------|----------|---------|
 | `.env` | ❌ git-ignored | `.env.template` | Professor names and API keys |
 | `src/model_catalog.json` | ❌ git-ignored | `src/model_catalog.template.json` | Model pricing and capabilities |
 | `settings.toml` | ✅ tracked | — | Runtime defaults (edit freely) |
+| `apis.json` | ✅ tracked | — | Alternate AI endpoint connections (add your own) |
 
 ---
 
@@ -226,6 +227,105 @@ warning_threshold_pct = 80
 | `warning_threshold_pct` | `80` | Print a budget warning when monthly spend exceeds this percentage of `monthly_limit` |
 
 CLI flags (`-t`, `-T`, `-M`, `-w`, etc.) always override these defaults for the current run only.
+
+---
+
+## `apis.json` — Alternate AI Endpoint Connections
+
+`apis.json` lives at the repository root and is tracked by git. It lists any AI
+endpoints you want to reach in addition to (or instead of) the built-in service.
+
+### Why use this?
+
+Use `apis.json` when you need to call an AI endpoint that isn't the built-in
+service — for example:
+
+- A model running on an **HPC cluster** or other self-hosted inference server
+- An **AI service provider's direct API** (many providers expose an
+  OpenAI-compatible REST interface you can reach with just a URL and an API key)
+
+### File format
+
+```json
+{
+  "_doc": "Human-readable description (ignored by the loader)",
+  "_examples": { "...copy an entry here to try it..." },
+  "default": null,
+  "endpoints": {
+    "my_cluster": {
+      "name": "My HPC Cluster",
+      "base_url": "http://my-cluster.internal:8000/v1",
+      "openai_compatible": true,
+      "default_model": "llama-3-70b-instruct",
+      "timeout": 30,
+      "verify_ssl": false
+    }
+  }
+}
+```
+
+Keys starting with `_` are documentation only — the loader ignores them.
+
+### Endpoint fields
+
+| Field | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `name` | No | key name | Human-readable label for logs and `--list-apis` |
+| `base_url` | **Yes** | — | Root URL of the API (e.g. `http://cluster:8000/v1`) |
+| `openai_compatible` | No | `false` | When `true`, uses the OpenAI SDK with `base_url` for LLM calls |
+| `default_model` | No | `null` | Model used when none is specified in the colon syntax |
+| `timeout` | No | `30` | Request timeout in seconds |
+| `verify_ssl` | No | `true` | Whether to verify SSL certificates (set `false` for internal clusters) |
+
+### API keys
+
+Each endpoint's API key is read from an environment variable:
+
+```
+API_<UPPERCASE_ENDPOINT_KEY>_KEY
+```
+
+Examples:
+- Endpoint key `my_cluster` → `API_MY_CLUSTER_KEY`
+- Endpoint key `cloud-provider` → `API_CLOUD_PROVIDER_KEY`
+
+Add these to your `.env` file (see `.env.template` for the pattern).
+
+### Setting a default endpoint
+
+Set `"default"` to an endpoint key to route **all** bare model strings there
+instead of the built-in service:
+
+```json
+{
+  "default": "my_cluster",
+  "endpoints": { "my_cluster": { ... } }
+}
+```
+
+When `"default"` is `null` (the default), bare model strings are handled by the
+built-in service as before.
+
+### Built-in examples
+
+The `_examples` section in `apis.json` shows two ready-to-use patterns:
+
+- **`hpc_cluster`** — OpenAI-compatible endpoint on an on-premises or HPC cluster
+- **`cloud_provider`** — Direct connection to a commercial AI service provider
+  that exposes an OpenAI-compatible REST API
+
+Copy the relevant example into `"endpoints"` and fill in your URL.
+
+### Using a configured endpoint
+
+Once an endpoint is in `"endpoints"`, use it on the command line with colon syntax:
+
+```bash
+python main.py heller prompt -m my_cluster:llama-3-70b
+```
+
+See [CLI Reference → Specifying Models](cli-reference.md#specifying-models) for
+the full syntax.
 
 ---
 

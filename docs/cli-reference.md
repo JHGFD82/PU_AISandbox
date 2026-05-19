@@ -241,6 +241,21 @@ python main.py heller prompt -m google/gemini-2.5-pro
 
 Supported auto-registration providers: `openai`, `google`. For all other providers, add the model entry to `src/model_catalog.json` manually.
 
+**Alternate endpoint with colon syntax** — prefix with `api_name:` to route to a
+configured endpoint from `apis.json`:
+
+```bash
+python main.py heller prompt -m my_cluster:llama-3-70b-instruct
+python main.py heller prompt -m cloud_provider:model-name
+```
+
+The part before the colon is the endpoint key from `apis.json`; everything after
+is the model name passed to that endpoint. The API key for the endpoint is read
+from `API_<UPPERCASE_KEY>_KEY` in `.env`.
+
+See [Configuration → apis.json](configuration.md#apisjson----alternate-ai-endpoint-connections)
+for how to define endpoints.
+
 ---
 
 ## Notes Flags

@@ -19,7 +19,7 @@ from src.services.api_config import (
 
 class TestEnvKeyFor:
     def test_underscore_name(self):
-        assert _env_key_for("della") == "API_DELLA_KEY"
+        assert _env_key_for("hpc_cluster") == "API_HPC_CLUSTER_KEY"
 
     def test_hyphen_name(self):
         assert _env_key_for("my-cluster") == "API_MY_CLUSTER_KEY"
@@ -38,11 +38,11 @@ class TestEnvKeyFor:
 _APIS_WITH_ENDPOINTS = {
     "default": None,
     "endpoints": {
-        "della": {
-            "name": "Della (Princeton HPC)",
-            "base_url": "https://della.example.com/v1",
+        "hpc_cluster": {
+            "name": "HPC Cluster",
+            "base_url": "https://cluster.example.com/v1",
             "openai_compatible": True,
-            "default_model": "qwen-preview",
+            "default_model": "llama-3-70b-instruct",
             "timeout": 30,
             "verify_ssl": True,
         },
@@ -55,13 +55,13 @@ _APIS_WITH_ENDPOINTS = {
 }
 
 _APIS_WITH_DEFAULT = {
-    "default": "della",
+    "default": "hpc_cluster",
     "endpoints": {
-        "della": {
-            "name": "Della (Princeton HPC)",
-            "base_url": "https://della.example.com/v1",
+        "hpc_cluster": {
+            "name": "HPC Cluster",
+            "base_url": "https://cluster.example.com/v1",
             "openai_compatible": True,
-            "default_model": "qwen-preview",
+            "default_model": "llama-3-70b-instruct",
         },
     },
 }
@@ -83,15 +83,15 @@ def _patch_apis(data: dict):
 
 class TestLoadAPIConfig:
     def test_openai_compatible(self, monkeypatch):
-        monkeypatch.setenv("API_DELLA_KEY", "test-key-123")
+        monkeypatch.setenv("API_HPC_CLUSTER_KEY", "test-key-123")
         with _patch_apis(_APIS_WITH_ENDPOINTS):
-            cfg = load_api_config("della")
-        assert cfg.api_name == "della"
-        assert cfg.display_name == "Della (Princeton HPC)"
-        assert cfg.base_url == "https://della.example.com/v1"
+            cfg = load_api_config("hpc_cluster")
+        assert cfg.api_name == "hpc_cluster"
+        assert cfg.display_name == "HPC Cluster"
+        assert cfg.base_url == "https://cluster.example.com/v1"
         assert cfg.api_key == "test-key-123"
         assert cfg.openai_compatible is True
-        assert cfg.default_model == "qwen-preview"
+        assert cfg.default_model == "llama-3-70b-instruct"
         assert cfg.timeout == 30
         assert cfg.verify_ssl is True
 
@@ -133,9 +133,9 @@ class TestLoadAPIConfig:
         assert "custom_header" in cfg.extra
 
     def test_returns_api_config_instance(self, monkeypatch):
-        monkeypatch.setenv("API_DELLA_KEY", "k")
+        monkeypatch.setenv("API_HPC_CLUSTER_KEY", "k")
         with _patch_apis(_APIS_WITH_ENDPOINTS):
-            cfg = load_api_config("della")
+            cfg = load_api_config("hpc_cluster")
         assert isinstance(cfg, APIConfig)
 
 
@@ -151,14 +151,14 @@ class TestLoadAPIConfigErrors:
 
     def test_unknown_api_hints_available(self):
         with _patch_apis(_APIS_WITH_ENDPOINTS):
-            with pytest.raises(ValueError, match="della"):
+            with pytest.raises(ValueError, match="hpc_cluster"):
                 load_api_config("nonexistent")
 
     def test_missing_key_raises(self, monkeypatch):
-        monkeypatch.delenv("API_DELLA_KEY", raising=False)
+        monkeypatch.delenv("API_HPC_CLUSTER_KEY", raising=False)
         with _patch_apis(_APIS_WITH_ENDPOINTS):
-            with pytest.raises(ValueError, match="API_DELLA_KEY"):
-                load_api_config("della")
+            with pytest.raises(ValueError, match="API_HPC_CLUSTER_KEY"):
+                load_api_config("hpc_cluster")
 
     def test_missing_base_url_raises(self, monkeypatch):
         data = {"endpoints": {"bad": {"name": "Bad"}}}
@@ -181,7 +181,7 @@ class TestListAPIs:
     def test_returns_names(self):
         with _patch_apis(_APIS_WITH_ENDPOINTS):
             names = list_apis()
-        assert set(names) == {"della", "data_service"}
+        assert set(names) == {"hpc_cluster", "data_service"}
 
     def test_empty_when_no_endpoints_key(self):
         with _patch_apis(_APIS_EMPTY):
@@ -199,7 +199,7 @@ class TestListAPIs:
 class TestGetDefaultApiName:
     def test_returns_default(self):
         with _patch_apis(_APIS_WITH_DEFAULT):
-            assert get_default_api_name() == "della"
+            assert get_default_api_name() == "hpc_cluster"
 
     def test_returns_none_when_null(self):
         with _patch_apis(_APIS_WITH_ENDPOINTS):
@@ -220,9 +220,9 @@ class TestGetDefaultApiName:
 
 class TestParseModelSource:
     def test_colon_splits_api_and_model(self):
-        api, model = parse_model_source("della:qwen-preview")
-        assert api == "della"
-        assert model == "qwen-preview"
+        api, model = parse_model_source("hpc_cluster:llama-3-70b")
+        assert api == "hpc_cluster"
+        assert model == "llama-3-70b"
 
     def test_colon_with_provider_slash_model(self):
         api, model = parse_model_source("my_cluster:openai/gpt-4o")
@@ -252,11 +252,11 @@ class TestParseModelSource:
 
     def test_empty_model_part_treated_as_bare(self):
         """A trailing colon (no model after) falls back to bare model."""
-        api, model = parse_model_source("della:")
+        api, model = parse_model_source("hpc_cluster:")
         assert api is None
-        assert model == "della:"
+        assert model == "hpc_cluster:"
 
     def test_whitespace_stripped(self):
-        api, model = parse_model_source("  della  :  qwen  ")
-        assert api == "della"
-        assert model == "qwen"
+        api, model = parse_model_source("  hpc_cluster  :  llama-3-70b  ")
+        assert api == "hpc_cluster"
+        assert model == "llama-3-70b"

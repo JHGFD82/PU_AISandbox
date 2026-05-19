@@ -81,9 +81,9 @@ class TestSandboxProcessorInit:
         """Colon syntax in model string auto-resolves APIConfig without caller involvement."""
         from src.services.api_config import APIConfig
         fake_cfg = APIConfig(
-            api_name="della",
-            display_name="Della HPC",
-            base_url="https://della.example.com/v1",
+            api_name="hpc_cluster",
+            display_name="HPC Cluster",
+            base_url="https://cluster.example.com/v1",
             api_key="key",
             openai_compatible=True,
             default_model=None,
@@ -103,15 +103,15 @@ class TestSandboxProcessorInit:
         original_load = _cfg_mod.load_api_config
 
         def fake_load(name):
-            if name == "della":
+            if name == "hpc_cluster":
                 return fake_cfg
             return original_load(name)
 
         monkeypatch.setattr(_cfg_mod, "load_api_config", fake_load)
 
-        proc = SandboxProcessor("smith", model="della:qwen-preview")
+        proc = SandboxProcessor("smith", model="hpc_cluster:llama-3-70b")
         assert proc._api_config is fake_cfg
-        assert proc._svc_kwargs["model"] == "qwen-preview"
+        assert proc._svc_kwargs["model"] == "llama-3-70b"
 
     def test_bare_model_leaves_api_config_none_when_no_default(self, monkeypatch):
         """Model without colon and no apis.default → _api_config stays None."""
