@@ -15,9 +15,9 @@ main.py
       info_commands.py    built-in: --list-models, usage subcommands
       sandbox_processor.py  shared service wiring used by plugins
   → src/services/         API-facing operations (TranslationService, ImageProcessorService)
-  → src/processors/       document preprocessing (PDF, DOCX, TXT, image)
+  → src/processors/       document ingestion (PDF, DOCX, TXT, MD, JSON, XLSX, image)
   → src/tracking/         per-professor token accounting + pricing (model_catalog.json)
-  → src/output/           text / PDF / Word document output
+  → src/output/           text / Markdown / PDF / Word / Excel / JSON output
   → plugins/
       prompt/             bundled plugin (ships with this repo)
       translation/        bundled plugin — base English translation (ships with this repo)
@@ -143,7 +143,30 @@ python main.py heller prompt -s --dry-run       # preview without API call
 
 ### Translation and transcription
 
-See the README in each plugin repo for full command examples, flag references, language codes, and input/output format details.
+**Input formats:** `.pdf`, `.docx`, `.txt`, `.md`, `.json`, `.xlsx`/`.xls`, and image files (`.png`, `.jpg`, etc.)  
+**Output formats:** `.txt`, `.md`, `.pdf`, `.docx`, `.xlsx` (Excel), `.json` — inferred from the `-o` extension.
+
+```bash
+python main.py heller translate jp-en -i paper.pdf -o output.pdf          # PDF to PDF
+python main.py heller translate zh-en -i article.docx -o translated.docx  # DOCX to DOCX
+python main.py heller translate jp-en -i data.json -o result.md           # JSON in, Markdown out
+python main.py heller translate jp-en -i data.xlsx -o result.xlsx         # Excel in, Excel out
+python main.py heller translate jp-en -i paper.pdf -p "1-10"              # page range
+python main.py heller translate jp-en -i paper.pdf --scanned              # scanned PDF
+python main.py heller translate jp-en -c                                  # paste text
+
+python main.py heller transcribe en -i scan.png -o result.txt             # single image
+python main.py heller transcribe en -i scans/                             # folder of images
+```
+
+To use an alternate AI endpoint (HPC cluster or third-party provider), use colon syntax with a key from `apis.json`:
+
+```bash
+python main.py heller translate jp-en -i paper.pdf -m my_cluster:llama-3-70b
+python main.py heller prompt -m cloud_provider:some-model
+```
+
+See [`docs/cli-reference.md`](docs/cli-reference.md) for the full flag reference and [`docs/configuration.md`](docs/configuration.md) for `apis.json` setup.
 
 ---
 
@@ -185,16 +208,25 @@ Prices are per 1,000,000 tokens (default `pricing_unit`). Set `"supports_vision"
 
 ## Runtime Settings
 
-`settings.toml` at the repo root controls defaults without touching code:
+`settings.toml` at the repo root controls defaults without touching code. Create `settings.local.toml` (git-ignored) to override individual keys for your machine only.
 
 | Section | Key | Default | Effect |
 |---------|-----|---------|--------|
 | `[prompt]` | `temperature` | `0.7` | Sampling temperature for prompt command |
+| `[prompt]` | `top_p` | `1.0` | Nucleus sampling top-p for prompt command |
+| `[prompt]` | `max_tokens` | `4000` | Max response tokens for prompt command |
+| `[prompt]` | `default_system_prompt` | `"You are a helpful assistant."` | System prompt used when `-s` is not passed |
+| `[retry]` | `page_delay_seconds` | `3.0` | Pause between pages in sequential mode |
 | `[retry]` | `max_retries` | `10` | Max retry attempts on transient errors |
-| `[retry]` | `base_retry_delay` | `3.0` | Base seconds for exponential backoff |
+| `[retry]` | `base_retry_delay` | `3.0` | Base seconds for exponential backoff (`delay = base × 2^attempt`) |
 | `[processing]` | `default_parallel_workers` | `1` | Default `-w` value (1 = sequential) |
+| `[processing]` | `default_ocr_passes` | `1` | Default `-P` value for EA OCR; > 1 enables multi-pass refinement |
+| `[processing]` | `default_page_size` | `2000` | Target characters per page when splitting DOCX/TXT |
+| `[processing]` | `max_parallel_workers` | `50` | Hard cap on concurrent workers |
 | `[output]` | `default_font_size` | `9` | Body font size (pt) for PDF/Word output |
 | `[budget]` | `warning_threshold_pct` | `80` | Warn when spend exceeds this % of monthly limit |
+
+See [`docs/configuration.md`](docs/configuration.md) for plugin-level settings (`[translation]`, `[ocr]`, etc.).
 
 ---
 

@@ -80,6 +80,7 @@ If two plugins claim the same command *and* both declare a `handles` list, the l
 - Creates a `TokenTracker` for the professor
 - Holds processors (`PDFProcessor`, `ImageProcessor`) and the file output handler
 - **Lazily** loads plugin-owned services via `__getattr__`
+- **Alternate API routing**: if `model` contains colon syntax (e.g. `"my_cluster:llama-3-70b"`), automatically loads the matching `apis.json` entry, points the OpenAI-compatible client at that `base_url`, and bypasses the model catalog
 
 The lazy loader follows a naming convention: attribute `translation_service` maps to `sys.modules["src.services.translation_service"].TranslationService`. Plugins inject their service files into `sys.modules` at import time; the processor instantiates them on first access.
 
@@ -113,6 +114,35 @@ On-demand aggregation (`usage report --all-time`) sums the active file with all 
 - `load_professor_config()` scans environment variables for `PROF_*_NAME`, `PROF_*_KEY` blocks.
 - `get_api_key(professor)` resolves primary key, falls back to backup key with a warning.
 
+### `src/processors/` — Document Ingestion
+
+Converts source files into lists of text pages for downstream AI services.
+
+| Processor | Input | Notes |
+|-----------|-------|-------|
+| `PdfProcessor` | `.pdf` | CJK-optimized LAParams; use `--scanned` to route through vision instead |
+| `DocxProcessor` | `.docx` | Body + tables in document order |
+| `TxtProcessor` | `.txt` | Split by `default_page_size` character target |
+| `MarkdownProcessor` | `.md` | Markdown formatting preserved as-is |
+| `JsonProcessor` | `.json` | Recursively flattened to key/value lines |
+| `ExcelProcessor` | `.xlsx` / `.xls` | Each sheet as header + tab-separated rows (requires `openpyxl`) |
+| `ImageProcessor` | `.png` `.jpg` `.jpeg` `.gif` `.bmp` `.tiff` `.webp` | Base64-encodes for vision model; blank-image detection skips empty pages |
+
+### `src/output/` — Result Serialization
+
+Writes AI output to disk in the format implied by the output file extension.
+
+| Extension | Handler | Behaviour |
+|-----------|---------|-----------|
+| `.txt` | `save_to_text_file` | Markdown tables rendered as ASCII box tables |
+| `.md` | `save_to_markdown` | Response written as-is; supports progressive (append) save |
+| `.pdf` | `pdf_builder` | CJK fonts; Markdown tables become proper tables |
+| `.docx` | `docx_builder` | 1" margins, 1.5 line spacing; Markdown tables become proper tables; optional image reinsertion |
+| `.xlsx` | `excel_builder` | Markdown tables → separate sheets; prose → "Text" sheet; requires `openpyxl`; falls back to `.txt` if unavailable |
+| `.json` | `json_builder` | Valid JSON is pretty-printed; plain text is wrapped as `{"content": "..."}` |
+
+Unsupported extensions and rich-format failures silently fall back to `.txt`.
+
 ---
 
 ## Plugin Isolation and sys.modules Injection
@@ -144,6 +174,7 @@ _register("src.services.translation_service", "src/services/translation_service.
 |--------|----------|
 | `.env` | Professor API keys (`PROF_*_NAME/KEY/BACKUP_KEY`) |
 | `settings.toml` (repo root) | Core defaults: temperature, retry, workers, font size, budget threshold |
+| `settings.local.toml` (repo root, git-ignored) | Machine-local overrides for any key in `settings.toml`; applied on top |
 | `plugins/*/settings.toml` | Plugin-specific defaults (each plugin's `src/settings.py` walks up to find it) |
 | `src/model_catalog.json` | Model registry: pricing, vision support, token limits (git-ignored; per-installation) |
 | CLI flags | Runtime overrides; always take precedence over all defaults |

@@ -228,6 +228,16 @@ warning_threshold_pct = 80
 
 CLI flags (`-t`, `-T`, `-M`, `-w`, etc.) always override these defaults for the current run only.
 
+### Local overrides
+
+Create `settings.local.toml` at the repository root to override individual keys without modifying the tracked `settings.toml`. Only the keys you specify are overridden — everything else falls back to `settings.toml`. The file is git-ignored (add it to `.gitignore` if not already present).
+
+```toml
+# settings.local.toml — machine-specific overrides (not committed)
+[processing]
+default_parallel_workers = 4
+```
+
 ---
 
 ## `apis.json` — Alternate AI Endpoint Connections
@@ -270,7 +280,7 @@ Keys starting with `_` are documentation only — the loader ignores them.
 
 | Field | Required | Default | Description |
 |-------|----------|---------|-------------|
-| `name` | No | key name | Human-readable label for logs and `--list-apis` |
+| `name` | No | key name | Human-readable label shown in logs |
 | `base_url` | **Yes** | — | Root URL of the API (e.g. `http://cluster:8000/v1`) |
 | `openai_compatible` | No | `false` | When `true`, uses the OpenAI SDK with `base_url` for LLM calls |
 | `default_model` | No | `null` | Model used when none is specified in the colon syntax |
@@ -331,9 +341,69 @@ the full syntax.
 
 ## Plugin Settings
 
-Each plugin can also have its own `settings.toml` in its plugin directory. The plugin's `src/settings.py` locates it by walking up from `__file__`. These files are tracked alongside their plugin (or, if the plugin is in a separate repo, tracked there).
+Each bundled plugin ships its own `settings.toml` in its plugin directory. The plugin's `src/settings.py` locates it by walking up from `__file__`. These files are tracked alongside their plugin (or, if the plugin is in a separate repo, tracked there).
 
 Plugin settings are isolated from the root `settings.toml` — they have no overlap in section names. See [`plugin-authoring-guide.md`](plugin-authoring-guide.md) for how to add settings to a new plugin.
+
+### `translation` plugin — `plugins/translation/settings.toml`
+
+Also used by `translation-ea` (which ships an identical file).
+
+#### `[translation]`
+
+| Key | Default | Effect |
+|-----|---------|--------|
+| `temperature` | `0.5` | Sampling temperature for text-based translation |
+| `top_p` | `0.5` | Nucleus sampling top-p for text-based translation |
+| `max_tokens` | `4000` | Maximum response tokens per page |
+| `context_percentage` | `0.65` | Fraction of the previous page passed as rolling context (0.0–1.0) |
+
+#### `[image_translation]`
+
+Used when `--scanned` or an image file is the input.
+
+| Key | Default | Effect |
+|-----|---------|--------|
+| `temperature` | `0.3` | Slightly creative to handle ambiguous characters from context |
+| `max_tokens` | `8000` | Higher budget: output includes both transcript and translation |
+
+### `transcription` plugin — `plugins/transcription/settings.toml`
+
+Also used by `transcription-ea`.
+
+#### `[ocr]`
+
+| Key | Default | Effect |
+|-----|---------|--------|
+| `temperature` | `0.0` | Fully deterministic — minimises hallucination |
+| `top_p` | `0.1` | Very low to prevent the model from inventing characters |
+| `max_tokens` | `4000` | Maximum response tokens per image |
+| `frequency_penalty` | `0.5` | Penalises repeated tokens |
+| `presence_penalty` | `0.3` | Encourages output diversity |
+
+#### `[transcription_review]`
+
+| Key | Default | Effect |
+|-----|---------|--------|
+| `temperature` | `0.1` | Low temperature for precise, analytical error detection |
+| `top_p` | `0.5` | Focused nucleus sampling |
+| `max_tokens` | `4000` | JSON output; increase for very long transcriptions |
+
+---
+
+## Optional Dependencies
+
+Some output and input formats require packages not listed in the core `requirements.txt`. These degrade gracefully if missing.
+
+| Package | Required for | Fallback |
+|---------|-------------|---------|
+| `openpyxl` | `.xlsx` output (Excel) and `.xlsx`/`.xls` input | Falls back to `.txt` output; input raises an error |
+
+Install as needed:
+
+```bash
+pip install openpyxl
+```
 
 ---
 
