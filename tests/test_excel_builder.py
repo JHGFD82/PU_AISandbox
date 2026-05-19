@@ -68,3 +68,35 @@ class TestSaveToExcel:
             save_to_excel("Some content", out, label="Test")
         # Fallback writes a .txt file
         assert Path(str(tmp_path / "fallback.txt")).exists()
+
+    def test_pipe_block_without_separator_treated_as_prose(self, tmp_path):
+        # A block that matches the pipe regex but lacks a separator row (---).
+        # _parse_md_table_block returns None → treated as prose (line 69).
+        content = "| foo | bar |\n| baz | qux |"
+        out = str(tmp_path / "nontable.xlsx")
+        save_to_excel(content, out, label="Test")
+        wb = openpyxl.load_workbook(out)
+        # Should produce a Text sheet (prose) not a Table sheet
+        assert not any("Table" in name for name in wb.sheetnames)
+
+    def test_empty_content_creates_content_sheet(self, tmp_path):
+        # Empty string produces no prose and no tables, so the fallback
+        # "Content" sheet is created (lines 88-92).
+        out = str(tmp_path / "empty.xlsx")
+        save_to_excel("", out, label="Test")
+        wb = openpyxl.load_workbook(out)
+        assert "Content" in wb.sheetnames
+
+    def test_save_error_falls_back_to_txt(self, tmp_path):
+        # Force wb.save() to raise so the except branch (lines 97-103) runs.
+        out = str(tmp_path / "err.xlsx")
+        with pytest.MonkeyPatch.context() as mp:
+            import openpyxl as _opx
+            original_save = _opx.Workbook.save
+
+            def bad_save(self, filename):
+                raise OSError("disk full")
+
+            mp.setattr(_opx.Workbook, "save", bad_save)
+            save_to_excel("Some content", out, label="Test")
+        assert Path(str(tmp_path / "err.txt")).exists()
