@@ -28,8 +28,9 @@ Plugin contract (three required members)
 
 ``run(args, professor, model, temperature, top_p, max_tokens)``
     Called when one of your commands is invoked.
-    **Token tracking is mandatory** — create a ``TokenTracker`` and pass it
-    to every service you call.  See the implementation below.
+    Construct a ``SandboxProcessor`` — it handles API key resolution,
+    token tracking, alternate-endpoint wiring, and lazy service loading.
+    See the implementation below.
 """
 
 from __future__ import annotations
@@ -74,12 +75,10 @@ _register("src.services.prompt_service", "src/services/prompt_service.py")
 
 # ── Imports from the main repo ────────────────────────────────────────────────
 # These are available because the main repo root is always on sys.path.
-from src.cli import add_common_flags          # shared flag helper  # noqa: E402
-from src.config import get_api_key             # API key resolution  # noqa: E402
-from src.errors import CLIError                # standard user-facing error  # noqa: E402
-from src.output.file_output import FileOutputHandler  # noqa: E402
-from src.services.prompt_service import PromptService  # noqa: E402
-from src.tracking.token_tracker import TokenTracker  # MANDATORY — see run()  # noqa: E402
+from src.cli import add_common_flags                        # shared flag helper  # noqa: E402
+from src.errors import CLIError                             # standard user-facing error  # noqa: E402
+from src.output.file_output import FileOutputHandler        # noqa: E402
+from src.runtime.sandbox_processor import SandboxProcessor  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -123,17 +122,16 @@ class PromptPlugin:
         max_tokens: Optional[int],
     ) -> None:
         # ── Mandatory setup ───────────────────────────────────────────────
-        api_key, _ = get_api_key(professor)
-        token_tracker = TokenTracker(professor=professor)   # MANDATORY
-
-        svc = PromptService(
-            api_key, professor,
-            token_tracker=token_tracker,
+        # SandboxProcessor owns API key resolution, TokenTracker creation,
+        # alternate-endpoint detection (colon syntax), and lazy service wiring.
+        sandbox = SandboxProcessor(
+            professor,
             model=model,
             temperature=temperature,
             top_p=top_p,
             max_tokens=max_tokens,
         )
+        svc = sandbox.prompt_service
 
         # ── Collect optional system prompt ────────────────────────────────
         system_prompt: Optional[str] = None

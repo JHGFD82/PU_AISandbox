@@ -95,13 +95,18 @@ class TestRegisterSubparsers:
 
 class TestPluginRunDryRun:
 
+    def _make_sandbox_mock(self, svc_mock):
+        """Return a SandboxProcessor mock whose .prompt_service returns svc_mock."""
+        sandbox_mock = MagicMock()
+        sandbox_mock.prompt_service = svc_mock
+        return sandbox_mock
+
     def test_dry_run_prints_and_returns_early(self, monkeypatch, capsys):
         svc_mock = MagicMock()
         svc_mock._get_model.return_value = "gpt-4o"
         svc_mock.build_prompts.return_value = ("sys", "usr")
-        monkeypatch.setattr(plugin_mod, "get_api_key", lambda p: ("fake-key", None))
-        monkeypatch.setattr(plugin_mod, "TokenTracker", lambda **_: MagicMock())
-        monkeypatch.setattr(plugin_mod, "PromptService", lambda *a, **kw: svc_mock)
+        monkeypatch.setattr(plugin_mod, "SandboxProcessor",
+                            lambda *a, **kw: self._make_sandbox_mock(svc_mock))
 
         args = _make_args(dry_run=True)
         PromptPlugin().run(args, "prof", None, None, None, None)
@@ -114,9 +119,8 @@ class TestPluginRunDryRun:
         svc_mock = MagicMock()
         svc_mock._get_model.return_value = "gpt-4o"
         svc_mock.build_prompts.return_value = ("sys", "usr")
-        monkeypatch.setattr(plugin_mod, "get_api_key", lambda p: ("fake-key", None))
-        monkeypatch.setattr(plugin_mod, "TokenTracker", lambda **_: MagicMock())
-        monkeypatch.setattr(plugin_mod, "PromptService", lambda *a, **kw: svc_mock)
+        monkeypatch.setattr(plugin_mod, "SandboxProcessor",
+                            lambda *a, **kw: self._make_sandbox_mock(svc_mock))
 
         args = _make_args(dry_run=True)
         PromptPlugin().run(args, "prof", "gpt-4o", 0.7, 0.9, 2000)
@@ -133,12 +137,16 @@ class TestPluginRunDryRun:
 
 class TestPluginRunNormal:
 
-    def _setup(self, monkeypatch, response_text="The answer", output_file=None):
+    def _make_sandbox_mock(self, svc_mock):
+        sandbox_mock = MagicMock()
+        sandbox_mock.prompt_service = svc_mock
+        return sandbox_mock
+
+    def _setup(self, monkeypatch, response_text="The answer"):
         svc_mock = MagicMock()
         svc_mock.send_prompt.return_value = response_text
-        monkeypatch.setattr(plugin_mod, "get_api_key", lambda p: ("fake-key", None))
-        monkeypatch.setattr(plugin_mod, "TokenTracker", lambda **_: MagicMock())
-        monkeypatch.setattr(plugin_mod, "PromptService", lambda *a, **kw: svc_mock)
+        monkeypatch.setattr(plugin_mod, "SandboxProcessor",
+                            lambda *a, **kw: self._make_sandbox_mock(svc_mock))
         monkeypatch.setattr(plugin_mod, "_collect_multiline", lambda label: "my question")
         return svc_mock
 
@@ -151,9 +159,9 @@ class TestPluginRunNormal:
         svc_mock.send_prompt.assert_called_once_with("my question", None)
 
     def test_raises_cli_error_when_prompt_is_blank(self, monkeypatch):
-        monkeypatch.setattr(plugin_mod, "get_api_key", lambda p: ("fake-key", None))
-        monkeypatch.setattr(plugin_mod, "TokenTracker", lambda **_: MagicMock())
-        monkeypatch.setattr(plugin_mod, "PromptService", lambda *a, **kw: MagicMock())
+        svc_mock = MagicMock()
+        monkeypatch.setattr(plugin_mod, "SandboxProcessor",
+                            lambda *a, **kw: self._make_sandbox_mock(svc_mock))
         monkeypatch.setattr(plugin_mod, "_collect_multiline", lambda label: "   ")
 
         with pytest.raises(CLIError, match="No prompt text provided"):
@@ -162,9 +170,8 @@ class TestPluginRunNormal:
     def test_send_prompt_exception_becomes_cli_error(self, monkeypatch):
         svc_mock = MagicMock()
         svc_mock.send_prompt.side_effect = RuntimeError("api down")
-        monkeypatch.setattr(plugin_mod, "get_api_key", lambda p: ("fake-key", None))
-        monkeypatch.setattr(plugin_mod, "TokenTracker", lambda **_: MagicMock())
-        monkeypatch.setattr(plugin_mod, "PromptService", lambda *a, **kw: svc_mock)
+        monkeypatch.setattr(plugin_mod, "SandboxProcessor",
+                            lambda *a, **kw: self._make_sandbox_mock(svc_mock))
         monkeypatch.setattr(plugin_mod, "_collect_multiline", lambda label: "question")
 
         with pytest.raises(CLIError, match="api down"):
@@ -186,9 +193,8 @@ class TestPluginRunNormal:
     def test_include_system_prompt_passes_collected_value(self, monkeypatch, capsys):
         svc_mock = MagicMock()
         svc_mock.send_prompt.return_value = "ok"
-        monkeypatch.setattr(plugin_mod, "get_api_key", lambda p: ("fake-key", None))
-        monkeypatch.setattr(plugin_mod, "TokenTracker", lambda **_: MagicMock())
-        monkeypatch.setattr(plugin_mod, "PromptService", lambda *a, **kw: svc_mock)
+        monkeypatch.setattr(plugin_mod, "SandboxProcessor",
+                            lambda *a, **kw: self._make_sandbox_mock(svc_mock))
         # First call = system prompt, second = user prompt
         call_seq = iter(["my system prompt", "my user prompt"])
         monkeypatch.setattr(plugin_mod, "_collect_multiline", lambda label: next(call_seq))
@@ -200,9 +206,8 @@ class TestPluginRunNormal:
     def test_include_system_prompt_empty_becomes_none(self, monkeypatch, capsys):
         svc_mock = MagicMock()
         svc_mock.send_prompt.return_value = "ok"
-        monkeypatch.setattr(plugin_mod, "get_api_key", lambda p: ("fake-key", None))
-        monkeypatch.setattr(plugin_mod, "TokenTracker", lambda **_: MagicMock())
-        monkeypatch.setattr(plugin_mod, "PromptService", lambda *a, **kw: svc_mock)
+        monkeypatch.setattr(plugin_mod, "SandboxProcessor",
+                            lambda *a, **kw: self._make_sandbox_mock(svc_mock))
         # Empty system prompt → should pass None to send_prompt
         call_seq = iter(["", "my user prompt"])
         monkeypatch.setattr(plugin_mod, "_collect_multiline", lambda label: next(call_seq))

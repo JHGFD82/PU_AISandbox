@@ -62,27 +62,26 @@ The loader checks for `commands`, `register_subparsers`, and `run`. Anything els
 
 ---
 
-## Token Tracking (Mandatory)
+## Token Tracking (via SandboxProcessor)
 
-Every plugin that makes API calls **must** create a `TokenTracker` and pass it to every service. This is enforced by convention, not code — omitting it causes silent billing gaps.
+Every plugin that makes API calls **must** use `SandboxProcessor`. It handles API key resolution, `TokenTracker` creation, alternate-endpoint wiring (`apis.json`), and lazy service instantiation — all in one place. Token tracking is then structural rather than a convention that can be forgotten.
 
 ```python
-from src.tracking.token_tracker import TokenTracker
+from src.runtime.sandbox_processor import SandboxProcessor
 
 def run(self, args, professor, model, temperature, top_p, max_tokens):
-    api_key, _ = get_api_key(professor)
-    token_tracker = TokenTracker(professor=professor)   # MANDATORY
-
-    svc = MyService(
-        api_key, professor,
-        token_tracker=token_tracker,   # pass it here
+    sandbox = SandboxProcessor(
+        professor,
         model=model,
         temperature=temperature,
         top_p=top_p,
         max_tokens=max_tokens,
     )
+    svc = sandbox.my_service   # lazily wired; requires sys.modules injection below
     ...
 ```
+
+`SandboxProcessor.__init__` creates the `TokenTracker` internally. If `model` contains a colon (e.g. `"my_cluster:llama-3-70b"`), `SandboxProcessor` automatically loads the matching entry from `apis.json`, points the client at the alternate `base_url`, and bypasses the model catalog — you get correct alternate-API routing for free.
 
 ---
 
@@ -230,8 +229,8 @@ def use_template_catalog(_use_template_catalog):
 - [ ] `plugin.py` at `plugins/myplugin/plugin.py`
 - [ ] Module-level `plugin = MyPlugin()` at the bottom of `plugin.py`
 - [ ] `commands` list declared on the class
-- [ ] `TokenTracker(professor=professor)` created in `run()` and passed to every service
-- [ ] Services injected into `sys.modules` before any import that needs them
+- [ ] `SandboxProcessor` used in `run()` — never create `TokenTracker` or services manually
+- [ ] Service module injected into `sys.modules` at import time (see "Adding a Service")
 - [ ] Languages registered via `register_language()` at module level
 - [ ] Tests in `plugins/myplugin/tests/`
 
@@ -242,5 +241,5 @@ def use_template_catalog(_use_template_catalog):
 **Extension plugins** (extending an existing command):
 - [ ] `handles` declared with the source-language shortcodes this plugin owns
 - [ ] `register_command_flags()` implemented — **not** `register_subparsers()`
-- [ ] No `sys.modules` injection — the base standalone plugin handles that
+- [ ] No additional `sys.modules` injection — the standalone plugin handles that
 - [ ] `run()` delegates to the base plugin's shared executor (e.g. `_execute_translate`)

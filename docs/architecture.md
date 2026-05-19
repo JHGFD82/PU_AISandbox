@@ -27,8 +27,9 @@ python main.py heller translate jp-en -i doc.pdf
               _plugins[args.command].run(...)  ← dispatches to owning plugin
                          │
                          ▼
-              plugin creates TokenTracker      ← MANDATORY — token accounting
-              plugin creates SandboxProcessor  ← wires API key + services
+              plugin creates SandboxProcessor  ← owns API key resolution,
+                                                 TokenTracker creation, and
+                                                 alternate-endpoint wiring
                          │
                          ▼
               SandboxProcessor lazily loads    ← reads sys.modules for plugin
@@ -154,8 +155,7 @@ _register("src.services.translation_service", "src/services/translation_service.
 ```
 TranslationPlugin.run(args, professor, ...)
   │
-  ├─ TokenTracker(professor=professor)
-  ├─ SandboxProcessor(professor, model, ...)
+  ├─ SandboxProcessor(professor, model, ...)   ← creates TokenTracker internally
   │     └─ __getattr__("translation_service")
   │           └─ TranslationService(api_key, professor, token_tracker=..., model=...)
   │
