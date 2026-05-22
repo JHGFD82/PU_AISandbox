@@ -184,6 +184,14 @@ class TestCollectImageFiles:
         assert "doc.pdf" not in names
         assert "img.jpg" in names
 
+    def test_numeric_filenames_use_natural_order(self, tmp_path):
+        (tmp_path / "page_1.jpg").write_bytes(b"")
+        (tmp_path / "page_2.jpg").write_bytes(b"")
+        (tmp_path / "page_10.jpg").write_bytes(b"")
+        result = _collect_image_files(str(tmp_path))
+        names = [os.path.basename(p) for p in result]
+        assert names == ["page_1.jpg", "page_2.jpg", "page_10.jpg"]
+
 
 # ---------------------------------------------------------------------------
 # _detect_and_validate_file
@@ -681,6 +689,26 @@ class TestProcessImageFolderParallel:
         proc.process_image_folder(str(folder), "English", workers=2)
         assert proc.image_processor_service.process_image_ocr.call_count == 2
 
+    def test_parallel_ocr_output_uses_natural_filename_order(self, monkeypatch, tmp_path):
+        proc = _make_processor(monkeypatch)
+        folder = tmp_path / "ocr_imgs_order"
+        folder.mkdir()
+        for name in ["page_1.jpg", "page_2.jpg", "page_10.jpg"]:
+            (folder / name).write_bytes(b"fake")
+
+        def _ocr_side_effect(file_path, *_args, **_kwargs):
+            return f"OCR({os.path.basename(file_path)})"
+
+        proc.image_processor_service.process_image_ocr = MagicMock(side_effect=_ocr_side_effect)
+
+        proc.process_image_folder(str(folder), "English", output_file="out.txt", workers=2)
+
+        saved_text = proc.file_output.save_translation_output.call_args.args[0]
+        i1 = saved_text.index("=== page_1.jpg ===")
+        i2 = saved_text.index("=== page_2.jpg ===")
+        i10 = saved_text.index("=== page_10.jpg ===")
+        assert i1 < i2 < i10
+
 
 # ---------------------------------------------------------------------------
 # Additional branch-coverage tests for previously untested paths
@@ -959,6 +987,32 @@ class TestProcessImageTranslationFolderEdgeCases:
         opts = OutputOptions(auto_save=True)
         proc.process_image_translation_folder(str(folder), "Japanese", "English", opts=opts, workers=2)
         proc.file_output.save_translation_output.assert_called_once()
+
+    def test_parallel_translation_output_uses_natural_filename_order(self, tmp_path, monkeypatch):
+        proc = _make_processor(monkeypatch)
+        folder = tmp_path / "imgs_order"
+        folder.mkdir()
+        for name in ["page_1.jpg", "page_2.jpg", "page_10.jpg"]:
+            (folder / name).write_bytes(b"fake")
+
+        def _translate_side_effect(file_path, *_args, **_kwargs):
+            name = os.path.basename(file_path)
+            return "", f"TR({name})"
+
+        proc.image_translation_service.process_image_translation = MagicMock(
+            side_effect=_translate_side_effect
+        )
+        proc.image_translation_service._get_model = MagicMock(return_value="gpt-4o")
+        proc.image_translation_service._suppress_inline_print = False
+
+        opts = OutputOptions(output_file="out.txt")
+        proc.process_image_translation_folder(str(folder), "Japanese", "English", opts=opts, workers=2)
+
+        saved_text = proc.file_output.save_translation_output.call_args.args[0]
+        i1 = saved_text.index("=== page_1.jpg ===")
+        i2 = saved_text.index("=== page_2.jpg ===")
+        i10 = saved_text.index("=== page_10.jpg ===")
+        assert i1 < i2 < i10
 
 
 # ---------------------------------------------------------------------------

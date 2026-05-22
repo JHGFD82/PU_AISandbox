@@ -2,7 +2,8 @@
 
 import logging
 import os
-from typing import Optional, List
+import re
+from typing import Optional, List, Any
 
 from ..errors import CLIError
 from ..models import OutputOptions
@@ -13,12 +14,23 @@ from ..console import print_section
 
 logger = logging.getLogger(__name__)
 
+_NATURAL_SPLIT_RE = re.compile(r"(\d+)")
+
+
+def _natural_sort_key(name: str) -> List[Any]:
+    """Return a key that sorts embedded digit runs numerically.
+
+    Example: page_2.jpg comes before page_10.jpg.
+    """
+    parts = _NATURAL_SPLIT_RE.split(name)
+    return [int(part) if part.isdigit() else part.casefold() for part in parts]
+
 
 def _collect_image_files(folder_path: str) -> List[str]:
     """Return sorted absolute paths of image files in *folder_path*."""
     return [
         os.path.join(folder_path, name)
-        for name in sorted(os.listdir(folder_path))
+        for name in sorted(os.listdir(folder_path), key=_natural_sort_key)
         if name.lower().endswith(IMAGE_EXTENSIONS)
         and os.path.isfile(os.path.join(folder_path, name))
     ]
