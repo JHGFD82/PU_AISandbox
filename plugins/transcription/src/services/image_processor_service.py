@@ -250,7 +250,7 @@ class ImageProcessorService(BaseService):
             timeout_msg="OCR returned no content after maximum retries",
         )
 
-        if not self._suppress_inline_print:
+        if passes > 1 and not self._suppress_inline_print:
             print_pass_result(f"Pass 1/{passes} result", transcription)
 
         refinement_prompt = self._build_refinement_prompt(
