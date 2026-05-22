@@ -26,6 +26,7 @@ def _make_svc(monkeypatch, **kwargs) -> BaseService:
     monkeypatch.setattr("src.services.base_service.resolve_model", lambda **_: "gpt-4o")
     monkeypatch.setattr("src.services.base_service.maybe_sync_model_pricing", lambda m: None)
     monkeypatch.setattr("src.services.base_service.get_model_max_completion_tokens", lambda m, d: d)
+    monkeypatch.setattr("src.services.base_service.model_omit_sampling_params", lambda m: False)
     tracker = MagicMock()
     tracker.record_usage.return_value = MagicMock(total_cost=0.001)
     svc = BaseService.__new__(BaseService)
@@ -95,6 +96,27 @@ class TestCreateCompletion:
         call_kwargs = svc.client.chat.completions.create.call_args
         assert "temperature" not in call_kwargs.kwargs
         assert "top_p" not in call_kwargs.kwargs
+
+    def test_catalog_flag_omits_sampling_params(self, monkeypatch):
+        svc = _make_svc(monkeypatch)
+        monkeypatch.setattr("src.services.base_service.model_uses_max_completion_tokens", lambda m: False)
+        monkeypatch.setattr("src.services.base_service.model_has_fixed_parameters", lambda m: False)
+        monkeypatch.setattr("src.services.base_service.model_omit_sampling_params", lambda m: True)
+
+        svc._create_completion(
+            "custom-model",
+            self._messages(),
+            512,
+            temperature=0.2,
+            top_p=0.9,
+            frequency_penalty=0.3,
+            presence_penalty=0.4,
+        )
+        call_kwargs = svc.client.chat.completions.create.call_args
+        assert "temperature" not in call_kwargs.kwargs
+        assert "top_p" not in call_kwargs.kwargs
+        assert "frequency_penalty" not in call_kwargs.kwargs
+        assert "presence_penalty" not in call_kwargs.kwargs
 
 
 # ---------------------------------------------------------------------------

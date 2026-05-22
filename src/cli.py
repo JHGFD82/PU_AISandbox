@@ -2,6 +2,7 @@
 
 import argparse
 import logging
+import os
 import sys
 from pathlib import Path
 from typing import Optional
@@ -17,13 +18,38 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 
-def setup_logging() -> None:
+def _add_debug_flags(parser: argparse.ArgumentParser) -> None:
+    """Add shared debug flags to *parser* if they are not already present."""
+    existing = {
+        opt
+        for action in parser._actions
+        for opt in getattr(action, "option_strings", [])
+    }
+    if "--verbose" not in existing:
+        parser.add_argument(
+            '--verbose',
+            dest='verbose',
+            action='store_true',
+            help='Enable verbose debug logging',
+        )
+    if "--debug-api" not in existing:
+        parser.add_argument(
+            '--debug-api',
+            dest='debug_api',
+            action='store_true',
+            help='Log raw API payload details for troubleshooting provider errors',
+        )
+
+
+def setup_logging(verbose: bool = False) -> None:
     """Set up logging configuration."""
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+    level = logging.DEBUG if verbose else logging.INFO
+    logging.basicConfig(level=level, format='%(asctime)s - %(levelname)s - %(message)s')
 
 
 def add_common_flags(parser: argparse.ArgumentParser) -> None:
     """Add flags shared by translate, transcribe, and prompt subparsers."""
+    _add_debug_flags(parser)
     parser.add_argument('-o', '--output', dest='output_file', type=str, help='Output file path')
     parser.add_argument('-m', '--model', dest='model', type=str, help='Model to use (e.g., gpt-4o, gpt-4o-mini)')
     parser.add_argument('-t', '--temperature', dest='temperature', type=float, default=None, help='Sampling temperature override (0.0–2.0)')
@@ -102,6 +128,7 @@ Run 'python main.py <professor> <command> --help' for plugin-specific usage.
         action='store_true',
         help='List all available models and their capabilities',
     )
+    _add_debug_flags(parser)
 
     # Professor-based commands use subparsers
     parser.add_argument(
@@ -116,6 +143,7 @@ Run 'python main.py <professor> <command> --help' for plugin-specific usage.
 
     # ===== USAGE COMMAND =====
     usage_parser = subparsers.add_parser('usage', help='View token usage and costs')
+    _add_debug_flags(usage_parser)
     usage_subparsers = usage_parser.add_subparsers(dest='usage_subcommand', help='Usage subcommand')
 
     # usage report [YYYY-MM]
@@ -123,6 +151,7 @@ Run 'python main.py <professor> <command> --help' for plugin-specific usage.
         'report',
         help='Display usage report (current month by default)',
     )
+    _add_debug_flags(report_parser)
     report_parser.add_argument(
         'month',
         type=str,
@@ -139,10 +168,12 @@ Run 'python main.py <professor> <command> --help' for plugin-specific usage.
     )
 
     # usage months
-    usage_subparsers.add_parser('months', help='List all archived months for this professor')
+    months_parser = usage_subparsers.add_parser('months', help='List all archived months for this professor')
+    _add_debug_flags(months_parser)
 
     # usage daily [date]
     daily_parser = usage_subparsers.add_parser('daily', help='Display daily usage')
+    _add_debug_flags(daily_parser)
     daily_parser.add_argument(
         'date',
         type=str,
@@ -167,13 +198,20 @@ Run 'python main.py <professor> <command> --help' for plugin-specific usage.
 
 def main() -> None:
     """Main entry point for the CLI application."""
-    setup_logging()
-
+    # Parse args first so logging level can honor --verbose.
     _plugins = load_plugins(Path(__file__).parent.parent / "plugins")
 
     try:
         parser = create_argument_parser(_plugins)
         args = parser.parse_args()
+
+        setup_logging(verbose=getattr(args, 'verbose', False))
+        if getattr(args, 'debug_api', False):
+            os.environ["PU_SANDBOX_DEBUG_API"] = "1"
+            logger.warning(
+                "Raw API debugging enabled via --debug-api; "
+                "responses may include sensitive data."
+            )
 
         # Handle global commands (no professor required)
         if args.show_config or args.list_models:

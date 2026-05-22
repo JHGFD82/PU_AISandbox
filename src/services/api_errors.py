@@ -1,9 +1,41 @@
 """Shared API error classification utilities for all service modules."""
 
 import logging
+import os
 from enum import Enum
 
 from ..models import is_model_access_error, remove_model_from_catalog
+
+
+def _log_raw_error_payload(error: Exception) -> None:
+    """Log provider error internals when debug mode is explicitly enabled."""
+    if os.getenv("PU_SANDBOX_DEBUG_API") != "1":
+        return
+
+    pieces: list[str] = [
+        f"type={type(error).__name__}",
+        f"repr={error!r}",
+    ]
+
+    response = getattr(error, "response", None)
+    if response is not None:
+        status = getattr(response, "status_code", None)
+        if status is not None:
+            pieces.append(f"response.status_code={status}")
+        text = getattr(response, "text", None)
+        if text:
+            pieces.append(f"response.text={text[:4000]}")
+        try:
+            json_payload = response.json()
+            pieces.append(f"response.json={json_payload}")
+        except Exception:
+            pass
+
+    body = getattr(error, "body", None)
+    if body is not None:
+        pieces.append(f"error.body={body}")
+
+    logging.error("Raw API error payload: " + " | ".join(pieces))
 
 
 class APISignal(str, Enum):
@@ -95,6 +127,7 @@ def classify_api_error(error: Exception, model: str) -> APISignal:
 
     Applicable to any service — translation, OCR, prompt, or otherwise.
     """
+    _log_raw_error_payload(error)
     handle_api_errors(error, model)
     msg = str(error).lower()
     if "context_length_exceeded" in msg or "maximum context length" in msg:

@@ -21,6 +21,7 @@ from .catalog import (
     is_model_access_error,
     load_model_catalog,
     model_has_fixed_parameters,
+    model_omit_sampling_params,
     model_supports_vision,
     model_uses_max_completion_tokens,
     remove_model_from_catalog,
@@ -51,6 +52,7 @@ __all__ = [
     "get_model_system_role",
     "model_uses_max_completion_tokens",
     "model_has_fixed_parameters",
+    "model_omit_sampling_params",
     "get_model_max_completion_tokens",
     # catalog (continued)
     "is_model_access_error",

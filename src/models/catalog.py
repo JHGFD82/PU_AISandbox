@@ -216,6 +216,17 @@ def model_has_fixed_parameters(model: str) -> bool:
     return models.get(model, {}).get("fixed_parameters", False)
 
 
+def model_omit_sampling_params(model: str) -> bool:
+    """Check if model should omit optional sampling parameters entirely.
+
+    Some provider routes deprecate temperature/top_p for specific models even
+    when they are not marked as fully fixed-parameter models.
+    """
+    config = load_model_catalog()
+    models = config["models"]
+    return models.get(model, {}).get("omit_sampling_params", False)
+
+
 def get_model_max_completion_tokens(model: str, default: int) -> int:
     """Get per-model max completion tokens override, falling back to the given default.
 

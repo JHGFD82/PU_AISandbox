@@ -1,6 +1,7 @@
 """Base class shared by all AI service modules."""
 
 import logging
+import os
 import re
 import time
 from typing import Any, Callable, Optional
@@ -9,7 +10,7 @@ from portkey_ai import Portkey
 from collections.abc import Iterator as ABCIterator
 
 from ..models import (
-    model_uses_max_completion_tokens, model_has_fixed_parameters,
+    model_uses_max_completion_tokens, model_has_fixed_parameters, model_omit_sampling_params,
     resolve_model, maybe_sync_model_pricing, get_model_max_completion_tokens,
 )
 from ..tracking.token_tracker import TokenTracker
@@ -148,6 +149,7 @@ class BaseService:
         """
         use_completion_tokens = model_uses_max_completion_tokens(model)
         fixed_params = model_has_fixed_parameters(model)
+        omit_sampling_params = model_omit_sampling_params(model)
 
         base_kwargs: dict[str, Any] = {
             "model": model,
@@ -160,11 +162,14 @@ class BaseService:
         if top_p is not None:
             base_kwargs["top_p"] = top_p
 
-        if use_completion_tokens and fixed_params:
-            return self.client.chat.completions.create(  # type: ignore[misc]
-                max_completion_tokens=max_tokens,
-                **{k: v for k, v in base_kwargs.items() if k not in ("temperature", "top_p")},
-            )
+        if fixed_params or omit_sampling_params:
+            for key in ("temperature", "top_p", "frequency_penalty", "presence_penalty"):
+                base_kwargs.pop(key, None)
+            if omit_sampling_params and not fixed_params:
+                logging.debug(
+                    f"Omitting sampling params for model '{model}' due to catalog configuration."
+                )
+
         if use_completion_tokens:
             return self.client.chat.completions.create(  # type: ignore[misc]
                 max_completion_tokens=max_tokens,
@@ -186,6 +191,21 @@ class BaseService:
                       data indicates a serious configuration problem.
         """
         assert not isinstance(response, ABCIterator), "Unexpected stream response received."
+
+        if os.getenv("PU_SANDBOX_DEBUG_API") == "1":
+            raw = None
+            try:
+                if hasattr(response, "model_dump_json"):
+                    raw = response.model_dump_json()  # type: ignore[attr-defined]
+                elif hasattr(response, "model_dump"):
+                    raw = str(response.model_dump())  # type: ignore[attr-defined]
+                elif hasattr(response, "to_dict"):
+                    raw = str(response.to_dict())  # type: ignore[attr-defined]
+                else:
+                    raw = repr(response)
+            except Exception as raw_err:
+                raw = f"<failed to serialize response: {raw_err}>"
+            logging.debug(f"Raw API response payload: {raw}")
 
         if response.id:
             logging.debug(f"API call successful. Response ID: {response.id}")
