@@ -4,10 +4,9 @@ Provides the ``transcribe`` command (OCR image transcription) and the
 ``transcription_review`` command (OCR error review) for English text.
 
 This is a **standalone plugin** — it registers the ``transcribe`` and
-``transcription_review`` commands.  For East Asia language support (Chinese,
-Japanese, Korean) with kanbun, vertical script, multi-pass, and
-parallel-worker options, install the ``transcription-ea`` **extension plugin**
-by cloning it into ``plugins/transcription-ea/``.
+``transcription_review`` commands.  Additional transcription capabilities can
+be added by installing extension plugins that declare their own ``handles`` and
+optional command flags.
 
 Extension plugins for transcription must **not** call ``register_subparsers()``
 — the commands already exist.  They hook in by declaring ``handles`` (the
@@ -103,9 +102,8 @@ class TranscriptionPlugin:
     - ``transcribe``            — OCR an image file or folder of images
     - ``transcription_review``  — Review prior transcription output for OCR errors
 
-    This base plugin handles English only.  Install ``transcription-ea`` for
-    East Asian language support (Japanese, Chinese, Korean) including multi-pass,
-    kanbun, and vertical-script options.
+    This base plugin handles English only.  Additional language-specific
+    behavior may be provided by separately installed transcription extensions.
     """
 
     commands: list[str] = ["transcribe", "transcription_review"]

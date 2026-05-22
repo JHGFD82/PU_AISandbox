@@ -14,8 +14,8 @@ class TranscriptionReviewPromptSpec:
     The model name is intentionally absent from the schema shown to the model;
     it is injected by TranscriptionReviewService after parsing the response.
 
-    This is the base spec.  The EA plugin (transcription-ea) extends this
-    with kanbun-specific review guidance.
+    This is the base spec. Extension plugins may add script-specific review
+    guidance.
     """
 
     language: str

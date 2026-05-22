@@ -30,8 +30,8 @@ class TranscriptionReviewService(BaseService):
     by the service after parsing the response, rather than relying on the model to
     self-report its name.
 
-    This is the base version.  The EA plugin (transcription-ea) extends this with
-    kanbun-specific review guidance and parameters.
+    This is the base version. Extension plugins may augment review guidance and
+    parameters for additional scripts or workflows.
     """
 
     def __init__(

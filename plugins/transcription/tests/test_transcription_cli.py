@@ -3,12 +3,13 @@ Tests for the base transcription plugin CLI flag parsing and validation logic.
 
 This plugin registers English only.  Tests verify:
   - transcribe and transcription_review commands work with 'en'
-  - EA-only flags (--kanbun, --kanbun-main, --spread, --vertical,
+    - extension-only flags (--kanbun, --kanbun-main, --spread, --vertical,
     --passes, --preserve-tables, --workers) are NOT present on the base plugin
   - Language codes outside 'en' are rejected
 """
 
 import importlib.util
+import inspect
 import sys
 from pathlib import Path
 
@@ -17,12 +18,12 @@ import pytest
 from src.cli import create_argument_parser
 
 # Absolute path to this plugin's entry point.  Loading via spec_from_file_location
-# ensures EA is never pulled in even when both plugins are installed side-by-side.
+# ensures optional extension plugins are never pulled in even when installed.
 _BASE_PLUGIN_FILE = Path(__file__).resolve().parents[1] / "plugin.py"
 
 
 def _make_parser():
-    """Build a parser backed by the base transcription plugin only (no EA)."""
+    """Build a parser backed by the base transcription plugin only."""
     spec = importlib.util.spec_from_file_location(
         "pu_plugin.transcription.plugin", _BASE_PLUGIN_FILE
     )
@@ -61,10 +62,10 @@ class TestTranscribeFlagDefaults:
 
 
 # ---------------------------------------------------------------------------
-# transcribe — EA flags are absent
+# transcribe — extension flags are absent
 # ---------------------------------------------------------------------------
 
-class TestTranscribeNoEAFlags:
+class TestTranscribeNoExtensionFlags:
 
     @pytest.fixture
     def parser(self):
@@ -169,10 +170,10 @@ class TestTranscriptionReviewFlagParsing:
 
 
 # ---------------------------------------------------------------------------
-# transcription_review — EA flags are absent
+# transcription_review — extension flags are absent
 # ---------------------------------------------------------------------------
 
-class TestTranscriptionReviewNoEAFlags:
+class TestTranscriptionReviewNoExtensionFlags:
 
     @pytest.fixture
     def parser(self):
@@ -201,9 +202,25 @@ class TestFlagIsolation:
         args = parser.parse_args(["heller", "transcribe", "en", "-i", "img.png"])
         for flag in ("vertical", "spread", "kanbun", "kanbun_main", "passes",
                      "preserve_tables", "workers"):
-            assert not hasattr(args, flag), f"EA flag '{flag}' should not exist on base transcribe args"
+            assert not hasattr(args, flag), f"Extension flag '{flag}' should not exist on base transcribe args"
 
     def test_ea_flags_not_present_on_review(self, parser):
         args = parser.parse_args(["heller", "transcription_review", "en", "-i", "text.txt"])
         for flag in ("kanbun", "kanbun_main"):
-            assert not hasattr(args, flag), f"EA flag '{flag}' should not exist on base transcription_review args"
+            assert not hasattr(args, flag), f"Extension flag '{flag}' should not exist on base transcription_review args"
+
+
+# ---------------------------------------------------------------------------
+# Service compatibility — tolerate extension kwargs when co-installed
+# ---------------------------------------------------------------------------
+
+class TestServiceCompatibility:
+
+    def test_build_prompts_accepts_ea_kwargs(self):
+        """Base service must accept extension kwargs to avoid dispatch-time TypeError."""
+        _make_parser()  # loads base plugin and injects service module
+        mod = sys.modules["src.services.image_processor_service"]
+
+        sig = inspect.signature(mod.ImageProcessorService.build_prompts)
+        assert "vertical" in sig.parameters
+        assert "spread" in sig.parameters

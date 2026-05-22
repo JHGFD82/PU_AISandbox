@@ -28,8 +28,8 @@ from ..settings import (
 class ImageProcessorService(BaseService):
     """Handles OCR operations using PortKey API.
 
-    Base version: English only.  No kanbun, vertical, spread, or table flags.
-    The EA plugin (transcription-ea) extends this class with those capabilities.
+    Base version: English only. Extension plugins may add language- or
+    workflow-specific OCR options.
     """
 
     def __init__(
@@ -60,8 +60,17 @@ class ImageProcessorService(BaseService):
             logging.warning(f"OCR default model '{ocr_default}' not available; using '{model}' instead.")
         return model
 
-    def _create_ocr_prompt(self, target_language: str) -> tuple[str, str]:
+    def _create_ocr_prompt(
+        self,
+        target_language: str,
+        vertical: bool = False,
+        spread: bool = False,
+    ) -> tuple[str, str]:
         """Create system and user prompts for OCR."""
+        # Compatibility note: extension plugins may pass additional OCR kwargs
+        # through shared dispatch paths. Accept compatible kwargs here to avoid
+        # unexpected-keyword crashes.
+        _ = (vertical, spread)
         spec = OcrPromptSpec(
             target_language=target_language,
             system_note=self.system_note,
@@ -69,15 +78,26 @@ class ImageProcessorService(BaseService):
         )
         return spec.system_prompt(), spec.user_prompt()
 
-    def build_prompts(self, target_language: str) -> tuple[str, str]:
+    def build_prompts(
+        self,
+        target_language: str,
+        vertical: bool = False,
+        spread: bool = False,
+    ) -> tuple[str, str]:
         """Return (system_prompt, user_prompt) without calling the API.
 
         Used by --dry-run mode to preview what would be sent to the model.
         """
-        return self._create_ocr_prompt(target_language)
+        return self._create_ocr_prompt(target_language, vertical=vertical, spread=spread)
 
-    def _build_refinement_prompt(self, target_language: str) -> str:
+    def _build_refinement_prompt(
+        self,
+        target_language: str,
+        vertical: bool = False,
+        spread: bool = False,
+    ) -> str:
         """Build the user prompt for a refinement pass (pass 2+)."""
+        _ = (vertical, spread)
         spec = OcrPromptSpec(target_language=target_language)
         return spec.refinement_prompt()
 
@@ -160,8 +180,15 @@ class ImageProcessorService(BaseService):
             timeout_msg=f"OCR refinement pass {pass_num} returned no content after maximum retries",
         )
 
-    def process_image_ocr(self, file_path: str, target_language: str,
-                          output_format: str = "console", passes: int = 1) -> str:
+    def process_image_ocr(
+        self,
+        file_path: str,
+        target_language: str,
+        output_format: str = "console",
+        vertical: bool = False,
+        spread: bool = False,
+        passes: int = 1,
+    ) -> str:
         """Perform OCR on an image file using the specified model with retry logic.
 
         If passes > 1, each additional pass sends the image and prior transcription back
@@ -176,7 +203,11 @@ class ImageProcessorService(BaseService):
                 f"Please use one of the following vision-capable models: {vision_models}"
             )
 
-        system_prompt, user_prompt = self._create_ocr_prompt(target_language)
+        system_prompt, user_prompt = self._create_ocr_prompt(
+            target_language,
+            vertical=vertical,
+            spread=spread,
+        )
 
         if self.image_processor.is_blank_image(file_path):
             logging.info(
@@ -222,7 +253,11 @@ class ImageProcessorService(BaseService):
         if not self._suppress_inline_print:
             print_pass_result(f"Pass 1/{passes} result", transcription)
 
-        refinement_prompt = self._build_refinement_prompt(target_language)
+        refinement_prompt = self._build_refinement_prompt(
+            target_language,
+            vertical=vertical,
+            spread=spread,
+        )
         for pass_num in range(2, passes + 1):
             if not self._suppress_inline_print:
                 print(f"  Pass {pass_num}/{passes}: Refining...")

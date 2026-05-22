@@ -6,9 +6,9 @@ Used by:
 
 All string content, no logic. Variables use str.format() placeholders.
 
-This file contains language-agnostic fragments only.  East Asia-specific
-content (kanbun, vertical script guidance, CJK language notes) lives in
-``plugins/transcription-ea``.
+This file contains language-agnostic fragments only. Script- or
+language-specific extensions should live in separately installed
+transcription plugins.
 
 This file is the authoritative home for base transcription prompts and ships
 with the main PU_AISandbox repo.  To change prompt text, edit the constants

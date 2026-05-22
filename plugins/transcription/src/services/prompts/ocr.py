@@ -13,8 +13,8 @@ class OcrPromptSpec:
     Call system_prompt(), user_prompt(), and refinement_prompt() to obtain
     the final strings.
 
-    This is the base spec.  The EA plugin (transcription-ea) extends this
-    with kanbun, vertical, spread, and CJK script-guidance support.
+    This is the base spec. Extension plugins may add script-specific guidance
+    and additional prompt controls.
     """
 
     target_language: str
