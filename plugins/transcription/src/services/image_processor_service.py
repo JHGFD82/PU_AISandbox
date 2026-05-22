@@ -108,7 +108,7 @@ class ImageProcessorService(BaseService):
             {"role": system_role, "content": system_prompt},
             {"role": "user", "content": [
                 {"type": "text", "text": user_prompt},
-                {"type": "image_url", "image_url": {"url": data_url}}
+                self._build_image_content_block(model, data_url)
             ]},
         ]
         temperature = self.custom_temperature if self.custom_temperature is not None else OCR_TEMPERATURE
@@ -131,12 +131,12 @@ class ImageProcessorService(BaseService):
             {"role": system_role, "content": system_prompt},
             {"role": "user", "content": [
                 {"type": "text", "text": first_user_prompt},
-                {"type": "image_url", "image_url": {"url": data_url}}
+                self._build_image_content_block(model, data_url)
             ]},
             {"role": "assistant", "content": prior_transcription},
             {"role": "user", "content": [
                 {"type": "text", "text": refinement_prompt},
-                {"type": "image_url", "image_url": {"url": data_url}}
+                self._build_image_content_block(model, data_url)
             ]},
         ]
         temperature = self.custom_temperature if self.custom_temperature is not None else OCR_TEMPERATURE

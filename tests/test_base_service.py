@@ -230,6 +230,40 @@ class TestRunWithRetry:
         result = svc._run_with_retry(body, "gpt-4o", return_signal_on_error=True)
         assert result == APISignal.CONTENT_FILTER
 
+
+# ---------------------------------------------------------------------------
+# _build_image_content_block
+# ---------------------------------------------------------------------------
+
+class TestImageContentBlock:
+
+    def test_claude_model_uses_anthropic_base64_block(self, monkeypatch):
+        svc = _make_svc(monkeypatch)
+        data_url = "data:image/jpeg;base64,QUJDRA=="
+
+        block = svc._build_image_content_block("claude-3-7-sonnet", data_url)
+
+        assert block["type"] == "image"
+        assert block["source"]["type"] == "base64"
+        assert block["source"]["media_type"] == "image/jpeg"
+        assert block["source"]["data"] == "QUJDRA=="
+
+    def test_non_claude_model_uses_image_url_block(self, monkeypatch):
+        svc = _make_svc(monkeypatch)
+        data_url = "data:image/png;base64,AAA="
+
+        block = svc._build_image_content_block("gpt-4o", data_url)
+
+        assert block == {"type": "image_url", "image_url": {"url": data_url}}
+
+    def test_claude_model_falls_back_when_not_data_url(self, monkeypatch):
+        svc = _make_svc(monkeypatch)
+        not_data_url = "https://example.com/image.png"
+
+        block = svc._build_image_content_block("claude-3-opus", not_data_url)
+
+        assert block == {"type": "image_url", "image_url": {"url": not_data_url}}
+
     def test_return_signal_on_none_exhaustion(self, monkeypatch):
         svc = _make_svc(monkeypatch)
         monkeypatch.setattr("src.services.base_service.MAX_RETRIES", 2)

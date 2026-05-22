@@ -120,7 +120,7 @@ class ImageTranslationService(BaseService):
                 "role": "user",
                 "content": [
                     {"type": "text", "text": user_prompt},
-                    {"type": "image_url", "image_url": {"url": data_url}},
+                    self._build_image_content_block(model, data_url),
                 ],
             },
         ]

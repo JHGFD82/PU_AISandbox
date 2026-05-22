@@ -1,6 +1,7 @@
 """Base class shared by all AI service modules."""
 
 import logging
+import re
 import time
 from typing import Any, Callable, Optional
 
@@ -96,6 +97,38 @@ class BaseService:
             if isinstance(content, str):
                 return content
         return None
+
+    @staticmethod
+    def _is_claude_family_model(model: str) -> bool:
+        """Return True when *model* appears to target Anthropic Claude."""
+        lower = model.lower()
+        return "claude" in lower or lower.startswith("anthropic/")
+
+    def _build_image_content_block(self, model: str, data_url: str) -> dict[str, Any]:
+        """Build a model-compatible image content block.
+
+        Claude-family models routed through Portkey may require Anthropic-native
+        image blocks (type=image with source.type=base64). Other models continue
+        to use OpenAI-style image_url payloads.
+        """
+        if self._is_claude_family_model(model):
+            m = re.match(r"^data:([^;]+);base64,(.+)$", data_url, re.DOTALL)
+            if m:
+                media_type, base64_data = m.group(1), m.group(2)
+                return {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": media_type,
+                        "data": base64_data,
+                    },
+                }
+            logging.warning(
+                "Claude model selected but image was not a data URL; "
+                "falling back to image_url payload format."
+            )
+
+        return {"type": "image_url", "image_url": {"url": data_url}}
 
     def _create_completion(
         self,
