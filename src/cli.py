@@ -183,12 +183,8 @@ Run 'python main.py <professor> <command> --help' for plugin-specific usage.
     # by their respective plugins in plugins/.
 
     # Register plugin subcommands (each unique plugin object called once).
-    if plugins:
-        _seen: set[int] = set()
-        for _p in plugins.values():
-            if id(_p) not in _seen:
-                _seen.add(id(_p))
-                _p.register_subparsers(subparsers)
+    for _p in dict.fromkeys(plugins.values() if plugins else []):
+        _p.register_subparsers(subparsers)
 
     return parser
 
