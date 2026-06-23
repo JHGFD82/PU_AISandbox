@@ -19,26 +19,19 @@ logger = logging.getLogger(__name__)
 
 
 def _add_debug_flags(parser: argparse.ArgumentParser) -> None:
-    """Add shared debug flags to *parser* if they are not already present."""
-    existing = {
-        opt
-        for action in parser._actions
-        for opt in getattr(action, "option_strings", [])
-    }
-    if "--verbose" not in existing:
-        parser.add_argument(
-            '--verbose',
-            dest='verbose',
-            action='store_true',
-            help='Enable verbose debug logging',
-        )
-    if "--debug-api" not in existing:
-        parser.add_argument(
-            '--debug-api',
-            dest='debug_api',
-            action='store_true',
-            help='Log raw API payload details for troubleshooting provider errors',
-        )
+    """Add --verbose and --debug-api flags to *parser*."""
+    parser.add_argument(
+        '--verbose',
+        dest='verbose',
+        action='store_true',
+        help='Enable verbose debug logging',
+    )
+    parser.add_argument(
+        '--debug-api',
+        dest='debug_api',
+        action='store_true',
+        help='Log raw API payload details for troubleshooting provider errors',
+    )
 
 
 def setup_logging(verbose: bool = False) -> None:
