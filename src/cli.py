@@ -74,6 +74,49 @@ def add_notes_flags(parser: argparse.ArgumentParser) -> None:
                         help='Inline note appended to both the system and user prompts')
 
 
+def _build_usage_subparser(subparsers: argparse._SubParsersAction) -> None:
+    """Register the 'usage' command and its subcommands (report, months, daily)."""
+    usage_parser = subparsers.add_parser('usage', help='View token usage and costs')
+    _add_debug_flags(usage_parser)
+    usage_subparsers = usage_parser.add_subparsers(dest='usage_subcommand', help='Usage subcommand')
+
+    # usage report [YYYY-MM]
+    report_parser = usage_subparsers.add_parser(
+        'report',
+        help='Display usage report (current month by default)',
+    )
+    _add_debug_flags(report_parser)
+    report_parser.add_argument(
+        'month',
+        type=str,
+        nargs='?',
+        default=None,
+        metavar='YYYY-MM',
+        help='Archived month to report on (e.g. 2025-07). Omit for current month.',
+    )
+    report_parser.add_argument(
+        '--all-time',
+        action='store_true',
+        default=False,
+        help='Include all-time totals aggregated from all archived months (current month only)',
+    )
+
+    # usage months
+    months_parser = usage_subparsers.add_parser('months', help='List all archived months for this professor')
+    _add_debug_flags(months_parser)
+
+    # usage daily [date]
+    daily_parser = usage_subparsers.add_parser('daily', help='Display daily usage')
+    _add_debug_flags(daily_parser)
+    daily_parser.add_argument(
+        'date',
+        type=str,
+        nargs='?',
+        default='today',
+        help='Date in YYYY-MM-DD format (defaults to today)',
+    )
+
+
 def create_argument_parser(
     plugins: Optional[dict[str, ModePlugin]] = None,
 ) -> argparse.ArgumentParser:
@@ -141,46 +184,7 @@ Run 'python main.py <professor> <command> --help' for plugin-specific usage.
     # Add subparsers for commands (usage, translate, transcribe)
     subparsers = parser.add_subparsers(dest='command', help='Command to execute')
 
-    # ===== USAGE COMMAND =====
-    usage_parser = subparsers.add_parser('usage', help='View token usage and costs')
-    _add_debug_flags(usage_parser)
-    usage_subparsers = usage_parser.add_subparsers(dest='usage_subcommand', help='Usage subcommand')
-
-    # usage report [YYYY-MM]
-    report_parser = usage_subparsers.add_parser(
-        'report',
-        help='Display usage report (current month by default)',
-    )
-    _add_debug_flags(report_parser)
-    report_parser.add_argument(
-        'month',
-        type=str,
-        nargs='?',
-        default=None,
-        metavar='YYYY-MM',
-        help='Archived month to report on (e.g. 2025-07). Omit for current month.',
-    )
-    report_parser.add_argument(
-        '--all-time',
-        action='store_true',
-        default=False,
-        help='Include all-time totals aggregated from all archived months (current month only)',
-    )
-
-    # usage months
-    months_parser = usage_subparsers.add_parser('months', help='List all archived months for this professor')
-    _add_debug_flags(months_parser)
-
-    # usage daily [date]
-    daily_parser = usage_subparsers.add_parser('daily', help='Display daily usage')
-    _add_debug_flags(daily_parser)
-    daily_parser.add_argument(
-        'date',
-        type=str,
-        nargs='?',
-        default='today',
-        help='Date in YYYY-MM-DD format (defaults to today)',
-    )
+    _build_usage_subparser(subparsers)
 
     # translate, transcribe, transcription_review, and prompt are all registered
     # by their respective plugins in plugins/.
