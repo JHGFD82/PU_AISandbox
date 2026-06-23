@@ -200,6 +200,19 @@ Run 'python main.py <professor> <command> --help' for plugin-specific usage.
     return parser
 
 
+def _available_commands_hint(plugins: dict[str, ModePlugin]) -> str:
+    """Return a formatted string listing built-in and plugin commands for error messages."""
+    lines = [
+        "\nBuilt-in commands:",
+        "  usage report [YYYY-MM] [--all-time]  Token usage report",
+        "  usage months                         List archived month files",
+        "  usage daily [YYYY-MM-DD]             Daily usage",
+    ]
+    if plugins:
+        lines.append("\nPlugin commands: " + ", ".join(sorted(plugins)))
+    return "\n".join(lines)
+
+
 def main() -> None:
     """Main entry point for the CLI application."""
     # Parse args first so logging level can honor --verbose.
@@ -226,31 +239,17 @@ def main() -> None:
         if not args.professor:
             raise CLIError(
                 "Professor name is required.\n"
-                "Usage: python main.py <professor_name> <command> [options]\n"
-                "\nBuilt-in commands:\n"
-                "  usage report [YYYY-MM] [--all-time]  Token usage report\n"
-                "  usage months                         List archived month files\n"
-                "  usage daily [YYYY-MM-DD]             Daily usage\n"
-                + (
-                    "\nPlugin commands: " + ", ".join(sorted(_plugins)) + "\n"
-                    if _plugins else ""
-                ) +
-                "\nOr for global commands: python main.py --show-config | --list-models"
+                "Usage: python main.py <professor_name> <command> [options]"
+                + _available_commands_hint(_plugins)
+                + "\n\nOr for global commands: python main.py --show-config | --list-models"
             )
 
         # Handle professor-specific commands
         if not args.command:
             raise CLIError(
-                f"No command specified for professor '{args.professor}'.\n"
-                "\nBuilt-in commands:\n"
-                "  usage report [YYYY-MM] [--all-time]  Token usage report\n"
-                "  usage months                         List archived month files\n"
-                "  usage daily [YYYY-MM-DD]             Daily usage\n"
-                + (
-                    "\nPlugin commands: " + ", ".join(sorted(_plugins)) + "\n"
-                    if _plugins else ""
-                ) +
-                "\nRun 'python main.py --help' for full usage information."
+                f"No command specified for professor '{args.professor}'."
+                + _available_commands_hint(_plugins)
+                + "\n\nRun 'python main.py --help' for full usage information."
             )
 
         # Route to appropriate handler
