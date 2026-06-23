@@ -213,6 +213,44 @@ def _available_commands_hint(plugins: dict[str, ModePlugin]) -> str:
     return "\n".join(lines)
 
 
+def _dispatch(args: argparse.Namespace, plugins: dict[str, ModePlugin]) -> None:
+    """Validate parsed arguments and route to the correct handler."""
+    # Handle global commands (no professor required)
+    if args.show_config or args.list_models:
+        handle_info_commands(args)
+        return
+
+    # All other commands require professor name
+    if not args.professor:
+        raise CLIError(
+            "Professor name is required.\n"
+            "Usage: python main.py <professor_name> <command> [options]"
+            + _available_commands_hint(plugins)
+            + "\n\nOr for global commands: python main.py --show-config | --list-models"
+        )
+
+    if not args.command:
+        raise CLIError(
+            f"No command specified for professor '{args.professor}'."
+            + _available_commands_hint(plugins)
+            + "\n\nRun 'python main.py --help' for full usage information."
+        )
+
+    if args.command == 'usage':
+        handle_info_commands(args)
+    elif args.command in plugins:
+        plugins[args.command].run(
+            args,
+            args.professor,
+            getattr(args, 'model', None),
+            getattr(args, 'temperature', None),
+            getattr(args, 'top_p', None),
+            getattr(args, 'max_tokens', None),
+        )
+    else:
+        raise CLIError(f"Unknown command: {args.command}")
+
+
 def main() -> None:
     """Main entry point for the CLI application."""
     # Parse args first so logging level can honor --verbose.
@@ -230,42 +268,7 @@ def main() -> None:
                 "responses may include sensitive data."
             )
 
-        # Handle global commands (no professor required)
-        if args.show_config or args.list_models:
-            if handle_info_commands(args):
-                return
-
-        # All other commands require professor name
-        if not args.professor:
-            raise CLIError(
-                "Professor name is required.\n"
-                "Usage: python main.py <professor_name> <command> [options]"
-                + _available_commands_hint(_plugins)
-                + "\n\nOr for global commands: python main.py --show-config | --list-models"
-            )
-
-        # Handle professor-specific commands
-        if not args.command:
-            raise CLIError(
-                f"No command specified for professor '{args.professor}'."
-                + _available_commands_hint(_plugins)
-                + "\n\nRun 'python main.py --help' for full usage information."
-            )
-
-        # Route to appropriate handler
-        if args.command == 'usage':
-            if handle_info_commands(args):
-                return
-        elif _plugins and args.command in _plugins:
-            model = getattr(args, 'model', None)
-            temperature = getattr(args, 'temperature', None)
-            top_p = getattr(args, 'top_p', None)
-            max_tokens = getattr(args, 'max_tokens', None)
-            _plugins[args.command].run(
-                args, args.professor, model, temperature, top_p, max_tokens
-            )
-        else:
-            raise CLIError(f"Unknown command: {args.command}")
+        _dispatch(args, _plugins)
 
     except CLIError as e:
         print(f"Error: {e}", file=sys.stderr)
