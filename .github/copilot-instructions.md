@@ -3,7 +3,7 @@
 ## Project Overview
 Modular AI sandbox platform for Princeton University faculty. Provides professor-specific API key management, per-professor token tracking, and a plugin-based command architecture for AI-powered workflows.
 
-**End users are primarily digital humanists and other non-CS faculty.** They understand what the tool does for their research but are not expected to know programming terminology. All documentation and docstrings must be written with this audience in mind (see [Documentation & Docstring Standards](#documentation--docstring-standards) below).
+**End users are primarily digital humanists and other non-CS faculty.** They understand what the tool does for their research but are not expected to know programming terminology. All documentation and docstrings must be written with this audience in mind (see Documentation and Docstring Standards below).
 
 If a required professor environment variable (`PROF_[ID]_NAME`, `PROF_[ID]_KEY`) is missing or invalid (empty string, missing entirely, or contains only whitespace), `get_api_key()` raises `ValueError`, which is caught and re-raised as `CLIError` with a descriptive message. The process terminates with exit code 1.
 
@@ -138,7 +138,7 @@ Use `python main.py --show-config` to validate professor configuration without m
 - **Plugin loading**: `tests/test_plugin_loader.py` — discovery, `ModePlugin` protocol validation, error handling for malformed plugins
 - **Core services and processors**: tests in `tests/` cover `TranslationService`, `ImageProcessorService`, processors in `src/processors/`, and `FileOutputHandler` — these all live in the main repo even though they are invoked by external plugins
 
-## Documentation & Docstring Standards
+## Documentation and Docstring Standards
 
 **Primary audience**: Princeton faculty from digital humanities and other non-CS disciplines. Assume readers understand what the tool accomplishes for their research, but not how programming constructs work internally. Avoid jargon like "serialize", "instantiate", "iterate", "callback", "mutex", or "idempotent" without plain-English definitions.
 
