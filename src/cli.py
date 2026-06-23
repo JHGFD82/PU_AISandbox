@@ -113,7 +113,23 @@ def _build_usage_subparser(subparsers: argparse._SubParsersAction) -> None:
 def create_argument_parser(
     plugins: Optional[dict[str, ModePlugin]] = None,
 ) -> argparse.ArgumentParser:
-    """Create and configure the command-line argument parser."""
+    """
+    Build the command-line parser that interprets everything a user types after
+    'python main.py'.
+
+    Sets up the top-level flags (--show-config, --list-models, --verbose,
+    --debug-api), the professor name argument, the built-in 'usage' subcommand
+    tree, and any commands registered by installed plugins (e.g., translate,
+    transcribe, prompt).
+
+    Args:
+        plugins: Optional mapping of command names to plugin objects. When
+                 provided, each plugin adds its own subcommand(s) to the parser.
+                 Example: {'translate': <TranslationPlugin>, 'prompt': <PromptPlugin>}
+
+    Returns:
+        A configured ArgumentParser ready to call .parse_args() on sys.argv.
+    """
     parser = argparse.ArgumentParser(
         description='Princeton University AI Sandbox — document processing and AI prompt tools',
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -203,7 +219,25 @@ def _available_commands_hint(plugins: dict[str, ModePlugin]) -> str:
 
 
 def _dispatch(args: argparse.Namespace, plugins: dict[str, ModePlugin]) -> None:
-    """Validate parsed arguments and route to the correct handler."""
+    """
+    Check that the right information was provided and send the request to the
+    correct command handler.
+
+    First checks whether a global command (--show-config or --list-models) was
+    requested, which does not require a professor name. Otherwise, confirms that
+    both a professor name and a command were supplied before routing to the
+    'usage' reporter or a plugin command (e.g., translate, prompt).
+
+    Args:
+        args: The parsed command-line values produced by argparse — contains
+              the professor name, command, and any flags the user passed.
+        plugins: The loaded plugin commands, keyed by command name
+                 (e.g., 'translate', 'prompt').
+
+    Raises:
+        CLIError: If the professor name or command is missing, or if the
+                  command is not recognized.
+    """
     # Handle global commands (no professor required)
     if args.show_config or args.list_models:
         handle_info_commands(args)
@@ -241,7 +275,14 @@ def _dispatch(args: argparse.Namespace, plugins: dict[str, ModePlugin]) -> None:
 
 
 def main() -> None:
-    """Main entry point for the CLI application."""
+    """
+    Start the AI Sandbox command-line tool.
+
+    Loads all installed plugins, reads the command the user typed, configures
+    how much detail is written to the log, and hands off to the appropriate
+    command handler. Any user-facing errors are printed to the terminal and
+    the program exits cleanly with a non-zero status code.
+    """
     # Parse args first so logging level can honor --verbose.
     _plugins = load_plugins(Path(__file__).parent.parent / "plugins")
 
