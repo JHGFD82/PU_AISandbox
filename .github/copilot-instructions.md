@@ -3,6 +3,8 @@
 ## Project Overview
 Modular AI sandbox platform for Princeton University faculty. Provides professor-specific API key management, per-professor token tracking, and a plugin-based command architecture for AI-powered workflows.
 
+**End users are primarily digital humanists and other non-CS faculty.** They understand what the tool does for their research but are not expected to know programming terminology. All documentation and docstrings must be written with this audience in mind (see [Documentation & Docstring Standards](#documentation--docstring-standards) below).
+
 If a required professor environment variable (`PROF_[ID]_NAME`, `PROF_[ID]_KEY`) is missing or invalid (empty string, missing entirely, or contains only whitespace), `get_api_key()` raises `ValueError`, which is caught and re-raised as `CLIError` with a descriptive message. The process terminates with exit code 1.
 
 If a professor exceeds their monthly token budget, `TokenTracker` logs a warning at each threshold (e.g., 80%, 100%) but does **not** halt processing — all API calls continue. To stop usage, the professor's API key must be revoked externally.
@@ -135,6 +137,46 @@ Use `python main.py --show-config` to validate professor configuration without m
 - **Thread safety**: `tests/test_token_tracker.py::TestConcurrentRecordUsage` — 16 concurrent `record_usage()` calls, exact token count, call count, session history length
 - **Plugin loading**: `tests/test_plugin_loader.py` — discovery, `ModePlugin` protocol validation, error handling for malformed plugins
 - **Core services and processors**: tests in `tests/` cover `TranslationService`, `ImageProcessorService`, processors in `src/processors/`, and `FileOutputHandler` — these all live in the main repo even though they are invoked by external plugins
+
+## Documentation & Docstring Standards
+
+**Primary audience**: Princeton faculty from digital humanities and other non-CS disciplines. Assume readers understand what the tool accomplishes for their research, but not how programming constructs work internally. Avoid jargon like "serialize", "instantiate", "iterate", "callback", "mutex", or "idempotent" without plain-English definitions.
+
+### Docstrings (write these for new functions and for functions being meaningfully modified)
+- Open with one plain-English sentence describing *what the function does*, not its internal mechanism.
+- Explain each parameter in human terms, not just its type. Always include a realistic example value.
+- Describe return values in terms of what the caller will do with them, not just their data type.
+- When a function performs multiple meaningful steps, name those steps in plain language in the docstring body.
+- Define any technical term used within the docstring itself (e.g., tokens, API key, JSON).
+- Analogies are encouraged where they clarify abstract concepts (e.g., tokens as a measure of text length roughly equivalent to words; a threading lock as a turn-taking mechanism that prevents two workers from writing at the same time).
+
+**Example — preferred docstring style**:
+```python
+def record_usage(self, model: str, tokens: int, professor: str) -> None:
+    """
+    Record that a professor used a certain number of tokens with a specific AI model.
+
+    Updates the professor's running usage total so that budget warnings can fire
+    and monthly reports stay accurate. The usage file is written to disk after
+    every call so that no data is lost if the program exits unexpectedly.
+
+    Args:
+        model: The AI model that processed the request, as named in the model
+               catalog (e.g., 'gpt-4o'). Tokens are the unit AI providers use
+               to measure text length — roughly one token per word.
+        tokens: The number of tokens consumed by this request.
+        professor: The professor's display name as set in .env (e.g., 'heller'),
+                   used to locate the correct usage file under data/.
+    """
+```
+
+### User-Facing Documentation (READMEs, docs/)
+- Lead every section with what the user *accomplishes*, not with how the system is structured internally.
+- Use numbered steps for any multi-step process, even when programmers might understand prose.
+- Define every technical term the first time it appears (e.g., "API key — a private password that grants access to the AI service").
+- Show CLI flags with realistic example commands in context, not just abstract flag descriptions.
+- Prefer active voice and direct address: "Run this command" rather than "The command can be run."
+- When documenting error messages, explain what likely caused the error in plain language and what the user should do next.
 
 ## Git Commit Workflow
 - A `.gitmessage` template exists at the repo root — always follow its format when writing commits:
