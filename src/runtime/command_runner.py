@@ -1,10 +1,10 @@
-"""CLI command dispatch mixin for SandboxProcessor.
+"""Shared interactive helpers used by SandboxProcessor and plugins.
 
-This module holds the ``_CommandMixin`` class, which translates parsed CLI
-arguments into calls on the concrete ``SandboxProcessor`` processing methods.
-It is split out from ``sandbox_processor.py`` solely for readability; all
-``self.*`` references resolve on the ``SandboxProcessor`` subclass via normal
-Python MRO.
+This module provides the tools that commands use when they need input from the
+user at runtime — collecting multi-line text, prompting for notes to append to
+a prompt, showing a preview of what would be sent without making an API call,
+and resolving where to save output files. Plugin developers can call these
+methods via ``SandboxProcessor`` or call the standalone helpers directly.
 """
 
 import argparse
@@ -17,19 +17,32 @@ logger = logging.getLogger(__name__)
 
 
 class _CommandMixin:
-    """CLI-to-processor bridge mixin for SandboxProcessor.
+    """Interactive helpers and output utilities shared by all SandboxProcessor commands.
 
-    Provides interactive helpers (multiline input, notes collection), inline-note
-    application, dry-run display, and output-path resolution.  All ``self.*``
-    references resolve on the concrete ``SandboxProcessor`` subclass via Python MRO.
-
-    Methods are intentionally static or take ``args`` as a parameter so they can
-    be called from plugin ``run()`` methods without constructing a full processor.
+    Provides methods for collecting multi-line input from the user, appending
+    notes to prompts, previewing what would be sent to the AI without making
+    a real call, and resolving where output files should be saved. These
+    methods are available on ``SandboxProcessor`` because it inherits from
+    this class — plugin developers can call them as ``sandbox.<method>()``.
     """
 
     @staticmethod
     def _collect_multiline(label: str) -> str:
-        """Print a prompt label and collect lines until '---' or EOF."""
+        """Show a labelled prompt and collect lines of text until the user signals they are done.
+
+        The user types as many lines as they like, then types ``---`` on its
+        own line (the end-of-input signal) to finish. End-of-file (e.g. piped
+        input) also stops collection.
+
+        Args:
+            label: The heading shown above the input area to tell the user
+                   what kind of text to enter (e.g. ``'User prompt'``,
+                   ``'Abstract text'``).
+
+        Returns:
+            All typed lines joined into a single string with newlines between
+            them.
+        """
         print(f"{label} (type --- on its own line when done):")
         lines: list[str] = []
         while True:
@@ -47,16 +60,24 @@ class _CommandMixin:
         system_prompt: Optional[str] = None,
         user_prompt: Optional[str] = None,
     ) -> Tuple[Optional[str], Optional[str]]:
-        """Optionally display the current prompts, then collect note text to append.
+        """Interactively ask the user where they want to add a note, then collect the note text.
 
-        If *system_prompt* or *user_prompt* are provided they are shown before
-        the question so the user has context for what they are annotating.
+        If either prompt is provided, it is displayed first so the user can
+        see what they are annotating. The user then chooses whether to add
+        the note to the system prompt, the user prompt, both at once, or a
+        different note to each. The collected note text is returned ready to
+        be appended to the relevant prompt before the API call is made.
 
-        Options:
-          system   — one note appended to the system prompt only
-          user     — one note appended to the user prompt only
-          both     — the same note appended to both prompts
-          separate — different notes collected individually for system then user
+        Args:
+            system_prompt: The current system prompt text to display for
+                           context. ``None`` if there is no system prompt to
+                           show.
+            user_prompt: The current user prompt text to display for context.
+                         ``None`` if there is no user prompt to show.
+
+        Returns:
+            A two-item tuple of ``(system_note, user_note)``. Either item may
+            be ``None`` if the user did not add a note to that prompt.
         """
         if system_prompt is not None or user_prompt is not None:
             sep = "-" * 70
@@ -95,10 +116,22 @@ class _CommandMixin:
 
     @staticmethod
     def _apply_inline_notes(service: Any, args: argparse.Namespace) -> None:
-        """Apply inline note flags (-ns/-nu/-nb) from *args* to *service*.
+        """Copy any inline note flags from the parsed command-line arguments onto the service.
 
-        -nb (note_both) sets both slots; -ns/-nu (note_system/note_user) set
-        individually and take precedence over -nb for their own slot.
+        Inline notes are notes passed directly on the command line via
+        ``-ns``, ``-nu``, or ``-nb`` rather than typed interactively. This
+        method reads those values from the parsed flags and assigns them to
+        the service so they are appended to the relevant prompt before the
+        API call is made. ``-nb`` (note-both) sets both prompts; ``-ns`` and
+        ``-nu`` set each individually and take precedence over ``-nb`` for
+        their respective prompt.
+
+        Args:
+            service: The service instance whose ``system_note`` and
+                     ``user_note`` attributes will be set
+                     (e.g. ``sandbox.translation_service``).
+            args: The object holding all parsed command-line flags for the
+                  current run.
         """
         _inline_both = getattr(args, 'note_both', None)
         _inline_sys  = getattr(args, 'note_system', None) or _inline_both
@@ -110,7 +143,17 @@ class _CommandMixin:
 
     @staticmethod
     def _sampling_kwargs(args: argparse.Namespace) -> dict:
-        """Return temperature/top_p/max_tokens from args for _dry_run_display."""
+        """Extract the temperature, top-p, and max-tokens values from the parsed command-line flags.
+
+        Args:
+            args: The object holding all parsed command-line flags for the
+                  current run.
+
+        Returns:
+            A dictionary with keys ``'temperature'``, ``'top_p'``, and
+            ``'max_tokens'``, each set to the value from the flags or
+            ``None`` if that flag was not used.
+        """
         return {
             'temperature': getattr(args, 'temperature', None),
             'top_p': getattr(args, 'top_p', None),
@@ -121,7 +164,25 @@ class _CommandMixin:
     def _dry_run_display(model: str, system_prompt: str, user_prompt: str, note: Optional[str] = None,
                          temperature: Optional[float] = None, top_p: Optional[float] = None,
                          max_tokens: Optional[int] = None) -> None:
-        """Print prompts in a structured format without making any API calls."""
+        """Print a formatted preview of what would be sent to the AI, without making any API call.
+
+        Shows the model name, any sampling overrides, and the full system and
+        user prompts. Used when ``--dry-run`` is passed on the command line so
+        the user can verify the prompt content before committing to an API call.
+
+        Args:
+            model: The model that would be used (e.g. ``'gpt-4o'``).
+            system_prompt: The system prompt that would be sent.
+            user_prompt: The user prompt that would be sent.
+            note: An optional additional note that would be appended,
+                  shown separately in the preview.
+            temperature: The temperature override in effect, or ``None`` if
+                         the default would be used.
+            top_p: The top-p override in effect, or ``None`` if the default
+                   would be used.
+            max_tokens: The max-tokens override in effect, or ``None`` if the
+                        default would be used.
+        """
         sep = "=" * 70
         print(f"\n{sep}")
         print("  DRY RUN — No API call will be made")
@@ -142,7 +203,22 @@ class _CommandMixin:
         print(f"\n{sep}\n")
 
     def _resolve_output_path(self, args: argparse.Namespace) -> Optional[str]:
-        """Resolve output file path based on arguments."""
+        """Determine the absolute path where the output file should be saved.
+
+        If a relative output path was specified, it is resolved relative to the
+        input file's directory rather than the current working directory. This
+        keeps the output file next to the source document, which is usually
+        what the user expects. An absolute output path is returned unchanged.
+
+        Args:
+            args: The object holding all parsed command-line flags for the
+                  current run. Reads ``output_file`` and ``input_file``
+                  from this object.
+
+        Returns:
+            The absolute output file path as a string, or ``None`` if no
+            output file was requested.
+        """
         output_file_arg: Optional[str] = getattr(args, 'output_file', None)
         input_file_arg: Optional[str] = getattr(args, 'input_file', None)
 

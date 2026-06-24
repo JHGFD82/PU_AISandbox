@@ -9,11 +9,16 @@ from .constants import IMAGE_EXTENSIONS
 
 
 class ImageProcessor():
-    """Handles extraction of text from image files."""
+    """Prepares image files for submission to the AI vision API.
+
+    Provides helpers to identify image files, check whether an image is blank
+    (so API calls can be skipped for empty pages), and encode image data into
+    the base64 data URL format that vision-capable AI models expect.
+    """
 
     @staticmethod
     def is_image_file(file_path: str) -> bool:
-        """Check if a file is an image file based on its extension."""
+        """Return ``True`` if the file's extension is a recognised image format."""
         return file_path.lower().endswith(IMAGE_EXTENSIONS)
 
     @staticmethod
@@ -22,15 +27,27 @@ class ImageProcessor():
         white_threshold: int = 240,
         blank_fraction: float = 0.99,
     ) -> bool:
-        """Return True when the image is predominantly blank (near-white).
+        """Return ``True`` when the image appears to be a blank or near-white page.
 
-        Converts the image to grayscale via PyMuPDF and samples up to 2 000
-        evenly-spaced pixels.  If at least *blank_fraction* of those samples
-        are brighter than *white_threshold* (0–255), the page is considered
-        blank and the API call can be safely skipped.
+        Converts the image to grayscale and samples up to 2,000 evenly-spaced
+        pixels. If at least ``blank_fraction`` of those samples are brighter
+        than ``white_threshold`` (on a 0–255 scale), the page is treated as
+        blank and the API call can be safely skipped, saving both time and
+        quota. Returns ``False`` on any error so that borderline images are
+        always sent to the model rather than silently dropped.
 
-        Returns False on any error so that borderline images are always sent
-        to the model rather than silently dropped.
+        Args:
+            file_path: Path to the image file to check.
+            white_threshold: Brightness level above which a pixel is counted
+                             as white (0 = black, 255 = pure white). Defaults
+                             to ``240``.
+            blank_fraction: The proportion of sampled pixels that must be
+                            above the threshold for the image to be considered
+                            blank. Defaults to ``0.99`` (99%).
+
+        Returns:
+            ``True`` if the image is predominantly blank, ``False`` otherwise
+            or if the check could not be completed.
         """
         try:
             import fitz  # PyMuPDF — required dependency (pymupdf)
@@ -61,7 +78,7 @@ class ImageProcessor():
 
     @staticmethod
     def validate_image_file(file_path: str) -> bool:
-        """Validate that a file is a valid image file."""
+        """Return ``True`` if the file has a recognised image extension and exists on disk."""
         if not ImageProcessor.is_image_file(file_path):
             return False
 
@@ -70,10 +87,22 @@ class ImageProcessor():
 
         return True
 
-    # Base 64 encode local image and return text to be included in AI prompt
     def local_image_to_data_url(self, file_path: str):
-        """
-        Get the url of a local image
+        """Read an image file from disk and encode it as a self-contained data URL string.
+
+        A data URL embeds the image's content type and its raw bytes encoded
+        in base64 directly in the string, so no separate file reference is
+        needed when submitting the image to the AI vision API. The resulting
+        string looks like ``data:image/png;base64,iVBOR...`` and can be placed
+        directly in the ``image_url`` field of an API message.
+
+        Args:
+            file_path: Path to the image file to encode (e.g.
+                       ``'/path/to/page_001.jpg'``).
+
+        Returns:
+            A data URL string containing the full encoded image, ready to
+            include in an API request.
         """
         mime_type, _ = guess_type(file_path)
 

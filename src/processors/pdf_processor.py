@@ -67,19 +67,20 @@ def generate_process_text(abstract_text: str, page_text: str, previous_page: str
 
 
 class PDFProcessor:
-    """
-    Handles PDF processing operations, including text extraction and cleaning.
+    """Extracts text from PDF files page by page, with tuning for CJK and vertical text layouts.
 
-    This class uses pdfminer.six to parse PDF files and extract text content,
-    with optimizations for handling CJK text and vertical text layouts.
+    Uses the ``pdfminer.six`` library to parse PDF structure and pull out
+    text content. The layout analysis settings are pre-tuned for documents
+    that contain Chinese, Japanese, or Korean characters, including support
+    for vertical text columns.
     """
 
     def __init__(self):
-        """
-        Initialize the PDFProcessor with custom layout analysis parameters.
+        """Set up the PDF text extractor with layout parameters tuned for CJK documents.
 
-        The parameters are optimized for better handling of CJK text, including
-        vertical text detection and improved character grouping.
+        Configures character grouping margins, enables vertical text detection,
+        and disables settings that can break CJK character clusters. These
+        parameters are applied to every page processed by this instance.
         """
         self.rsrcmgr = PDFResourceManager()
         # Improved LAParams for better CJK text extraction
@@ -95,14 +96,18 @@ class PDFProcessor:
         self.interpreter = PDFPageInterpreter(self.rsrcmgr, self.device)
     
     def _clean_text(self, text: str) -> str:
-        """
-        Clean extracted text by removing problematic characters and formatting issues.
+        """Remove encoding artefacts and normalise whitespace in text extracted from a PDF.
+
+        Strips null characters, byte-order marks, and ``(cid:N)`` references
+        that appear when a PDF's character mapping is incomplete. Collapses
+        runs of spaces and tabs to a single space while preserving line breaks.
 
         Args:
-            text: The raw text extracted from the PDF layout.
+            text: Raw text as extracted from the PDF layout engine.
 
         Returns:
-            A cleaned version of the text with unwanted characters removed.
+            Cleaned text ready for further processing, or an empty string if
+            the input was empty or whitespace-only.
         """
         if not text:
             return ""
@@ -119,14 +124,18 @@ class PDFProcessor:
         return cleaned_text.strip()
     
     def process_pdf(self, file_handle: BinaryIO) -> Iterator[PDFPage]:
-        """
-        Process a PDF file and return an iterator over its pages.
+        """Open a PDF file and return an object that steps through its pages one at a time.
+
+        Using an iterator (a step-through object) rather than loading all pages
+        at once keeps memory use low for large documents. Callers typically pass
+        the result directly to ``process_page`` in a loop.
 
         Args:
-            file_handle: A binary file object representing the PDF file.
+            file_handle: An open binary file object pointing to a PDF file.
 
         Returns:
-            An iterator over PDFPage objects.
+            An iterator that yields one ``PDFPage`` object per page in the
+            document, in order from first to last.
         """
         return PDFPage.get_pages(file_handle)
     
