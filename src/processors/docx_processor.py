@@ -12,7 +12,13 @@ if TYPE_CHECKING:
 
 
 class DocxProcessor(BaseTextProcessor):
-    """Handles extraction of text from Word documents."""
+    """Extracts text and embedded media from Word (.docx) document files.
+
+    Provides three extraction modes: plain text pages for translation,
+    block-level extraction that keeps tables and paragraphs separate for
+    round-trip DOCX output, and embedded image extraction for re-inserting
+    images into the translated document.
+    """
     
     def extract_raw_content(self, file_obj: BinaryIO) -> str:
         """Extract raw text content from a Word document, including table cells.
@@ -63,15 +69,23 @@ class DocxProcessor(BaseTextProcessor):
     
     @staticmethod
     def process_docx_with_pages(file_obj: BinaryIO, target_page_size: int = DEFAULT_PAGE_SIZE) -> List[str]:
-        """
-        Extract text from a Word document and split into logical pages based on content size.
-        
+        """Extract all text from a Word document and split it into translation-sized pages.
+
+        Reads the document body in order (so table content appears at its
+        correct position relative to surrounding paragraphs), then groups the
+        resulting paragraphs into pages using the target character limit.
+        Use this method when the output format is not ``.docx`` — for DOCX
+        output, use ``process_docx_for_translation`` instead to preserve table
+        structure.
+
         Args:
-            file_obj: Binary file object of the Word document
-            target_page_size: Target number of characters per "page"
-            
+            file_obj: An open binary file object pointing to a ``.docx`` file.
+            target_page_size: Approximate maximum characters per page.
+                              Defaults to the project-wide page size setting.
+
         Returns:
-            List of strings, each representing a logical "page" of content
+            A list of page strings ready to be sent to the translation service,
+            one string per logical page.
         """
         try:
             processor = DocxProcessor()
@@ -94,15 +108,23 @@ class DocxProcessor(BaseTextProcessor):
 
     @staticmethod
     def extract_blocks(file_obj: BinaryIO) -> "List[Union[ParagraphBlock, TableBlock]]":
-        """Extract the document body as an ordered list of typed blocks.
+        """Read a Word document body and return its contents as an ordered list of typed blocks.
 
-        Paragraphs become :class:`~src.models.doc_block.ParagraphBlock` items;
-        tables become :class:`~src.models.doc_block.TableBlock` items with
-        unique ``[TABLE_N]`` placeholder tokens that can be embedded in
-        translation prompts and resolved back to Word table objects later.
+        Paragraphs are returned as ``ParagraphBlock`` items. Tables are
+        returned as ``TableBlock`` items, each carrying a unique placeholder
+        token (``[TABLE_1]``, ``[TABLE_2]``, etc.) that can be embedded in
+        translation prompts. When the AI returns translated text, the
+        placeholder positions mark exactly where each translated table should
+        be reinserted in the output document. Document order is preserved so
+        tables always appear at their correct position relative to surrounding
+        paragraphs.
 
-        Walks ``doc.element.body`` in document order so tables appear at their
-        correct position relative to surrounding paragraphs.
+        Args:
+            file_obj: An open binary file object pointing to a ``.docx`` file.
+
+        Returns:
+            A list of ``ParagraphBlock`` and ``TableBlock`` objects in document
+            order.
         """
         from docx import Document
         from docx.oxml.ns import qn
@@ -141,22 +163,30 @@ class DocxProcessor(BaseTextProcessor):
         file_obj: BinaryIO,
         target_page_size: int = DEFAULT_PAGE_SIZE,
     ) -> "Tuple[List[str], Dict[str, List[List[str]]]]":
-        """Extract pages and a table registry for Markdown-round-trip translation.
+        """Extract pages and table data from a Word document for round-trip DOCX translation.
 
-        Returns ``(pages, table_registry)`` where:
+        Like ``process_docx_with_pages``, but also extracts each table's cell
+        contents into a separate registry. In the extracted pages, every table
+        is replaced by its placeholder token (``[TABLE_1]`` etc.) so the
+        translation prompt stays clean. The table cells are translated
+        separately via ``TranslationService.translate_table_grid`` and the
+        translated grids are later reinserted as proper Word tables by
+        ``FileOutputHandler.save_to_docx``.
 
-        * ``pages`` — text strings split to ``target_page_size`` just like
-          :meth:`process_docx_with_pages`, but each table is replaced by its
-          unique ``[TABLE_N]`` placeholder token.
-        * ``table_registry`` — mapping from ``"[TABLE_N]"`` to the raw cell
-          grid (list-of-lists).  The grid is translated separately via
-          :meth:`~src.services.translation_service.TranslationService.translate_table_grid`
-          and later reinserted by
-          :meth:`~src.output.file_output.FileOutputHandler.save_to_docx`.
-
-        Use this method (instead of :meth:`process_docx_with_pages`) whenever
-        the output format is ``.docx``, so that tables survive translation as
+        Use this method (instead of ``process_docx_with_pages``) whenever the
+        output will be a ``.docx`` file so that tables survive translation as
         proper Word table objects rather than being flattened to prose.
+
+        Args:
+            file_obj: An open binary file object pointing to a ``.docx`` file.
+            target_page_size: Approximate maximum characters per page.
+
+        Returns:
+            A two-item tuple of ``(pages, table_registry)``. ``pages`` is a
+            list of page strings with table placeholders embedded.
+            ``table_registry`` maps each placeholder (e.g. ``'[TABLE_1]'``)
+            to the original untranslated cell grid (a list of rows, each row
+            a list of cell strings).
         """
         from ..models.doc_block import ParagraphBlock, TableBlock
 
@@ -188,14 +218,24 @@ class DocxProcessor(BaseTextProcessor):
 
     @staticmethod
     def extract_media(file_obj: BinaryIO) -> "List[EmbeddedMedia]":
-        """Extract embedded images from a Word document with positional information.
+        """Pull all embedded images out of a Word document, recording each image's position in the document.
 
-        Each returned :class:`EmbeddedMedia` item carries a ``position_fraction``
-        (0.0–1.0) that represents the image's approximate location in the source
-        document relative to total paragraph count.  The fraction is used for
-        proportional reinsertion when the translated paragraph count differs.
+        Each returned ``EmbeddedMedia`` object carries a ``position_fraction``
+        between 0.0 and 1.0 representing where in the document the image
+        appeared relative to total paragraph count. This fraction is used when
+        reinserting images into the translated document: because the translated
+        text may have a different paragraph count, a proportional position
+        keeps images near their original context rather than all piling up at
+        the beginning or end.
 
-        Requires ``python-docx``.
+        Args:
+            file_obj: An open binary file object pointing to a ``.docx`` file.
+
+        Returns:
+            A list of ``EmbeddedMedia`` objects in document order, each
+            containing the raw image bytes, content type, position fraction,
+            and original dimensions. Returns an empty list if the document
+            contains no embedded images.
         """
         from ..models.embedded_media import EmbeddedMedia
         from docx import Document

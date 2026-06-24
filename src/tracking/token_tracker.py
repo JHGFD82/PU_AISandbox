@@ -44,7 +44,12 @@ def get_archive_path(professor: str, month: str) -> Path:
 
 @dataclass
 class TokenUsage:
-    """Token usage data for a single API call."""
+    """A record of the tokens and cost consumed by a single API call.
+
+    Instances are created by ``TokenTracker.record_usage()`` and stored in the
+    professor's usage file under ``session_history`` so that every call can be
+    reviewed after the fact.
+    """
     model: str
     prompt_tokens: int
     completion_tokens: int
@@ -57,7 +62,7 @@ class TokenUsage:
 
 @dataclass
 class UsageStats:
-    """Usage statistics structure."""
+    """Running totals for a group of API calls — used for per-model, per-day, and per-month summaries."""
     total_tokens: int = 0
     total_input_tokens: int = 0
     total_output_tokens: int = 0
@@ -65,7 +70,7 @@ class UsageStats:
     call_count: int = 0
 
     def add_usage(self, prompt_tokens: int, completion_tokens: int, total_tokens: int, cost: float):
-        """Add usage data to the statistics."""
+        """Add the token counts and cost from one API call to the running totals."""
         self.total_tokens += total_tokens
         self.total_input_tokens += prompt_tokens
         self.total_output_tokens += completion_tokens
@@ -73,7 +78,7 @@ class UsageStats:
         self.call_count += 1
 
     def merge_dict(self, d: Dict[str, Any]):
-        """Merge a stats dictionary into this object."""
+        """Add the totals from a raw dictionary (as read from a usage file) into this object."""
         self.total_tokens += d.get("total_tokens", 0)
         self.total_input_tokens += d.get("total_input_tokens", 0)
         self.total_output_tokens += d.get("total_output_tokens", 0)
@@ -81,7 +86,7 @@ class UsageStats:
         self.call_count += d.get("call_count", 0)
 
     def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary format."""
+        """Convert this object to a plain dictionary suitable for saving to a JSON file."""
         return asdict(self)
 
 
@@ -97,12 +102,26 @@ class TokenTracker:
 
     def __init__(self, professor: str, data_file: Optional[str] = None,
                  monthly_limit: Optional[float] = None):
-        """Initialize the token tracker.
+        """Set up token tracking for a professor, loading any existing usage data from disk.
+
+        On startup, checks whether the stored usage file belongs to the current
+        calendar month. If the file is from a previous month it is automatically
+        moved to the archives folder and a fresh file is started (month
+        rollover). All subsequent calls to ``record_usage()`` write to the new
+        file.
 
         Args:
-            professor:     Professor name used for file naming and archive paths.
-            data_file:     Override the default data file path entirely.
-            monthly_limit: Override the configured monthly spending limit.
+            professor: The professor's safe-filename identifier, used to locate
+                       and name the usage file (e.g. ``'heller'`` maps to
+                       ``data/token_usage_heller.json``).
+            data_file: Full path to an alternative usage file. ``None`` in
+                       normal operation, which causes the path to be derived
+                       automatically from the professor's safe filename.
+                       Redirected to a temporary file in tests.
+            monthly_limit: Override the monthly spending cap (in dollars) set
+                           in ``model_catalog.json``. ``None`` in normal
+                           operation, which causes the limit to be read from
+                           the catalog. Only non-``None`` in tests.
         """
         self.professor = professor
 
@@ -206,18 +225,32 @@ class TokenTracker:
 
     def record_usage(self, model: str, prompt_tokens: int, completion_tokens: int,
                      total_tokens: int, requested_model: Optional[str] = None) -> TokenUsage:
-        """Record token usage for a single API call.
+        """Record that an API call was made and update all running totals in the usage file.
 
-        Thread-safe: acquires the instance lock for the full read-modify-write
-        cycle so that concurrent page workers cannot interleave their updates
-        and silently drop token counts.
+        Updates the professor's totals for the current month, today's date, and
+        the specific model used, then immediately writes the updated file to
+        disk so no data is lost if the program exits unexpectedly.
+
+        To prevent two background workers from writing at the same time and
+        overwriting each other's data, this method acquires an exclusive turn
+        before updating — only one call can proceed at a time (thread safety
+        via a lock).
 
         Args:
-            model:           Actual model name returned by the API (may carry a date suffix).
-            prompt_tokens:   Input token count.
-            completion_tokens: Output token count.
-            total_tokens:    Combined token count.
-            requested_model: Model name used in the request (for pricing lookup when different).
+            model: The model name as reported back by the API — may include a
+                   date suffix (e.g. ``'gpt-4o-2024-08-06'``).
+            prompt_tokens: Number of tokens in the input sent to the model.
+            completion_tokens: Number of tokens in the model's response.
+            total_tokens: Combined input and output token count.
+            requested_model: The model name used when making the request. When
+                             the API returns a different name than was requested
+                             (e.g. a dated alias), this value is used for
+                             pricing lookup instead. ``None`` when the
+                             requested and returned model names are the same.
+
+        Returns:
+            A ``TokenUsage`` record with the full breakdown of tokens and costs
+            for this call.
         """
         with self._lock:
             timestamp = datetime.now().isoformat()
@@ -255,16 +288,37 @@ class TokenTracker:
         return usage
 
     def get_daily_usage(self, date: Optional[str] = None) -> Dict[str, Any]:
-        """Return usage stats for *date* (default: today) from the current month's file."""
+        """Return the token totals for a single day from the current month's usage file.
+
+        Args:
+            date: The date to look up in ``YYYY-MM-DD`` format
+                  (e.g. ``'2026-06-23'``). Defaults to today if not provided.
+
+        Returns:
+            A stats dictionary with ``total_tokens``, ``total_cost``,
+            ``call_count``, and related fields. Returns a zeroed-out stats
+            dictionary if no usage was recorded for that date.
+        """
         if date is None:
             date = self._get_current_date()
         return self.usage_data["daily_usage"].get(date, UsageStats().to_dict())
 
     def get_monthly_usage(self, month: Optional[str] = None) -> Dict[str, Any]:
-        """Return usage stats for *month* (default: current month).
+        """Return the token totals for an entire calendar month.
 
-        For the current month the in-memory totals are returned directly.
-        For past months the corresponding archive file is read.
+        For the current month, reads directly from the in-memory totals.
+        For any past month, reads the corresponding file from the archives
+        folder (``data/archives/{professor}/{YYYY-MM}.json``).
+
+        Args:
+            month: The month to look up in ``YYYY-MM`` format
+                   (e.g. ``'2026-05'``). Defaults to the current month if not
+                   provided.
+
+        Returns:
+            A stats dictionary with ``total_tokens``, ``total_cost``,
+            ``call_count``, and related fields. Returns a zeroed-out stats
+            dictionary if no archive file exists for the requested month.
         """
         if month is None:
             month = self._get_current_month()
@@ -282,7 +336,16 @@ class TokenTracker:
         return UsageStats().to_dict()
 
     def get_all_time_usage(self) -> Dict[str, Any]:
-        """Aggregate total usage across all archived months plus the current month."""
+        """Return the cumulative token totals across every month on record.
+
+        Adds together the current month's totals and every archived month file
+        found in ``data/archives/{professor}/``. Archive files that cannot be
+        read are skipped with a warning rather than causing the whole call to fail.
+
+        Returns:
+            A stats dictionary with the combined ``total_tokens``,
+            ``total_cost``, ``call_count``, and related fields across all time.
+        """
         combined = UsageStats()
         combined.merge_dict(self.usage_data["total_usage"])
 
@@ -316,14 +379,18 @@ class TokenTracker:
         }
 
     def print_usage_report(self, month: Optional[str] = None, include_all_time: bool = False):
-        """Print a formatted usage report.
+        """Print a formatted usage report to the terminal.
+
+        For the current month, shows token totals, a per-model breakdown,
+        today's usage, and remaining monthly budget. For a past month, shows
+        the archived totals and a daily breakdown for that month.
 
         Args:
-            month:           If given (e.g. '2025-07'), print a report for that
-                             archived month instead of the current month.
-            include_all_time: When True (current month only), also print all-time
-                              totals aggregated from all archived months plus the
-                              current month.
+            month: A past month to report on in ``YYYY-MM`` format
+                   (e.g. ``'2025-07'``). Omit to report on the current month.
+            include_all_time: When ``True`` (and reporting on the current
+                              month), also prints cumulative totals across every
+                              archived month plus the current one.
         """
         current_month = self._get_current_month()
 

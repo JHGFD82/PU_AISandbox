@@ -1,4 +1,9 @@
-"""CLI controller: argument parsing, validation, and top-level dispatch."""
+"""CLI entry point: parses command-line arguments, validates them, and routes each command to the right handler.
+
+Importing this module loads the ``.env`` file, discovers all installed plugins,
+and builds the argument parser. The ``main()`` function at the bottom is what
+runs when you type ``python main.py ...``.
+"""
 
 import argparse
 import logging
@@ -35,13 +40,32 @@ def _add_debug_flags(parser: argparse.ArgumentParser) -> None:
 
 
 def setup_logging(verbose: bool = False) -> None:
-    """Set up logging configuration."""
+    """Configure how log messages are formatted and which detail level is shown.
+
+    At the default level (``verbose=False``), only informational messages and
+    above are shown. Passing ``verbose=True`` (triggered by ``--verbose``) also
+    surfaces debug messages, which include per-page progress and API call details.
+
+    Args:
+        verbose: When ``True``, show detailed debug output in the terminal.
+                 Defaults to ``False``.
+    """
     level = logging.DEBUG if verbose else logging.INFO
     logging.basicConfig(level=level, format='%(asctime)s - %(levelname)s - %(message)s')
 
 
 def add_common_flags(parser: argparse.ArgumentParser) -> None:
-    """Add flags shared by translate, transcribe, and prompt subparsers."""
+    """Attach the standard set of flags that every command supports to a subcommand's argument parser.
+
+    Adds ``-o`` (output file), ``-m`` (model), ``-t`` (temperature),
+    ``-T`` (top-p), ``-M`` (max tokens), ``--dry-run``, and the debug flags.
+    Calling this once per subcommand keeps flag definitions in one place so
+    that all commands behave consistently.
+
+    Args:
+        parser: The subcommand parser to attach the flags to. Typically the
+                object returned by ``subparsers.add_parser('mycommand')``.
+    """
     _add_debug_flags(parser)
     parser.add_argument('-o', '--output', dest='output_file', type=str, help='Output file path')
     parser.add_argument('-m', '--model', dest='model', type=str, help='Model to use (e.g., gpt-4o, gpt-4o-mini)')
@@ -52,7 +76,16 @@ def add_common_flags(parser: argparse.ArgumentParser) -> None:
 
 
 def add_notes_flags(parser: argparse.ArgumentParser) -> None:
-    """Add the interactive and inline notes flags to a subparser."""
+    """Attach the notes flags to a subcommand's argument parser.
+
+    The notes flags let users append extra context to the system prompt, the
+    user prompt, or both — either interactively at runtime (``-n``) or as a
+    single string passed directly on the command line (``-ns``, ``-nu``,
+    ``-nb``).
+
+    Args:
+        parser: The subcommand parser to attach the flags to.
+    """
     parser.add_argument(
         '-n', '--notes',
         dest='notes',
@@ -113,22 +146,21 @@ def _build_usage_subparser(subparsers: argparse._SubParsersAction) -> None:
 def create_argument_parser(
     plugins: Optional[dict[str, ModePlugin]] = None,
 ) -> argparse.ArgumentParser:
-    """
-    Build the command-line parser that interprets everything a user types after
-    'python main.py'.
+    """Build the command-line parser that interprets everything a user types after
+    ``python main.py``.
 
-    Sets up the top-level flags (--show-config, --list-models, --verbose,
-    --debug-api), the professor name argument, the built-in 'usage' subcommand
-    tree, and any commands registered by installed plugins (e.g., translate,
-    transcribe, prompt).
+    Sets up the top-level flags (``--show-config``, ``--list-models``,
+    ``--verbose``, ``--debug-api``), the professor name argument, the built-in
+    ``usage`` subcommand tree, and any commands registered by installed plugins
+    (e.g., ``translate``, ``transcribe``, ``prompt``).
 
     Args:
-        plugins: Optional mapping of command names to plugin objects. When
-                 provided, each plugin adds its own subcommand(s) to the parser.
-                 Example: {'translate': <TranslationPlugin>, 'prompt': <PromptPlugin>}
+        plugins: A dictionary mapping command names to plugin objects, as
+                 returned by ``load_plugins()``. Pass ``None`` or an empty dict
+                 to build a parser with only the built-in commands.
 
     Returns:
-        A configured ArgumentParser ready to call .parse_args() on sys.argv.
+        A configured parser ready to call ``.parse_args()`` on.
     """
     parser = argparse.ArgumentParser(
         description='Princeton University AI Sandbox — document processing and AI prompt tools',
@@ -219,20 +251,18 @@ def _available_commands_hint(plugins: dict[str, ModePlugin]) -> str:
 
 
 def _dispatch(args: argparse.Namespace, plugins: dict[str, ModePlugin]) -> None:
-    """
-    Check that the right information was provided and send the request to the
-    correct command handler.
+    """Check that the parsed arguments form a valid command, then hand off to the right handler.
 
-    First checks whether a global command (--show-config or --list-models) was
-    requested, which does not require a professor name. Otherwise, confirms that
-    both a professor name and a command were supplied before routing to the
-    'usage' reporter or a plugin command (e.g., translate, prompt).
+    Handles global commands (``--show-config``, ``--list-models``) first, since
+    those don't require a professor name. Otherwise, confirms that both a
+    professor name and a command were supplied before routing to the ``usage``
+    reporter or a plugin command (e.g., ``translate``, ``prompt``).
 
     Args:
-        args: The parsed command-line values produced by argparse — contains
-              the professor name, command, and any flags the user passed.
-        plugins: The loaded plugin commands, keyed by command name
-                 (e.g., 'translate', 'prompt').
+        args: The object holding all parsed command-line flags for the current
+              run, as returned by ``parser.parse_args()``.
+        plugins: A dictionary mapping command names to plugin objects, keyed by
+                 command name (e.g., 'translate', 'prompt').
 
     Raises:
         CLIError: If the professor name or command is missing, or if the
@@ -275,13 +305,13 @@ def _dispatch(args: argparse.Namespace, plugins: dict[str, ModePlugin]) -> None:
 
 
 def main() -> None:
-    """
-    Start the AI Sandbox command-line tool.
+    """Run the AI Sandbox tool from the command line.
 
-    Loads all installed plugins, reads the command the user typed, configures
-    how much detail is written to the log, and hands off to the appropriate
-    command handler. Any user-facing errors are printed to the terminal and
-    the program exits cleanly with a non-zero status code.
+    Discovers installed plugins, builds the argument parser, reads the flags
+    typed by the user, configures logging, and routes the request to the
+    appropriate command handler. Any user-facing errors are printed to the
+    terminal and the process exits with a failure code (exit code 1) so that
+    scripts can detect the failure.
     """
     # Parse args first so logging level can honor --verbose.
     _plugins = load_plugins(Path(__file__).parent.parent / "plugins")

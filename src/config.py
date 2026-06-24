@@ -1,4 +1,11 @@
-"""Language helpers, CLI argument types, and professor configuration; model catalog and pricing live in src/models/."""
+"""Helpers for language registration, professor configuration, and API key lookup.
+
+This module is the starting point for two things plugin developers commonly need:
+registering the languages their plugin supports (via ``register_language``) and
+looking up a professor's API credentials at runtime (via ``get_api_key``).
+Professor configuration and model pricing are kept separate — pricing lives in
+``src/models/``.
+"""
 
 import argparse
 import os
@@ -16,14 +23,44 @@ _PLUGIN_LANGUAGES: set[str] = set()
 
 
 def register_language(code: str, name: str) -> None:
-    """Register a language code into LANGUAGE_MAP, called by plugins at import time."""
+    """Make a new language available for use in translate and transcribe commands.
+
+    Plugins call this once at startup to declare which languages they support.
+    After registration, the short code (e.g. ``'jp'``) can be typed on the
+    command line and will be resolved to its full name (e.g. ``'Japanese'``)
+    before being sent to the AI service.
+
+    Args:
+        code: The short code the user types on the command line (e.g. ``'jp'``,
+              ``'zh'``, ``'en'``). Stored in lowercase regardless of how it is
+              passed in.
+        name: The full language name forwarded to the AI service
+              (e.g. ``'Japanese'``, ``'Chinese'``, ``'English'``).
+    """
     code = code.lower()
     LANGUAGE_MAP[code] = name
     _PLUGIN_LANGUAGES.add(code)
 
 
 def make_safe_filename(name: str) -> str:
-    """Convert a professor name to a safe filename."""
+    """Convert a name to a version that is safe to use inside a file or folder name.
+
+    Spaces and most special characters are replaced with underscores, consecutive
+    underscores are collapsed to one, and the result is lowercased. This produces
+    a consistent, filesystem-friendly identifier (safe filename) used throughout
+    the project to name token-usage files and archive folders.
+
+    For example: ``'Jeff Heller'`` → ``'jeff_heller'``,
+    ``'Smith & Jones'`` → ``'smith_jones'``.
+
+    Args:
+        name: Any string — typically the professor's display name as set in
+              ``.env`` (e.g. ``'Jeff Heller'``).
+
+    Returns:
+        A lowercase string with only letters, digits, hyphens, and underscores
+        (e.g. ``'jeff_heller'``).
+    """
     safe_name = re.sub(r'[^\w\-_\.]', '_', name)
     safe_name = re.sub(r'_+', '_', safe_name)
     safe_name = safe_name.strip('_')
@@ -36,7 +73,25 @@ def _language_keys_str() -> str:
 
 
 def parse_single_language_code(value: str) -> str:
-    """Parse a single language code (e.g. en, zh, jp, kr) for transcribe/OCR commands."""
+    """Validate a language code typed on the command line and return its full name.
+
+    Used by the argument parser for transcribe and OCR commands, which accept a
+    single target language. If the code is not recognised, an error message is
+    shown to the user directly in the terminal.
+
+    Args:
+        value: The short language code typed by the user (e.g. ``'jp'``,
+               ``'zh'``, ``'en'``).
+
+    Returns:
+        The full language name for that code (e.g. ``'Japanese'``, ``'Chinese'``,
+        ``'English'``), ready to be passed to the AI service.
+
+    Raises:
+        argparse.ArgumentTypeError: If the code is not in the list of languages
+            registered by the installed plugins. The error message lists all
+            valid codes.
+    """
     code = value.strip().lower()
     if code not in LANGUAGE_MAP:
         raise argparse.ArgumentTypeError(
@@ -46,15 +101,31 @@ def parse_single_language_code(value: str) -> str:
 
 
 def parse_language_code(value: str) -> Union[str, Tuple[str, str]]:
-    """Parse language code for OCR or translation commands.
+    """Validate a language argument typed on the command line and return it in a form the service layer can use.
 
-    Accepted formats:
-      Single code  — "en", "jp"         → OCR/transcription target language (full name)
-      Hyphen pair  — "jp-en", "zh-en"   → translation source-target pair (code tuple)
+    Accepts two formats depending on the command:
 
-    Translation pairs return ``(source_code, target_code)`` — shortcodes, not full names.
-    Each plugin's ``run()`` resolves codes to full names via ``LANGUAGE_MAP`` before
-    passing them to the service layer.
+    - **Single code** (``'en'``, ``'jp'``) — used for OCR and transcription,
+      where only a target language is needed. Returns the full language name
+      (e.g. ``'English'``).
+    - **Hyphen-separated pair** (``'jp-en'``, ``'zh-en'``) — used for
+      translation, where a source and target language are both required. Returns
+      a two-item tuple of short codes (e.g. ``('jp', 'en')``). Each plugin's
+      ``run()`` method resolves these codes to full names before passing them to
+      the service layer.
+
+    Args:
+        value: The language argument as typed on the command line
+               (e.g. ``'jp'`` or ``'jp-en'``).
+
+    Returns:
+        Either a full language name string (single-code path) or a
+        ``(source_code, target_code)`` tuple (pair path).
+
+    Raises:
+        argparse.ArgumentTypeError: If any code in the value is not registered,
+            if a pair contains more than two parts, or if source and target are
+            the same language.
     """
     valid_keys = _language_keys_str()
 
@@ -88,7 +159,23 @@ _PROF_NAME_PATTERN = re.compile(r'^PROF_(.+?)_NAME$')
 
 
 def load_professor_config() -> Dict[str, Dict[str, str]]:
-    """Load professor configuration from environment variables."""
+    """Read all professor configurations from environment variables and return them as a lookup table.
+
+    Scans the current environment for variables that follow the pattern
+    ``PROF_<ID>_NAME`` / ``PROF_<ID>_KEY`` (as set in ``.env``) and assembles
+    one entry per professor. The lookup table is keyed by the safe-filename
+    form of the professor's name (e.g. ``'heller'``) so it can be matched
+    against command-line input.
+
+    Returns:
+        A dictionary where each key is the professor's safe-filename identifier
+        (e.g. ``'heller'``) and each value is a sub-dictionary with the keys
+        ``'name'`` (display name), ``'primary_key'`` (env var name for the
+        primary API key), ``'backup_key'`` (env var name for the backup key),
+        ``'id'`` (the numeric or string ID from the env var), and
+        ``'safe_name'`` (same as the outer key).
+        Returns an empty dictionary if no professor variables are found.
+    """
     professors: Dict[str, Dict[str, str]] = {}
 
     for key, value in os.environ.items():
@@ -112,7 +199,26 @@ def load_professor_config() -> Dict[str, Dict[str, str]]:
 
 
 def get_api_key(professor_name: str) -> Tuple[str, str]:
-    """Get API key and resolved professor display name from environment configuration."""
+    """Look up a professor's API key (the private credential that grants access to the AI service).
+
+    Tries the professor's primary key first, then falls back to the backup key
+    if the primary is not set. Accepts both the professor's display name
+    (e.g. ``'Heller'``) and the safe-filename form (e.g. ``'heller'``) so
+    either can be typed on the command line.
+
+    Args:
+        professor_name: The professor's name or safe-filename identifier as
+                        typed on the command line (e.g. ``'heller'``).
+
+    Returns:
+        A two-item tuple of ``(api_key, display_name)`` where ``api_key`` is
+        the credential string read from ``.env`` and ``display_name`` is the
+        professor's full name as configured (e.g. ``'Jeff Heller'``).
+
+    Raises:
+        ValueError: If the professor name is not found in the configuration, or
+                    if neither their primary nor backup API key is set in ``.env``.
+    """
     professors = load_professor_config()
 
     if professor_name in professors:

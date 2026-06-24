@@ -1,4 +1,10 @@
-"""Abstract base class for text-based document processors with shared section-splitting logic."""
+"""Shared base class for all text-based document processors.
+
+Subclasses (such as ``DocxProcessor``, ``TxtProcessor``, and
+``MarkdownProcessor``) inherit two static methods from this class that handle
+the common work of turning a flat string of text into paragraph-sized chunks
+ready for translation.
+"""
 
 import logging
 from typing import List
@@ -6,19 +12,36 @@ from abc import ABC
 
 
 class BaseTextProcessor(ABC):
-    """Base class for text-based document processors."""
+    """Foundation for processors that extract text from document files.
+
+    Provides ``split_text_into_pages`` and ``parse_text_into_paragraphs`` —
+    the two shared steps that every text-based processor needs before handing
+    content to the translation service.
+    """
     
     @staticmethod
     def split_text_into_pages(paragraphs: List[str], target_page_size: int = 2000) -> List[str]:
-        """
-        Split a list of paragraphs into logical pages based on content size.
-        
+        """Group paragraphs into logical pages so that no single page sent to the AI is too long.
+
+        Accumulates paragraphs until adding the next one would push the page
+        over the character target, then starts a new page. This keeps each
+        translation request within the model's comfortable working range while
+        preserving natural paragraph boundaries. A page that exceeds the target
+        on its own is still kept as a single page rather than being split
+        mid-paragraph.
+
         Args:
-            paragraphs: List of text paragraphs
-            target_page_size: Target number of characters per "page"
-            
+            paragraphs: A list of paragraph strings as returned by
+                        ``parse_text_into_paragraphs``.
+            target_page_size: The approximate maximum number of characters per
+                              page. Defaults to ``2000``. Larger values produce
+                              fewer, longer pages; smaller values produce more,
+                              shorter ones.
+
         Returns:
-            List of strings, each representing a logical "page" of content
+            A list of page strings, each containing one or more paragraphs
+            joined by double newlines. Returns ``['']`` if ``paragraphs`` is
+            empty.
         """
         if not paragraphs:
             logging.warning("No paragraphs provided for page splitting")
@@ -53,14 +76,20 @@ class BaseTextProcessor(ABC):
     
     @staticmethod
     def parse_text_into_paragraphs(content: str) -> List[str]:
-        """
-        Parse raw text content into a list of paragraphs.
-        
+        """Split a raw text string into a list of individual paragraphs.
+
+        Splits first on double newlines (the standard paragraph separator),
+        then falls back to single newlines if no double newlines are found,
+        and finally returns the whole string as one paragraph if neither
+        separator is present. Empty strings and whitespace-only lines are
+        discarded.
+
         Args:
-            content: Raw text content
-            
+            content: The full text content of a document as a single string.
+
         Returns:
-            List of paragraph strings
+            A list of non-empty paragraph strings. Returns an empty list if
+            ``content`` contains only whitespace.
         """
         if not content.strip():
             return []

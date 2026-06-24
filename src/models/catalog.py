@@ -1,4 +1,11 @@
-"""Model catalog file I/O and model property queries."""
+"""Reads and writes the model catalog file, and answers questions about individual models.
+
+The model catalog (``src/model_catalog.json``) is the single source of truth for
+which AI models are available, what they cost per token, and what special
+capabilities or limitations each one has. Functions in this module load that
+file, look up pricing and properties for a given model, and save any changes
+back to disk.
+"""
 
 import json
 import logging
@@ -32,12 +39,24 @@ def get_model_catalog_path() -> Path:
 
 
 def load_model_catalog() -> Dict[str, Any]:
-    """Load model catalog from file with comprehensive validation.
+    """Read the model catalog file and return its contents.
 
-    The result is cached in memory after the first successful read and
-    re-used as long as the file's mtime has not changed.  This eliminates
-    repeated file-descriptor opens during parallel translation where each
-    worker would otherwise open the catalog for every API call.
+    To avoid re-opening the file on every API call during a long translation
+    job, the result is kept in memory after the first read and reused for the
+    rest of the session (caching). The cache is automatically discarded if the
+    file on disk has been modified since the last read, so edits to
+    ``model_catalog.json`` always take effect on the next call.
+
+    Returns:
+        A dictionary with two top-level keys: ``'config'`` (global settings
+        such as pricing unit and monthly limit) and ``'models'`` (per-model
+        pricing and capability flags).
+
+    Raises:
+        FileNotFoundError: If ``src/model_catalog.json`` does not exist.
+            The error message explains how to create it from the template.
+        ValueError: If the file contains invalid JSON or is missing required
+            sections.
     """
     global _catalog_cache, _catalog_cache_path, _catalog_cache_mtime
 
@@ -98,11 +117,17 @@ def load_model_catalog() -> Dict[str, Any]:
 
 
 def save_model_catalog(config: Dict[str, Any]) -> None:
-    """Save model catalog to file atomically.
+    """Write an updated model catalog to disk and clear the in-memory cache.
 
-    Writes to a temp file in the same directory, then replaces the target
-    with os.replace() so readers never see a partially written file.
-    Invalidates the in-memory cache so the next read reflects the new data.
+    The file is written completely to a temporary location before replacing
+    the live catalog, so a crash or power loss mid-write can never leave a
+    partially written file behind (atomic write). The in-memory cache is
+    cleared so the next read picks up the new contents.
+
+    Args:
+        config: The complete catalog dictionary to save, in the same structure
+                returned by ``load_model_catalog()`` — a dict with ``'config'``
+                and ``'models'`` keys.
     """
     global _catalog_cache
     _catalog_cache = None  # Invalidate before write so any concurrent reader re-reads
@@ -128,7 +153,24 @@ def get_available_models() -> List[str]:
 
 
 def get_model_pricing(model: str) -> Dict[str, float]:
-    """Get pricing for a specific model."""
+    """Return the input and output cost rates for a model from the catalog.
+
+    If the requested model is not in the catalog, falls back to
+    ``gpt-4o-mini`` pricing and logs a warning. This prevents a missing entry
+    from halting a job, though the cost estimate will be approximate.
+
+    Args:
+        model: The model name exactly as it appears in ``model_catalog.json``
+               (e.g. ``'gpt-4o'``, ``'gpt-4o-mini'``).
+
+    Returns:
+        A dictionary with at minimum ``'input'`` and ``'output'`` keys whose
+        values are the cost per pricing unit (see ``get_pricing_unit()``).
+
+    Raises:
+        ValueError: If the model is not found and the fallback model is also
+                    absent from the catalog.
+    """
     config = load_model_catalog()
     models = config["models"]
 
@@ -164,7 +206,20 @@ def get_monthly_limit() -> float:
 
 
 def model_supports_vision(model: str) -> bool:
-    """Check if a model supports vision/image processing."""
+    """Check whether a model can accept images as part of a request.
+
+    Models that support vision can be used for OCR and image translation.
+    The capability is controlled by the ``supports_vision`` flag in
+    ``model_catalog.json``. Returns ``False`` for any model not in the
+    catalog.
+
+    Args:
+        model: The model name to check (e.g. ``'gpt-4o'``).
+
+    Returns:
+        ``True`` if the model's catalog entry has ``"supports_vision": true``,
+        ``False`` otherwise.
+    """
     config = load_model_catalog()
     models = config["models"]
 
@@ -185,10 +240,21 @@ def get_vision_capable_models() -> List[str]:
 
 
 def get_model_system_role(model: str) -> str:
-    """Get the appropriate system message role for a model.
+    """Return the role label the model expects for system-level instructions.
 
-    Newer reasoning models (e.g. o3-mini, gpt-5) require 'developer' instead of 'system'.
-    Defaults to 'system' for all other models.
+    Most models accept a ``"system"`` role for the instruction message at the
+    start of a conversation. A small number of newer reasoning models
+    (such as ``o3-mini``) require the label ``"developer"`` instead and will
+    reject requests that use ``"system"``. This function looks up the correct
+    label from the catalog so each model receives the format it expects.
+
+    Args:
+        model: The model name to look up (e.g. ``'gpt-4o'``, ``'o3-mini'``).
+
+    Returns:
+        ``'system'`` for most models, or ``'developer'`` for models that
+        require it. Defaults to ``'system'`` if the model is not in the
+        catalog.
     """
     config = load_model_catalog()
     models = config["models"]
@@ -196,9 +262,20 @@ def get_model_system_role(model: str) -> str:
 
 
 def model_uses_max_completion_tokens(model: str) -> bool:
-    """Check if a model requires 'max_completion_tokens' instead of 'max_tokens'.
+    """Check whether a model requires a different parameter name for setting its response length limit.
 
-    Newer reasoning models (e.g. o3-mini, gpt-5) reject 'max_tokens'.
+    Standard models accept ``max_tokens`` to cap how long their response can
+    be. Some newer reasoning models (such as ``o3-mini``) reject that
+    parameter and require ``max_completion_tokens`` instead. This function
+    looks up which parameter name applies so the API call is constructed
+    correctly.
+
+    Args:
+        model: The model name to check (e.g. ``'gpt-4o'``, ``'o3-mini'``).
+
+    Returns:
+        ``True`` if the model requires ``max_completion_tokens``,
+        ``False`` if it uses the standard ``max_tokens``.
     """
     config = load_model_catalog()
     models = config["models"]
@@ -206,10 +283,20 @@ def model_uses_max_completion_tokens(model: str) -> bool:
 
 
 def model_has_fixed_parameters(model: str) -> bool:
-    """Check if a model only accepts default sampling parameters.
+    """Check whether a model ignores temperature, top-p, and other sampling controls.
 
-    Reasoning models (e.g. o3-mini, gpt-5) reject temperature, top_p,
-    frequency_penalty, and presence_penalty — only the default values are supported.
+    Most models accept parameters that shape how creative or focused their
+    responses are (temperature, top-p, etc.). Some reasoning models
+    (such as ``o3-mini``) only support fixed, default values for those
+    parameters and will reject requests that include them. When this returns
+    ``True``, sampling parameters are omitted from the API call entirely.
+
+    Args:
+        model: The model name to check (e.g. ``'gpt-4o'``, ``'o3-mini'``).
+
+    Returns:
+        ``True`` if the model's catalog entry has ``"fixed_parameters": true``,
+        ``False`` otherwise.
     """
     config = load_model_catalog()
     models = config["models"]
@@ -217,10 +304,19 @@ def model_has_fixed_parameters(model: str) -> bool:
 
 
 def model_omit_sampling_params(model: str) -> bool:
-    """Check if model should omit optional sampling parameters entirely.
+    """Check whether sampling parameters should be left out of requests for this model.
 
-    Some provider routes deprecate temperature/top_p for specific models even
-    when they are not marked as fully fixed-parameter models.
+    Similar to ``model_has_fixed_parameters``, but applies to models where the
+    provider route discourages temperature and top-p even though the model is
+    not fully locked down. Setting ``"omit_sampling_params": true`` in the
+    catalog for such a model prevents rejected-request errors without treating
+    the model as fully fixed-parameter.
+
+    Args:
+        model: The model name to check (e.g. ``'gpt-4o'``).
+
+    Returns:
+        ``True`` if sampling parameters should be omitted, ``False`` otherwise.
     """
     config = load_model_catalog()
     models = config["models"]
@@ -228,31 +324,62 @@ def model_omit_sampling_params(model: str) -> bool:
 
 
 def get_model_max_completion_tokens(model: str, default: int) -> int:
-    """Get per-model max completion tokens override, falling back to the given default.
+    """Return the response-length cap to use for a model, applying any per-model override from the catalog.
 
-    Reasoning models (e.g. gpt-5) consume hidden reasoning tokens from the same
-    completion budget, so they need a larger cap than standard models.
-    Set 'max_completion_tokens' in model_catalog.json to override the default.
+    Some models (particularly reasoning models that do internal thinking before
+    responding) consume part of the token budget on steps that are not visible
+    in the final response. Those models therefore need a larger cap than
+    standard models. Setting ``max_completion_tokens`` in the catalog entry
+    for such a model overrides the value that would otherwise be used.
+
+    Args:
+        model: The model name to look up (e.g. ``'gpt-4o'``).
+        default: The cap to use if no per-model override is set in the catalog
+                 (e.g. ``4096``).
+
+    Returns:
+        The per-model override from the catalog if present, otherwise
+        ``default``.
     """
     config = load_model_catalog()
     return config["models"].get(model, {}).get("max_completion_tokens", default)
 
 
 def get_default_model(role: str) -> Optional[str]:
-    """Get the default model name for a given role from config.defaults.
+    """Return the default model name configured for a specific role, if one is set.
 
-    Roles: 'translation', 'ocr', 'image_translation'.
-    Returns None if the defaults section or the specific role is absent from
-    the catalog, allowing callers to apply their own fallback logic.
+    Different commands use different default models — OCR uses a vision-capable
+    model while translation may use a different one. These defaults are set in
+    the ``config.defaults`` section of ``model_catalog.json`` and can be
+    changed there without touching any code.
+
+    Args:
+        role: The command role to look up. Recognised values are
+              ``'translation'``, ``'ocr'``, and ``'image_translation'``.
+
+    Returns:
+        The model name string if a default is configured for that role
+        (e.g. ``'gpt-4o-mini'``), or ``None`` if the role is absent from the
+        catalog. Callers apply their own fallback when ``None`` is returned.
     """
     config = load_model_catalog()
     return config.get("config", {}).get("defaults", {}).get(role)
 
 
 def remove_model_from_catalog(model_name: str) -> bool:
-    """Remove a model from the catalog by key name.
+    """Delete a model entry from the catalog and save the updated file to disk.
 
-    Returns True if the model was removed, False if it was not present.
+    Used automatically when the system detects that a model is no longer
+    accessible through the AI gateway. Logs a warning when the model is
+    removed so the change is visible in the run log.
+
+    Args:
+        model_name: The exact key of the model to remove, as it appears in
+                    ``model_catalog.json`` (e.g. ``'gpt-4o-2024-08-06'``).
+
+    Returns:
+        ``True`` if the model was found and removed, ``False`` if the model
+        was not present in the catalog (no changes are made in that case).
     """
     catalog = load_model_catalog()
     if model_name not in catalog["models"]:

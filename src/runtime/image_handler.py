@@ -1,4 +1,4 @@
-"""Image OCR and image translation mixin: single-image and folder batch processing."""
+"""Image OCR and image translation: single-image and folder batch processing for transcribe and translate commands."""
 
 import logging
 import os
@@ -27,7 +27,12 @@ def _natural_sort_key(name: str) -> List[Any]:
 
 
 def _collect_image_files(folder_path: str) -> List[str]:
-    """Return sorted absolute paths of image files in *folder_path*."""
+    """Return a sorted list of absolute paths to all image files in a folder.
+
+    Files are sorted so that names with embedded numbers appear in the natural
+    reading order (e.g. ``page_2.jpg`` before ``page_10.jpg``) rather than
+    alphabetical order (which would put ``page_10.jpg`` before ``page_2.jpg``).
+    """
     return [
         os.path.join(folder_path, name)
         for name in sorted(os.listdir(folder_path), key=_natural_sort_key)
@@ -37,11 +42,12 @@ def _collect_image_files(folder_path: str) -> List[str]:
 
 
 class _ImageHandlerMixin:
-    """Mixin that adds image OCR and image translation capabilities to SandboxProcessor.
+    """Image OCR and translation capabilities added to SandboxProcessor.
 
-    Expects the following attributes set by the host class __init__:
-        self.image_processor_service, self.image_translation_service,
-        self.token_tracker, self.file_output
+    Provides methods for transcribing images to text (``transcribe`` command)
+    and for translating images in a single pass (``translate`` command on image
+    files). Both single-file and whole-folder modes are supported, with optional
+    parallel processing when multiple workers are requested.
     """
 
     def process_image_translation(
@@ -52,12 +58,25 @@ class _ImageHandlerMixin:
         opts: OutputOptions = OutputOptions(),
         spread: bool = False,
     ) -> None:
-        """Transcribe and translate an image in a single API call (translate command).
+        """Transcribe and translate a single image file in one step.
 
-        Uses ImageTranslationService to send one combined prompt, allowing
-        reasoning models to resolve ambiguous characters using translation context.
-        Prints both the transcript and the translation; saves the translation if
-        an output path is specified or auto_save is enabled.
+        Sends the image to the AI with a combined transcription-and-translation
+        prompt. This single-pass approach lets the model use the translation
+        context to resolve ambiguous characters in the transcription, which
+        improves accuracy compared to running OCR and translation separately.
+        Both the original transcription and the translation are printed to the
+        terminal.
+
+        Args:
+            file_path: Absolute path to the image file.
+            source_language: Full name of the language in the image
+                             (e.g. ``'Japanese'``).
+            target_language: Full name of the language to translate to
+                             (e.g. ``'English'``).
+            opts: Output and formatting options. If an output path is set or
+                  auto-save is enabled, the translation is also saved to a file.
+            spread: When ``True``, treats the image as a double-page spread
+                    (two facing pages photographed together).
         """
         logger.info(
             f"Starting image translation: {os.path.basename(file_path)} "
@@ -95,10 +114,28 @@ class _ImageHandlerMixin:
         workers: int = 1,
         spread: bool = False,
     ) -> None:
-        """Translate all images in a folder using the combined OCR+translation service.
+        """Translate all image files in a folder and optionally save the combined output.
 
-        When ``workers > 1`` images are dispatched in parallel via a ThreadPoolExecutor.
-        Results are printed and assembled in sorted-filename order after all workers finish.
+        Processes images in natural filename order (so ``page_2.jpg`` comes
+        before ``page_10.jpg``). When more than one worker is requested, images
+        are processed in parallel to speed up large batches, and a progress bar
+        is shown while they run. Results are always printed and assembled in the
+        original sorted order, regardless of which order the workers finish.
+
+        Args:
+            folder_path: Path to the folder containing the image files.
+            source_language: Full name of the language in the images
+                             (e.g. ``'Japanese'``).
+            target_language: Full name of the language to translate to
+                             (e.g. ``'English'``).
+            opts: Output and formatting options. If an output path is set or
+                  auto-save is enabled, the combined translation is saved.
+            workers: Number of images to process in parallel. Defaults to
+                     ``1`` (sequential). Capped at the system maximum.
+            spread: When ``True``, treats each image as a double-page spread.
+
+        Raises:
+            CLIError: If no image files are found in the folder.
         """
         folder_path = os.path.abspath(folder_path)
         image_files = _collect_image_files(folder_path)
@@ -211,7 +248,26 @@ class _ImageHandlerMixin:
         spread: bool = False,
         passes: int = 1,
     ) -> None:
-        """Process an image file with OCR (transcribe command)."""
+        """Transcribe an image file to text using OCR (transcribe command, single file).
+
+        Sends the image to the AI and extracts any readable text, printing the
+        result to the terminal. With ``passes > 1``, the transcription is run
+        multiple times and the results are reconciled to reduce errors — useful
+        for low-quality scans or difficult handwriting.
+
+        Args:
+            file_path: Absolute path to the image file.
+            target_language: Full name of the language in the image, used to
+                             guide the AI (e.g. ``'Japanese'``).
+            output_file: Path to save the extracted text. ``None`` means
+                         print to terminal only.
+            vertical: When ``True``, tells the AI the text is arranged in
+                      vertical columns (common in classical East Asian texts).
+            spread: When ``True``, treats the image as a double-page spread.
+            passes: Number of OCR passes to run per image. Multiple passes
+                    improve accuracy by letting the model cross-check its own
+                    output. Defaults to ``1``.
+        """
         logger.info(f"Starting OCR processing: {os.path.basename(file_path)} → {target_language}")
 
         try:
@@ -243,11 +299,29 @@ class _ImageHandlerMixin:
         passes: int = 1,
         workers: int = 1,
     ) -> None:
-        """Process all images in a folder with OCR, printing each result and optionally saving combined output.
+        """Transcribe all image files in a folder and optionally save the combined output.
 
-        When ``workers > 1`` images are dispatched in parallel via a ThreadPoolExecutor.
-        Multi-pass OCR within each image always runs sequentially inside the worker.
-        Results are printed and assembled in the original sorted-filename order.
+        Processes images in natural filename order. When more than one worker
+        is requested, images are transcribed in parallel and a progress bar is
+        shown. Results are always printed and assembled in the original sorted
+        order. If an image cannot be processed, an error message is recorded
+        in its place and the remaining images continue.
+
+        Args:
+            folder_path: Path to the folder containing the image files.
+            target_language: Full name of the language in the images
+                             (e.g. ``'Japanese'``).
+            output_file: Path to save the combined transcription. ``None``
+                         means print to terminal only.
+            vertical: When ``True``, tells the AI the text is in vertical
+                      columns.
+            spread: When ``True``, treats each image as a double-page spread.
+            passes: Number of OCR passes per image. Defaults to ``1``.
+            workers: Number of images to process in parallel. Defaults to
+                     ``1`` (sequential). Capped at the system maximum.
+
+        Raises:
+            CLIError: If no image files are found in the folder.
         """
         folder_path = os.path.abspath(folder_path)
         image_files = _collect_image_files(folder_path)

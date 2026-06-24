@@ -1,4 +1,12 @@
-"""Document translation mixin: file-type detection, text-file processing, and document translation."""
+"""Document translation mixin: detects file types and routes each format to the right translation pipeline.
+
+This module handles everything between receiving a file path on the command
+line and delivering translated text to the output layer. It recognises PDFs,
+Word documents, plain text files, Excel spreadsheets, JSON files, and Markdown
+files, extracts their text content in logical pages, sends each page to the
+translation service, and assembles the results. Image files are routed to the
+combined OCR-and-translate pipeline instead.
+"""
 
 import logging
 import os
@@ -59,20 +67,32 @@ def _parse_page_ranges(page_nums_str: Optional[str]) -> List[Tuple[int, Optional
 
 
 class _DocumentHandlerMixin:
-    """Mixin that adds document-translation capabilities to SandboxProcessor.
+    """Document translation capabilities added to SandboxProcessor.
 
-    Expects the following attributes set by the host class __init__:
-        self.translation_service, self.pdf_processor, self.file_output,
-        self.image_processor   (for is_image_file / validate_image_file)
-
-    Also expects these methods from co-mixed classes:
-        self._collect_multiline()         (_CommandMixin)
-        self.process_image_translation()  (_ImageHandlerMixin)
-        self.process_image_translation_folder()  (_ImageHandlerMixin)
+    Provides methods for translating documents of any supported format. The
+    host class (``SandboxProcessor``) supplies the services this mixin calls —
+    ``translation_service``, ``pdf_processor``, ``file_output``, and
+    ``image_processor`` — so no setup is needed beyond constructing a
+    ``SandboxProcessor``.
     """
 
     def _detect_and_validate_file(self, file_path: str) -> str:
-        """Detect file type and validate the file. Caller must pass an absolute path."""
+        """Check that a file exists and identify its type.
+
+        Recognises image files by content as well as by extension, so formats
+        like ``.jpg`` and ``.png`` are handled alongside document formats.
+
+        Args:
+            file_path: Absolute path to the file to inspect.
+
+        Returns:
+            A short type token: one of ``'image'``, ``'pdf'``, ``'docx'``,
+            ``'txt'``, ``'excel'``, ``'json'``, or ``'markdown'``.
+
+        Raises:
+            CLIError: If the file does not exist, fails image validation, or
+                has an extension not supported by any installed plugin.
+        """
         if not os.path.exists(file_path):
             raise CLIError(f"File '{file_path}' not found.")
 
@@ -108,13 +128,41 @@ class _DocumentHandlerMixin:
         workers: int = 1,
         table_aware: bool = False,
     ) -> Tuple[List[str], Optional[dict]]:
-        """Process text-based files (DOCX, TXT) with common logic.
+        """Extract text from a document, split it into pages, and translate the requested page range.
 
-        Returns ``(translated_pages, source_table_registry)``.  The registry
-        is only populated when *file_type* is ``'docx'`` and *table_aware* is
-        ``True``; it contains the *untranslated* table grids extracted by
-        :meth:`DocxProcessor.process_docx_for_translation` and must be
-        translated by the caller before use.
+        Handles DOCX, TXT, Excel, JSON, and Markdown files through their
+        respective processors, then passes the extracted pages to the
+        translation service. The page range filtering (``page_nums``) is
+        applied after extraction so only the requested portion is translated.
+
+        Args:
+            file_path: Absolute path to the document file.
+            file_type: The type token returned by ``_detect_and_validate_file``
+                       (e.g. ``'docx'``, ``'txt'``, ``'excel'``).
+            page_nums: A page selection string in the same format accepted on
+                       the command line (e.g. ``'1-5'``, ``'3,7,10-12'``), or
+                       ``None`` to process the whole document.
+            abstract_text: An optional abstract or summary of the document to
+                           provide the AI as context when translating. Improves
+                           accuracy for dense academic texts.
+            source_language: Full name of the language to translate from
+                             (e.g. ``'Japanese'``).
+            target_language: Full name of the language to translate to
+                             (e.g. ``'English'``).
+            opts: Output and formatting options for this translation job.
+            workers: Number of pages to translate in parallel. Defaults to
+                     ``1`` (sequential).
+            table_aware: When ``True`` and ``file_type`` is ``'docx'``, also
+                         extracts table data separately so tables can be
+                         reconstructed in the output DOCX file.
+
+        Returns:
+            A two-item tuple of ``(translated_pages, table_registry)``.
+            ``translated_pages`` is a list of translated text strings, one per
+            logical page. ``table_registry`` is a dictionary mapping table
+            identifiers to their extracted cell grids — populated only when
+            ``file_type`` is ``'docx'`` and ``table_aware`` is ``True``,
+            otherwise ``None``.
         """
         logger.info(f"Processing {file_type.upper()} file: {os.path.basename(file_path)}")
 
@@ -176,7 +224,38 @@ class _DocumentHandlerMixin:
         spread: bool = False,
         scanned: bool = False,
     ) -> None:
-        """Translate a document file (PDF, Word document, or text file)."""
+        """Translate a document file and optionally save the result.
+
+        Accepts PDF, Word (DOCX), plain text, Excel, JSON, Markdown, and image
+        files. Detects the format automatically, extracts the text, and routes
+        it to the appropriate translation pipeline. Progress and the translated
+        text are printed to the terminal as each page completes.
+
+        Args:
+            file_path: Path to the source document (relative or absolute).
+            source_language: Full name of the language to translate from
+                             (e.g. ``'Japanese'``).
+            target_language: Full name of the language to translate to
+                             (e.g. ``'English'``).
+            page_nums: A page selection string limiting which pages to
+                       translate (e.g. ``'1-5'``, ``'3,7,10-12'``). Pass
+                       ``None`` to translate the full document.
+            abstract: When ``True``, the user is prompted to type an abstract
+                      of the document before translation begins. This context
+                      can improve translation accuracy for dense academic texts.
+            opts: Output and formatting options for this job, including the
+                  output file path, auto-save behaviour, font, and font size.
+            workers: Number of pages to translate in parallel. Defaults to
+                     ``1`` (sequential). Larger values speed up long documents
+                     but use more API quota simultaneously.
+            spread: When ``True``, treats the document as a double-page spread
+                    (left and right pages combined into one image). Used for
+                    scanned books or manuscripts.
+            scanned: When ``True`` and the input is a PDF, renders each page as
+                     an image first and passes it through the OCR-and-translate
+                     pipeline. Use this for PDFs that contain scanned images
+                     rather than selectable text.
+        """
         file_path = os.path.abspath(file_path)
         file_type = self._detect_and_validate_file(file_path)
 
@@ -334,7 +413,23 @@ class _DocumentHandlerMixin:
         abstract: bool = False,
         opts: OutputOptions = OutputOptions(),
     ) -> None:
-        """Translate custom text input by the user."""
+        """Prompt the user to type text directly in the terminal and translate it.
+
+        Collects multi-line input interactively (the user ends input with
+        ``---``), then sends the text to the translation service. The
+        translation is printed to the terminal and, if an output path is
+        configured in ``opts``, also saved to a file.
+
+        Args:
+            source_language: Full name of the language the user will type in
+                             (e.g. ``'Japanese'``).
+            target_language: Full name of the language to translate to
+                             (e.g. ``'English'``).
+            abstract: When ``True``, the user is first prompted to type an
+                      abstract for context before entering the main text.
+            opts: Output and formatting options, including whether to save
+                  the result and where.
+        """
         abstract_text: Optional[str] = self._collect_multiline("Abstract text") or None if abstract else None  # type: ignore[attr-defined]
 
         try:
