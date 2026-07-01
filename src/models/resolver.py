@@ -17,8 +17,10 @@ def resolve_model(
 
     Resolution order:
     1) requested_model (if provided and valid)
-    2) prefer_model (if provided and valid)
-    3) config.defaults.translation from the model catalog (if valid)
+    2) prefer_model (if provided and valid) — callers are responsible for
+       resolving their own role-specific default (e.g. via
+       ``get_default_model("translation")``) and passing it as prefer_model
+    3) DEFAULT_FALLBACK_MODEL (a neutral, role-agnostic fallback)
     4) first available compatible model from pricing config
 
     Args:
@@ -83,9 +85,8 @@ def resolve_model(
         return requested_model
 
     # 2) prefer_model (if provided and valid)
-    # 3) config.defaults.translation (if valid), falling back to DEFAULT_FALLBACK_MODEL
-    translation_default = _catalog.get_default_model("translation") or _catalog.DEFAULT_FALLBACK_MODEL
-    priority_candidates = [candidate for candidate in (prefer_model, translation_default) if candidate]
+    # 3) DEFAULT_FALLBACK_MODEL (neutral, role-agnostic)
+    priority_candidates = [candidate for candidate in (prefer_model, _catalog.DEFAULT_FALLBACK_MODEL) if candidate]
     for candidate in priority_candidates:
         resolved = resolve_candidate(candidate)
         if resolved:

@@ -45,13 +45,13 @@ BASE_RETRY_DELAY: float = _s["retry"]["base_retry_delay"]
 
 # ── Parallelism & document processing ─────────────────────────────────────────
 DEFAULT_PARALLEL_WORKERS: int = _s["processing"]["default_parallel_workers"]
-DEFAULT_OCR_PASSES: int = _s["processing"]["default_ocr_passes"]
 DEFAULT_PAGE_SIZE: int = _s["processing"]["default_page_size"]
 MAX_PARALLEL_WORKERS: int = _s["processing"]["max_parallel_workers"]
 
-# ── Transcription review (plugin) ─────────────────────────────────────────────
-# TRANSCRIPTION_REVIEW_* constants are provided by the transcription plugin.
-# Access via src.settings.__getattr__ which searches pu_plugin.*.settings.
+# ── Transcription (plugin) ────────────────────────────────────────────────────
+# DEFAULT_OCR_PASSES and TRANSCRIPTION_REVIEW_* constants are provided by the
+# transcription plugin. Access via src.settings.__getattr__ below, which
+# searches pu_plugin.*.settings.
 
 # ── Output formatting ─────────────────────────────────────────────────────────
 DEFAULT_FONT_SIZE: int = _s["output"]["default_font_size"]

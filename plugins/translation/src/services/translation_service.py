@@ -18,6 +18,9 @@ from pdfminer.pdfpage import PDFPage
 from ..models import (
     get_model_system_role,
     OutputOptions,
+    get_default_model,
+    resolve_model,
+    maybe_sync_model_pricing,
 )
 from .api_errors import APISignal
 from .base_service import BaseService
@@ -53,7 +56,14 @@ class TranslationService(BaseService):
         # Tracks API/connection errors batched for summary in parallel mode
         self._api_error_count: int = 0
         self._api_error_lock = threading.Lock()
-    
+
+    def _get_model(self) -> str:
+        """Get the model to use for translation, preferring the catalog's translation default."""
+        translation_default = get_default_model("translation")
+        model = resolve_model(requested_model=self.custom_model, prefer_model=translation_default)
+        maybe_sync_model_pricing(model)
+        return model
+
     def _call_translation_api(self, model: str, system_role: str,
                                system_prompt: str, user_prompt: str) -> Any:
         """Call the translation API with the correct token-limit parameter for the model."""

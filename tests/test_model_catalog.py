@@ -10,6 +10,7 @@ import src.models.catalog as catalog_module
 import src.models.pricing as pricing_module
 import src.models.resolver as resolver_module
 from src.models import (
+    DEFAULT_FALLBACK_MODEL,
     get_available_models,
     get_default_model,
     get_model_catalog_path,
@@ -327,9 +328,11 @@ class TestGetModelMaxCompletionTokens:
 
 class TestResolveModel:
 
-    def test_no_args_returns_default_model(self, mock_catalog):
-        # config.defaults.translation = "gpt-4o" which is in SAMPLE_CATALOG
-        assert resolve_model() == "gpt-4o"
+    def test_no_args_returns_fallback_model(self, mock_catalog):
+        # resolve_model() no longer looks up any role-specific default itself —
+        # role-specific defaults are the caller's responsibility via prefer_model.
+        # With no prefer_model, it resolves straight to DEFAULT_FALLBACK_MODEL.
+        assert resolve_model() == DEFAULT_FALLBACK_MODEL
 
     def test_requested_model_returned(self, mock_catalog):
         assert resolve_model(requested_model="gpt-5") == "gpt-5"
@@ -342,26 +345,30 @@ class TestResolveModel:
         with pytest.raises(ValueError, match="not vision-capable"):
             resolve_model(requested_model="text-only-model", require_vision=True)
 
-    def test_prefer_model_used_when_default_skipped(self, mock_catalog, monkeypatch):
-        # Patch get_default_model so the translation default is unavailable
-        monkeypatch.setattr(catalog_module, "get_default_model", lambda role: "nonexistent")
-        assert resolve_model(prefer_model="gpt-4o-mini") == "gpt-4o-mini"
+    def test_prefer_model_used_over_fallback(self, mock_catalog):
+        # prefer_model is checked before DEFAULT_FALLBACK_MODEL.
+        assert resolve_model(prefer_model="gpt-5") == "gpt-5"
 
-    def test_prefer_model_ignored_if_not_vision_capable(self, mock_catalog, monkeypatch):
-        # prefer_model has no vision, translation default "gpt-4o" does → falls through to gpt-4o
-        assert resolve_model(prefer_model="text-only-model", require_vision=True) == "gpt-4o"
+    def test_prefer_model_ignored_if_not_vision_capable(self, mock_catalog):
+        # prefer_model has no vision → skipped; DEFAULT_FALLBACK_MODEL
+        # ("gpt-4o-mini") does support vision in SAMPLE_CATALOG, so it wins.
+        assert resolve_model(prefer_model="text-only-model", require_vision=True) == DEFAULT_FALLBACK_MODEL
 
-    def test_require_vision_skips_non_vision_models(self, mock_catalog, monkeypatch):
-        # Patch get_default_model so the translation default is unavailable
-        monkeypatch.setattr(catalog_module, "get_default_model", lambda role: "nonexistent")
+    def test_require_vision_skips_non_vision_models(self, mock_catalog):
         result = resolve_model(require_vision=True)
         assert result in {"gpt-5", "gpt-4o", "gpt-4o-mini"}
 
-    def test_falls_through_to_first_available_when_defaults_missing(self, mock_catalog, monkeypatch):
-        monkeypatch.setattr(catalog_module, "get_default_model", lambda role: "nonexistent")
+    def test_falls_through_to_first_available_when_fallback_missing(self, monkeypatch):
+        # Remove the fallback model from the catalog so resolution must reach
+        # step 4 (first available compatible model) instead of stopping at
+        # DEFAULT_FALLBACK_MODEL.
+        catalog_without_fallback = {
+            **SAMPLE_CATALOG,
+            "models": {k: v for k, v in SAMPLE_CATALOG["models"].items() if k != DEFAULT_FALLBACK_MODEL},
+        }
+        monkeypatch.setattr(catalog_module, "load_model_catalog", lambda: catalog_without_fallback)
         result = resolve_model()
-        # Should be the first model in SAMPLE_CATALOG that isn't "nonexistent"
-        assert result in {"gpt-5", "gpt-4o", "gpt-4o-mini", "text-only-model"}
+        assert result in {"gpt-5", "gpt-4o", "text-only-model"}
 
     def test_no_compatible_models_raises(self, monkeypatch):
         all_text_catalog = {

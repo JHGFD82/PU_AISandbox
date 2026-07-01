@@ -6,6 +6,8 @@ source =
     plugins/translation/plugin.py
     plugins/prompt/src
     plugins/prompt/plugin.py
+    plugins/transcription/src
+    plugins/transcription/plugin.py
 
 [report]
 omit =

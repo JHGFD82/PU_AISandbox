@@ -66,6 +66,41 @@ class TestTranslationServiceInit:
 
 
 # ---------------------------------------------------------------------------
+# TranslationService — _get_model
+# ---------------------------------------------------------------------------
+
+class TestTranslationServiceModel:
+
+    def test_get_model_returns_string(self, monkeypatch):
+        monkeypatch.setattr("src.services.base_service.get_model_max_completion_tokens", lambda m, d: d)
+        from src.services import translation_service as ts_mod
+        monkeypatch.setattr(ts_mod, "resolve_model", lambda **_: "gpt-4o")
+        monkeypatch.setattr(ts_mod, "maybe_sync_model_pricing", lambda m: None)
+        monkeypatch.setattr(ts_mod, "get_default_model", lambda _: "gpt-4o")
+        svc = TranslationService("fake-key")
+        model = svc._get_model()
+        assert isinstance(model, str)
+        assert len(model) > 0
+
+    def test_get_model_prefers_translation_default(self, monkeypatch):
+        monkeypatch.setattr("src.services.base_service.get_model_max_completion_tokens", lambda m, d: d)
+        from src.services import translation_service as ts_mod
+        monkeypatch.setattr(ts_mod, "get_default_model", lambda role: "catalog-translation-default")
+        monkeypatch.setattr(ts_mod, "maybe_sync_model_pricing", lambda m: None)
+        captured = {}
+
+        def _fake_resolve_model(*, requested_model=None, prefer_model=None, **_):
+            captured["prefer_model"] = prefer_model
+            return prefer_model or "fallback"
+
+        monkeypatch.setattr(ts_mod, "resolve_model", _fake_resolve_model)
+        svc = TranslationService("fake-key")
+        model = svc._get_model()
+        assert captured["prefer_model"] == "catalog-translation-default"
+        assert model == "catalog-translation-default"
+
+
+# ---------------------------------------------------------------------------
 # TranslationService — _find_split_point (static, pure)
 # ---------------------------------------------------------------------------
 

@@ -30,6 +30,11 @@ OCR_TOP_P: float = _ocr.get("top_p", 0.1)
 OCR_MAX_TOKENS: int = _ocr.get("max_tokens", 4000)
 OCR_FREQUENCY_PENALTY: float = _ocr.get("frequency_penalty", 0.5)
 OCR_PRESENCE_PENALTY: float = _ocr.get("presence_penalty", 0.3)
+# Exported as DEFAULT_OCR_PASSES (not OCR_DEFAULT_PASSES) because
+# src/settings.py's __getattr__ delegation looks up this exact attribute name,
+# and plugins/transcription-ea/plugin.py imports it as `from src.settings
+# import DEFAULT_OCR_PASSES`.
+DEFAULT_OCR_PASSES: int = _ocr.get("default_ocr_passes", 1)
 
 # ── Transcription review ──────────────────────────────────────────────────────
 TRANSCRIPTION_REVIEW_TEMPERATURE: float = _transcription_review.get("temperature", 0.1)
