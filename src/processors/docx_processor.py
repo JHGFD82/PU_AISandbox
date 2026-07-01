@@ -1,7 +1,7 @@
 """Word document processor: extracts text from .docx files into logical sections."""
 
 import logging
-from typing import Dict, List, BinaryIO, Tuple, Union, TYPE_CHECKING
+from typing import List, BinaryIO, Union, TYPE_CHECKING
 
 from .base_text_processor import BaseTextProcessor
 from .constants import DEFAULT_PAGE_SIZE
@@ -75,8 +75,10 @@ class DocxProcessor(BaseTextProcessor):
         correct position relative to surrounding paragraphs), then groups the
         resulting paragraphs into pages using the target character limit.
         Use this method when the output format is not ``.docx`` — for DOCX
-        output, use ``process_docx_for_translation`` instead to preserve table
-        structure.
+        output, the translation plugin's own
+        ``process_docx_for_translation`` (in
+        ``plugins/translation/src/processors/docx_translation.py``) is used
+        instead to preserve table structure.
 
         Args:
             file_obj: An open binary file object pointing to a ``.docx`` file.
@@ -157,64 +159,6 @@ class DocxProcessor(BaseTextProcessor):
                     blocks.append(TableBlock(rows=rows, placeholder=placeholder))
 
         return blocks
-
-    @staticmethod
-    def process_docx_for_translation(
-        file_obj: BinaryIO,
-        target_page_size: int = DEFAULT_PAGE_SIZE,
-    ) -> "Tuple[List[str], Dict[str, List[List[str]]]]":
-        """Extract pages and table data from a Word document for round-trip DOCX translation.
-
-        Like ``process_docx_with_pages``, but also extracts each table's cell
-        contents into a separate registry. In the extracted pages, every table
-        is replaced by its placeholder token (``[TABLE_1]`` etc.) so the
-        translation prompt stays clean. The table cells are translated
-        separately via ``TranslationService.translate_table_grid`` and the
-        translated grids are later reinserted as proper Word tables by
-        ``FileOutputHandler.save_to_docx``.
-
-        Use this method (instead of ``process_docx_with_pages``) whenever the
-        output will be a ``.docx`` file so that tables survive translation as
-        proper Word table objects rather than being flattened to prose.
-
-        Args:
-            file_obj: An open binary file object pointing to a ``.docx`` file.
-            target_page_size: Approximate maximum characters per page.
-
-        Returns:
-            A two-item tuple of ``(pages, table_registry)``. ``pages`` is a
-            list of page strings with table placeholders embedded.
-            ``table_registry`` maps each placeholder (e.g. ``'[TABLE_1]'``)
-            to the original untranslated cell grid (a list of rows, each row
-            a list of cell strings).
-        """
-        from ..models.doc_block import ParagraphBlock, TableBlock
-
-        processor = DocxProcessor()
-        blocks = DocxProcessor.extract_blocks(file_obj)
-
-        table_registry: Dict[str, List[List[str]]] = {}
-        text_parts: List[str] = []
-
-        for block in blocks:
-            if isinstance(block, ParagraphBlock):
-                text_parts.append(block.text)
-            elif isinstance(block, TableBlock):
-                table_registry[block.placeholder] = block.rows
-                text_parts.append(block.placeholder)
-
-        combined = '\n\n'.join(text_parts) if text_parts else ""
-        if not combined:
-            logging.warning("No content found in Word document")
-            return [""], {}
-
-        paragraphs = processor.parse_text_into_paragraphs(combined)
-        pages = processor.split_text_into_pages(paragraphs, target_page_size)
-        logging.info(
-            f"Split Word document into {len(pages)} logical page(s) "
-            f"with {len(table_registry)} table(s) extracted for separate translation"
-        )
-        return pages, table_registry
 
     @staticmethod
     def extract_media(file_obj: BinaryIO) -> "List[EmbeddedMedia]":

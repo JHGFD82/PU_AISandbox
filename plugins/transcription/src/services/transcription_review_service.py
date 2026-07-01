@@ -9,7 +9,10 @@ import re
 from typing import Any, Optional
 
 from ..models import (
+    get_default_model,
     get_model_system_role,
+    maybe_sync_model_pricing,
+    resolve_model,
 )
 from ..tracking.token_tracker import TokenTracker
 from .base_service import BaseService
@@ -45,6 +48,13 @@ class TranscriptionReviewService(BaseService):
         max_tokens: Optional[int] = None,
     ):
         super().__init__(api_key, professor, token_tracker, None, model, temperature, top_p, max_tokens)
+
+    def _get_model(self) -> str:
+        """Get the model to use for transcription review, preferring the catalog's transcription_review default."""
+        review_default = get_default_model("transcription_review")
+        model = resolve_model(requested_model=self.custom_model, prefer_model=review_default)
+        maybe_sync_model_pricing(model)
+        return model
 
     def build_prompts(
         self,
@@ -111,6 +121,8 @@ class TranscriptionReviewService(BaseService):
         self,
         text: str,
         language: str,
+        kanbun: bool = False,
+        kanbun_main: bool = False,
     ) -> str:
         """Review a transcription and return a JSON report string.
 
@@ -121,6 +133,10 @@ class TranscriptionReviewService(BaseService):
         language:
             Full language name (e.g. ``"English"``), as returned by
             ``parse_single_language_code``.
+        kanbun, kanbun_main:
+            Accepted for signature compatibility with extension-plugin
+            overrides (e.g. East Asian kanbun review guidance). Unused by
+            this base (English-only) implementation.
         """
         spec = TranscriptionReviewPromptSpec(
             language=language,
@@ -130,7 +146,7 @@ class TranscriptionReviewService(BaseService):
         system_prompt = spec.system_prompt()
         user_prompt = spec.user_prompt(text)
 
-        model = self._resolve_model("transcription_review")
+        model = self._get_model()
         system_role = get_model_system_role(model)
 
         def body(_attempt: int) -> Optional[str]:

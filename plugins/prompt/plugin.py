@@ -78,7 +78,6 @@ _register("src.services.prompt_service", "src/services/prompt_service.py")
 from src.cli import add_common_flags                        # shared flag helper  # noqa: E402
 from src.errors import CLIError                             # standard user-facing error  # noqa: E402
 from src.output.file_output import FileOutputHandler        # noqa: E402
-from src.runtime.sandbox_processor import SandboxProcessor  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -122,6 +121,13 @@ class PromptPlugin:
         max_tokens: Optional[int],
     ) -> None:
         # ── Mandatory setup ───────────────────────────────────────────────
+        # Imported here (not at module level) because SandboxProcessor's class
+        # statement discovers plugin-registered runtime mixins from
+        # sys.modules at first-import time — safe only once load_plugins()
+        # has run every plugin's module-level _register() calls, which
+        # happens before any plugin's run() is ever dispatched.
+        from src.runtime.sandbox_processor import SandboxProcessor
+
         # SandboxProcessor owns API key resolution, TokenTracker creation,
         # alternate-endpoint detection (colon syntax), and lazy service wiring.
         sandbox = SandboxProcessor(

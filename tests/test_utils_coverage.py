@@ -232,3 +232,42 @@ class TestCapWorkerCount:
         assert cap_worker_count(8, 6, 4) == 4
         assert cap_worker_count(3, 6, 4) == 3
 
+
+# ===========================================================================
+# src/services/parallel_utils.py — collect_image_files / natural_sort_key
+# ===========================================================================
+
+import os
+
+from src.services.parallel_utils import collect_image_files
+
+
+class TestCollectImageFiles:
+
+    def test_returns_sorted_image_paths(self, tmp_path):
+        (tmp_path / "b.jpg").write_bytes(b"")
+        (tmp_path / "a.png").write_bytes(b"")
+        (tmp_path / "z.txt").write_text("")  # not an image
+        result = collect_image_files(str(tmp_path))
+        names = [os.path.basename(p) for p in result]
+        assert names == ["a.png", "b.jpg"]
+
+    def test_empty_folder_returns_empty_list(self, tmp_path):
+        assert collect_image_files(str(tmp_path)) == []
+
+    def test_non_image_files_excluded(self, tmp_path):
+        (tmp_path / "doc.pdf").write_bytes(b"")
+        (tmp_path / "img.jpg").write_bytes(b"")
+        result = collect_image_files(str(tmp_path))
+        names = [os.path.basename(p) for p in result]
+        assert "doc.pdf" not in names
+        assert "img.jpg" in names
+
+    def test_numeric_filenames_use_natural_order(self, tmp_path):
+        (tmp_path / "page_1.jpg").write_bytes(b"")
+        (tmp_path / "page_2.jpg").write_bytes(b"")
+        (tmp_path / "page_10.jpg").write_bytes(b"")
+        result = collect_image_files(str(tmp_path))
+        names = [os.path.basename(p) for p in result]
+        assert names == ["page_1.jpg", "page_2.jpg", "page_10.jpg"]
+

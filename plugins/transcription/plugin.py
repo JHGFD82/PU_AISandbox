@@ -26,9 +26,12 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import logging
 import sys
 from pathlib import Path
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 # ── Module registration (must run at import time) ────────────────────────────
 
@@ -80,6 +83,10 @@ _register(
     "src.services.transcription_review_service",
     "src/services/transcription_review_service.py",
 )
+_register(
+    "src.runtime.image_handler",
+    "src/runtime/image_handler.py",
+)
 
 # ── Main-repo imports ─────────────────────────────────────────────────────────
 # These are available because the main PU_AISandbox root is on sys.path
@@ -91,6 +98,36 @@ from src.errors import CLIError                                    # noqa: E402
 
 # Register the language supported by this base plugin.
 register_language('en', 'English')
+
+
+# ── Shared execution helper ────────────────────────────────────────────────────
+
+def _run_transcription_review(
+    sandbox: "SandboxProcessor",  # noqa: F821 — imported lazily in run(), only for type hints
+    text: str,
+    language: str,
+    kanbun: bool = False,
+    kanbun_main: bool = False,
+    output_file: Optional[str] = None,
+) -> None:
+    """Review a transcription for OCR errors and print (and optionally save) the JSON report.
+
+    kanbun/kanbun_main are accepted for extension-plugin compatibility (East
+    Asian kanbun review guidance) — this base plugin doesn't set them itself.
+    """
+    from src.errors import CLIError
+    from src.output.file_output import FileOutputHandler
+    try:
+        result_json = sandbox.transcription_review_service.review_transcription(
+            text, language, kanbun=kanbun, kanbun_main=kanbun_main
+        )
+        print("\n" + result_json)
+        if output_file:
+            FileOutputHandler.save_to_text_file(result_json, output_file, label="Review")
+    except Exception as e:
+        logger.error(f"Error during transcription review: {e}", exc_info=True)
+        raise CLIError(f"Error during transcription review: {e}") from e
+
 
 # ── Plugin class ──────────────────────────────────────────────────────────────
 
@@ -269,7 +306,7 @@ class TranscriptionPlugin:
                 )
 
             output_file_r = sandbox._resolve_output_path(args)
-            sandbox.process_transcription_review(text, language, output_file=output_file_r)
+            _run_transcription_review(sandbox, text, language, output_file=output_file_r)
 
 
 plugin = TranscriptionPlugin()

@@ -136,6 +136,14 @@ _register(
     "src.services.image_translation_service",
     "src/services/image_translation_service.py",
 )
+_register(
+    "src.processors.docx_translation",
+    "src/processors/docx_translation.py",
+)
+_register(
+    "src.runtime.document_handler",
+    "src/runtime/document_handler.py",
+)
 
 
 # ── Main-repo imports ──────────────────────────────────────────────────────────

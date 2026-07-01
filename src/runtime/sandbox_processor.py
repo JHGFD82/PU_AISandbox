@@ -6,14 +6,12 @@ from typing import TYPE_CHECKING, Optional, TypedDict
 
 from ..config import get_api_key
 from ..errors import CLIError
-from ..models import OutputOptions  # noqa: F401 — used in type hints across handler mixins
 from ..output.file_output import FileOutputHandler
 from ..processors.image_processor import ImageProcessor
 from ..processors.pdf_processor import PDFProcessor
 from ..tracking.token_tracker import TokenTracker
 from .command_runner import _CommandMixin
-from .document_handler import _DocumentHandlerMixin
-from .image_handler import _ImageHandlerMixin
+from .file_types import _FileTypeMixin
 
 if TYPE_CHECKING:
     from ..services.api_config import APIConfig
@@ -30,7 +28,35 @@ class _SvcKwargs(TypedDict, total=False):
     max_tokens: Optional[int]
 
 
-class SandboxProcessor(_DocumentHandlerMixin, _ImageHandlerMixin, _CommandMixin):
+def _discover_plugin_mixins() -> tuple[type, ...]:
+    """Collect mixin classes plugins have registered under src.runtime.*.
+
+    Mirrors the sys.modules service-injection convention already used for
+    plugin-owned services (see ``__getattr__`` below): a plugin registers a
+    module under a ``"src.runtime.<name>"`` key and exports a class named
+    ``Mixin``. This function scans sys.modules for any such module and returns
+    its ``Mixin`` class so it can be included as a SandboxProcessor base.
+
+    Evaluated exactly once, when this module is first imported — safe because
+    SandboxProcessor is only ever imported lazily from inside a plugin's
+    run() method, never at module scope in src/cli.py or plugin_loader.py, and
+    load_plugins() (which runs every plugin's _register() calls) always
+    completes before any run() is dispatched. Returns an empty tuple if no
+    plugin registers a runtime mixin — SandboxProcessor still works, just
+    without any mode-specific commands.
+    """
+    mixins: list[type] = []
+    for module_name, module in list(sys.modules.items()):
+        if module is None or not module_name.startswith("src.runtime."):
+            continue
+        mixin_cls = getattr(module, "Mixin", None)
+        if isinstance(mixin_cls, type):
+            mixins.append(mixin_cls)
+    mixins.sort(key=lambda cls: cls.__module__)  # deterministic MRO
+    return tuple(mixins)
+
+
+class SandboxProcessor(*_discover_plugin_mixins(), _FileTypeMixin, _CommandMixin):
     """Main application class for processing inputs to the Princeton AI Sandbox."""
 
     def __init__(self, professor_name: str, model: Optional[str] = None,
@@ -145,23 +171,3 @@ class SandboxProcessor(_DocumentHandlerMixin, _ImageHandlerMixin, _CommandMixin)
         # Cache on the instance so __getattr__ is only called once per service.
         object.__setattr__(self, name, val)
         return val
-
-    def process_transcription_review(
-        self,
-        text: str,
-        language: str,
-        kanbun: bool = False,
-        kanbun_main: bool = False,
-        output_file: Optional[str] = None,
-    ) -> None:
-        """Review a transcription for OCR errors and print (and optionally save) the JSON report."""
-        try:
-            result_json = self.transcription_review_service.review_transcription(
-                text, language, kanbun=kanbun, kanbun_main=kanbun_main
-            )
-            print("\n" + result_json)
-            if output_file:
-                FileOutputHandler.save_to_text_file(result_json, output_file, label="Review")
-        except Exception as e:
-            logger.error(f"Error during transcription review: {e}", exc_info=True)
-            raise CLIError(f"Error during transcription review: {e}") from e

@@ -42,11 +42,11 @@ def _make_processor(monkeypatch) -> SandboxProcessor:
 class TestProcessTextBasedFileTableAware:
 
     def test_table_aware_calls_process_docx_for_translation(self, tmp_path, monkeypatch):
-        """When table_aware=True the method uses DocxProcessor.process_docx_for_translation."""
+        """When table_aware=True the method uses process_docx_for_translation."""
         proc = _make_processor(monkeypatch)
         fake_registry = {"[TABLE_1]": [["Header"], ["Cell"]]}
         monkeypatch.setattr(
-            "src.runtime.document_handler.DocxProcessor.process_docx_for_translation",
+            "src.runtime.document_handler.process_docx_for_translation",
             lambda f, target_page_size: (["Page text"], fake_registry),
         )
         f = tmp_path / "doc.docx"

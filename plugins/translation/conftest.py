@@ -44,10 +44,19 @@ def _register(module_name: str, rel_path: str) -> None:
         sys.modules[module_name] = mod
         spec.loader.exec_module(mod)  # type: ignore[union-attr]
     # Make the module accessible as an attribute on its parent package so that
-    # pytest monkeypatch.setattr("src.services.<name>.*") works.
+    # pytest monkeypatch.setattr("src.services.<name>.*") works. Falls back to
+    # importlib.import_module when the parent (a real package, e.g.
+    # src.runtime) hasn't been imported yet; synthetic parents like
+    # pu_plugin.translation aren't real importable packages, so ImportError
+    # there just means "no attribute to expose" — safe to skip.
     parts = module_name.rsplit(".", 1)
     if len(parts) == 2:
         parent = sys.modules.get(parts[0])
+        if parent is None:
+            try:
+                parent = importlib.import_module(parts[0])
+            except ImportError:
+                parent = None
         if parent is not None:
             setattr(parent, parts[1], sys.modules[module_name])
 
@@ -73,6 +82,14 @@ _register(
 _register(
     "src.services.image_translation_service",
     "src/services/image_translation_service.py",
+)
+_register(
+    "src.processors.docx_translation",
+    "src/processors/docx_translation.py",
+)
+_register(
+    "src.runtime.document_handler",
+    "src/runtime/document_handler.py",
 )
 
 

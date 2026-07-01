@@ -2,11 +2,40 @@
 
 import logging
 import os
+import re
 from concurrent.futures import ThreadPoolExecutor, as_completed as futures_as_completed
 from contextlib import contextmanager
 from typing import Any, Callable, Dict, Generator, List, Tuple
 
 from tqdm import tqdm
+
+from ..processors.constants import IMAGE_EXTENSIONS
+
+_NATURAL_SPLIT_RE = re.compile(r"(\d+)")
+
+
+def natural_sort_key(name: str) -> List[Any]:
+    """Return a key that sorts embedded digit runs numerically.
+
+    Example: page_2.jpg comes before page_10.jpg.
+    """
+    parts = _NATURAL_SPLIT_RE.split(name)
+    return [int(part) if part.isdigit() else part.casefold() for part in parts]
+
+
+def collect_image_files(folder_path: str) -> List[str]:
+    """Return a sorted list of absolute paths to all image files in a folder.
+
+    Files are sorted so that names with embedded numbers appear in the natural
+    reading order (e.g. ``page_2.jpg`` before ``page_10.jpg``) rather than
+    alphabetical order (which would put ``page_10.jpg`` before ``page_2.jpg``).
+    """
+    return [
+        os.path.join(folder_path, name)
+        for name in sorted(os.listdir(folder_path), key=natural_sort_key)
+        if name.lower().endswith(IMAGE_EXTENSIONS)
+        and os.path.isfile(os.path.join(folder_path, name))
+    ]
 
 
 def cap_worker_count(

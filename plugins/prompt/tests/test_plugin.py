@@ -105,7 +105,7 @@ class TestPluginRunDryRun:
         svc_mock = MagicMock()
         svc_mock._get_model.return_value = "gpt-4o"
         svc_mock.build_prompts.return_value = ("sys", "usr")
-        monkeypatch.setattr(plugin_mod, "SandboxProcessor",
+        monkeypatch.setattr("src.runtime.sandbox_processor.SandboxProcessor",
                             lambda *a, **kw: self._make_sandbox_mock(svc_mock))
 
         args = _make_args(dry_run=True)
@@ -119,7 +119,7 @@ class TestPluginRunDryRun:
         svc_mock = MagicMock()
         svc_mock._get_model.return_value = "gpt-4o"
         svc_mock.build_prompts.return_value = ("sys", "usr")
-        monkeypatch.setattr(plugin_mod, "SandboxProcessor",
+        monkeypatch.setattr("src.runtime.sandbox_processor.SandboxProcessor",
                             lambda *a, **kw: self._make_sandbox_mock(svc_mock))
 
         args = _make_args(dry_run=True)
@@ -145,7 +145,7 @@ class TestPluginRunNormal:
     def _setup(self, monkeypatch, response_text="The answer"):
         svc_mock = MagicMock()
         svc_mock.send_prompt.return_value = response_text
-        monkeypatch.setattr(plugin_mod, "SandboxProcessor",
+        monkeypatch.setattr("src.runtime.sandbox_processor.SandboxProcessor",
                             lambda *a, **kw: self._make_sandbox_mock(svc_mock))
         monkeypatch.setattr(plugin_mod, "_collect_multiline", lambda label: "my question")
         return svc_mock
@@ -160,7 +160,7 @@ class TestPluginRunNormal:
 
     def test_raises_cli_error_when_prompt_is_blank(self, monkeypatch):
         svc_mock = MagicMock()
-        monkeypatch.setattr(plugin_mod, "SandboxProcessor",
+        monkeypatch.setattr("src.runtime.sandbox_processor.SandboxProcessor",
                             lambda *a, **kw: self._make_sandbox_mock(svc_mock))
         monkeypatch.setattr(plugin_mod, "_collect_multiline", lambda label: "   ")
 
@@ -170,7 +170,7 @@ class TestPluginRunNormal:
     def test_send_prompt_exception_becomes_cli_error(self, monkeypatch):
         svc_mock = MagicMock()
         svc_mock.send_prompt.side_effect = RuntimeError("api down")
-        monkeypatch.setattr(plugin_mod, "SandboxProcessor",
+        monkeypatch.setattr("src.runtime.sandbox_processor.SandboxProcessor",
                             lambda *a, **kw: self._make_sandbox_mock(svc_mock))
         monkeypatch.setattr(plugin_mod, "_collect_multiline", lambda label: "question")
 
@@ -193,7 +193,7 @@ class TestPluginRunNormal:
     def test_include_system_prompt_passes_collected_value(self, monkeypatch, capsys):
         svc_mock = MagicMock()
         svc_mock.send_prompt.return_value = "ok"
-        monkeypatch.setattr(plugin_mod, "SandboxProcessor",
+        monkeypatch.setattr("src.runtime.sandbox_processor.SandboxProcessor",
                             lambda *a, **kw: self._make_sandbox_mock(svc_mock))
         # First call = system prompt, second = user prompt
         call_seq = iter(["my system prompt", "my user prompt"])
@@ -206,7 +206,7 @@ class TestPluginRunNormal:
     def test_include_system_prompt_empty_becomes_none(self, monkeypatch, capsys):
         svc_mock = MagicMock()
         svc_mock.send_prompt.return_value = "ok"
-        monkeypatch.setattr(plugin_mod, "SandboxProcessor",
+        monkeypatch.setattr("src.runtime.sandbox_processor.SandboxProcessor",
                             lambda *a, **kw: self._make_sandbox_mock(svc_mock))
         # Empty system prompt → should pass None to send_prompt
         call_seq = iter(["", "my user prompt"])
