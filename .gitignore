@@ -1,13 +1,10 @@
-# Specify filepatterns you want git to ignore.
+# OS
 .DS_Store
+Thumbs.db
 
-# Environment variables
-.env
-.env.local
-.env.*.local
-
-# Local settings overrides (user-specific, not committed)
-settings.local.toml
+# IDE
+.idea/
+.vscode/
 
 # Python
 __pycache__/
@@ -19,10 +16,22 @@ venv/
 .venv/
 env/
 ENV/
-.idea/
 
-# VS Code
-.vscode/
+# Environment variables / local shell config
+.env
+.env.local
+.env.*.local
+.envrc
+
+# Local settings overrides (user-specific, not committed)
+settings.local.toml
+
+# Testing / coverage artifacts
+.coverage
+htmlcov/
+coverage.xml
+junit.xml
+.pytest_cache/
 
 # Local test folder
 example_docs/
@@ -41,15 +50,6 @@ data/archives/*
 data/usage_report.html
 !data/README.md
 
-# Coverage
-.coverage
-htmlcov/
-coverage.xml
-junit.xml
-
-# OS
-Thumbs.db
-
 # Plugins — each plugin is a separately cloned/developed git repo.
 # The plugins/ folder is committed (via .gitkeep) so it exists on a fresh
 # clone; the contents of each plugin repo are not tracked by the main repo.
@@ -63,6 +63,3 @@ plugins/*
 
 # External files
 Presentation/
-
-# Pytest cache
-.pytest_cache/
