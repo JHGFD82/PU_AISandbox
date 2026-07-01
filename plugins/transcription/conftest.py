@@ -3,18 +3,26 @@
 Adds the main PU_AISandbox repo root to sys.path so that ``src.*`` imports
 resolve correctly when running tests from within this plugin directory.
 
-Also pre-registers this plugin's runtime mixin module into sys.modules so
-tests can import SandboxProcessor with the transcribe-specific methods
-already composed in.
+Also pre-registers this plugin's service and runtime-mixin modules into
+sys.modules (mirroring plugins/translation/conftest.py) so tests can import
+them via their src.services.*/src.runtime.* names without depending on
+another test file incidentally loading the real plugin.py first.
 """
 
 import importlib.util
 import sys
 from pathlib import Path
+from unittest.mock import MagicMock
+
+import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
+
+import src.models.catalog as _catalog_module  # noqa: E402 — must follow sys.path setup
+
+_TEMPLATE_PATH = _REPO_ROOT / "src" / "model_catalog.template.json"
 
 _PLUGIN_DIR = Path(__file__).resolve().parent
 
@@ -48,4 +56,57 @@ def _register(module_name: str, rel_path: str) -> None:
             setattr(parent, parts[1], sys.modules[module_name])
 
 
-_register("src.runtime.image_handler", "src/runtime/image_handler.py")
+# Register in dependency order: settings → fragments → specs → services → runtime.
+_register("pu_plugin.transcription.settings", "src/settings.py")
+_register(
+    "src.services.prompts.ocr_fragments",
+    "src/services/prompts/ocr_fragments.py",
+)
+_register(
+    "src.services.prompts.ocr",
+    "src/services/prompts/ocr.py",
+)
+_register(
+    "src.services.prompts.transcription_review",
+    "src/services/prompts/transcription_review.py",
+)
+_register(
+    "src.services.image_processor_service",
+    "src/services/image_processor_service.py",
+)
+_register(
+    "src.services.transcription_review_service",
+    "src/services/transcription_review_service.py",
+)
+_register(
+    "src.runtime.image_handler",
+    "src/runtime/image_handler.py",
+)
+
+
+@pytest.fixture(autouse=True)
+def _use_template_catalog(monkeypatch):
+    """Redirect get_model_catalog_path to the template file for all tests.
+
+    This allows tests to run in CI where src/model_catalog.json is git-ignored.
+    """
+    monkeypatch.setattr(_catalog_module, "get_model_catalog_path", lambda: _TEMPLATE_PATH)
+
+
+@pytest.fixture(autouse=True)
+def _mock_token_tracker(monkeypatch):
+    """Prevent real TokenTracker instances from writing to data/ during tests.
+
+    All service constructors that receive no explicit token_tracker fall back to
+    ``TokenTracker(professor=..., data_file=...)`` inside BaseService.__init__.
+    Patching it here keeps test runs side-effect-free without requiring every
+    call site to pass a mock explicitly.
+    """
+    def _make_tracker(**_):
+        tracker = MagicMock()
+        usage = MagicMock()
+        usage.total_cost = 0.0
+        tracker.record_usage.return_value = usage
+        return tracker
+
+    monkeypatch.setattr("src.services.base_service.TokenTracker", _make_tracker)
