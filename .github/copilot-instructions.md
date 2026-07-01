@@ -184,4 +184,4 @@ def record_usage(self, model: str, tokens: int, professor: str) -> None:
   - **Types**: `feat`, `fix`, `refactor`, `docs`, `test`, `chore`, `perf`, `ci`, `build`
   - **Body sections**: `Why:`, `What changed:`, `Notes:` (when relevant)
 - After making **any** code changes, always propose a commit message in this format before ending the response.
-- **The user handles all git commits themselves. Never run `git commit` or `git add`.**
+- **Do not run `git commit` or `git add`. The user handles all git commits themselves. However, if the user tells you otherwise, follow their instructions.**

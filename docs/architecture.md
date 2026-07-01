@@ -80,9 +80,12 @@ If two plugins claim the same command *and* both declare a `handles` list, the l
 - Creates a `TokenTracker` for the professor
 - Holds processors (`PDFProcessor`, `ImageProcessor`) and the file output handler
 - **Lazily** loads plugin-owned services via `__getattr__`
+- **Composes plugin-owned command mixins** (e.g. `translate_document`, `process_image`) as base classes at class-definition time — see "Plugin Isolation and sys.modules Injection" below
 - **Alternate API routing**: if `model` contains colon syntax (e.g. `"my_cluster:llama-3-70b"`), automatically loads the matching `apis.json` entry, points the OpenAI-compatible client at that `base_url`, and bypasses the model catalog
 
 The lazy loader follows a naming convention: attribute `translation_service` maps to `sys.modules["src.services.translation_service"].TranslationService`. Plugins inject their service files into `sys.modules` at import time; the processor instantiates them on first access.
+
+Core, always-present mixins (`_FileTypeMixin` for file-type detection, `_CommandMixin` for interactive helpers) are the only ones statically listed in the class definition — everything mode-specific comes from plugin-registered mixins discovered at import time.
 
 ### `src/runtime/dispatch_plugin.py` — Multi-Plugin Routing
 
@@ -147,7 +150,7 @@ Unsupported extensions and rich-format failures silently fall back to `.txt`.
 
 ## Plugin Isolation and sys.modules Injection
 
-Plugins own their service files. Because `src/services/` no longer ships translation or transcription logic, plugins must make those modules findable. The pattern:
+Plugins own their service files *and* their command-orchestration logic (e.g. `translate_document`, `process_image`). Because `src/` ships neither translation nor transcription business logic, plugins must make those modules findable. The pattern:
 
 ```python
 # In plugin.py, at module level (before any imports that need the module)
@@ -165,6 +168,23 @@ _register("src.services.translation_service", "src/services/translation_service.
 ```
 
 `SandboxProcessor.__getattr__` then finds the module in `sys.modules` and instantiates the service class automatically. No changes to `src/` are ever needed when adding a plugin.
+
+### The same convention for orchestration methods: `src.runtime.*` mixin discovery
+
+Methods that used to live directly on `SandboxProcessor` (or a statically-inherited mixin) — `translate_document`, `translate_custom_text`, `process_image_translation`, `process_image`, etc. — are owned by the plugin that implements them, using the identical `_register()` pattern but under a `"src.runtime.<name>"` key instead of `"src.services.<name>"`:
+
+```python
+_register("src.runtime.document_handler", "src/runtime/document_handler.py")
+```
+
+The registered module must export a class named `Mixin`. `src/runtime/sandbox_processor.py` scans `sys.modules` for every key starting with `"src.runtime."` and includes each one's `Mixin` class as a `SandboxProcessor` base, at the moment `SandboxProcessor`'s class statement first executes:
+
+```python
+class SandboxProcessor(*_discover_plugin_mixins(), _FileTypeMixin, _CommandMixin):
+    ...
+```
+
+This is safe because `SandboxProcessor` is only ever imported lazily inside a plugin's `run()` method (never at module scope anywhere in `src/`), and `load_plugins()` runs every plugin's `_register()` calls before any `run()` is dispatched — so every plugin mixin is guaranteed to already be registered by the time `_discover_plugin_mixins()` runs. `plugins/translation/` and `plugins/transcription/` each register their own `src.runtime.*` module name (they can't share one, since a plugin's own document/image-handling methods are its own file); each plugin's `conftest.py` mirrors the same registration for its standalone test suite.
 
 ---
 
