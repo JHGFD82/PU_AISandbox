@@ -10,10 +10,23 @@ def save_to_markdown(
     output_path: str,
     label: str = "Output",
 ) -> None:
-    """Save *content* to a Markdown file at *output_path*.
+    """Save the AI's response text to a .md (Markdown) file.
 
-    The AI response is written as-is because the models already produce
-    Markdown-formatted text.  A trailing newline is added if absent.
+    The text is written exactly as the AI produced it, since AI models
+    already format their responses using Markdown (a simple text formatting
+    style using symbols like ``#`` for headings and ``**bold**`` for bold
+    text) when asked to. A trailing blank line is added if one isn't already
+    present.
+
+    Args:
+        content: The AI's response text to save.
+        output_path: The file path to write to, e.g. ``'response.md'``.
+        label: A short description used in the saved-confirmation message
+               shown to the user (e.g. ``'Translation'`` or ``'Response'``).
+
+    Raises:
+        OSError: If the file cannot be written (e.g. the folder doesn't
+                 exist or there's a permissions problem).
     """
     text = content if content.endswith("\n") else content + "\n"
     try:

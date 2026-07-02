@@ -12,13 +12,21 @@ from ._output_utils import (
 )
 from ..settings import DEFAULT_FONT_SIZE
 
-# Maximum width (EMU) an inserted image may occupy inside a Word document.
-# Derived from US Letter (8.5") with 1" margins on each side: 6.5" × 914400 EMU/inch.
+# The widest an inserted image is allowed to be inside a Word document,
+# measured in EMU (English Metric Units — the unit Word uses internally for
+# object sizing; 914,400 EMU = 1 inch). This value is a US Letter page
+# (8.5 inches wide) with 1-inch margins on each side, leaving 6.5 usable
+# inches: 6.5 x 914400.
 _MAX_IMAGE_WIDTH_EMU: int = 5_943_600
 
 
 def _apply_docx_table_borders(table) -> None:  # type: ignore[no-untyped-def]
-    """Apply thin (0.5 pt) black borders to all sides of a python-docx Table."""
+    """Draw a thin black border around every cell of a Word table.
+
+    Args:
+        table: A table object from the python-docx library (the library used
+               to build Word documents), as returned by ``doc.add_table()``.
+    """
     try:
         from docx.oxml.ns import qn
         from docx.oxml import OxmlElement
@@ -47,16 +55,37 @@ def save_to_docx(
     *,
     label: str,
 ) -> None:
-    """Save content to a Word document using python-docx.
+    """Save the AI's response text to a Word document (.docx file).
 
-    If *media* is provided (a list of :class:`~src.models.embedded_media.EmbeddedMedia`
-    items), each image is reinserted at the proportionally equivalent position in
-    the translated document.
+    Uses the python-docx library to build the document. If images were
+    extracted from the source document, each one is reinserted at roughly
+    its original position in the translated document. If any tables were set
+    aside for separate translation, their placeholder markers (like
+    ``'[TABLE_1]'``) are swapped out for real Word table objects, so the
+    rows and columns display properly instead of appearing as plain text.
 
-    If *table_registry* is provided (a mapping from ``"[TABLE_N]"`` placeholder
-    tokens to translated cell grids), any paragraph whose text is exactly a
-    ``[TABLE_N]`` token is replaced by a proper Word ``Table`` object instead
-    of being written as a paragraph.
+    Args:
+        content: The AI's response text to write into the document.
+        output_path: The file path to save to, e.g. ``'translated.docx'``.
+        custom_font: The name of a specific font to use. ``None`` chooses a
+                     sensible default automatically based on the target
+                     language.
+        target_lang: The language the content was translated into (e.g.
+                     ``'English'``, ``'Japanese'``), used to decide whether a
+                     font capable of displaying non-Latin scripts is needed.
+                     ``None`` if this isn't a translation.
+        media: A list of ``EmbeddedMedia`` objects (images captured from the
+               source document) to reinsert into this document. ``None`` or
+               an empty list if there are no images to insert.
+        table_registry: A dictionary mapping each table placeholder marker
+                        (e.g. ``'[TABLE_1]'``) to that table's translated
+                        cell text (a list of rows, each row a list of cell
+                        strings). ``None`` if no tables were extracted for
+                        this document.
+        font_size: The body text size, in points, e.g. ``11``. ``None`` uses
+                   the default size.
+        label: A short description used in the saved-confirmation message
+               shown to the user (e.g. ``'Translation'``).
     """
     try:
         from docx import Document
@@ -276,6 +305,14 @@ def save_to_docx(
 
 
 def _fallback_to_text(content: str, output_path: str, label: str) -> None:
-    """Fallback to text output when Word document generation fails."""
+    """Save as a plain .txt file instead, used when Word document generation fails.
+
+    Args:
+        content: The text to save.
+        output_path: The originally-requested .docx path; the extension is
+                     swapped to .txt automatically.
+        label: A short description used in the saved-confirmation message
+               shown to the user.
+    """
     text_output_path = str(Path(output_path).with_suffix('.txt'))
     save_to_text_file(content, text_output_path, label)

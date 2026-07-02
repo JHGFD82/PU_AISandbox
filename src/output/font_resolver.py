@@ -1,4 +1,4 @@
-"""Font resolution utilities for output generation."""
+"""Chooses the right font for PDF and Word output, including support for non-Latin scripts."""
 
 import logging
 from pathlib import Path
@@ -6,18 +6,48 @@ from typing import Optional
 
 
 def _fonts_dir() -> Path:
-    """Return the project-level fonts directory."""
+    """Return the path to this project's ``fonts/`` folder."""
     return Path(__file__).resolve().parents[2] / 'fonts'
 
 
 def _emit_warning(message: str, log_message: Optional[str] = None) -> None:
-    """Emit a synchronized warning to logs and console."""
+    """Show a warning to the user on-screen and record the same event in the log file.
+
+    Args:
+        message: The warning text to print to the terminal.
+        log_message: A more detailed version of the message to write to the
+                     log file, if different from what's shown on-screen.
+                     ``None`` reuses ``message`` for both.
+    """
     logging.warning(log_message or message)
     print(message)
 
 
 def get_pdf_font(custom_font: Optional[str] = None) -> str:
-    """Get an appropriate font for CJK characters in PDF output."""
+    """Choose which font to use when writing a PDF, favoring ones that can display CJK text.
+
+    CJK refers to Chinese, Japanese, and Korean writing systems, which need a
+    font specifically designed to include those characters — most standard
+    fonts cannot display them at all. This function looks in the project's
+    ``fonts/`` folder for a usable font, in this order:
+
+    1. The font named in ``custom_font``, if provided and found.
+    2. One of a small list of preferred CJK-capable fonts bundled with common
+       operating systems (e.g. Arial Unicode, AppleGothic).
+    3. Any other ``.ttf`` font file found in the ``fonts/`` folder.
+    4. As a last resort, a plain built-in font that won't display CJK
+       characters correctly, printing guidance on how to fix this.
+
+    Args:
+        custom_font: The name of a specific font file (without the ``.ttf``
+                     extension) to look for first, e.g. ``'NotoSansCJK'``.
+                     ``None`` skips straight to the preferred font list.
+
+    Returns:
+        The name of the font to use with the PDF-generation library
+        (reportlab). Falls back to ``'Times-Roman'`` if no CJK font could be
+        found or if the PDF-generation library isn't installed.
+    """
     try:
         from reportlab.pdfbase import pdfmetrics
         from reportlab.pdfbase.ttfonts import TTFont
@@ -92,7 +122,25 @@ def get_pdf_font(custom_font: Optional[str] = None) -> str:
 
 
 def get_docx_font(custom_font: Optional[str] = None) -> str:
-    """Get an appropriate font for CJK characters for Word output."""
+    """Choose which font to use when writing a Word document, favoring ones that can display CJK text.
+
+    CJK refers to Chinese, Japanese, and Korean writing systems, which need a
+    font specifically designed to include those characters. Unlike PDF
+    generation, Word documents only need the font's name (Word itself locates
+    and renders the actual font file), so this function mainly returns a
+    sensible font name rather than registering font files.
+
+    Args:
+        custom_font: The name of a specific font to use, e.g.
+                     ``'NotoSansCJK'``. Only used if a matching ``.ttf`` file
+                     exists in the ``fonts/`` folder; otherwise ignored.
+                     ``None`` skips straight to the preferred font list.
+
+    Returns:
+        The font name to apply to the Word document. Falls back to
+        ``'Times New Roman'`` if a filesystem error prevents checking for
+        fonts.
+    """
     try:
         fonts_dir = _fonts_dir()
         if fonts_dir.exists() and custom_font:

@@ -27,10 +27,32 @@ def save_to_pdf(
     *,
     label: str,
 ) -> None:
-    """Save content to a PDF file using reportlab.
+    """Save the AI's response text to a PDF file.
 
-    If *table_registry* is provided, ``[TABLE_N]`` placeholder paragraphs
-    are rendered as reportlab ``Table`` flowables instead of plain text.
+    Uses the reportlab library to build the document. If any tables were set
+    aside for separate translation, their placeholder markers (like
+    ``'[TABLE_1]'``) are swapped out for real PDF tables with visible grid
+    lines, instead of being printed as plain text.
+
+    Args:
+        content: The AI's response text to write into the PDF.
+        output_path: The file path to save to, e.g. ``'translated.pdf'``.
+        custom_font: The name of a specific font to use. ``None`` chooses a
+                     sensible default automatically based on the target
+                     language.
+        target_lang: The language the content was translated into (e.g.
+                     ``'English'``, ``'Korean'``), used to decide whether a
+                     font capable of displaying non-Latin scripts is needed.
+                     ``None`` if this isn't a translation.
+        table_registry: A dictionary mapping each table placeholder marker
+                        (e.g. ``'[TABLE_1]'``) to that table's translated
+                        cell text (a list of rows, each row a list of cell
+                        strings). ``None`` if no tables were extracted for
+                        this document.
+        font_size: The body text size, in points, e.g. ``11``. ``None`` uses
+                   the default size.
+        label: A short description used in the saved-confirmation message
+               shown to the user (e.g. ``'Translation'``).
     """
     try:
         from reportlab.lib.pagesizes import letter
@@ -183,6 +205,14 @@ def save_to_pdf(
 
 
 def _fallback_to_text(content: str, output_path: str, label: str) -> None:
-    """Fallback to text output when PDF generation fails."""
+    """Save as a plain .txt file instead, used when PDF generation fails.
+
+    Args:
+        content: The text to save.
+        output_path: The originally-requested .pdf path; the extension is
+                     swapped to .txt automatically.
+        label: A short description used in the saved-confirmation message
+               shown to the user.
+    """
     text_output_path = str(Path(output_path).with_suffix('.txt'))
     save_to_text_file(content, text_output_path, label)

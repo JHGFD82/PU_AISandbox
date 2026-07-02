@@ -12,16 +12,24 @@ def save_to_excel(
     output_path: str,
     label: str = "Output",
 ) -> None:
-    """Save *content* to an Excel workbook at *output_path*.
+    """Save the AI's response text to an Excel workbook (.xlsx file).
 
-    Strategy:
-    - If the response contains one or more Markdown tables, each table is
-      written as a separate sheet named "Table 1", "Table 2", etc.  Any
-      surrounding prose is written to a "Text" sheet.
-    - If there are no Markdown tables, each non-empty paragraph becomes a
-      row in column A of a single "Content" sheet.
+    Any tables in the response are placed on their own worksheet ("Table 1",
+    "Table 2", and so on) so the rows and columns display properly in Excel,
+    with the header row shown in bold. Any surrounding prose (text that isn't
+    part of a table) is written to its own "Text" worksheet, one paragraph
+    per row. If the response contains no tables at all, every paragraph is
+    written to a single "Content" worksheet instead.
 
-    Falls back to plain-text output if openpyxl is unavailable.
+    This function relies on the ``openpyxl`` package. If it isn't installed,
+    the response is saved as a plain .txt file instead, with a note printed
+    explaining why.
+
+    Args:
+        content: The AI's response text to save.
+        output_path: The file path to write to, e.g. ``'response.xlsx'``.
+        label: A short description used in the saved-confirmation message
+               shown to the user (e.g. ``'Translation'`` or ``'Response'``).
     """
     try:
         import openpyxl

@@ -11,10 +11,22 @@ def save_to_json(
     output_path: str,
     label: str = "Output",
 ) -> None:
-    """Save *content* to a JSON file at *output_path*.
+    """Save the AI's response text to a .json file.
 
-    If *content* is already valid JSON it is round-tripped (pretty-printed).
-    Otherwise the text is wrapped as ``{"content": "<text>"}``.
+    If the response text is already valid JSON, it's reformatted with
+    consistent spacing and saved as-is. Otherwise, the plain text is wrapped
+    in a simple structure — ``{"content": "<the text>"}`` — so the output is
+    still valid JSON even when the AI didn't respond in that format.
+
+    Args:
+        content: The AI's response text to save.
+        output_path: The file path to write to, e.g. ``'response.json'``.
+        label: A short description used in the saved-confirmation message
+               shown to the user (e.g. ``'Translation'`` or ``'Response'``).
+
+    Raises:
+        OSError: If the file cannot be written (e.g. the folder doesn't
+                 exist or there's a permissions problem).
     """
     try:
         data = json.loads(content)
