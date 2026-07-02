@@ -9,7 +9,7 @@ a ``handles`` list), the plugin loader builds a ``DispatchPlugin`` to combine
 them into a single command instead of raising a conflict error.
 
 How routing works: when the merged command runs, ``DispatchPlugin`` looks at
-the source-language token the user requested (e.g. ``'J'`` for Japanese) and
+the source-language token the user requested (e.g. ``'jp'`` for Japanese) and
 hands the request off to whichever original plugin declared ownership of
 that token. If the destination language belongs to a different plugin, and
 that plugin can offer extra guidance for translating into its language, that
@@ -53,7 +53,7 @@ class DispatchPlugin:
         commands: A single-item list containing the shared command name
                   (e.g. ``['translate']``).
         source_registry: A dictionary mapping each source-language token
-                         (e.g. ``'J'`` for Japanese) to the plugin that
+                         (e.g. ``'jp'`` for Japanese) to the plugin that
                          handles it.
     """
 
@@ -176,7 +176,7 @@ class DispatchPlugin:
             raise CLIError(
                 f"Command '{self._command}' requires a language-code argument "
                 "(either a single code such as 'en', or a language-code pair "
-                "such as 'J-E')."
+                "such as 'jp-en')."
             )
 
         owner = self.source_registry.get(source_token)
