@@ -1,25 +1,37 @@
 """PU_AISandbox Transcription base plugin.
 
-Provides the ``transcribe`` command (OCR image transcription) and the
-``transcription_review`` command (OCR error review) for English text.
+Provides the ``transcribe`` command (turning images of text into typed
+text — optical character recognition, or OCR) and the
+``transcription_review`` command (checking a transcription for likely OCR
+mistakes) for English text.
 
 This is a **standalone plugin** — it registers the ``transcribe`` and
-``transcription_review`` commands.  Additional transcription capabilities can
-be added by installing extension plugins that declare their own ``handles`` and
-optional command flags.
+``transcription_review`` commands itself. Support for other languages is
+added by installing separate extension plugins that declare which
+languages they handle and add their own extra command-line flags, without
+re-registering these two commands from scratch.
 
-Extension plugins for transcription must **not** call ``register_subparsers()``
-— the commands already exist.  They hook in by declaring ``handles`` (the
-source-language tokens they own) and implementing ``register_command_flags()``
-to append their flags to the shared parser.  Calling ``register_subparsers()``
-would cause a conflict and the plugin would be silently skipped.
+Extension plugins for transcription must **not** call
+``register_subparsers()`` themselves — the commands already exist here.
+Instead, an extension plugin hooks in by declaring a ``handles`` list (the
+language names it owns, e.g. ``["Japanese"]``) and implementing
+``register_command_flags()`` to add its own flags to the shared parser
+this plugin already built. Calling ``register_subparsers()`` from an
+extension plugin would try to register the same command twice, which
+causes a conflict, so any extension plugin that does this is silently
+skipped by the loader.
 
-ARCHITECTURE — sys.modules injection
---------------------------------------
-``_register()`` (called at import time) injects each extracted service module
-into ``sys.modules`` under the same ``src.services.*`` name it had in the main
-repo.  This keeps everything importable after the service files are removed
-from the main repo's ``src/`` directory.
+How plugin-owned service files stay importable
+-----------------------------------------------
+Some of this plugin's supporting code (its prompt-building and API-calling
+service classes) lives in this plugin's own directory rather than in the
+main repository's ``src/`` folder. To keep those files importable under
+their expected ``src.services.*`` path — the same path the main
+repository's own services use — ``_register()`` (called once, at import
+time, below) loads each file directly and inserts it into Python's
+registry of already-imported modules under that name. This means other
+code can write a normal ``import src.services.whatever`` statement without
+needing to know the file actually lives inside this plugin's folder.
 """
 
 from __future__ import annotations
@@ -39,12 +51,20 @@ _PLUGIN_DIR = Path(__file__).parent
 
 
 def _register(module_name: str, rel_path: str) -> None:
-    """Inject a plugin module into sys.modules under the src.* namespace.
+    """Make one of this plugin's own files importable under a ``src.*`` path.
 
-    If the module is already present (main repo's version loaded first), the
-    registration is skipped.
+    See the module docstring above ("How plugin-owned service files stay
+    importable") for the full explanation of why this is needed.
+
+    Args:
+        module_name: The dotted import path to register the module under
+                     (e.g. ``'src.services.image_processor_service'``).
+        rel_path: The module's real file path, relative to this plugin's
+                  own directory.
     """
     if module_name in sys.modules:
+        # Already registered — most likely the main repository's own copy
+        # of this module loaded first, so there's nothing more to do.
         return
     path = _PLUGIN_DIR / rel_path
     if not path.exists():
@@ -110,10 +130,28 @@ def _run_transcription_review(
     kanbun_main: bool = False,
     output_file: Optional[str] = None,
 ) -> None:
-    """Review a transcription for OCR errors and print (and optionally save) the JSON report.
+    """Check a transcription for likely OCR mistakes and print (and optionally save) the result.
 
-    kanbun/kanbun_main are accepted for extension-plugin compatibility (East
-    Asian kanbun review guidance) — this base plugin doesn't set them itself.
+    Args:
+        sandbox: The active ``SandboxProcessor`` for this run, which owns
+                 the API key, model, and the transcription-review service
+                 that actually calls the AI model.
+        text: The transcription text to check for errors.
+        language: The language the transcription is written in (e.g.
+                  ``'English'``).
+        kanbun: Whether to apply Kanbun-specific review guidance (Kanbun is
+                a system for reading classical Chinese texts using Japanese
+                grammar markers). Accepted here for compatibility with East
+                Asian language extension plugins — this base (English-only)
+                plugin never sets it itself.
+        kanbun_main: Whether the text is itself the main Kanbun reading
+                     rather than an annotation. Same compatibility note as
+                     ``kanbun`` above.
+        output_file: Where to save the review report as a text file, or
+                     ``None`` to only print it to the screen.
+
+    Raises:
+        CLIError: If the AI model call fails.
     """
     from src.errors import CLIError
     from src.output.file_output import FileOutputHandler
@@ -133,21 +171,30 @@ def _run_transcription_review(
 
 
 class TranscriptionPlugin:
-    """OCR transcription and transcription-review mode plugin (base, English only).
+    """Turns images of English text into typed text, and checks transcriptions for errors.
 
     Registers two commands:
-    - ``transcribe``            — OCR an image file or folder of images
-    - ``transcription_review``  — Review prior transcription output for OCR errors
 
-    This base plugin handles English only.  Additional language-specific
-    behavior may be provided by separately installed transcription extensions.
+    - ``transcribe`` — reads an image file (or a whole folder of images) and
+      produces typed-out text using optical character recognition (OCR),
+      the process of an AI model reading text out of a picture.
+    - ``transcription_review`` — takes the *output* of a prior transcription
+      run and checks it against common OCR mistake patterns, producing a
+      structured report of likely errors.
+
+    This base plugin handles English only. Other languages (e.g. Japanese,
+    Chinese) are added by installing separate transcription extension
+    plugins alongside this one — see the module docstring above for how
+    extensions plug into these same two commands.
     """
 
     commands: list[str] = ["transcribe", "transcription_review"]
     # ``handles`` lists the full language names (as returned by
-    # ``parse_single_language_code``) that this plugin services.  The
-    # plugin loader uses this to merge with other transcription plugins
-    # via DispatchPlugin, routing each language to the correct plugin.
+    # ``parse_single_language_code``) that this plugin services. The
+    # plugin loader uses this list to combine this plugin with any
+    # installed language extension plugins (via DispatchPlugin), so a
+    # ``transcribe ja`` request is routed to the extension that declares
+    # ``handles = ["Japanese"]`` instead of to this base plugin.
     handles: list[str] = ["English"]
 
     # ── Argument registration ─────────────────────────────────────────────────
@@ -156,10 +203,20 @@ class TranscriptionPlugin:
         self,
         subparsers: argparse._SubParsersAction,
     ) -> None:
-        # Guard against double-registration: DispatchPlugin calls this method
-        # once per managed command (one instance per command), so when two
-        # commands share the same primary plugin both instances will call this.
-        # The idempotency check ensures the parsers are only created once.
+        """Register the ``transcribe`` and ``transcription_review`` subcommands and their flags.
+
+        Called once at startup by the plugin loader. Because both this base
+        plugin and any installed language extension are wired up as
+        separate instances that route through the same two command names,
+        this method may be called more than once for the same command set
+        — the ``if ... not in subparsers.choices`` checks below make sure
+        each command's parser is only actually built the first time,
+        avoiding a duplicate-registration error.
+
+        Args:
+            subparsers: The shared subcommand registry passed in by the CLI
+                        startup code.
+        """
         # ── transcribe ────────────────────────────────────────────────────────
         if "transcribe" not in subparsers.choices:
             tr = subparsers.add_parser("transcribe", help="Transcribe images using OCR")
@@ -216,7 +273,37 @@ class TranscriptionPlugin:
         top_p: Optional[float],
         max_tokens: Optional[int],
     ) -> None:
-        """Execute the transcribe or transcription_review command."""
+        """Run the ``transcribe`` or ``transcription_review`` command, whichever was invoked.
+
+        Builds a ``SandboxProcessor`` (which resolves the professor's API
+        key, sets up token/cost tracking, and lazily creates whichever
+        services are needed), then branches on ``args.command`` to run the
+        requested command: transcribing an image or folder of images, or
+        reviewing a previously-produced transcription for likely OCR
+        errors.
+
+        Args:
+            args: The object holding all the parsed command-line flags for
+                  this run (which command was invoked, the input file path,
+                  whether ``--dry-run`` was passed, etc.).
+            professor: The Princeton NetID whose configuration and API key
+                       should be used for this run (e.g. ``'heller'``).
+            model: The AI model explicitly requested on the command line, or
+                   ``None`` to use this plugin's configured default.
+            temperature: The requested sampling temperature (controls how
+                         predictable vs. varied the model's wording is), or
+                         ``None`` to use the default.
+            top_p: The requested nucleus-sampling value (an alternative way
+                   of controlling response variety), or ``None`` to use the
+                   default.
+            max_tokens: The requested maximum response length, in tokens
+                        (the small chunks of text models process and bill
+                        by), or ``None`` to use the default.
+
+        Raises:
+            CLIError: If a required input is missing, the wrong file type
+                is supplied, or the AI model call fails.
+        """
         import os
         from src.runtime.sandbox_processor import SandboxProcessor
 

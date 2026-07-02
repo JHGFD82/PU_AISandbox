@@ -1,4 +1,14 @@
-"""Combined OCR + translation service — single vision prompt resolves ambiguous characters using translation context."""
+"""Reads and translates text found in images (e.g. scanned book pages), in one AI call.
+
+Instead of first extracting text from an image (optical character
+recognition, or OCR) and then translating it as a separate step, this
+service sends the image straight to a vision-capable AI model along with
+instructions to transcribe and translate at the same time. This works
+better for handwriting or unusual fonts, because the model can use its
+understanding of the target language to resolve an ambiguous character
+based on what makes sense in context, rather than guessing during a
+transcription-only pass with no translation context available yet.
+"""
 
 import logging
 import os
@@ -20,15 +30,16 @@ from ..settings import IMAGE_TRANSLATION_MAX_TOKENS, IMAGE_TRANSLATION_TEMPERATU
 
 
 class ImageTranslationService(BaseService):
-    """Handles combined OCR + translation from images in a single API call.
+    """Transcribes and translates the text in an image using one vision-capable AI model call.
 
-    Designed for reasoning-capable vision models (e.g. gpt-5) that can hold
-    both transcription and translation in context simultaneously, resolving
-    ambiguous characters using translation context rather than guessing during
-    a separate OCR pass.
+    Built and used internally by the translation plugin's ``run()`` method
+    for image-based inputs (e.g. photos or scans) — a plugin author does not
+    need to construct this directly, but ``process_image_translation`` below
+    is a useful reference for handling images and vision models in a plugin
+    of your own.
 
-    Returns both a transcript and a translation so the caller can present or
-    save either or both.
+    Returns both the transcribed original-language text and its translation,
+    so the caller can present or save either one, or both.
     """
 
     def __init__(
@@ -42,12 +53,24 @@ class ImageTranslationService(BaseService):
         top_p: Optional[float] = None,
         max_tokens: Optional[int] = None,
     ):
+        """Set up an image translation service for one professor's request.
+
+        These parameters are supplied automatically by ``SandboxProcessor``
+        when a plugin accesses ``self.image_translation_service`` — see
+        ``BaseService.__init__`` for the full explanation of each one.
+        """
         super().__init__(api_key, professor, token_tracker, token_tracker_file, model, temperature, top_p, max_tokens)
         self.image_processor = ImageProcessor()
         self.tables: bool = False
 
     def _get_model(self) -> str:
-        """Get model to use, preferring the catalog image_translation default."""
+        """Decide which vision-capable AI model to use, syncing its price if needed.
+
+        Uses the model the user explicitly requested if one was given (as
+        long as it supports reading images), otherwise falls back to the
+        catalog's configured image-translation default. Also makes sure the
+        model's price is up to date before returning it.
+        """
         img_trans_default = get_default_model("image_translation")
         model = resolve_model(
             requested_model=self.custom_model,
@@ -63,12 +86,39 @@ class ImageTranslationService(BaseService):
         return model
 
     def _get_max_tokens(self, model: str) -> int:
-        """Get token budget for this model, using per-model catalog override if set."""
+        """Decide the maximum response length to request from the model, in tokens.
+
+        Tokens are the small chunks of text (roughly a word or word-piece)
+        that AI models process and bill by. Uses the user's explicit
+        override if one was given, otherwise the model catalog's configured
+        limit for this specific model.
+
+        Args:
+            model: The model whose token limit is being looked up, e.g.
+                   ``'gpt-4o'``.
+
+        Returns:
+            The maximum number of tokens the model may generate in its
+            response.
+        """
         if self.custom_max_tokens is not None:
             return self.custom_max_tokens
         return get_model_max_completion_tokens(model, IMAGE_TRANSLATION_MAX_TOKENS)
 
     def _build_system_prompt(self, source_language: str, target_language: str, vertical: bool = False, spread: bool = False) -> str:
+        """Build the system prompt (the model's standing instructions) for one image translation request.
+
+        Args:
+            source_language: The language the image's text is written in.
+            target_language: The language to translate into.
+            vertical: Whether the text runs top-to-bottom, right-to-left,
+                      as in traditional vertical Japanese or Chinese layout.
+            spread: Whether the image shows two facing pages side by side
+                    (a two-page spread) rather than a single page.
+
+        Returns:
+            The system prompt text.
+        """
         spec = ImageTranslationPromptSpec(
             source_language=source_language,
             target_language=target_language,
@@ -79,6 +129,17 @@ class ImageTranslationService(BaseService):
         return spec.system_prompt()
 
     def _build_user_prompt(self, source_language: str, target_language: str, vertical: bool = False, spread: bool = False) -> str:
+        """Build the user-facing prompt text that accompanies the image in the API request.
+
+        Args:
+            source_language: The language the image's text is written in.
+            target_language: The language to translate into.
+            vertical: Whether the text runs top-to-bottom, right-to-left.
+            spread: Whether the image shows two facing pages side by side.
+
+        Returns:
+            The user prompt text.
+        """
         spec = ImageTranslationPromptSpec(
             source_language=source_language,
             target_language=target_language,
@@ -89,9 +150,20 @@ class ImageTranslationService(BaseService):
         return spec.user_prompt()
 
     def build_prompts(self, source_language: str, target_language: str, vertical: bool = False, spread: bool = False) -> tuple[str, str]:
-        """Return (system_prompt, user_prompt) without calling the API.
+        """Build the prompts that would be sent to the model, without actually calling it.
 
-        Used by --dry-run mode to preview what would be sent to the model.
+        Used by ``--dry-run`` mode so a user can preview exactly what would
+        be sent to the AI before committing to an API call (and its cost).
+
+        Args:
+            source_language: The language the image's text is written in.
+            target_language: The language to translate into.
+            vertical: Whether the text runs top-to-bottom, right-to-left.
+            spread: Whether the image shows two facing pages side by side.
+
+        Returns:
+            A two-item tuple of ``(system_prompt, user_prompt)`` exactly as
+            they would be sent to the model.
         """
         spec = ImageTranslationPromptSpec(
             source_language=source_language,
@@ -113,7 +185,27 @@ class ImageTranslationService(BaseService):
         data_url: str,
         max_tokens: int,
     ) -> Any:
-        """Call the API with parameters appropriate for the given model."""
+        """Send one image-translation request to the AI model and return its raw response.
+
+        Args:
+            model: The model to call, e.g. ``'gpt-4o'``.
+            system_role: The role name to use for the system-prompt message
+                         (e.g. ``'system'`` or ``'developer'``, depending on
+                         what the model expects).
+            system_prompt: The standing instructions telling the model how
+                           to transcribe and translate.
+            user_prompt: The user-facing instructions accompanying the
+                         image.
+            data_url: The image, encoded as a data URL (the image's raw
+                      bytes converted to text so it can be embedded directly
+                      in the API request instead of hosted separately).
+            max_tokens: The maximum length, in tokens, the model may
+                        generate in its response.
+
+        Returns:
+            The raw API response object, passed on to
+            ``_record_response_usage()`` and then parsed by the caller.
+        """
         messages: list[dict[str, Any]] = [
             {"role": system_role, "content": system_prompt},
             {
@@ -130,11 +222,21 @@ class ImageTranslationService(BaseService):
         return self._create_completion(model, messages, max_tokens, temperature=temperature)
 
     def _parse_response(self, content: str) -> tuple[str, str]:
-        """Extract [TRANSCRIPT] and [TRANSLATION] sections from the model response.
+        """Split the model's raw response into its transcript and translation sections.
 
-        Returns ("", "") when the model signals no readable text ([NO_TEXT]).
-        Falls back to treating the full response as the translation if the
-        expected section headers are absent.
+        The model is instructed to mark its response with ``[TRANSCRIPT]``
+        and ``[TRANSLATION]`` section headers; this method extracts the text
+        under each one.
+
+        Args:
+            content: The model's raw response text.
+
+        Returns:
+            A ``(transcript, translation)`` tuple. Both are empty strings if
+            the model signaled that the image had no readable text (an
+            illustration-only page). If the expected section headers are
+            missing from an otherwise non-empty response, the whole response
+            is treated as the translation and the transcript is left empty.
         """
         # Model signals no readable text on this page (illustration-only)
         if content.strip() == "[NO_TEXT]":
@@ -166,21 +268,30 @@ class ImageTranslationService(BaseService):
         vertical: bool = False,
         spread: bool = False,
     ) -> tuple[str, str]:
-        """Transcribe and translate an image in a single API call.
+        """Transcribe and translate the text found in one image, in a single AI model call.
 
         Args:
-            file_path: Absolute path to the image file.
-            source_language: Language of text in the image (e.g. 'Chinese').
-            target_language: Language to translate into (e.g. 'English').
-            vertical: Whether the text is predominantly vertical (top-to-bottom, right-to-left).
-            spread: Whether the image is a two-page spread (two facing pages).
+            file_path: The absolute path to the image file on disk (e.g.
+                       ``/Users/heller/scans/page_012.png``).
+            source_language: The language of the text in the image (e.g.
+                              ``'Chinese'``).
+            target_language: The language to translate into (e.g.
+                              ``'English'``).
+            vertical: Whether the text runs top-to-bottom, right-to-left, as
+                      in traditional vertical Japanese or Chinese layout.
+            spread: Whether the image shows two facing pages side by side (a
+                    two-page spread) rather than a single page.
 
         Returns:
-            (transcript, translation) — either may be empty if parsing fails.
+            A ``(transcript, translation)`` tuple. If the image is blank or
+            contains no readable text, both are empty strings and no API
+            call is made.
 
         Raises:
-            ValueError: If the selected model does not support vision.
-            RuntimeError: If no valid response is received after all retries.
+            ValueError: If the selected model does not support reading
+                images (vision).
+            RuntimeError: If no valid response is received after all retry
+                attempts.
         """
         model = self._get_model()
 

@@ -1,4 +1,13 @@
-"""Translation service for the PU AI Sandbox."""
+"""Translates document text using the Princeton AI Sandbox's AI models, page by page.
+
+This is the core AI-calling class behind the ``translate`` command. A plugin
+author building a similar service can use this as a reference: it extends
+``BaseService`` (which handles the actual network call and retry behavior)
+and adds translation-specific logic on top — building translation prompts,
+splitting oversized pages when a model's context window is exceeded,
+translating in parallel across multiple pages, and handling tables
+separately from regular prose so that rows and columns survive translation.
+"""
 
 import logging
 import os
@@ -37,14 +46,29 @@ from ..settings import (
     CONTEXT_PERCENTAGE,
 )
 
-# Regex pattern for matching citation/reference numbers in CJK and ASCII brackets
+# Matches a citation/reference number in parentheses, in either CJK-style
+# full-width brackets (（1）) or standard ASCII brackets ((1)) — used to check
+# whether numbered references survived translation intact.
 _CITATION_NUM_RE: str = r'[（\(](\d+)[）\)]'
 
 
 class TranslationService(BaseService):
-    """Handles translation operations using PortKey API."""
+    """Translates document text into a target language using an AI model.
+
+    Built and used internally by the translation plugin's ``run()`` method —
+    a plugin author does not need to construct this directly, but studying
+    its methods (especially ``translate_document`` and
+    ``translate_text_pages``) is a useful reference for building a similar
+    AI-calling service.
+    """
 
     def __init__(self, api_key: str, professor: Optional[str] = None, token_tracker: Optional[TokenTracker] = None, token_tracker_file: Optional[str] = None, model: Optional[str] = None, temperature: Optional[float] = None, top_p: Optional[float] = None, max_tokens: Optional[int] = None):
+        """Set up a translation service for one professor's request.
+
+        These parameters are supplied automatically by ``SandboxProcessor``
+        when a plugin accesses ``self.translation_service`` — see
+        ``BaseService.__init__`` for the full explanation of each one.
+        """
         super().__init__(api_key, professor, token_tracker, token_tracker_file, model, temperature, top_p, max_tokens)
         self.pdf_processor = PDFProcessor()
         self.variant_notes: list[str] = []  # appended to system prompt; set by dispatching plugin
@@ -58,7 +82,14 @@ class TranslationService(BaseService):
         self._api_error_lock = threading.Lock()
 
     def _get_model(self) -> str:
-        """Get the model to use for translation, preferring the catalog's translation default."""
+        """Decide which AI model to use for this translation, syncing its price if needed.
+
+        Uses the model the user explicitly requested if one was given,
+        otherwise falls back to the catalog's configured translation
+        default. Also makes sure the model's price is up to date before
+        returning it, since pricing feeds directly into per-professor
+        budget tracking.
+        """
         translation_default = get_default_model("translation")
         model = resolve_model(requested_model=self.custom_model, prefer_model=translation_default)
         maybe_sync_model_pricing(model)
@@ -66,7 +97,23 @@ class TranslationService(BaseService):
 
     def _call_translation_api(self, model: str, system_role: str,
                                system_prompt: str, user_prompt: str) -> Any:
-        """Call the translation API with the correct token-limit parameter for the model."""
+        """Send one translation request to the AI model and return its raw response.
+
+        Args:
+            model: The model to call, e.g. ``'gpt-4o'``.
+            system_role: The role name to use for the system-prompt message
+                         (e.g. ``'system'`` or ``'developer'``, depending on
+                         what the model expects).
+            system_prompt: The instructions telling the model how to
+                           translate (source/target language, formatting
+                           rules, etc.).
+            user_prompt: The actual text to be translated, plus any
+                         surrounding context.
+
+        Returns:
+            The raw API response object, passed on to
+            ``_record_response_usage()`` and ``_extract_response_content()``.
+        """
         temperature, top_p, max_tokens = self._resolve_sampling_params(
             model, TRANSLATION_TEMPERATURE, TRANSLATION_TOP_P, TRANSLATION_MAX_TOKENS
         )
@@ -80,7 +127,26 @@ class TranslationService(BaseService):
         )
     
     def _create_translation_prompt(self, source_language: str, target_language: str, output_format: str = "console", text: str = "", context_type: str = "none") -> tuple[str, str]:
-        """Create system and user prompt templates for translation."""
+        """Build the system and user prompt text that will be sent to the AI model.
+
+        Args:
+            source_language: The language the text is currently written in
+                              (e.g. ``'Japanese'``).
+            target_language: The language to translate into (e.g.
+                              ``'English'``).
+            output_format: The output destination, used to adjust formatting
+                            instructions (e.g. ``'console'``, ``'pdf'``,
+                            ``'docx'``, ``'txt'``).
+            text: The text to be translated, used only to detect whether it
+                  contains numbered references or table placeholder markers
+                  so the prompt can include the right instructions.
+            context_type: What kind of surrounding context is being supplied
+                          alongside this page — ``'none'``, ``'abstract'``,
+                          or ``'previous_page'``.
+
+        Returns:
+            A two-item tuple of ``(system_prompt, user_prompt_template)``.
+        """
         has_numbered = detect_numbered_content(text) if text else False
         has_table_markers = '[TABLE_' in text if text else False
         logging.debug(f"Numbered content detected: {has_numbered}")
@@ -100,15 +166,52 @@ class TranslationService(BaseService):
         return spec.system_prompt(), spec.user_prompt()
     
     def build_prompts(self, text: str, source_language: str, target_language: str, output_format: str = "console", context_type: str = "none") -> tuple[str, str]:
-        """Return (system_prompt, user_prompt) for the given text without calling the API.
+        """Build the prompts that would be sent to the model, without actually calling it.
 
-        Used by --dry-run mode to preview what would be sent to the model.
+        Used by ``--dry-run`` mode so a user can preview exactly what would
+        be sent to the AI before committing to an API call (and its cost).
+
+        Args:
+            text: The text that would be translated.
+            source_language: The language the text is currently written in.
+            target_language: The language it would be translated into.
+            output_format: The output destination, used to adjust formatting
+                            instructions.
+            context_type: What kind of surrounding context would be
+                          supplied — ``'none'``, ``'abstract'``, or
+                          ``'previous_page'``.
+
+        Returns:
+            A two-item tuple of ``(system_prompt, user_prompt)`` exactly as
+            they would be sent to the model.
         """
         system_prompt, user_prompt_template = self._create_translation_prompt(source_language, target_language, output_format, text, context_type=context_type)
         return system_prompt, user_prompt_template + text
 
     def translate_text(self, text: str, source_language: str, target_language: str, output_format: str = "console", context_type: str = "none") -> "str | APISignal":
-        """Translate text using the specified model with retry logic for content filters."""
+        """Translate a single chunk of text into the target language.
+
+        Retries automatically if the model's safety filter blocks the
+        content or if the response comes back empty, up to the retry limit
+        built into ``BaseService``.
+
+        Args:
+            text: The text to translate.
+            source_language: The language the text is currently written in
+                              (e.g. ``'Japanese'``).
+            target_language: The language to translate into (e.g.
+                              ``'English'``).
+            output_format: The output destination, used to adjust formatting
+                            instructions (e.g. ``'console'``, ``'pdf'``,
+                            ``'docx'``, ``'txt'``).
+            context_type: What kind of surrounding context is being supplied
+                          — ``'none'``, ``'abstract'``, or ``'previous_page'``.
+
+        Returns:
+            The translated text, or a special marker value (an ``APISignal``)
+            if the request hit the model's safety filter or its maximum
+            context length instead of completing normally.
+        """
         model = self._get_model()
         system_prompt, user_prompt_template = self._create_translation_prompt(source_language, target_language, output_format, text, context_type=context_type)
         user_prompt = user_prompt_template + text
@@ -139,17 +242,51 @@ class TranslationService(BaseService):
     def translate_page_text(self, abstract_text: str, page_text: str, previous_page: str, 
                           source_language: str, target_language: str, output_format: str = "console",
                           previous_translated: str = "") -> str:
-        """Translate page text with context."""
+        """Translate one page of a document, giving the model relevant surrounding context.
+
+        Args:
+            abstract_text: An abstract or summary of the whole document, if
+                           one is available, used to help the model translate
+                           terminology consistently. Empty string if none.
+            page_text: The text of the page to translate.
+            previous_page: The untranslated text of the page immediately
+                           before this one, used as context. Empty string if
+                           this is the first page.
+            source_language: The language the document is currently written
+                              in.
+            target_language: The language to translate into.
+            output_format: The output destination, used to adjust formatting
+                            instructions.
+            previous_translated: The already-translated text of the previous
+                                 page, used as additional context in
+                                 sequential (non-parallel) translation runs.
+                                 Empty string if unavailable.
+
+        Returns:
+            The translated page text.
+        """
         context_type = "abstract" if abstract_text else ("previous_page" if previous_page else "none")
         process_text = generate_process_text(abstract_text, page_text, previous_page, CONTEXT_PERCENTAGE, previous_translated)
         return self.translate_text(process_text, source_language, target_language, output_format, context_type=context_type)
 
     @staticmethod
     def _find_split_point(text: str, middle_index: int) -> int:
-        """Find a natural split point near the middle of text.
+        """Find a natural place to break a page of text in half.
 
-        Prefers a double-newline paragraph boundary, then any sentence-ending
-        punctuation. Falls back to the raw middle index if neither is found.
+        Used when a page is too long for the model's context window and
+        needs to be split into two smaller pieces for separate translation.
+        Prefers to split at a paragraph break near the middle, then at a
+        sentence-ending punctuation mark, so translated halves don't cut off
+        mid-sentence when possible.
+
+        Args:
+            text: The text to find a split point within.
+            middle_index: The rough midpoint character position to search
+                          around.
+
+        Returns:
+            The character index to split at. Falls back to ``middle_index``
+            exactly if no paragraph break or sentence ending is found nearby.
         """
         # Prefer a paragraph break within ±100 chars of the middle
         for offset in range(100):
@@ -168,7 +305,39 @@ class TranslationService(BaseService):
     def generate_text(self, abstract_text: str, page_text: str, previous_page: str,
                      page_num: int, source_language: str, target_language: str, output_format: str = "console",
                      previous_translated: str = "") -> str:
-        """Generate translated text for a page, handling context length limits."""
+        """Translate one page of a document, automatically splitting it if it's too long.
+
+        If the model reports that the page exceeds its maximum context
+        length, the page is split in half (see ``_find_split_point``) and
+        each half is translated separately, recursively splitting further if
+        needed. Image-only pages (no extractable text) are skipped entirely
+        with no API call made, since there's nothing to translate.
+
+        Args:
+            abstract_text: An abstract or summary of the whole document, if
+                           available. Empty string if none.
+            page_text: The text of the page to translate. An empty or
+                       whitespace-only string is treated as an image-only
+                       page and skipped.
+            previous_page: The untranslated text of the previous page, used
+                           as context.
+            page_num: The zero-based page number (page 1 is ``0``), used for
+                      the page marker written into the output and for log
+                      messages.
+            source_language: The language the document is currently written
+                              in.
+            target_language: The language to translate into.
+            output_format: The output destination, used to adjust formatting
+                            instructions.
+            previous_translated: The already-translated text of the previous
+                                 page, used as additional context.
+
+        Returns:
+            The translated page text, with a page marker (e.g.
+            ``'-- Page 3 --'``) at the top so the output layer can locate
+            page boundaries later (for example, to reinsert images at the
+            right page in a PDF-to-Word translation).
+        """
         # Short-circuit for image-only (blank) pages — no text to translate,
         # no API call, no error message in the output.
         if not page_text.strip():
@@ -239,7 +408,17 @@ class TranslationService(BaseService):
         pages: Iterable[PDFPage],
         start_page: int,
     ) -> Iterable[tuple[int, str, str]]:
-        """Yield (index, page_text, previous_page_text) for each PDF page."""
+        """Turn a sequence of raw PDF pages into (page number, page text, previous page text) triples.
+
+        Args:
+            pages: The PDF pages to process, from the pdfminer library.
+            start_page: The zero-based page number to start counting from.
+
+        Yields:
+            A ``(index, page_text, previous_page_text)`` tuple for each page,
+            where ``previous_page_text`` is the untranslated text of the
+            immediately preceding page (empty string for the first page).
+        """
         page_text = ""
         for i, page in enumerate(pages, start=start_page):
             previous_page = page_text
@@ -250,7 +429,19 @@ class TranslationService(BaseService):
     def _make_text_triples(
         text_pages: List[str],
     ) -> Iterable[tuple[int, str, str]]:
-        """Yield (index, page_text, previous_page_text) for each pre-extracted text page."""
+        """Turn a list of already-extracted text pages into (page number, page text, previous page text) triples.
+
+        Used for formats like Word documents where pages are extracted as
+        plain text ahead of time, rather than read directly from a PDF.
+
+        Args:
+            text_pages: The document's text, already split into pages.
+
+        Yields:
+            A ``(index, page_text, previous_page_text)`` tuple for each page,
+            where ``previous_page_text`` is the untranslated text of the
+            immediately preceding page (empty string for the first page).
+        """
         previous_page = ""
         for i, page_text in enumerate(text_pages):
             yield i, page_text, previous_page
@@ -267,16 +458,39 @@ class TranslationService(BaseService):
         workers: int,
         opts: OutputOptions,
     ) -> List[str]:
-        """Translate pages in parallel using a ThreadPoolExecutor.
+        """Translate every page of a document at the same time using multiple worker threads.
 
-        Each page is dispatched as an independent API call.  Previous-page
-        context is the untranslated source text of the prior page (not the
-        prior translation), because translation order is non-deterministic
-        in parallel mode.
+        Each page is sent to the AI model as an independent request, so
+        pages can complete in any order. Because of this, each page uses the
+        untranslated text of the previous page as context (rather than its
+        translation, which might not exist yet). Results are written to
+        temporary files on disk as they complete, rather than held in
+        memory, so very large documents don't consume excessive memory; the
+        temporary files are always cleaned up afterward, even if a worker
+        thread fails partway through.
 
-        Results are written to numbered temp files so that memory stays
-        bounded even for very large documents.  Temp files are deleted in a
-        ``finally`` block so they are cleaned up even if a worker raises.
+        Args:
+            all_triples: The full list of ``(page_number, page_text,
+                         previous_page_text)`` triples to translate, from
+                         ``_make_pdf_triples`` or ``_make_text_triples``.
+            abstract_text: An abstract or summary of the whole document, if
+                           available.
+            source_language: The language the document is currently written
+                              in.
+            target_language: The language to translate into.
+            output_format: The output destination, used to adjust formatting
+                            instructions.
+            unit_label: What to call each unit of work in progress messages
+                        (e.g. ``'page'`` or ``'section'``).
+            workers: How many pages to translate at the same time.
+            opts: The output settings for this run — used here only to check
+                  whether progressive saving was requested, which isn't
+                  supported in parallel mode and is disabled with a warning
+                  if so.
+
+        Returns:
+            The translated text for every page, in original page order
+            (not completion order).
         """
         n_pages = len(all_triples)
         actual_workers = cap_worker_count(workers, n_pages, MAX_PARALLEL_WORKERS, unit_label, "document")
@@ -370,12 +584,41 @@ class TranslationService(BaseService):
         input_file_path: Optional[str],
         workers: int = 1,
     ) -> List[str]:
-        """Translate a sequence of (index, page_text, previous_page) triples.
+        """Translate a whole document's pages, either one at a time or in parallel.
 
-        Shared by translate_document and translate_text_pages.  When
-        ``workers > 1`` the generator is materialised up-front and pages are
-        dispatched in parallel; otherwise the existing sequential path with
-        per-page delays and optional progressive save is used.
+        Shared by ``translate_document`` and ``translate_text_pages``. When
+        ``workers`` is greater than 1, every page is dispatched to run at
+        the same time (see ``_translate_pages_parallel``). Otherwise, pages
+        are translated one after another, with a short pause between API
+        calls and optional progressive saving (writing each translated page
+        to disk immediately, so progress isn't lost if the run is
+        interrupted).
+
+        Args:
+            page_triples: The document's pages as ``(page_number, page_text,
+                          previous_page_text)`` triples.
+            abstract_text: An abstract or summary of the whole document, if
+                           available.
+            source_language: The language the document is currently written
+                              in.
+            target_language: The language to translate into.
+            output_format: The output destination, used to adjust formatting
+                            instructions.
+            first_index: The zero-based page number of the very first page
+                         being translated, used to calculate delays between
+                         requests.
+            unit_label: What to call each unit of work in progress and error
+                        messages (e.g. ``'page'`` or ``'section'``).
+            opts: The output settings for this run (whether to save
+                  progressively, the output file path, etc.).
+            input_file_path: The original source file's path, used to name
+                             the progressively-saved output file. ``None``
+                             if progressive saving wasn't requested.
+            workers: How many pages to translate at the same time. ``1``
+                     translates pages one after another instead.
+
+        Returns:
+            The translated text for every page, in original page order.
         """
         if workers > 1:
             all_triples = list(page_triples)
@@ -471,10 +714,22 @@ class TranslationService(BaseService):
 
     @staticmethod
     def _rows_to_markdown(rows: List[List[str]]) -> str:
-        """Convert a cell grid to a Markdown table string.
+        """Convert a table's cell grid into a Markdown-formatted table string.
 
-        Rows with unequal column counts are padded to the maximum width.
-        A separator row is inserted after the first (header) row.
+        Markdown is a simple text formatting style where a table is written
+        using vertical bars (``|``) to separate columns and a row of dashes
+        under the header. This is the format sent to the AI model for table
+        translation, since models handle plain text more reliably than raw
+        table objects.
+
+        Args:
+            rows: The table's cell text, as a list of rows (each row a list
+                  of cell strings). Rows with unequal column counts are
+                  padded to match the widest row.
+
+        Returns:
+            The table formatted as Markdown text, with a separator row
+            inserted after the header row.
         """
         if not rows:
             return ""
@@ -489,10 +744,17 @@ class TranslationService(BaseService):
 
     @staticmethod
     def _parse_markdown_table(md: str) -> Optional[List[List[str]]]:
-        """Parse a Markdown table string back to a cell grid.
+        """Convert a Markdown-formatted table string back into a cell grid.
 
-        Separator rows (containing only ``-``, ``:``, and ``|``) are skipped.
-        Returns ``None`` if no valid table rows are found.
+        The reverse of ``_rows_to_markdown``, used to read the AI model's
+        translated table response back into rows and columns.
+
+        Args:
+            md: The Markdown table text returned by the model.
+
+        Returns:
+            The table's cell text as a list of rows, or ``None`` if no valid
+            table rows could be found in ``md``.
         """
         rows: List[List[str]] = []
         for line in md.strip().splitlines():
@@ -512,15 +774,26 @@ class TranslationService(BaseService):
         source_language: str,
         target_language: str,
     ) -> List[List[str]]:
-        """Translate a table's cell grid via a dedicated Markdown round-trip API call.
+        """Translate a table's cell text, keeping its row-and-column structure intact.
 
-        Converts *rows* to a Markdown table, sends it to the model with a
-        table-specific system prompt, then parses the response back to a grid.
+        Sends the table to the AI model as Markdown (a simple text
+        formatting style using pipe characters to represent rows and
+        columns) with instructions specific to table translation, then
+        converts the model's response back into a grid of cells.
 
-        Falls back to the original *rows* if:
-        * the API returns no content or an error signal,
-        * the Markdown cannot be parsed, or
-        * the translated row count does not match the original.
+        Args:
+            rows: The table's original cell text, as a list of rows (each
+                  row a list of cell strings).
+            source_language: The language the table is currently written in.
+            target_language: The language to translate into.
+
+        Returns:
+            The translated cell grid, in the same row/column shape as
+            ``rows``. Falls back to returning ``rows`` unchanged if the
+            model's response is empty, can't be parsed back into a table, or
+            doesn't have the same number of rows as the original — this
+            keeps the original content visible rather than losing it if
+            translation fails.
         """
         if not rows:
             return rows
@@ -566,6 +839,17 @@ class TranslationService(BaseService):
 
     @staticmethod
     def _resolve_output_format(opts: OutputOptions) -> str:
+        """Decide which formatting instructions to use, based on the requested output file type.
+
+        Args:
+            opts: The output settings for this run.
+
+        Returns:
+            ``'pdf'``, ``'docx'``, or ``'txt'`` if the output file has a
+            matching extension; ``'txt'`` if auto-save was requested with no
+            explicit extension; or ``'console'`` if the result is only being
+            printed to the screen.
+        """
         if opts.output_file:
             ext = opts.output_file.lower().rsplit('.', 1)[-1] if '.' in opts.output_file else ''
             format_map = {'pdf': 'pdf', 'docx': 'docx', 'txt': 'txt'}
@@ -580,7 +864,34 @@ class TranslationService(BaseService):
                            opts: OutputOptions = OutputOptions(),
                            input_file_path: Optional[str] = None,
                            workers: int = 1) -> List[str]:
-        """Translate all pages in a document."""
+        """Translate every page of a PDF (or other page-based document) into the target language.
+
+        Args:
+            pages: The document's pages, from the pdfminer library.
+            abstract_text: An abstract or summary of the whole document, if
+                           one is available, used to help the model
+                           translate terminology consistently. ``None`` if
+                           there is no abstract.
+            start_page: The zero-based page number to start translating from
+                        (page 1 is ``0``).
+            end_page: The zero-based page number to stop translating at,
+                      inclusive. ``None`` translates through to the end of
+                      the document.
+            source_language: The language the document is currently written
+                              in (e.g. ``'Japanese'``).
+            target_language: The language to translate into (e.g.
+                              ``'English'``).
+            opts: The output-related settings for this run (output file
+                  path, whether to save progressively, etc.).
+            input_file_path: The original source file's path, used to name
+                             progressively-saved output files. ``None`` if
+                             progressive saving wasn't requested.
+            workers: How many pages to translate at the same time. ``1``
+                     (the default) translates pages one after another.
+
+        Returns:
+            The translated text for every requested page, in page order.
+        """
         output_format = self._resolve_output_format(opts)
         pages = islice(pages, start_page, None if end_page is None else end_page + 1)
         return self._translate_page_sequence(
@@ -601,7 +912,29 @@ class TranslationService(BaseService):
                             opts: OutputOptions = OutputOptions(),
                             input_file_path: Optional[str] = None,
                             workers: int = 1) -> List[str]:
-        """Translate pre-extracted text pages (e.g., from Word documents)."""
+        """Translate a list of already-extracted text pages (e.g. from a Word document).
+
+        Used instead of ``translate_document`` for source formats that don't
+        come as PDF pages — the text has already been split into logical
+        pages ahead of time.
+
+        Args:
+            text_pages: The document's text, already split into pages.
+            abstract_text: An abstract or summary of the whole document, if
+                           available. ``None`` if there is no abstract.
+            source_language: The language the document is currently written
+                              in.
+            target_language: The language to translate into.
+            opts: The output-related settings for this run.
+            input_file_path: The original source file's path, used to name
+                             progressively-saved output files. ``None`` if
+                             progressive saving wasn't requested.
+            workers: How many pages to translate at the same time. ``1``
+                     (the default) translates pages one after another.
+
+        Returns:
+            The translated text for every page, in page order.
+        """
         output_format = self._resolve_output_format(opts)
         return self._translate_page_sequence(
             self._make_text_triples(text_pages),

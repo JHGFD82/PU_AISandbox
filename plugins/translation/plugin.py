@@ -1,75 +1,95 @@
 """PU_AISandbox Translation plugin — built-in base (English).
 
-This plugin ships with the main PU_AISandbox repo.  It serves two roles:
+This plugin ships with the main PU_AISandbox repository. It serves two
+roles at once:
 
-  1. **Service owner** — injects the shared translation service layer
-     (TranslationService, ImageTranslationService, prompt specs, and
-     translation_fragments) into sys.modules so that any other translation
-     plugin can use them without bundling copies.
+  1. **Service owner** — it makes the shared translation building blocks
+     (``TranslationService`` for text, ``ImageTranslationService`` for
+     images, the prompt-building classes, and the translation-specific
+     prompt text) reachable under a shared ``src.*`` import path, so that
+     any other translation-language plugin can use the exact same
+     implementation instead of bundling its own copy.
 
-  2. **English handler** — owns English as a source language and provides
-     English destination-side guidance.  It also houses _execute_translate(),
-     the shared execution helper that all translation plugins delegate to.
+  2. **English handler** — it owns English as a source language (so
+     ``translate en-jp`` routes here) and provides English destination-side
+     guidance. It also contains ``_execute_translate()``, the shared
+     execution logic that every translation plugin (this one and any
+     installed language extensions) delegates to after handling its own
+     language-specific setup.
 
-This is a **standalone plugin** — it registers the ``translate`` command.
-If you are adding support for additional languages, write an **extension
-plugin** instead (see "TEMPLATE GUIDE" below and docs/plugin-authoring-guide.md).
+This is a **standalone plugin** — it registers the ``translate`` command
+itself. If you are adding support for an additional source language (e.g.
+Japanese, Chinese), write an **extension plugin** instead — see the
+"TEMPLATE GUIDE" section below, and ``docs/plugin-authoring-guide.md`` for
+a longer walkthrough.
 
 TEMPLATE GUIDE FOR EXTENSION PLUGIN AUTHORS
 --------------------------------------------
-Extension plugins extend the ``translate`` command with new source languages.
-They **must not** call ``register_subparsers()`` — the ``translate`` command
-already exists.  Doing so would cause a conflict and your plugin would be
-silently skipped by the loader.
+Extension plugins extend the ``translate`` command to cover new source
+languages. They **must not** call ``register_subparsers()`` themselves —
+the ``translate`` command already exists here. Doing so would try to
+register the same command twice, which causes a conflict, so the plugin
+loader would silently skip your plugin.
 
-Clone this file into your plugin directory and adapt it:
+To build a new language extension, copy this file into your own plugin
+directory and adapt it as follows:
 
-  1. Change ``handles`` to the shortcodes your plugin owns as *source*
-     languages (matching the keys in ``LANGUAGE_MAP``, e.g.
-     ``["jp", "zh"]``).  ``handles`` uses shortcodes—the same strings the
-     user types on the command line—so plugin authors can see at a glance
-     which CLI codes belong to their plugin.
+  1. Change ``handles`` to the short language codes your plugin owns as
+     *source* languages (matching the keys in ``LANGUAGE_MAP``, e.g.
+     ``["jp", "zh"]``). These are the same short codes a user types on the
+     command line (e.g. ``jp`` for Japanese), so another developer can see
+     at a glance which codes belong to your plugin.
 
-  2. **Remove the sys.modules injection block.**  The base plugin registers
-     those modules at load time; they are already present in sys.modules
-     when your plugin loads (alphabetical load order guarantees this).
+  2. **Remove the module-registration block below** (the calls to
+     ``_register()``). This base plugin already registers those shared
+     modules when it loads; because plugins load in alphabetical order,
+     they're already available by the time your plugin's file runs.
 
-  3. Keep the same main-repo imports — they all come from the shared repo,
-     not from this plugin.
+  3. Keep the same main-repo imports — they all come from the shared
+     repository, not from this plugin, so they don't need adapting.
 
-  4. Add your language-specific CLI flags in ``register_command_flags()``.
-     Do *not* implement ``register_subparsers()`` — extension plugins use
-     ``register_command_flags()`` only.  Do *not* re-add ``language_code``
-     or any flag already in the base parser — those are added by the base
-     plugin or DispatchPlugin.
+  4. Add your language-specific command-line flags inside
+     ``register_command_flags()``. Do *not* implement
+     ``register_subparsers()`` — extension plugins only implement
+     ``register_command_flags()``. Do *not* re-add ``language_code`` or any
+     flag already defined in the base parser here — those are added once by
+     this base plugin (or by ``DispatchPlugin``, the internal component
+     that merges multiple plugins' flags into one shared parser).
 
-  5. In ``run()``, append your variant notes *before* calling
-     ``_execute_translate``::
+  5. Inside your plugin's ``run()`` method, append any language-specific
+     guidance to the translation service's ``variant_notes`` list *before*
+     calling the shared execution function::
 
          if getattr(args, 'my_flag', False):
              sandbox.translation_service.variant_notes.append(MY_NOTE)
 
-     Variant notes are opaque strings appended to the model's system prompt
-     as separate additional-instructions blocks.  Append multiple notes for
-     mixed-convention texts; order is preserved.
+     Each note is a plain string appended to the AI model's system prompt
+     as its own additional-instructions block. You can append more than one
+     note (for example, to handle a document that mixes writing
+     conventions); their order in the list is preserved in the prompt.
 
-  6. Obtain the shared execute function and call it::
+  6. Look up and call the shared execution function::
 
          import sys
          _base = sys.modules.get('pu_plugin.translation.plugin')
          _base._execute_translate(sandbox, args, source_language, target_language)
 
   7. Optionally implement ``get_peer_guidance(token)`` to contribute
-     destination-side conventions when your language appears as a
-     translation target (see docstring below).
+     destination-side conventions when your language is the *target* of a
+     translation rather than the source (see its docstring below for
+     details).
 
-ARCHITECTURE — sys.modules injection
---------------------------------------
-``_register()`` (called at module import time) injects each service module
-into ``sys.modules`` under the same ``src.services.*`` name it uses
-throughout the codebase.  Language plugins that load *after* this plugin
-(all of them, by alphabetical order) find the modules already present and
-import them normally.
+How plugin-owned service files stay importable
+-----------------------------------------------
+``_register()`` (called once, at import time, below) loads each shared
+service file directly from this plugin's own directory and inserts it into
+Python's registry of already-imported modules under the ``src.services.*``
+path the rest of the codebase expects — the same mechanism described in
+``plugins/prompt/plugin.py``. Because plugins load in alphabetical order,
+this (the "translation" plugin) always loads before any language
+extension plugin, so by the time an extension plugin's file runs, these
+modules are already registered and it can just write a normal ``import
+src.services.translation_service`` statement.
 """
 
 from __future__ import annotations
@@ -91,13 +111,20 @@ _PLUGIN_DIR = Path(__file__).parent
 # ── Module registration ────────────────────────────────────────────────────────
 
 def _register(module_name: str, rel_path: str) -> None:
-    """Inject a plugin-owned module into sys.modules under its src.* namespace.
+    """Make one of this plugin's own files importable under a ``src.*`` path.
 
-    If the name is already registered (e.g. a development override was loaded
-    first), the registration is skipped.  Modules are resolved relative to
-    this plugin's directory.
+    See the module docstring above ("How plugin-owned service files stay
+    importable") for the full explanation of why this is needed.
+
+    Args:
+        module_name: The dotted import path to register the module under
+                     (e.g. ``'src.services.translation_service'``).
+        rel_path: The module's real file path, relative to this plugin's
+                  own directory.
     """
     if module_name in sys.modules:
+        # Already registered — for example, a development override was
+        # loaded first — so there's nothing more to do.
         return
     path = _PLUGIN_DIR / rel_path
     if not path.exists():
@@ -175,14 +202,35 @@ def _execute_translate(
     source_language: str,
     target_language: str,
 ) -> None:
-    """Core validation and dispatch for the translate command.
+    """Validate flag combinations, then translate the requested input and produce output.
 
-    Called by TranslationPlugin.run() and by any external translation plugin
-    that delegates here after applying its own plugin-specific setup.
+    This is the shared implementation behind every ``translate`` command,
+    regardless of which source-language plugin (this base plugin, or an
+    installed extension) handled the language-specific setup first. It
+    checks that the combination of flags the user passed makes sense (for
+    example, rejecting ``--preserve-media`` with a non-Word-document
+    output), builds the output settings, and then dispatches to the
+    appropriate translation method — custom pasted text, a single file, or
+    a whole folder of images.
 
-    Accepts an already-initialised SandboxProcessor; any plugin-specific
-    service properties (e.g. ``variant_notes``) must be set on ``sandbox``
-    *before* calling this function.
+    Args:
+        sandbox: The active ``SandboxProcessor`` for this run, already
+                 constructed with the professor's API key, model, and
+                 sampling settings. Any plugin-specific service properties
+                 (like ``variant_notes``, extra guidance appended to the
+                 model's prompt) must already be set on ``sandbox`` *before*
+                 this function is called.
+        args: The object holding all the parsed command-line flags for
+              this run.
+        source_language: The full name of the language being translated
+                          from (e.g. ``'Japanese'``).
+        target_language: The full name of the language being translated
+                          into (e.g. ``'English'``).
+
+    Raises:
+        CLIError: If the flags passed are incompatible with each other or
+            with the input/output file types, or if no input was given at
+            all.
     """
     import os
 
@@ -416,33 +464,47 @@ def _execute_translate(
 # ── Plugin class ───────────────────────────────────────────────────────────────
 
 class TranslationPlugin:
-    """Built-in translation plugin.  Owns English and provides the shared
-    translation service layer used by all language plugins.
+    """Translates documents and text into or out of English (the built-in base plugin).
 
-    See the module docstring for the template guide for external plugin authors.
+    Owns English as a source language and also provides the shared
+    translation service layer that every other translation-language plugin
+    reuses. See the module docstring above for the full template guide
+    describing how to write a new language extension plugin on top of this
+    one.
     """
 
     commands: list[str] = ["translate"]
 
     # Languages this plugin owns as source languages.
-    # ``handles`` stores the shortcodes that users type on the command line
+    # ``handles`` stores the short codes users type on the command line
     # (e.g. ``en`` for English), matching the keys in ``LANGUAGE_MAP``.
-    # The plugin loader reads this to merge multiple translation plugins into a
-    # unified dispatch system rather than treating them as command conflicts.
+    # The plugin loader reads this list to combine multiple translation
+    # plugins into one unified command, routing each requested language to
+    # the plugin that declares it, rather than treating separate plugins
+    # trying to own the same "translate" command as a conflict.
     handles: list[str] = ["en"]
 
     # ── Argument registration ──────────────────────────────────────────────────
 
     def register_command_flags(self, parser: argparse.ArgumentParser) -> None:
-        """Add this plugin's flags to an existing 'translate' subparser.
+        """Add this plugin's command-line flags to the shared ``translate`` parser.
 
-        Called by DispatchPlugin when building the merged parser, and called
-        internally by register_subparsers() to avoid duplication.
+        Called both by this plugin's own ``register_subparsers()`` below,
+        and by ``DispatchPlugin`` (the internal component that merges every
+        installed translation-language plugin's flags into one combined
+        parser) when a language extension plugin is also installed.
 
-        Add only flags owned by *this* plugin here.  Do not re-add
-        ``language_code`` or common/notes flags — those come from elsewhere.
-        External plugins should follow the same pattern: one method for flags,
-        called from both register_subparsers() and as the DispatchPlugin hook.
+        Add only the flags owned by *this* plugin here. Do not re-add
+        ``language_code`` or the common/notes flags shared across plugins —
+        those are added elsewhere. A language extension plugin should
+        follow this same pattern: put its flags in a
+        ``register_command_flags()`` method of its own, called from both
+        its ``register_subparsers()`` (if it's ever run standalone) and as
+        the ``DispatchPlugin`` hook.
+
+        Args:
+            parser: The argument parser for the ``translate`` command to
+                    add flags to.
         """
         from plugins.translation.utils import validate_page_nums  # noqa: PLC0415
         input_group = parser.add_mutually_exclusive_group(required=False)
@@ -523,11 +585,18 @@ class TranslationPlugin:
         self,
         subparsers: "argparse._SubParsersAction[argparse.ArgumentParser]",
     ) -> None:
-        """Register the 'translate' subcommand for standalone operation.
+        """Register the ``translate`` subcommand and delegate its flags to ``register_command_flags``.
 
-        When multiple translation plugins are loaded, DispatchPlugin calls
-        this method on the base plugin to create the shared parser, then
-        calls register_command_flags() on each additional plugin separately.
+        Called once at startup by the plugin loader. When one or more
+        language extension plugins are also installed, ``DispatchPlugin``
+        (the internal component that merges plugins sharing a command)
+        calls this method on this base plugin to build the shared parser,
+        then calls ``register_command_flags()`` on each extension plugin
+        separately to add their flags to the same parser.
+
+        Args:
+            subparsers: The shared subcommand registry passed in by the CLI
+                        startup code.
         """
         p = subparsers.add_parser("translate", help="Translate documents or text")
         p.add_argument(
@@ -540,14 +609,27 @@ class TranslationPlugin:
     # ── Peer guidance ──────────────────────────────────────────────────────────
 
     def get_peer_guidance(self, token: str) -> Optional[str]:
-        """Return destination-side guidance when English is the translation target.
+        """Provide extra guidance for the model when English is the translation target.
 
-        Called by DispatchPlugin when this plugin owns the destination language.
-        Return a string to inject conventions into the source plugin's prompt
-        context, or None for graceful degradation.
+        Called by ``DispatchPlugin`` when this plugin owns the destination
+        language of a translation request — for example, if a Japanese
+        extension plugin is translating *into* English, it asks this
+        method for any English-specific conventions to include. Returning
+        ``None`` is a safe, valid answer that simply adds no extra
+        guidance.
 
-        Override in external plugins to provide language-specific destination
-        conventions (register rules, orthographic norms, etc.).
+        A language extension plugin can override this method to contribute
+        its own destination-side conventions — for example, honorific
+        register rules or spelling norms — when its language is the
+        translation target rather than the source.
+
+        Args:
+            token: The short language code being asked about (e.g.
+                   ``'en'``).
+
+        Returns:
+            Extra guidance text to add to the model's prompt, or ``None``
+            if no special guidance is needed. Standard English needs none.
         """
         return None  # Standard English needs no special destination guidance.
 
@@ -562,7 +644,38 @@ class TranslationPlugin:
         top_p: Optional[float],
         max_tokens: Optional[int],
     ) -> None:
-        """Execute the translate command."""
+        """Run the ``translate`` command for a source-target language pair involving English.
+
+        Builds a ``SandboxProcessor`` (which resolves the professor's API
+        key, sets up token/cost tracking, and lazily creates whichever
+        services are needed), resolves the requested language pair, applies
+        any destination-side guidance contributed by another plugin, and
+        hands off to ``_execute_translate()`` for validation and the actual
+        translation work.
+
+        Args:
+            args: The object holding all the parsed command-line flags for
+                  this run (the language pair, input/output paths, and any
+                  translation-specific flags like ``--preserve-media``).
+            professor: The Princeton NetID whose configuration and API key
+                       should be used for this run (e.g. ``'heller'``).
+            model: The AI model explicitly requested on the command line, or
+                   ``None`` to use this plugin's configured default.
+            temperature: The requested sampling temperature (controls how
+                         predictable vs. varied the model's wording is), or
+                         ``None`` to use the default.
+            top_p: The requested nucleus-sampling value (an alternative way
+                   of controlling response variety), or ``None`` to use the
+                   default.
+            max_tokens: The requested maximum response length, in tokens
+                        (the small chunks of text models process and bill
+                        by), or ``None`` to use the default.
+
+        Raises:
+            CLIError: If the language code isn't a valid source-target
+                pair, or if ``_execute_translate`` rejects the flag
+                combination or input.
+        """
         from src.runtime.sandbox_processor import SandboxProcessor
 
         sandbox = SandboxProcessor(
