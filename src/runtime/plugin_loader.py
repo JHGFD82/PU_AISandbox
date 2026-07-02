@@ -1,8 +1,10 @@
-"""Discover and load ModePlugin instances from the plugins/ directory.
+"""Finds and loads every installed plugin from the plugins/ directory.
 
-Scans ``plugins/*/plugin.py`` at application startup.  Any plugin that
-fails to import or does not satisfy the ModePlugin interface emits a
-warning and is skipped — it never crashes the main application.
+Runs once at application startup, before the command-line parser is built.
+Any plugin that fails to import, or that doesn't provide everything a
+plugin needs to provide (see ``ModePlugin`` in ``plugin.py``), is skipped
+with a warning printed to the log — a broken or incomplete plugin never
+crashes the rest of the application.
 """
 
 import importlib.util
@@ -18,10 +20,19 @@ logger = logging.getLogger(__name__)
 
 
 def load_plugins(plugins_dir: Path) -> "dict[str, ModePlugin]":
-    """Return a mapping of CLI command name → ModePlugin for every valid plugin.
+    """Find every valid plugin and map each of its commands to that plugin.
 
-    Scans each immediate subdirectory of *plugins_dir* for a ``plugin.py``
-    entry point.  Subdirectories without a ``plugin.py`` are silently ignored.
+    Looks inside every immediate subfolder of ``plugins_dir`` for a
+    ``plugin.py`` file. Subfolders without one are simply skipped — they
+    aren't treated as plugins at all.
+
+    Args:
+        plugins_dir: The folder to search for plugins, e.g. the project's
+                     top-level ``plugins/`` directory.
+
+    Returns:
+        A dictionary mapping each CLI command name (e.g. ``'translate'``) to
+        the plugin object that handles it.
     """
     result: dict[str, "ModePlugin"] = {}
     if not plugins_dir.is_dir():
@@ -41,7 +52,17 @@ def _load_one(
     plugin_file: Path,
     result: "dict[str, ModePlugin]",
 ) -> None:
-    """Import one plugin module and register its commands into *result*."""
+    """Load a single plugin's code and add its commands to the shared results.
+
+    Args:
+        plugin_name: The plugin's folder name (e.g. ``'translation'``), used
+                     only in log messages to identify which plugin a warning
+                     refers to.
+        plugin_file: The full path to that plugin's ``plugin.py`` file.
+        result: The command-name-to-plugin dictionary being built up by
+                ``load_plugins()``; this plugin's commands are added to it
+                directly rather than returned.
+    """
     module_name = f"pu_plugin.{plugin_name}.plugin"
     try:
         spec = importlib.util.spec_from_file_location(module_name, plugin_file)

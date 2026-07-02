@@ -1,4 +1,14 @@
-"""Runtime processing orchestration: wires services and delegates to handler mixins."""
+"""Wires up the AI services a plugin needs and gives it plain access to them.
+
+``SandboxProcessor`` is the object every plugin builds inside its ``run()``
+method. It looks up the professor's API key, sets up token tracking, and
+prepares the file-handling and processing tools most plugins need
+(``file_output``, ``image_processor``, ``pdf_processor``). Any additional
+service or orchestration method a specific plugin needs (e.g. a translation
+or transcription service) is supplied by that plugin itself and attached
+automatically — see ``__getattr__`` and ``_discover_plugin_mixins`` below for
+how that attachment works.
+"""
 
 import logging
 import sys
@@ -20,7 +30,7 @@ logger = logging.getLogger(__name__)
 
 
 class _SvcKwargs(TypedDict, total=False):
-    """Shared keyword arguments passed to every BaseService subclass."""
+    """The settings shared by every AI service ``SandboxProcessor`` creates."""
     token_tracker: TokenTracker
     model: Optional[str]
     temperature: Optional[float]
@@ -29,21 +39,30 @@ class _SvcKwargs(TypedDict, total=False):
 
 
 def _discover_plugin_mixins() -> tuple[type, ...]:
-    """Collect mixin classes plugins have registered under src.runtime.*.
+    """Find every set of plugin-added capabilities that should be built into SandboxProcessor.
 
-    Mirrors the sys.modules service-injection convention already used for
-    plugin-owned services (see ``__getattr__`` below): a plugin registers a
-    module under a ``"src.runtime.<name>"`` key and exports a class named
-    ``Mixin``. This function scans sys.modules for any such module and returns
-    its ``Mixin`` class so it can be included as a SandboxProcessor base.
+    Each installed plugin can extend what ``SandboxProcessor`` is able to do
+    (e.g. adding document-translation or image-transcription methods) by
+    registering its own module under the name ``"src.runtime.<plugin_name>"``
+    and exporting a class named ``Mixin`` from it — the same registration
+    approach already used for plugin-owned services (see ``__getattr__``
+    below). This function looks through every currently-loaded module for
+    one registered that way and collects its ``Mixin`` class, so that
+    ``SandboxProcessor`` can build those capabilities in as if they were
+    written directly into this file.
 
-    Evaluated exactly once, when this module is first imported — safe because
-    SandboxProcessor is only ever imported lazily from inside a plugin's
-    run() method, never at module scope in src/cli.py or plugin_loader.py, and
-    load_plugins() (which runs every plugin's _register() calls) always
-    completes before any run() is dispatched. Returns an empty tuple if no
-    plugin registers a runtime mixin — SandboxProcessor still works, just
-    without any mode-specific commands.
+    This only runs once, the first time this module is imported — which is
+    safe because ``SandboxProcessor`` is always constructed from inside a
+    plugin's ``run()`` method (never at startup), and every plugin has
+    already finished registering its modules (via ``load_plugins()``) before
+    any ``run()`` method executes. If no plugin has registered any
+    capabilities, this returns an empty result and ``SandboxProcessor`` still
+    works — it just won't have any mode-specific methods available.
+
+    Returns:
+        The collection of plugin-provided classes to combine into
+        ``SandboxProcessor``, sorted by module name so the combination order
+        is always the same from run to run.
     """
     mixins: list[type] = []
     for module_name, module in list(sys.modules.items()):
@@ -52,32 +71,58 @@ def _discover_plugin_mixins() -> tuple[type, ...]:
         mixin_cls = getattr(module, "Mixin", None)
         if isinstance(mixin_cls, type):
             mixins.append(mixin_cls)
-    mixins.sort(key=lambda cls: cls.__module__)  # deterministic MRO
+    # Sorted by module name so the combined class is built the same way every
+    # time, regardless of the order plugins happened to load in.
+    mixins.sort(key=lambda cls: cls.__module__)
     return tuple(mixins)
 
 
 class SandboxProcessor(*_discover_plugin_mixins(), _FileTypeMixin, _CommandMixin):
-    """Main application class for processing inputs to the Princeton AI Sandbox."""
+    """Central coordinator that a plugin's run() method builds to carry out its command.
+
+    Combines whatever mode-specific capabilities the installed plugins have
+    registered (e.g. document translation, image transcription) with the
+    always-present file-type detection and interactive-prompt helpers every
+    plugin can use, regardless of which plugin is running.
+    """
 
     def __init__(self, professor_name: str, model: Optional[str] = None,
                  temperature: Optional[float] = None, top_p: Optional[float] = None,
                  max_tokens: Optional[int] = None,
                  api_config: Optional["APIConfig"] = None):
-        """Initialize the processor for the specified professor.
+        """Set up a processor for one professor's request.
 
         Args:
-            professor_name: Professor identifier for API key lookup and token tracking.
-            model:          Override model name.  May include colon syntax such as
-                            ``della:qwen-preview`` — the processor automatically parses
-                            the api name prefix and loads the corresponding ``APIConfig``.
-            temperature:    Sampling temperature override.
-            top_p:          Nucleus-sampling top-p override.
-            max_tokens:     Max completion tokens override.
-            api_config:     Explicit ``APIConfig`` override.  If ``None`` and ``model``
-                            contains colon syntax, the config is resolved automatically.
-                            When set, lazily-loaded ``BaseService`` instances will have
-                            their Portkey client replaced with an OpenAI-compatible
-                            client pointed at this API's ``base_url``.
+            professor_name: The professor's identifier (e.g. ``'heller'``),
+                             used to look up their API key and to record
+                             token usage under their name.
+            model: A specific model to use instead of the plugin's default
+                   (e.g. ``'gpt-4o'``). Can also use the colon syntax
+                   ``'api_name:model_name'`` (e.g. ``'della:qwen-preview'``)
+                   to route requests to an alternate API endpoint — the
+                   ``api_name`` portion is parsed automatically and used to
+                   load the matching endpoint configuration. ``None`` uses
+                   the plugin's own default model.
+            temperature: How varied or creative the response should be
+                         (``0.0``–``2.0``), overriding the model's default.
+                         ``None`` uses the default.
+            top_p: An alternative response-variety control (``0.0``–``1.0``),
+                   overriding the model's default. ``None`` uses the default.
+            max_tokens: The maximum response length, in tokens (tokens are
+                        the unit AI providers use to measure text length,
+                        roughly one token per word), overriding the model's
+                        default. ``None`` uses the default.
+            api_config: An explicit alternate-endpoint configuration to use
+                        instead of the sandbox's normal endpoint. ``None``
+                        with a colon-syntax ``model`` resolves this
+                        automatically; ``None`` with a plain model name uses
+                        the standard Princeton AI Sandbox endpoint.
+
+        Raises:
+            CLIError: If the professor's configuration is missing or invalid
+                      (e.g. no API key set up for them), or if an alternate
+                      endpoint named in ``model`` doesn't have a valid
+                      configuration.
         """
         try:
             api_key, self.professor_display_name = get_api_key(professor_name)
@@ -127,17 +172,38 @@ class SandboxProcessor(*_discover_plugin_mixins(), _FileTypeMixin, _CommandMixin
             raise CLIError(f"Configuration error: {e}") from e
 
     def __getattr__(self, name: str):
-        """Lazily instantiate plugin-provided services on first access.
+        """Create a plugin-provided service the first time it's accessed by name.
 
-        Any plugin that injects a module into ``sys.modules`` under the key
-        ``src.services.<name>`` and exports a class whose name is the
-        PascalCase form of ``<name>`` will be instantiated automatically —
-        no changes to this file required.
+        This is what makes attributes like ``self.translation_service`` work
+        even though ``SandboxProcessor`` never defines them directly: when a
+        plugin registers a module in ``sys.modules`` under the key
+        ``src.services.<name>`` and that module contains a class whose name
+        matches ``<name>`` written in capitalized-no-underscores form (e.g.
+        the module key ``translation_service`` maps to a class named
+        ``TranslationService``), that class is instantiated automatically the
+        first time something asks for ``self.<name>``. No changes to this
+        file are needed to support a new plugin's services.
 
-        When ``self._api_config`` is set, the created service's Portkey client
-        is replaced with an OpenAI-compatible client pointing at the configured
-        ``base_url``.  The model is also resolved directly (bypassing the model
-        catalog) so that external model names like ``qwen-preview`` work as-is.
+        When ``self._api_config`` names an alternate API endpoint (rather
+        than the standard Princeton AI Sandbox endpoint), the newly created
+        service's network client is replaced with one pointed at that
+        endpoint's address, and the model name is used exactly as given
+        instead of being checked against the model price catalog — this
+        allows external, non-catalog model names to work without extra
+        configuration.
+
+        Args:
+            name: The attribute name that was accessed but not found on the
+                  instance directly, e.g. ``'translation_service'``.
+
+        Returns:
+            The newly created service instance, which is also saved on the
+            object so future accesses skip this lookup entirely.
+
+        Raises:
+            AttributeError: If no plugin has registered a service under this
+                             name, or if the registered module doesn't
+                             contain a matching class.
         """
         module_name = f"src.services.{name}"
         module = sys.modules.get(module_name)
