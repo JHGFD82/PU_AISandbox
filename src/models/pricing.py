@@ -1,4 +1,11 @@
-"""PortKey pricing API integration and model catalog update functions."""
+"""Looks up and stores AI model pricing from Princeton's PortKey pricing service.
+
+When someone requests a model that isn't yet in the local price list
+(``model_catalog.json``), these functions fetch its current price from
+PortKey (the gateway service Princeton uses to reach AI providers) and save
+it locally, so future requests for that model don't need another network
+lookup.
+"""
 
 import json
 import logging
@@ -8,22 +15,36 @@ from typing import Any, Dict, Tuple
 
 from . import catalog as _catalog
 
-# In-memory cache: model name → last-synced datetime.
-# Prevents repeated catalog disk reads when many workers share the same model.
+# Keeps track, in memory, of when each model's price was last refreshed —
+# this is a temporary record that exists only while the program is running,
+# and it prevents every worker thread from separately re-reading the catalog
+# file off disk when they all happen to use the same model.
 _sync_cache: Dict[str, datetime] = {}
 
 PORTKEY_PRICING_API_BASE = "https://api.portkey.ai/model-configs/pricing"
 
 
 def _fetch_model_pricing(provider_model: str, pricing_unit: int) -> Dict[str, Any]:
-    """Fetch pricing from PortKey's pricing API.
+    """Look up a model's current price directly from PortKey's pricing service.
 
-    ``provider_model`` must be in ``provider/model-name`` format.
-    Prices from the API are per 100 tokens; multiply by ``pricing_unit / 100``
-    to get the stored price (e.g. ×10,000 when pricing_unit=1,000,000).
+    Args:
+        provider_model: The provider and model name together, separated by a
+                         slash (e.g. ``'openai/gpt-4o'``).
+        pricing_unit: How many tokens the returned prices should be expressed
+                      per — tokens are the unit AI providers use to measure
+                      text length, roughly one token per word. PortKey always
+                      reports prices per 100 tokens, so this function scales
+                      that figure up to match the catalog's convention (e.g.
+                      multiplying by 10,000 when ``pricing_unit`` is
+                      1,000,000, meaning "price per million tokens").
 
-    Returns a dict with at minimum 'input' and 'output' keys.
-    Raises RuntimeError if the fetch fails or returns no usable pricing.
+    Returns:
+        A dictionary with ``'input'`` (cost per unit of prompt text sent) and
+        ``'output'`` (cost per unit of AI-generated text received) keys.
+
+    Raises:
+        RuntimeError: If PortKey has no usable pricing for this model, or the
+                      network request fails.
     """
     provider, model_key = provider_model.split("/", 1)
     catalog = _catalog.load_model_catalog()
@@ -54,16 +75,32 @@ def _fetch_model_pricing(provider_model: str, pricing_unit: int) -> Dict[str, An
 
 
 def add_model_to_catalog(provider_model: str) -> Tuple[str, Dict[str, Any]]:
-    """Add or update a model in the local model catalog by fetching pricing from PortKey.
+    """Look up a new model's pricing from PortKey and save it to the local catalog.
 
-    ``provider_model`` must be in ``provider/model-name`` format
-    (e.g. ``openai/gpt-4o``, ``google/gemini-2.5-pro``, ``azure-ai/Llama-3.3-70B-Instruct``).
-    The local catalog key will be the part after the slash (e.g. ``gpt-4o``).
+    This is what runs automatically the first time someone requests a model
+    using ``provider/model-name`` format (e.g. ``-m openai/gpt-4o``) that
+    isn't already in ``model_catalog.json``. After this call, the model's
+    price is stored locally and future requests for it won't need another
+    network lookup.
 
-    Pricing is fetched automatically from PortKey's pricing catalog.  ``supports_vision``
-    defaults to ``False`` — edit ``model_catalog.json`` directly to change it.
+    Args:
+        provider_model: The provider and model name together, separated by a
+                         slash — e.g. ``'openai/gpt-4o'``,
+                         ``'google/gemini-2.5-pro'``, or
+                         ``'azure-ai/Llama-3.3-70B-Instruct'``. The catalog
+                         entry is stored under just the part after the slash
+                         (e.g. ``'gpt-4o'``).
 
-    Returns ``(model_name, entry)``.
+    Returns:
+        A two-item tuple of ``(model_name, entry)``: the model's catalog key
+        (e.g. ``'gpt-4o'``) and the full pricing entry that was saved,
+        including whether it supports image input (``supports_vision``,
+        which defaults to ``False`` unless PortKey reports otherwise — edit
+        ``model_catalog.json`` directly to correct it if needed).
+
+    Raises:
+        ValueError: If ``provider_model`` isn't in ``provider/model-name``
+                    format (missing the slash).
     """
     if "/" not in provider_model:
         raise ValueError(
@@ -107,10 +144,16 @@ def add_model_to_catalog(provider_model: str) -> Tuple[str, Dict[str, Any]]:
 
 
 def maybe_sync_model_pricing(model: str) -> None:
-    """Fetch current pricing for a model from PortKey if not synced within the last hour.
+    """Refresh a model's price from PortKey if it hasn't been checked in the last hour.
 
-    Only runs when the model has a 'portkey_id' field. Silently skips on any
-    network or parse error so the caller is never blocked.
+    Called automatically before most API calls to keep prices reasonably
+    current without slowing down every single request with a network lookup.
+    Does nothing if the model was never auto-registered from PortKey (i.e. it
+    has no ``'portkey_id'`` saved), and silently gives up on any network
+    problem so that a pricing check never blocks or breaks an API call.
+
+    Args:
+        model: The catalog name of the model to check (e.g. ``'gpt-4o'``).
     """
     # Fast in-memory check — avoids disk reads when workers share the same model
     cached_at = _sync_cache.get(model)
