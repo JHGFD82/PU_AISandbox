@@ -139,13 +139,12 @@ def _run_transcription_review(
         text: The transcription text to check for errors.
         language: The language the transcription is written in (e.g.
                   ``'English'``).
-        kanbun: Whether to apply Kanbun-specific review guidance (Kanbun is
-                a system for reading classical Chinese texts using Japanese
-                grammar markers). Accepted here for compatibility with East
-                Asian language extension plugins — this base (English-only)
-                plugin never sets it itself.
-        kanbun_main: Whether the text is itself the main Kanbun reading
-                     rather than an annotation. Same compatibility note as
+        kanbun: An extension-plugin-specific review flag, passed through
+                unused by this base (English-only) plugin so the function
+                signature stays compatible with installed language
+                extensions that do use it.
+        kanbun_main: A second extension-plugin-specific review flag, passed
+                     through unused for the same compatibility reason as
                      ``kanbun`` above.
         output_file: Where to save the review report as a text file, or
                      ``None`` to only print it to the screen.

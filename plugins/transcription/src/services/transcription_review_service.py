@@ -134,9 +134,10 @@ class TranscriptionReviewService(BaseService):
             Full language name (e.g. ``"English"``), as returned by
             ``parse_single_language_code``.
         kanbun, kanbun_main:
-            Accepted for signature compatibility with extension-plugin
-            overrides (e.g. East Asian kanbun review guidance). Unused by
-            this base (English-only) implementation.
+            Extension-plugin-specific flags, accepted here only for
+            signature compatibility with installed language extensions
+            that do use them. Unused by this base (English-only)
+            implementation.
         """
         spec = TranscriptionReviewPromptSpec(
             language=language,
