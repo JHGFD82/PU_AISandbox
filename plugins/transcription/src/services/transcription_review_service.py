@@ -121,8 +121,6 @@ class TranscriptionReviewService(BaseService):
         self,
         text: str,
         language: str,
-        kanbun: bool = False,
-        kanbun_main: bool = False,
     ) -> str:
         """Review a transcription and return a JSON report string.
 
@@ -133,11 +131,6 @@ class TranscriptionReviewService(BaseService):
         language:
             Full language name (e.g. ``"English"``), as returned by
             ``parse_single_language_code``.
-        kanbun, kanbun_main:
-            Extension-plugin-specific flags, accepted here only for
-            signature compatibility with installed language extensions
-            that do use them. Unused by this base (English-only)
-            implementation.
         """
         spec = TranscriptionReviewPromptSpec(
             language=language,

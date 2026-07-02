@@ -126,8 +126,6 @@ def _run_transcription_review(
     sandbox: "SandboxProcessor",  # noqa: F821 — imported lazily in run(), only for type hints
     text: str,
     language: str,
-    kanbun: bool = False,
-    kanbun_main: bool = False,
     output_file: Optional[str] = None,
 ) -> None:
     """Check a transcription for likely OCR mistakes and print (and optionally save) the result.
@@ -139,13 +137,6 @@ def _run_transcription_review(
         text: The transcription text to check for errors.
         language: The language the transcription is written in (e.g.
                   ``'English'``).
-        kanbun: An extension-plugin-specific review flag, passed through
-                unused by this base (English-only) plugin so the function
-                signature stays compatible with installed language
-                extensions that do use it.
-        kanbun_main: A second extension-plugin-specific review flag, passed
-                     through unused for the same compatibility reason as
-                     ``kanbun`` above.
         output_file: Where to save the review report as a text file, or
                      ``None`` to only print it to the screen.
 
@@ -155,9 +146,7 @@ def _run_transcription_review(
     from src.errors import CLIError
     from src.output.file_output import FileOutputHandler
     try:
-        result_json = sandbox.transcription_review_service.review_transcription(
-            text, language, kanbun=kanbun, kanbun_main=kanbun_main
-        )
+        result_json = sandbox.transcription_review_service.review_transcription(text, language)
         print("\n" + result_json)
         if output_file:
             FileOutputHandler.save_to_text_file(result_json, output_file, label="Review")

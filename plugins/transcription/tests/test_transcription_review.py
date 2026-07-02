@@ -48,15 +48,6 @@ class TestRunTranscriptionReview:
         with pytest.raises(CLIError, match="Error during transcription review"):
             _run_transcription_review(sandbox, "text", "Japanese")
 
-    def test_kanbun_kwargs_passed_through(self):
-        """kanbun/kanbun_main are forwarded to the service for extension-plugin compatibility."""
-        sandbox = _make_sandbox()
-        sandbox.transcription_review_service.review_transcription.return_value = '{}'
-        _run_transcription_review(sandbox, "text", "Japanese", kanbun=True, kanbun_main=False)
-        sandbox.transcription_review_service.review_transcription.assert_called_once_with(
-            "text", "Japanese", kanbun=True, kanbun_main=False
-        )
-
 
 # ---------------------------------------------------------------------------
 # TranscriptionReviewService — _get_model / review_transcription signature
@@ -77,14 +68,3 @@ class TestTranscriptionReviewServiceModel:
         model = svc._get_model()
         assert isinstance(model, str)
         assert len(model) > 0
-
-    def test_review_transcription_accepts_kanbun_kwargs_without_error(self, monkeypatch):
-        """Base service must not crash when called with kanbun kwargs (EA-plugin compatibility)."""
-        svc = self._make_svc(monkeypatch)
-        monkeypatch.setattr(svc, "_get_model", lambda: "gpt-4o")
-        monkeypatch.setattr(svc, "_call_api", lambda *a, **kw: MagicMock(
-            choices=[MagicMock(message=MagicMock(content='{"meta": {}}'))]
-        ))
-        monkeypatch.setattr(svc, "_record_response_usage", lambda *a, **kw: None)
-        result = svc.review_transcription("text", "English", kanbun=False, kanbun_main=False)
-        assert isinstance(result, str)
