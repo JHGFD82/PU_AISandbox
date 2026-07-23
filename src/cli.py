@@ -6,11 +6,25 @@ runs when you type ``python main.py ...``.
 """
 
 import argparse
+import importlib
 import logging
 import os
 import sys
 from pathlib import Path
 from typing import Optional
+
+# Loading this hands terminal line-editing to GNU Readline, which manages
+# its own input buffer instead of the operating system's default line
+# buffer (a "cooked mode" limit of roughly 1024 characters on macOS).
+# Without it, pasting a long system or user prompt into an interactive
+# `input()` prompt can be silently cut off partway through. Loaded by
+# module name (rather than a plain `import readline`) purely so it doesn't
+# leave an unused-import binding for linters to flag; it's not available
+# on some Windows Python builds, so this is best-effort.
+try:
+    importlib.import_module("readline")
+except ImportError:
+    pass
 
 from dotenv import load_dotenv
 
