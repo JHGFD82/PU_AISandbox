@@ -1,0 +1,72 @@
+# .settings.template — copy this file to .settings (git-ignored) and fill it in.
+#
+# .settings holds this installation's own credentials and local identity:
+# professor names/keys, optional feature secrets, alternate-endpoint API
+# keys, and which other installations' usage data to include in reports.
+# It is the one file in this project that should never be placed in a
+# synced folder (Dropbox, iCloud, etc.) — if a value needs to move between
+# machines, copy that one line by hand over a channel you trust.
+#
+# You can also build this file entirely from the command line instead of
+# copying/editing it by hand — see `python main.py env --help`.
+
+[professors.heller]
+name = "Heller"
+key = "your_heller_primary_key_here"
+backup_key = "your_heller_backup_key_here"
+
+[professors.smith]
+name = "Smith"
+key = "your_smith_primary_key_here"
+backup_key = "your_smith_backup_key_here"
+
+# ── Alternate API endpoint keys ────────────────────────────────────────────────
+# For each [endpoints.<name>] entry you define in settings.default.toml,
+# settings.local.toml, or a shared settings file, set its key here.
+# Example:
+# [endpoints.my_cluster]
+# key = "your_cluster_key_here"
+
+# ── Web UI plugin (optional) ────────────────────────────────────────────────────
+# Unlocks python main.py webui serve. Set this by running:
+#   python main.py webui set-passphrase
+# Leave unset to run with no unlock gate at all (fine for a 127.0.0.1-only setup).
+# [webui]
+# passphrase_hash = "..."
+#
+# Keeps browser sessions signed-in across server restarts. Any long random
+# string works — if left unset, a new one is generated each time the server
+# starts, meaning everyone has to unlock again after a restart. Set with:
+#   python main.py env set webui.session_secret --generate
+# session_secret = "..."
+
+# ── Shared settings (optional) ──────────────────────────────────────────────────
+# Point this at a settings.toml-format file synced across a group of
+# installations (e.g. via Dropbox) to share runtime defaults between them —
+# handy if you manage several professors' installations yourself, or if a
+# research group wants everyone using the same tuned settings. Merges
+# between settings.default.toml (repo defaults) and settings.local.toml
+# (still this machine's personal overrides, which still win). See
+# src/settings.py for the full merge order.
+# [shared_settings]
+# path = "/path/to/shared/settings.shared.toml"
+
+# ── External/remote usage-data sources (optional) ──────────────────────────────
+# Lets this installation include another installation's usage data when
+# building reports (e.g. a folder synced with Dropbox). See
+# `python main.py <professor> usage sources --help` and
+# docs/webui-plugin-plan.md section 1 for the full explanation — this
+# section is normally managed via that command rather than hand-edited.
+# [usage_sources]
+# source_id = ""
+#
+# [[usage_sources.external]]
+# label = "Prof. Johnson"          # read-only: only Johnson's own installation writes here
+# path = "/Volumes/shared-drive/johnson-sandbox/data"
+# mode = "read-only"
+#
+# [[usage_sources.external]]
+# label = "Prof. Smith"            # shared-write: both installations record usage here
+# path = "/Users/heller/Dropbox/Smith-Shared/data"
+# mode = "shared-write"
+# professor = "smith"

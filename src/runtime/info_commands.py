@@ -6,14 +6,13 @@ import logging
 import os
 import secrets
 from datetime import datetime
-from typing import Optional
 
-from .. import env_editor
+from .. import settings_store
 from ..config import LANGUAGE_MAP, get_registered_env_fields, load_professor_config
 from ..errors import CLIError
 from ..models.catalog import get_pricing_unit, load_model_catalog
-from ..services.api_config import env_var_for_endpoint, list_apis
-from ..tracking.source_config import (
+from ..services.api_config import credential_path_for_endpoint, list_apis
+from ..settings_store import (
     add_source,
     get_configured_sources,
     get_source_id,
@@ -25,23 +24,23 @@ logger = logging.getLogger(__name__)
 
 
 def _list_optional_env_fields() -> list[tuple[str, str, str, bool]]:
-    """Return every optional .env variable this installation knows about, for display.
+    """Return every optional ``.settings`` value this installation knows about, for display.
 
     Combines two sources: plugin-declared fields (registered via
     ``register_env_field()``, e.g. the webui plugin's secrets) and
-    alternate-API-endpoint keys derived from ``apis.json`` (which don't go
-    through the registry since their names depend on what's configured
-    there, not on any plugin).
+    alternate-API-endpoint credential paths derived from the configured
+    endpoints (which don't go through the registry since their names depend
+    on what's configured in ``settings.*.toml``, not on any plugin).
 
     Returns:
-        A list of ``(key, label, section, secret)`` tuples, sorted by
-        section then key.
+        A list of ``(dotted_path, label, section, secret)`` tuples, sorted
+        by section then path.
     """
     fields = [(f.key, f.label, f.section, f.secret) for f in get_registered_env_fields()]
     for api_name in list_apis():
         fields.append((
-            env_var_for_endpoint(api_name),
-            f"API key for the '{api_name}' endpoint (see apis.json)",
+            credential_path_for_endpoint(api_name),
+            f"API key for the '{api_name}' endpoint (see settings.default.toml/settings.local.toml)",
             "Alternate API endpoints",
             True,
         ))
@@ -53,12 +52,9 @@ def show_professor_config() -> None:
     professors = load_professor_config()
 
     if not professors:
-        print("No professors configured in .env file.")
+        print("No professors configured in .settings.")
         print("Add one with: python main.py env add-professor")
-        print("Or by hand, in the format:")
-        print("  PROF_[ID]_NAME=Professor Name")
-        print("  PROF_[ID]_KEY=api_key")
-        print("  PROF_[ID]_BACKUP_KEY=backup_api_key")
+        print("Or by hand, under a [professors.<safe_name>] table — see .settings.template.")
         _print_optional_settings()
         return
 
@@ -66,8 +62,8 @@ def show_professor_config() -> None:
     print("=" * 60)
 
     for safe_name, prof in professors.items():
-        primary_set = "set" if os.environ.get(prof['primary_key']) else "NOT SET"
-        backup_set = "set" if os.environ.get(prof['backup_key']) else "not set"
+        primary_set = "set" if prof.get('key') else "NOT SET"
+        backup_set = "set" if prof.get('backup_key') else "not set"
 
         # Data file on disk
         usage_path = get_usage_data_path(safe_name)
@@ -80,8 +76,8 @@ def show_professor_config() -> None:
 
         print(f"\n  {prof['name']}")
         print(f"    Safe name:    {safe_name}")
-        print(f"    Primary key:  {prof['primary_key']} ({primary_set})")
-        print(f"    Backup key:   {prof['backup_key']} ({backup_set})")
+        print(f"    Primary key:  {primary_set}")
+        print(f"    Backup key:   {backup_set}")
         print(f"    Usage file:   {usage_label}")
         if archived_months:
             print(f"    Archives:     {', '.join(archived_months)}")
@@ -101,7 +97,7 @@ def show_professor_config() -> None:
 
 
 def _print_optional_settings() -> None:
-    """Print every optional .env setting this installation knows about and whether it's set.
+    """Print every optional ``.settings`` value this installation knows about and whether it's set.
 
     Never prints a secret's value — only whether it's currently set. Run
     after a `git pull` (or any update) to see whether a new optional
@@ -114,15 +110,15 @@ def _print_optional_settings() -> None:
         return
 
     print("\n" + "=" * 60)
-    print("Optional settings (all unset by default — see .env.template):")
+    print("Optional settings (all unset by default — see .settings.template):")
     current_section = None
-    for key, label, section, _secret in fields:
+    for path, label, section, _secret in fields:
         if section != current_section:
             print(f"\n  [{section}]")
             current_section = section
-        status = "set" if os.environ.get(key) else "not set"
-        print(f"    {key}  ({status})  {label}")
-    print("\nSet one with: python main.py env set <KEY>")
+        status = "set" if settings_store.get_value(path) else "not set"
+        print(f"    {path}  ({status})  {label}")
+    print("\nSet one with: python main.py env set <dotted.path>")
 
 
 def list_available_models() -> None:
@@ -145,7 +141,7 @@ def list_available_models() -> None:
     print("=" * len(bar) + "\n")
 
 
-def _print_daily_usage(token_tracker: TokenTracker, professor_name: str, date: Optional[str] = None) -> None:
+def _print_daily_usage(token_tracker: TokenTracker, professor_name: str, date: str | None = None) -> None:
     """Display daily usage report for info-only command path."""
     if date == 'today':
         usage = token_tracker.get_daily_usage()
@@ -225,8 +221,8 @@ def handle_info_commands(args: argparse.Namespace) -> bool:
 def _handle_env_command(args: argparse.Namespace) -> None:
     """Handle 'env add-professor/remove-professor/list/set/unset'.
 
-    This is the CLI-side half of directly editing .env — see
-    ``src/env_editor.py`` for why writing to .env directly is safe here
+    This is the CLI-side half of directly editing ``.settings`` — see
+    ``src/settings_store.py`` for why writing to it directly is safe here
     (every edit is triggered by a person typing a command at their own
     keyboard, never over a network call or as part of syncing between
     machines).
@@ -270,7 +266,7 @@ def _env_add_professor_interactive(args: argparse.Namespace) -> None:
     backup_key = getpass.getpass("Backup API key (optional, hidden — press Enter to skip): ")
 
     try:
-        safe_name = env_editor.add_professor(name, primary_key, backup_key or None)
+        safe_name = settings_store.add_professor(name, primary_key, backup_key or None)
     except ValueError as e:
         raise CLIError(str(e)) from e
 
@@ -282,63 +278,65 @@ def _env_remove_professor(args: argparse.Namespace) -> None:
     """Remove a professor by safe name or display name, after a yes/no confirmation.
 
     Confirmation matters here specifically because this deletes real key
-    material from .env, not just a display entry.
+    material from .settings, not just a display entry.
     """
     identifier = args.identifier
     confirm = input(
-        f"Remove professor '{identifier}' from .env? This deletes their API key(s). [y/N]: "
+        f"Remove professor '{identifier}' from .settings? This deletes their API key(s). [y/N]: "
     ).strip().lower()
     if confirm not in ("y", "yes"):
         print("Cancelled — nothing was removed.")
         return
     try:
-        removed_name = env_editor.remove_professor(identifier)
+        removed_name = settings_store.remove_professor(identifier)
     except ValueError as e:
         raise CLIError(str(e)) from e
     print(f"Removed professor '{removed_name}'.")
 
 
 def _env_set_value(args: argparse.Namespace) -> None:
-    """Set an optional .env variable, prompting for the value (hidden input if it's a secret).
+    """Set an optional ``.settings`` value, prompting for it (hidden input if it's a secret).
 
-    Unregistered keys are treated as secret by default — hiding input when
+    *key* is a dotted path (e.g. ``webui.session_secret``,
+    ``endpoints.hpc_cluster.key``), not an environment-variable name.
+    Unregistered paths are treated as secret by default — hiding input when
     it wasn't necessary is a minor inconvenience; echoing a value that
     turns out to be a key would not be.
     """
-    key = args.key.strip().upper()
+    path = args.key.strip()
     known_secrets = {k: secret for k, _label, _section, secret in _list_optional_env_fields()}
-    is_secret = known_secrets.get(key, True)
+    is_secret = known_secrets.get(path, True)
 
     if getattr(args, 'generate', False):
         if not is_secret:
             raise CLIError(
-                f"--generate is only for secret values; '{key}' isn't registered as one. "
-                f"Use 'python main.py env set {key}' instead."
+                f"--generate is only for secret values; '{path}' isn't registered as one. "
+                f"Use 'python main.py env set {path}' instead."
             )
         value = secrets.token_urlsafe(32)
     else:
-        prompt = f"Value for {key}: "
+        prompt = f"Value for {path}: "
         value = getpass.getpass(prompt) if is_secret else input(prompt).strip()
 
     try:
-        env_editor.set_optional_value(key, value)
+        settings_store.set_value(path, value)
     except ValueError as e:
         raise CLIError(str(e)) from e
 
-    print(f"\n{key} set (value hidden)." if is_secret else f"\n{key}={value}")
+    print(f"\n{path} set (value hidden)." if is_secret else f"\n{path}={value}")
 
 
 def _env_unset_value(args: argparse.Namespace) -> None:
-    """Remove an optional .env variable."""
-    key = args.key.strip().upper()
-    env_editor.unset_optional_value(key)
-    print(f"{key} removed (if it was set).")
+    """Remove an optional ``.settings`` value."""
+    path = args.key.strip()
+    settings_store.unset_value(path)
+    print(f"{path} removed (if it was set).")
 
 
 def _handle_usage_sources(args: argparse.Namespace) -> None:
     """Handle 'usage sources list/add/remove'. See docs/webui-plugin-plan.md section 1.
 
-    Note that the external-source configuration itself (data_sources.json)
+    Note that the external-source configuration itself (in ``.settings``)
     isn't scoped to the professor named on the command line — every usage
     subcommand requires a professor argument for consistency, but 'sources'
     manages this installation's config as a whole. The professor named on

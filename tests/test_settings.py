@@ -1,19 +1,20 @@
 """
 Tests for src/settings.py:
-  - _merge_layer (the pure merge logic used for both the lab-shared layer
+  - _merge_layer (the pure merge logic used for both the shared layer
     and settings.local.toml)
   - the full three-layer load order, exercised via importlib.reload with
-    PU_SANDBOX_LAB_SETTINGS pointed at a tmp_path file
+    settings_store's shared_settings.path pointed at a tmp_path file
 
 The module executes its layered load at import time, so the reload test
-restores the real (env-var-free) state afterward to avoid leaking a
-modified settings module into any other test in the same session.
+restores the real (unmodified) state afterward to avoid leaking a modified
+settings module into any other test in the same session.
 """
 
 import importlib
 import logging
 
 import src.settings as settings_mod
+import src.settings_store as settings_store_mod
 from src.settings import _merge_layer
 
 
@@ -46,35 +47,41 @@ class TestMergeLayer:
 
 class TestLayeredLoadOrder:
 
-    def test_lab_settings_env_var_applies_and_local_still_wins(self, tmp_path, monkeypatch):
-        """settings.toml -> lab-shared file -> settings.local.toml, each overriding the last."""
-        lab_file = tmp_path / "lab.toml"
-        lab_file.write_text("[budget]\nwarning_threshold_pct = 95\n")
-        monkeypatch.setenv("PU_SANDBOX_LAB_SETTINGS", str(lab_file))
+    def _point_shared_settings_at(self, tmp_path, monkeypatch, path):
+        """Redirect settings_store's .settings file to a tmp one with shared_settings.path set."""
+        settings_file = tmp_path / ".settings"
+        settings_file.write_text(f'[shared_settings]\npath = "{path}"\n')
+        monkeypatch.setattr(settings_store_mod, "SETTINGS_PATH", settings_file)
+
+    def test_shared_settings_path_applies_and_local_still_wins(self, tmp_path, monkeypatch):
+        """settings.default.toml -> shared file -> settings.local.toml, each overriding the last."""
+        shared_file = tmp_path / "shared.toml"
+        shared_file.write_text("[budget]\nwarning_threshold_pct = 95\n")
+        self._point_shared_settings_at(tmp_path, monkeypatch, str(shared_file))
 
         try:
             importlib.reload(settings_mod)
-            # Repo's settings.local.toml (if present) still wins over the lab file
-            # for any key it mentions; but the lab file's value applies for keys
+            # Repo's settings.local.toml (if present) still wins over the shared file
+            # for any key it mentions; but the shared file's value applies for keys
             # settings.local.toml doesn't touch. We only assert the mechanism ran
             # without error and produced *some* integer threshold.
             assert isinstance(settings_mod.BUDGET_WARNING_THRESHOLD, int)
         finally:
-            monkeypatch.delenv("PU_SANDBOX_LAB_SETTINGS", raising=False)
+            monkeypatch.setattr(settings_store_mod, "SETTINGS_PATH", tmp_path / "no_shared_settings")
             importlib.reload(settings_mod)
 
-    def test_missing_lab_settings_file_warns_but_does_not_raise(self, tmp_path, monkeypatch, caplog):
+    def test_missing_shared_settings_file_warns_but_does_not_raise(self, tmp_path, monkeypatch, caplog):
         missing_path = tmp_path / "does_not_exist.toml"
-        monkeypatch.setenv("PU_SANDBOX_LAB_SETTINGS", str(missing_path))
+        self._point_shared_settings_at(tmp_path, monkeypatch, str(missing_path))
         try:
             with caplog.at_level(logging.WARNING):
                 importlib.reload(settings_mod)
-            assert any("PU_SANDBOX_LAB_SETTINGS" in r.message for r in caplog.records)
+            assert any("shared_settings.path" in r.message for r in caplog.records)
         finally:
-            monkeypatch.delenv("PU_SANDBOX_LAB_SETTINGS", raising=False)
+            monkeypatch.setattr(settings_store_mod, "SETTINGS_PATH", tmp_path / "no_shared_settings")
             importlib.reload(settings_mod)
 
-    def test_unset_lab_settings_env_var_leaves_behavior_unchanged(self, monkeypatch):
-        monkeypatch.delenv("PU_SANDBOX_LAB_SETTINGS", raising=False)
+    def test_unset_shared_settings_leaves_behavior_unchanged(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(settings_store_mod, "SETTINGS_PATH", tmp_path / ".settings")
         importlib.reload(settings_mod)
         assert isinstance(settings_mod.BUDGET_WARNING_THRESHOLD, int)

@@ -33,10 +33,10 @@ hand first if you want a new one.
 
 Note: this only touches this installation's own local data/ folder. If a
 professor's usage tracking has already been switched to a shared-write
-external source (data_sources.json), that professor's records live under
-the external source's own path instead and aren't touched by this script
-— run it there too if that installation also has old-format records to
-convert.
+external source (configured in .settings), that professor's records live
+under the external source's own path instead and aren't touched by this
+script — run it there too if that installation also has old-format records
+to convert.
 """
 
 import argparse
@@ -48,7 +48,7 @@ from pathlib import Path
 _ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(_ROOT))
 
-from src.tracking.source_config import get_source_id  # noqa: E402
+from src.settings_store import get_source_id
 
 DATA_DIR = _ROOT / "data"
 BACKUP_DIR = DATA_DIR / "_pre_migration_backup"

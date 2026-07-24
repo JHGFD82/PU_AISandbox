@@ -23,8 +23,8 @@ if str(_REPO_ROOT) not in sys.path:
 def _configured_professors(monkeypatch):
     """Two fake professors, matching the {safe_name: {...}} shape load_professor_config() returns."""
     fake_config = {
-        "heller": {"name": "Heller", "primary_key": "PROF_1_KEY", "backup_key": "PROF_1_BACKUP_KEY", "id": "1", "safe_name": "heller"},
-        "smith": {"name": "Smith", "primary_key": "PROF_2_KEY", "backup_key": "PROF_2_BACKUP_KEY", "id": "2", "safe_name": "smith"},
+        "heller": {"name": "Heller", "key": "sk-heller", "backup_key": None, "safe_name": "heller"},
+        "smith": {"name": "Smith", "key": "sk-smith", "backup_key": None, "safe_name": "smith"},
     }
     # app.py imported load_professor_config into its own namespace at import
     # time, so it must be patched there (on the actual registered module
@@ -37,7 +37,6 @@ def _configured_professors(monkeypatch):
 @pytest.fixture(autouse=True)
 def _no_passphrase(monkeypatch):
     """Default every test to the open-access (no passphrase configured) case."""
-    monkeypatch.delenv("WEBUI_PASSPHRASE_HASH", raising=False)
     auth = sys.modules["_pu_webui_auth"]
     app_module = sys.modules["_pu_webui_app"]
     monkeypatch.setattr(app_module, "_auth_backend", auth.PassphraseBackend(passphrase_hash=""))

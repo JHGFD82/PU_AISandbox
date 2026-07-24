@@ -1,4 +1,4 @@
-"""Load user-customizable settings from settings.toml at the repository root.
+"""Load user-customizable settings from settings.default.toml at the repository root.
 
 All tuneable runtime defaults live in that file. This module reads it once at
 import time and exposes each value as a typed module-level constant so other
@@ -8,35 +8,42 @@ Settings are merged from up to three layers, in this order (later layers
 override earlier ones, key by key — a layer only needs to mention the
 settings it wants to change):
 
-1. ``settings.toml`` — the repo's checked-in defaults, same for everyone.
-2. A lab-shared file, if ``PU_SANDBOX_LAB_SETTINGS`` is set (an environment
-   variable pointing at a ``.toml`` file, e.g. one synced with Dropbox
-   between everyone in a lab). Lets a group share defaults — a shared
-   cluster's worker count, a lab-wide font size — without anyone needing to
-   hand-edit their own copy. Absent by default; nothing changes unless this
-   variable is set.
+1. ``settings.default.toml`` — the repo's checked-in defaults, same for everyone.
+2. A shared file, if ``shared_settings.path`` is set in ``.settings``
+   (see ``src/settings_store.py``) — e.g. one synced with Dropbox between
+   everyone in a group. Lets a group share defaults — a shared cluster's
+   worker count, a group-wide font size, even a shared alternate-endpoint
+   definition (see the ``[endpoints]`` section below) — without anyone
+   hand-editing their own copy. Absent by default; nothing changes unless
+   this is set. A common case: one person manages several professors'
+   installations and wants them all to use the same tuned settings.
 3. ``settings.local.toml`` — this machine's personal overrides, git-ignored.
-   Still the last word: even with a lab-shared file in play, a setting
+   Still the last word: even with a shared file in play, a setting
    placed here wins, so one person can override just their own quirk
    without touching the file everyone else reads.
+
+The ``[endpoints]`` section (alternate AI API endpoint *definitions* — base
+URL, timeout, etc.) merges through these same three layers exactly like
+every other section. Only the credential for each endpoint lives outside
+this file, in ``.settings`` (since credentials are never meant to be shared
+or layered) — see ``src/services/api_config.py`` for how the two combine.
 """
 
-import os
 import sys
 from pathlib import Path
 
 import tomllib
 
+from . import settings_store
 from .config import register_env_field
 
 _ROOT = Path(__file__).parent.parent  # src/ -> repo root
-_TOML_PATH = _ROOT / "settings.toml"
+_TOML_PATH = _ROOT / "settings.default.toml"
 _LOCAL_TOML_PATH = _ROOT / "settings.local.toml"
-_LAB_SETTINGS_ENV_VAR = "PU_SANDBOX_LAB_SETTINGS"
 
 register_env_field(
-    _LAB_SETTINGS_ENV_VAR,
-    "Path to a lab-shared settings.toml, merged between settings.toml and settings.local.toml",
+    "shared_settings.path",
+    "Path to a shared settings.toml, merged between settings.default.toml and settings.local.toml",
     section="Core",
     secret=False,
 )
@@ -63,21 +70,20 @@ try:
         _s = tomllib.load(_f)
 except FileNotFoundError:
     raise FileNotFoundError(
-        f"settings.toml not found at {_TOML_PATH}. "
-        "Copy settings.toml from the repository root and edit it to configure the sandbox."
+        f"settings.default.toml not found at {_TOML_PATH}. "
+        "Copy settings.default.toml from the repository root and edit it to configure the sandbox."
     )
 
-# Layer 2: lab-shared settings, only if PU_SANDBOX_LAB_SETTINGS points at a real file.
-_lab_settings_path = os.environ.get(_LAB_SETTINGS_ENV_VAR)
-if _lab_settings_path:
-    _resolved_lab_path = Path(_lab_settings_path).expanduser()
-    if _resolved_lab_path.exists():
-        _merge_layer(_s, _resolved_lab_path)
+# Layer 2: shared settings, only if .settings points at a real file.
+_shared_settings_path = settings_store.get_shared_settings_path()
+if _shared_settings_path:
+    if _shared_settings_path.exists():
+        _merge_layer(_s, _shared_settings_path)
     else:
         import logging
         logging.getLogger(__name__).warning(
-            f"{_LAB_SETTINGS_ENV_VAR} is set to '{_lab_settings_path}', but no file exists "
-            "there — lab-shared settings were not applied."
+            f"shared_settings.path is set to '{_shared_settings_path}', but no file exists "
+            "there — shared settings were not applied."
         )
 
 # Layer 3: settings.local.toml — this machine's personal overrides, still the last word.
@@ -110,6 +116,10 @@ DEFAULT_FONT_SIZE: int = _s["output"]["default_font_size"]
 
 # ── Budget ─────────────────────────────────────────────────────────────────────
 BUDGET_WARNING_THRESHOLD: int = _s["budget"]["warning_threshold_pct"]
+
+# ── Alternate AI API endpoints (definitions only — credentials live in .settings) ──
+ENDPOINTS: dict = _s.get("endpoints", {})
+DEFAULT_ENDPOINT = _s.get("config", {}).get("default_endpoint") or None
 
 
 def __getattr__(name: str):

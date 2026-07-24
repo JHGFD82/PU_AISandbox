@@ -12,16 +12,15 @@ TokenTracker's shared-write path is only reached when data_file is left as
 None (matching real usage) and a shared-write source is configured for the
 professor being tracked — every test here patches
 src.tracking.token_tracker.get_shared_write_source directly rather than
-touching the real data_sources.json.
+touching the real .settings.
 """
 
 import json
-from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
-from src.tracking.source_config import ExternalSource
+from src.settings_store import ExternalSource
 from src.tracking.token_tracker import (
     TokenTracker,
     UsageStats,

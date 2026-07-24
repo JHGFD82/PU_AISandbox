@@ -1,8 +1,10 @@
 """CLI entry point: parses command-line arguments, validates them, and routes each command to the right handler.
 
-Importing this module loads the ``.env`` file, discovers all installed plugins,
-and builds the argument parser. The ``main()`` function at the bottom is what
-runs when you type ``python main.py ...``.
+Importing this module discovers all installed plugins and builds the
+argument parser. The ``main()`` function at the bottom is what runs when you
+type ``python main.py ...``. Credentials and other per-installation settings
+are read on demand from ``.settings`` (see ``src/settings_store.py``) rather
+than being loaded into the process environment up front.
 """
 
 import argparse
@@ -11,7 +13,6 @@ import logging
 import os
 import sys
 from pathlib import Path
-from typing import Optional
 
 # Loading this hands terminal line-editing to GNU Readline, which manages
 # its own input buffer instead of the operating system's default line
@@ -26,13 +27,8 @@ try:
 except ImportError:
     pass
 
-from dotenv import load_dotenv
-
 from .errors import CLIError
 from .runtime import ModePlugin, handle_info_commands, load_plugins
-
-# Load environment variables
-load_dotenv()
 
 logger = logging.getLogger(__name__)
 
@@ -202,7 +198,7 @@ def _build_usage_sources_subparser(usage_subparsers: argparse._SubParsersAction)
 
 
 def _build_env_subparser(subparsers: argparse._SubParsersAction) -> None:
-    """Register the 'env' command: add/remove professors and manage optional .env settings.
+    """Register the 'env' command: add/remove professors and manage optional .settings values.
 
     Unlike every other built-in command, 'env' never requires a professor
     name on the command line — you need it precisely when no professor
@@ -216,7 +212,7 @@ def _build_env_subparser(subparsers: argparse._SubParsersAction) -> None:
     shell history or a process listing.
     """
     env_parser = subparsers.add_parser(
-        'env', help="Add/remove professors and manage optional .env settings"
+        'env', help="Add/remove professors and manage optional .settings values"
     )
     _add_debug_flags(env_parser)
     env_sub = env_parser.add_subparsers(dest='env_subcommand', help='env subcommand')
@@ -239,31 +235,31 @@ def _build_env_subparser(subparsers: argparse._SubParsersAction) -> None:
     )
 
     list_parser = env_sub.add_parser(
-        'list', help='List optional .env settings and whether each is currently set',
+        'list', help='List optional .settings values and whether each is currently set',
     )
     _add_debug_flags(list_parser)
 
     set_parser = env_sub.add_parser(
         'set',
-        help='Set an optional .env variable (prompts for the value; hidden input for secrets)',
+        help='Set an optional .settings value (prompts for it; hidden input for secrets)',
     )
     _add_debug_flags(set_parser)
     set_parser.add_argument(
         'key', type=str,
-        help="The variable to set, e.g. WEBUI_SESSION_SECRET or API_HPC_CLUSTER_KEY",
+        help="Dotted path to set, e.g. webui.session_secret or endpoints.hpc_cluster.key",
     )
     set_parser.add_argument(
         '--generate', action='store_true',
         help='Auto-generate a random value instead of prompting (secrets only)',
     )
 
-    unset_parser = env_sub.add_parser('unset', help='Remove an optional .env variable')
+    unset_parser = env_sub.add_parser('unset', help='Remove an optional .settings value')
     _add_debug_flags(unset_parser)
     unset_parser.add_argument('key', type=str, help='The variable to remove')
 
 
 def create_argument_parser(
-    plugins: Optional[dict[str, ModePlugin]] = None,
+    plugins: dict[str, ModePlugin] | None = None,
 ) -> argparse.ArgumentParser:
     """Build the command-line parser that interprets everything a user types after
     ``python main.py``.
@@ -366,8 +362,8 @@ def _available_commands_hint(plugins: dict[str, ModePlugin]) -> str:
         "  usage daily [YYYY-MM-DD]             Daily usage",
         "  env add-professor                    Add a new professor (no professor name needed first)",
         "  env remove-professor <identifier>    Remove a configured professor",
-        "  env list                             List optional .env settings and their status",
-        "  env set <KEY> / env unset <KEY>       Set or remove an optional .env variable",
+        "  env list                             List optional .settings values and their status",
+        "  env set <path> / env unset <path>     Set or remove an optional .settings value",
     ]
     if plugins:
         lines.append("\nPlugin commands: " + ", ".join(sorted(plugins)))

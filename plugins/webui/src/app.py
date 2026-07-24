@@ -29,12 +29,10 @@ exists on disk and that's what lets ``SandboxProcessor`` find it.
 
 from __future__ import annotations
 
-import os
 import secrets
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -42,6 +40,7 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from starlette.middleware.sessions import SessionMiddleware
 
+from src import settings_store
 from src.config import load_professor_config
 from src.models import (
     DEFAULT_FALLBACK_MODEL,
@@ -68,17 +67,17 @@ class ActiveProfessorBody(BaseModel):
 
 class NewConversationBody(BaseModel):
     professor: str
-    model: Optional[str] = None
+    model: str | None = None
 
 
 class ChatBody(BaseModel):
     professor: str
     conversation_id: str
     message: str
-    model: Optional[str] = None
+    model: str | None = None
 
 
-def _validated_professor(safe_name: Optional[str]) -> str:
+def _validated_professor(safe_name: str | None) -> str:
     """Confirm *safe_name* is a professor configured in .env, or raise a 400 error.
 
     Every route that accepts a professor name from the browser calls this
@@ -109,9 +108,10 @@ def create_app() -> FastAPI:
 
     # A random secret is fine for this session-cookie's purpose (signing,
     # not encrypting) — worst case on restart is everyone has to unlock
-    # again. Set WEBUI_SESSION_SECRET in .env to keep sessions alive across
-    # restarts instead.
-    secret = os.environ.get("WEBUI_SESSION_SECRET") or secrets.token_hex(32)
+    # again. Set webui.session_secret in .settings (e.g. via
+    # `python main.py env set webui.session_secret --generate`) to keep
+    # sessions alive across restarts instead.
+    secret = settings_store.get_value("webui.session_secret") or secrets.token_hex(32)
     app.add_middleware(
         SessionMiddleware, secret_key=secret, session_cookie=WEBUI_SESSION_COOKIE_NAME
     )

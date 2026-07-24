@@ -171,77 +171,50 @@ class TestParseLanguageCode:
 
 class TestLoadProfessorConfig:
 
-    def test_empty_environment_returns_empty_dict(self, monkeypatch):
-        monkeypatch.delenv("PROF_1_NAME", raising=False)
-        monkeypatch.delenv("PROF_1_KEY", raising=False)
-        # Wipe every PROF_* variable that might be inherited from the real .env
-        for key in list(__import__("os").environ.keys()):
-            if key.startswith("PROF_"):
-                monkeypatch.delenv(key, raising=False)
+    @pytest.fixture(autouse=True)
+    def _isolate_settings_path(self, tmp_path, monkeypatch):
+        from src import settings_store
+        monkeypatch.setattr(settings_store, "SETTINGS_PATH", tmp_path / ".settings")
+
+    def test_empty_settings_returns_empty_dict(self):
         assert load_professor_config() == {}
 
-    def test_single_professor_returned(self, monkeypatch):
-        for key in list(__import__("os").environ.keys()):
-            if key.startswith("PROF_"):
-                monkeypatch.delenv(key, raising=False)
-        monkeypatch.setenv("PROF_1_NAME", "Jeff Heller")
-        monkeypatch.setenv("PROF_1_KEY", "sk-test-key")
+    def test_single_professor_returned(self):
+        from src import settings_store
+        settings_store.add_professor("Jeff Heller", "sk-test-key")
         result = load_professor_config()
         assert "jeff_heller" in result
 
-    def test_professor_entry_has_expected_keys(self, monkeypatch):
-        for key in list(__import__("os").environ.keys()):
-            if key.startswith("PROF_"):
-                monkeypatch.delenv(key, raising=False)
-        monkeypatch.setenv("PROF_1_NAME", "Jeff Heller")
-        monkeypatch.setenv("PROF_1_KEY", "sk-test-key")
+    def test_professor_entry_has_expected_keys(self):
+        from src import settings_store
+        settings_store.add_professor("Jeff Heller", "sk-test-key", "sk-backup")
         entry = load_professor_config()["jeff_heller"]
         assert entry["name"] == "Jeff Heller"
         assert entry["safe_name"] == "jeff_heller"
-        assert entry["primary_key"] == "PROF_1_KEY"
-        assert entry["backup_key"] == "PROF_1_BACKUP_KEY"
-        assert entry["id"] == "1"
+        assert entry["key"] == "sk-test-key"
+        assert entry["backup_key"] == "sk-backup"
 
-    def test_professor_without_primary_key_excluded(self, monkeypatch):
-        for key in list(__import__("os").environ.keys()):
-            if key.startswith("PROF_"):
-                monkeypatch.delenv(key, raising=False)
-        monkeypatch.setenv("PROF_1_NAME", "No Key Prof")
-        # Intentionally omit PROF_1_KEY
-        assert load_professor_config() == {}
-
-    def test_multiple_professors_all_returned(self, monkeypatch):
-        for key in list(__import__("os").environ.keys()):
-            if key.startswith("PROF_"):
-                monkeypatch.delenv(key, raising=False)
-        monkeypatch.setenv("PROF_1_NAME", "Alice Smith")
-        monkeypatch.setenv("PROF_1_KEY", "key-alice")
-        monkeypatch.setenv("PROF_2_NAME", "Bob Jones")
-        monkeypatch.setenv("PROF_2_KEY", "key-bob")
+    def test_multiple_professors_all_returned(self):
+        from src import settings_store
+        settings_store.add_professor("Alice Smith", "key-alice")
+        settings_store.add_professor("Bob Jones", "key-bob")
         result = load_professor_config()
         assert "alice_smith" in result
         assert "bob_jones" in result
         assert len(result) == 2
 
-    def test_safe_name_used_as_dict_key(self, monkeypatch):
-        for key in list(__import__("os").environ.keys()):
-            if key.startswith("PROF_"):
-                monkeypatch.delenv(key, raising=False)
-        monkeypatch.setenv("PROF_1_NAME", "O'Brien Lee")
-        monkeypatch.setenv("PROF_1_KEY", "sk-obrien")
+    def test_safe_name_used_as_dict_key(self):
+        from src import settings_store
+        settings_store.add_professor("O'Brien Lee", "sk-obrien")
         result = load_professor_config()
         # Apostrophe → underscore, spaces → underscore
         assert "o_brien_lee" in result
 
-    def test_backup_key_var_recorded_even_if_not_set(self, monkeypatch):
-        for key in list(__import__("os").environ.keys()):
-            if key.startswith("PROF_"):
-                monkeypatch.delenv(key, raising=False)
-        monkeypatch.setenv("PROF_3_NAME", "Test Prof")
-        monkeypatch.setenv("PROF_3_KEY", "sk-testprof")
-        # PROF_3_BACKUP_KEY is NOT set, but the config entry should still record the var name
+    def test_backup_key_none_when_not_set(self):
+        from src import settings_store
+        settings_store.add_professor("Test Prof", "sk-testprof")
         entry = load_professor_config()["test_prof"]
-        assert entry["backup_key"] == "PROF_3_BACKUP_KEY"
+        assert entry["backup_key"] is None
 
 
 # ---------------------------------------------------------------------------
@@ -250,96 +223,62 @@ class TestLoadProfessorConfig:
 
 class TestGetApiKey:
 
-    def _setup_one_prof(self, monkeypatch, *, name="Jeff Heller", primary="sk-primary", backup=None):
-        """Helper: register one professor and optionally set their keys."""
-        for key in list(__import__("os").environ.keys()):
-            if key.startswith("PROF_"):
-                monkeypatch.delenv(key, raising=False)
-        monkeypatch.setenv("PROF_1_NAME", name)
-        monkeypatch.setenv("PROF_1_KEY", primary)
-        if backup:
-            monkeypatch.setenv("PROF_1_BACKUP_KEY", backup)
+    @pytest.fixture(autouse=True)
+    def _isolate_settings_path(self, tmp_path, monkeypatch):
+        from src import settings_store
+        monkeypatch.setattr(settings_store, "SETTINGS_PATH", tmp_path / ".settings")
 
-    def test_returns_primary_key_by_safe_name(self, monkeypatch):
-        self._setup_one_prof(monkeypatch)
+    def _setup_one_prof(self, *, name="Jeff Heller", primary="sk-primary", backup=None):
+        """Helper: register one professor and optionally set their keys."""
+        from src import settings_store
+        settings_store.add_professor(name, primary, backup)
+
+    def test_returns_primary_key_by_safe_name(self):
+        self._setup_one_prof()
         key, display_name = get_api_key("jeff_heller")
         assert key == "sk-primary"
         assert display_name == "Jeff Heller"
 
-    def test_returns_primary_key_by_display_name(self, monkeypatch):
-        self._setup_one_prof(monkeypatch)
+    def test_returns_primary_key_by_display_name(self):
+        self._setup_one_prof()
         key, display_name = get_api_key("Jeff Heller")
         assert key == "sk-primary"
 
-    def test_display_name_lookup_is_case_insensitive(self, monkeypatch):
-        self._setup_one_prof(monkeypatch)
+    def test_display_name_lookup_is_case_insensitive(self):
+        self._setup_one_prof()
         key, _ = get_api_key("jeff heller")
         assert key == "sk-primary"
 
-    def test_unknown_professor_raises_value_error(self, monkeypatch):
-        self._setup_one_prof(monkeypatch)
+    def test_unknown_professor_raises_value_error(self):
+        self._setup_one_prof()
         with pytest.raises(ValueError, match="not found"):
             get_api_key("nobody")
 
-    def test_no_professors_configured_raises_value_error(self, monkeypatch):
-        for key in list(__import__("os").environ.keys()):
-            if key.startswith("PROF_"):
-                monkeypatch.delenv(key, raising=False)
+    def test_no_professors_configured_raises_value_error(self):
         with pytest.raises(ValueError):
             get_api_key("heller")
 
-    def test_falls_back_to_backup_key(self, monkeypatch):
-        for key in list(__import__("os").environ.keys()):
-            if key.startswith("PROF_"):
-                monkeypatch.delenv(key, raising=False)
-        monkeypatch.setenv("PROF_1_NAME", "Jeff Heller")
-        # Set only the backup key variable (primary env var missing)
-        monkeypatch.setenv("PROF_1_BACKUP_KEY", "sk-backup")
-        # We must also register the primary key var name in env so load_professor_config
-        # includes this professor — PROF_1_KEY must have a value (even empty is excluded).
-        # So simulate primary key env var pointing to a value that is empty:
-        monkeypatch.setenv("PROF_1_KEY", "sk-primary-present")
-        # Now remove the primary env var value by patching os.getenv directly
-        import os
-        original_getenv = os.getenv
-
-        def _patched_getenv(key, default=None):
-            if key == "PROF_1_KEY":
-                return None          # simulate missing primary
-            return original_getenv(key, default)
-
-        monkeypatch.setattr("src.config.os.getenv", _patched_getenv)
+    def test_falls_back_to_backup_key(self):
+        from src import settings_store
+        settings_store.add_professor("Jeff Heller", "sk-primary")
+        settings_store.unset_value("professors.jeff_heller.key")
+        settings_store.set_value("professors.jeff_heller.backup_key", "sk-backup")
         key, _ = get_api_key("jeff_heller")
         assert key == "sk-backup"
 
-    def test_no_api_keys_at_all_raises_value_error(self, monkeypatch):
-        for key in list(__import__("os").environ.keys()):
-            if key.startswith("PROF_"):
-                monkeypatch.delenv(key, raising=False)
-        monkeypatch.setenv("PROF_1_NAME", "Jeff Heller")
-        monkeypatch.setenv("PROF_1_KEY", "placeholder")   # needed to register professor
-
-        import os
-        original_getenv = os.getenv
-
-        def _patched_getenv(key, default=None):
-            if key in ("PROF_1_KEY", "PROF_1_BACKUP_KEY"):
-                return None
-            return original_getenv(key, default)
-
-        monkeypatch.setattr("src.config.os.getenv", _patched_getenv)
+    def test_no_api_keys_at_all_raises_value_error(self):
+        from src import settings_store
+        settings_store.add_professor("Jeff Heller", "placeholder")
+        settings_store.unset_value("professors.jeff_heller.key")
         with pytest.raises(ValueError, match="No API key"):
             get_api_key("jeff_heller")
 
-    def test_professor_not_found_mentions_add_professor(self, monkeypatch):
-        self._setup_one_prof(monkeypatch)
+    def test_professor_not_found_mentions_add_professor(self):
+        self._setup_one_prof()
         with pytest.raises(ValueError, match="env add-professor"):
             get_api_key("nobody")
 
-    def test_no_professors_configured_mentions_add_professor(self, monkeypatch):
-        for key in list(__import__("os").environ.keys()):
-            if key.startswith("PROF_"):
-                monkeypatch.delenv(key, raising=False)
+    def test_no_professors_configured_mentions_add_professor(self):
         with pytest.raises(ValueError, match="env add-professor"):
             get_api_key("heller")
 

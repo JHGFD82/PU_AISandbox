@@ -1,6 +1,14 @@
-# settings.toml — User-customizable runtime settings for PU AI Sandbox
-# Edit this file to change default behavior. Changes take effect on the next run.
-# Default models are in src/model_catalog.json under [config.defaults].
+# settings.default.toml — Repo-shipped runtime defaults for PU AI Sandbox.
+# Edit this file only if you're changing the default for everyone who clones
+# this repo. For your own machine, use settings.local.toml instead (see
+# docs/configuration.md) — it overrides just the keys you put in it, without
+# touching this file. Default models are in src/model_catalog.json under
+# [config.defaults].
+#
+# [endpoints.<name>] and [config].default_endpoint are also supported here
+# (or, more commonly, in settings.local.toml / a shared file) — see
+# "Alternate AI Endpoint Connections" in docs/configuration.md. The
+# credential for each endpoint is never stored here; it lives in .settings.
 
 [prompt]
 temperature = 0.7          # More creative than translation — suitable for open-ended prompts

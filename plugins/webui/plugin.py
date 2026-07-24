@@ -2,8 +2,8 @@
 
 Implements the ``webui`` command: ``webui serve`` starts a local FastAPI
 server (conversation history, model switching, a live spend sidebar) and
-``webui set-passphrase`` generates the unlock-gate hash for ``.env``. See
-``docs/webui-plugin-plan.md`` for the full design.
+``webui set-passphrase`` sets the unlock-gate passphrase, writing its hash
+to ``.settings``. See ``docs/webui-plugin-plan.md`` for the full design.
 
 Unlike every other plugin, ``webui`` sets ``requires_professor = False`` —
 its command doesn't belong to one professor at CLI-invocation time (you run
@@ -20,7 +20,6 @@ import getpass
 import importlib.util
 import sys
 from pathlib import Path
-from typing import Optional
 
 _PLUGIN_DIR = Path(__file__).parent
 
@@ -75,21 +74,21 @@ _register("_pu_webui_conversation", "src/conversation.py")
 _register("src.services.chat_service", "src/services/chat_service.py")
 _register("_pu_webui_app", "src/app.py")
 
-from src.config import register_env_field  # noqa: E402
-from src.errors import CLIError  # noqa: E402
+from src.config import register_env_field
+from src.errors import CLIError
 
 # Lets `--show-config` and `python main.py env set/list` discover these two
-# optional variables without needing to know anything about the webui plugin
+# optional values without needing to know anything about the webui plugin
 # specifically — see register_env_field()'s docstring in src/config.py.
 register_env_field(
-    "WEBUI_PASSPHRASE_HASH",
+    "webui.passphrase_hash",
     "Unlock passphrase hash (generate via 'webui set-passphrase')",
     section="Web UI plugin",
     secret=True,
 )
 register_env_field(
-    "WEBUI_SESSION_SECRET",
-    "Session signing secret (any long random string; 'env set WEBUI_SESSION_SECRET --generate' works)",
+    "webui.session_secret",
+    "Session signing secret (any long random string; 'env set webui.session_secret --generate' works)",
     section="Web UI plugin",
     secret=True,
 )
@@ -112,17 +111,17 @@ class WebUiPlugin:
 
         webui_sub.add_parser(
             "set-passphrase",
-            help="Generate a WEBUI_PASSPHRASE_HASH value to paste into .env",
+            help="Set the web UI unlock passphrase (writes webui.passphrase_hash to .settings)",
         )
 
     def run(
         self,
         args: argparse.Namespace,
-        professor: Optional[str],
-        model: Optional[str],
-        temperature: Optional[float],
-        top_p: Optional[float],
-        max_tokens: Optional[int],
+        professor: str | None,
+        model: str | None,
+        temperature: float | None,
+        top_p: float | None,
+        max_tokens: int | None,
     ) -> None:
         """Dispatch to ``serve`` (start the server, blocks) or ``set-passphrase`` (print a hash, exits).
 
@@ -169,11 +168,15 @@ def _serve(args: argparse.Namespace) -> None:
 
 
 def _print_passphrase_hash() -> None:
-    """Prompt for a new passphrase (hidden input) and print the .env line to paste in.
+    """Prompt for a new passphrase (hidden input), hash it, and write it directly to .settings.
 
-    Does not write to .env automatically — that file also holds live API
-    keys, so changes to it are left to the person running this command.
+    Writing directly here (rather than printing a line to paste in, as this
+    used to work) is safe for the same reason every other ``.settings``
+    write is: it's driven by a command typed locally, never over a network
+    call or as part of syncing files between machines.
     """
+    from src import settings_store
+
     passphrase = getpass.getpass("New unlock passphrase: ")
     confirm = getpass.getpass("Confirm passphrase: ")
     if passphrase != confirm:
@@ -183,5 +186,5 @@ def _print_passphrase_hash() -> None:
 
     auth = sys.modules["_pu_webui_auth"]
     hashed = auth.hash_passphrase(passphrase)
-    print("\nAdd this line to your .env file:\n")
-    print(f"WEBUI_PASSPHRASE_HASH={hashed}\n")
+    settings_store.set_value("webui.passphrase_hash", hashed)
+    print("\nUnlock passphrase set.")

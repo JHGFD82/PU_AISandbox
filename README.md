@@ -32,7 +32,7 @@ For deeper documentation, see the `docs/` folder:
 
 - [`docs/architecture.md`](docs/architecture.md) — request lifecycle, component descriptions, data-flow diagrams
 - [`docs/cli-reference.md`](docs/cli-reference.md) — full flag reference for all commands
-- [`docs/configuration.md`](docs/configuration.md) — `.env`, `model_catalog.json`, `settings.toml` template and schema reference
+- [`docs/configuration.md`](docs/configuration.md) — `.settings`, `model_catalog.json`, `settings.default.toml` template and schema reference
 - [`docs/token-usage-guide.md`](docs/token-usage-guide.md) — token tracking, usage commands, budget settings, and troubleshooting
 - [`docs/plugin-authoring-guide.md`](docs/plugin-authoring-guide.md) — step-by-step guide to writing new plugins
 
@@ -50,22 +50,25 @@ pip install -r requirements.txt
 
 ### 2. Configure professors
 
-Copy the template and edit it:
+Copy the template, then add your first professor with the built-in `env` command (it prompts for the name and keys, keys hidden at entry):
 
 ```bash
-cp .env.template .env
+cp .settings.template .settings
+python main.py env add-professor
 ```
 
-Edit `.env` — add one block per professor:
+Or hand-edit `.settings` directly — add one table per professor:
 
-```env
-PROF_1_NAME=Heller
-PROF_1_KEY=your_primary_api_key_here
-PROF_1_BACKUP_KEY=your_backup_api_key_here
+```toml
+[professors.heller]
+name = "Heller"
+key = "your_primary_api_key_here"
+backup_key = "your_backup_api_key_here"
 
-PROF_2_NAME=Smith
-PROF_2_KEY=another_primary_key_here
-PROF_2_BACKUP_KEY=another_backup_key_here
+[professors.smith]
+name = "Smith"
+key = "another_primary_key_here"
+backup_key = "another_backup_key_here"
 ```
 
 Princeton faculty obtain API keys through OIT. Each faculty member registers independently.
@@ -159,14 +162,14 @@ python main.py heller transcribe en -i scan.png -o result.txt             # sing
 python main.py heller transcribe en -i scans/                             # folder of images
 ```
 
-To use an alternate AI endpoint (HPC cluster or third-party provider), use colon syntax with a key from `apis.json`:
+To use an alternate AI endpoint (HPC cluster or third-party provider), use colon syntax with a key from an `[endpoints.<name>]` table (defined in `settings.default.toml`, a shared file, or `settings.local.toml`; credentialed via `.settings`):
 
 ```bash
 python main.py heller translate jp-en -i paper.pdf -m my_cluster:llama-3-70b
 python main.py heller prompt -m cloud_provider:some-model
 ```
 
-See [`docs/cli-reference.md`](docs/cli-reference.md) for the full flag reference and [`docs/configuration.md`](docs/configuration.md) for `apis.json` setup.
+See [`docs/cli-reference.md`](docs/cli-reference.md) for the full flag reference and [`docs/configuration.md`](docs/configuration.md) for endpoint setup.
 
 ---
 
@@ -177,7 +180,7 @@ Each professor has isolated, month-scoped tracking:
 - **Active file**: `data/token_usage_{name}.json` — current calendar month only
 - **Archives**: `data/archives/{name}/{YYYY-MM}.json` — one file per past month; written automatically on the first use of a new month
 - All totals in each file cover that month only — no file grows indefinitely
-- Monthly budget limits and warning threshold are configurable in `settings.toml` and `src/model_catalog.json`
+- Monthly budget limits and warning threshold are configurable in `settings.default.toml` and `src/model_catalog.json`
 - All-time totals are computed on demand by aggregating the active file with all archives (`usage report --all-time`)
 
 ---
@@ -208,7 +211,7 @@ Prices are per 1,000,000 tokens (default `pricing_unit`). Set `"supports_vision"
 
 ## Runtime Settings
 
-`settings.toml` at the repo root controls defaults without touching code. Create `settings.local.toml` (git-ignored) to override individual keys for your machine only.
+`settings.default.toml` at the repo root controls defaults without touching code. Create `settings.local.toml` (git-ignored) to override individual keys for your machine only; one person can also share a settings file (pointed to via `.settings`'s `shared_settings.path`) that sits between the two. See [`docs/configuration.md`](docs/configuration.md#local-overrides) for how the three layers merge.
 
 | Section | Key | Default | Effect |
 |---------|-----|---------|--------|

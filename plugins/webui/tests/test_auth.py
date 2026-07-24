@@ -10,7 +10,8 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from plugins.webui.src.auth import PassphraseBackend, hash_passphrase  # noqa: E402
+from plugins.webui.src.auth import PassphraseBackend, hash_passphrase
+from src import settings_store
 
 
 def _run(coro):
@@ -38,13 +39,13 @@ class TestConfigured:
         backend = PassphraseBackend(passphrase_hash="")
         assert backend.configured is False
 
-    def test_reads_from_environment_when_not_given(self, monkeypatch):
-        monkeypatch.setenv("WEBUI_PASSPHRASE_HASH", "env-hash")
+    def test_reads_from_settings_when_not_given(self, monkeypatch):
+        monkeypatch.setattr(settings_store, "get_value", lambda path: "settings-hash")
         backend = PassphraseBackend()
         assert backend.configured is True
 
-    def test_defaults_to_unconfigured_when_env_unset(self, monkeypatch):
-        monkeypatch.delenv("WEBUI_PASSPHRASE_HASH", raising=False)
+    def test_defaults_to_unconfigured_when_settings_unset(self, monkeypatch):
+        monkeypatch.setattr(settings_store, "get_value", lambda path: None)
         backend = PassphraseBackend()
         assert backend.configured is False
 

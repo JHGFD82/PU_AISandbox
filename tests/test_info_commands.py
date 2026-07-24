@@ -8,14 +8,12 @@ No API calls, no cloud I/O; TokenTracker is either mocked or backed by tmp_path.
 """
 
 import argparse
-import json
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-import src.env_editor as env_editor_mod
 import src.runtime.info_commands as info_mod
-import src.tracking.source_config as source_config_mod
+import src.settings_store as settings_store_mod
 from src.errors import CLIError
 from src.runtime.info_commands import (
     _print_daily_usage,
@@ -26,18 +24,9 @@ from src.runtime.info_commands import (
 
 
 @pytest.fixture(autouse=True)
-def _redirect_data_sources_file(tmp_path, monkeypatch):
-    """Keep 'usage sources' tests from touching the real repo-root data_sources.json."""
-    monkeypatch.setattr(source_config_mod, "DATA_SOURCES_FILE", tmp_path / "data_sources.json")
-
-
-@pytest.fixture(autouse=True)
-def _redirect_env_path(tmp_path, monkeypatch):
-    """Keep 'env' tests from touching the real repo-root .env file."""
-    monkeypatch.setattr(env_editor_mod, "ENV_PATH", tmp_path / ".env")
-    for key in list(__import__("os").environ.keys()):
-        if key.startswith("PROF_") or key in ("TEST_SECRET_VAR",):
-            monkeypatch.delenv(key, raising=False)
+def _redirect_settings_path(tmp_path, monkeypatch):
+    """Keep 'env' and 'usage sources' tests from touching the real repo-root .settings file."""
+    monkeypatch.setattr(settings_store_mod, "SETTINGS_PATH", tmp_path / ".settings")
 
 # ---------------------------------------------------------------------------
 # Shared test catalog (matches model_catalog.json schema)
@@ -420,39 +409,37 @@ class TestShowProfessorConfig:
         return m
 
     def test_no_professors_prints_instructions(self, capsys, monkeypatch):
-        monkeypatch.setattr(info_mod, "load_professor_config", lambda: {})
+        monkeypatch.setattr(info_mod, "load_professor_config", dict)
         show_professor_config()
         out = capsys.readouterr().out
         assert "No professors configured" in out
 
     def test_no_professors_shows_format_hint(self, capsys, monkeypatch):
-        monkeypatch.setattr(info_mod, "load_professor_config", lambda: {})
+        monkeypatch.setattr(info_mod, "load_professor_config", dict)
         show_professor_config()
         out = capsys.readouterr().out
-        assert "PROF_[ID]_NAME" in out
+        assert "professors.<safe_name>" in out
 
     def test_professor_shown_primary_key_set_no_archive(self, capsys, monkeypatch):
         """Primary key set, backup NOT set, usage file missing, no archive dir."""
-        profs = {"heller": {"name": "Jeff Heller", "primary_key": "KEY_A", "backup_key": "KEY_B"}}
+        profs = {"heller": {"name": "Jeff Heller", "key": "real-key", "backup_key": None}}
         monkeypatch.setattr(info_mod, "load_professor_config", lambda: profs)
         monkeypatch.setattr(info_mod, "get_usage_data_path", lambda _: self._make_mock_usage(exists=False))
         mock_archive = MagicMock()
         mock_archive.exists.return_value = False
         monkeypatch.setattr(info_mod, "get_archive_dir", lambda _: mock_archive)
-        monkeypatch.setenv("KEY_A", "real-key")
-        monkeypatch.delenv("KEY_B", raising=False)
         show_professor_config()
         out = capsys.readouterr().out
         assert "Jeff Heller" in out
         assert "heller" in out
-        assert "(set)" in out
+        assert "Primary key:  set" in out
         assert "not yet created" in out
         assert "none" in out
 
     def test_professor_shown_primary_key_not_set_usage_exists_with_archives(
             self, capsys, monkeypatch, tmp_path):
         """Primary NOT SET, backup set, usage file exists, archive dir has months."""
-        profs = {"heller": {"name": "Jeff Heller", "primary_key": "KEY_A", "backup_key": "KEY_B"}}
+        profs = {"heller": {"name": "Jeff Heller", "key": "", "backup_key": "backup-key"}}
         monkeypatch.setattr(info_mod, "load_professor_config", lambda: profs)
         monkeypatch.setattr(info_mod, "get_usage_data_path", lambda _: self._make_mock_usage(exists=True))
         archive_dir = tmp_path / "archives"
@@ -460,8 +447,6 @@ class TestShowProfessorConfig:
         (archive_dir / "2026-01.json").write_text("{}")
         (archive_dir / "2026-02.json").write_text("{}")
         monkeypatch.setattr(info_mod, "get_archive_dir", lambda _: archive_dir)
-        monkeypatch.delenv("KEY_A", raising=False)
-        monkeypatch.setenv("KEY_B", "backup-key")
         show_professor_config()
         out = capsys.readouterr().out
         assert "NOT SET" in out
@@ -549,7 +534,7 @@ class TestHandleInfoCommandsEnv:
 
     def test_set_secret_value_hides_it_in_output(self, capsys, monkeypatch):
         monkeypatch.setattr("getpass.getpass", lambda *_: "super-secret")
-        args = _make_ns(command="env", env_subcommand="set", key="WEBUI_SESSION_SECRET", generate=False)
+        args = _make_ns(command="env", env_subcommand="set", key="webui.session_secret", generate=False)
         handle_info_commands(args)
         out = capsys.readouterr().out
         assert "super-secret" not in out
@@ -559,17 +544,15 @@ class TestHandleInfoCommandsEnv:
         def _boom(*_a, **_k):
             raise AssertionError("should not prompt when --generate is used")
         monkeypatch.setattr("getpass.getpass", _boom)
-        args = _make_ns(command="env", env_subcommand="set", key="WEBUI_SESSION_SECRET", generate=True)
+        args = _make_ns(command="env", env_subcommand="set", key="webui.session_secret", generate=True)
         handle_info_commands(args)
-        import os
-        assert os.environ.get("WEBUI_SESSION_SECRET")
+        assert settings_store_mod.get_value("webui.session_secret")
 
     def test_unset_removes_value(self, monkeypatch):
         monkeypatch.setattr("getpass.getpass", lambda *_: "some-value")
-        handle_info_commands(_make_ns(command="env", env_subcommand="set", key="WEBUI_SESSION_SECRET"))
-        handle_info_commands(_make_ns(command="env", env_subcommand="unset", key="WEBUI_SESSION_SECRET"))
-        import os
-        assert "WEBUI_SESSION_SECRET" not in os.environ
+        handle_info_commands(_make_ns(command="env", env_subcommand="set", key="webui.session_secret"))
+        handle_info_commands(_make_ns(command="env", env_subcommand="unset", key="webui.session_secret"))
+        assert settings_store_mod.get_value("webui.session_secret") is None
 
     def test_no_subcommand_raises_cli_error(self):
         args = _make_ns(command="env", env_subcommand=None)

@@ -8,16 +8,14 @@ Professor configuration and model pricing are kept separate — pricing lives in
 """
 
 import argparse
-import os
 import re
 from dataclasses import dataclass
-from typing import Dict, List, Tuple, Union
 
 # Language registry — starts empty; populated by plugins at import time via
 # register_language().  The framework needs this dict and the parser functions
 # here (argparse type= hooks must be importable from src), but the *entries*
 # are entirely the responsibility of each language plugin.
-LANGUAGE_MAP: Dict[str, str] = {}
+LANGUAGE_MAP: dict[str, str] = {}
 
 # Tracks which codes were registered by plugins.
 _PLUGIN_LANGUAGES: set[str] = set()
@@ -51,7 +49,7 @@ class EnvField:
 
 
 # Populated by plugins (and core) at import time via register_env_field().
-_ENV_FIELDS: Dict[str, EnvField] = {}
+_ENV_FIELDS: dict[str, EnvField] = {}
 
 
 def register_env_field(key: str, label: str, *, section: str = "Other", secret: bool = False) -> None:
@@ -77,7 +75,7 @@ def register_env_field(key: str, label: str, *, section: str = "Other", secret: 
     _ENV_FIELDS[key] = EnvField(key=key, label=label, section=section, secret=secret)
 
 
-def get_registered_env_fields() -> List[EnvField]:
+def get_registered_env_fields() -> list[EnvField]:
     """Return every optional ``.env`` field registered so far, grouped by section for display."""
     return sorted(_ENV_FIELDS.values(), key=lambda f: (f.section, f.key))
 
@@ -160,7 +158,7 @@ def parse_single_language_code(value: str) -> str:
     return LANGUAGE_MAP[code]
 
 
-def parse_language_code(value: str) -> Union[str, Tuple[str, str]]:
+def parse_language_code(value: str) -> str | tuple[str, str]:
     """Validate a language argument typed on the command line and return it in a form the service layer can use.
 
     Accepts two formats depending on the command:
@@ -215,50 +213,29 @@ def parse_language_code(value: str) -> Union[str, Tuple[str, str]]:
 
 
 
-_PROF_NAME_PATTERN = re.compile(r'^PROF_(.+?)_NAME$')
+def load_professor_config() -> dict[str, dict[str, str]]:
+    """Read all professor configurations and return them as a lookup table.
 
-
-def load_professor_config() -> Dict[str, Dict[str, str]]:
-    """Read all professor configurations from environment variables and return them as a lookup table.
-
-    Scans the current environment for variables that follow the pattern
-    ``PROF_<ID>_NAME`` / ``PROF_<ID>_KEY`` (as set in ``.env``) and assembles
-    one entry per professor. The lookup table is keyed by the safe-filename
+    Reads from ``.settings`` (see ``src/settings_store.py``) rather than
+    environment variables. The lookup table is keyed by the safe-filename
     form of the professor's name (e.g. ``'heller'``) so it can be matched
     against command-line input.
 
     Returns:
-        A dictionary where each key is the professor's safe-filename identifier
-        (e.g. ``'heller'``) and each value is a sub-dictionary with the keys
-        ``'name'`` (display name), ``'primary_key'`` (env var name for the
-        primary API key), ``'backup_key'`` (env var name for the backup key),
-        ``'id'`` (the numeric or string ID from the env var), and
-        ``'safe_name'`` (same as the outer key).
-        Returns an empty dictionary if no professor variables are found.
+        A dictionary where each key is the professor's safe-filename
+        identifier (e.g. ``'heller'``) and each value is a sub-dictionary
+        with the keys ``'name'`` (display name), ``'key'`` (primary API key
+        value), ``'backup_key'`` (backup API key value, or ``None``), and
+        ``'safe_name'`` (same as the outer key). Returns an empty dictionary
+        if no professors are configured.
     """
-    professors: Dict[str, Dict[str, str]] = {}
-
-    for key, value in os.environ.items():
-        match = _PROF_NAME_PATTERN.match(key)
-        if match:
-            prof_id = match.group(1)
-            primary_key_var = f'PROF_{prof_id}_KEY'
-            backup_key_var = f'PROF_{prof_id}_BACKUP_KEY'
-
-            if primary_key_var in os.environ:
-                safe_name = make_safe_filename(value)
-                professors[safe_name] = {
-                    'name': value,
-                    'primary_key': primary_key_var,
-                    'backup_key': backup_key_var,
-                    'id': prof_id,
-                    'safe_name': safe_name,
-                }
-
-    return professors
+    from . import (
+        settings_store,  # deferred: settings_store imports make_safe_filename from here
+    )
+    return settings_store.get_professors()
 
 
-def get_api_key(professor_name: str) -> Tuple[str, str]:
+def get_api_key(professor_name: str) -> tuple[str, str]:
     """Look up a professor's API key (the private credential that grants access to the AI service).
 
     Tries the professor's primary key first, then falls back to the backup key
@@ -272,12 +249,12 @@ def get_api_key(professor_name: str) -> Tuple[str, str]:
 
     Returns:
         A two-item tuple of ``(api_key, display_name)`` where ``api_key`` is
-        the credential string read from ``.env`` and ``display_name`` is the
-        professor's full name as configured (e.g. ``'Jeff Heller'``).
+        the credential string read from ``.settings`` and ``display_name`` is
+        the professor's full name as configured (e.g. ``'Jeff Heller'``).
 
     Raises:
         ValueError: If the professor name is not found in the configuration, or
-                    if neither their primary nor backup API key is set in ``.env``.
+                    if neither their primary nor backup API key is set.
     """
     professors = load_professor_config()
 
@@ -305,21 +282,21 @@ def get_api_key(professor_name: str) -> Tuple[str, str]:
                 error_msg = (
                     "No professors configured yet.\n"
                     "Add one with: python main.py env add-professor\n"
-                    "(or by hand — see .env.template for the PROF_[ID]_NAME/KEY format)"
+                    "(or by hand — see .settings.template for the format)"
                 )
             raise ValueError(error_msg)
 
-    primary_key = os.getenv(prof_config['primary_key'])
+    primary_key = prof_config.get('key')
     if primary_key:
         return primary_key, prof_config['name']
 
-    backup_key = os.getenv(prof_config['backup_key'])
+    backup_key = prof_config.get('backup_key')
     if backup_key:
         print(f"Warning: Using backup API key for {prof_config['name']}")
         return backup_key, prof_config['name']
 
     raise ValueError(
         f"No API key found for professor '{prof_config['name']}'. "
-        f"Please set {prof_config['primary_key']} in your .env file."
+        f"Please set one with: python main.py env add-professor"
     )
 

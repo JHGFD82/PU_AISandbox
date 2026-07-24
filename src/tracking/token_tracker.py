@@ -6,8 +6,8 @@ invisibly to callers:
 - **local** (the default, unchanged from before): one mutable JSON file per
   month, rewritten in place on every call, exactly as this module has
   always worked.
-- **shared-write**: for a professor configured in ``data_sources.json``
-  (see ``src/tracking/source_config.py``) as sharing usage tracking with
+- **shared-write**: for a professor configured in ``.settings``
+  (see ``src/settings_store.py``) as sharing usage tracking with
   another installation over a synced folder like Dropbox. Instead of
   rewriting one file — unsafe once two machines might do it near-
   simultaneously, since a plain file-sync service like Dropbox has no way
@@ -29,25 +29,25 @@ import logging
 import os
 import secrets
 import threading
+from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Any, List, Optional, Tuple
-from dataclasses import dataclass, asdict
+from typing import Any
 
-from ..models.catalog import (
-    get_model_pricing, get_pricing_unit,
-    get_monthly_limit,
-)
 from ..config import make_safe_filename
 from ..console import print_banner, print_subsection
+from ..models.catalog import (
+    get_model_pricing,
+    get_monthly_limit,
+    get_pricing_unit,
+)
 from ..settings import BUDGET_WARNING_THRESHOLD
-from .source_config import (
+from ..settings_store import (
     ExternalSource,
     get_configured_sources,
     get_shared_write_source,
     get_source_id,
 )
-
 
 # Constants
 USAGE_DATA_DIR = "data"
@@ -96,12 +96,12 @@ def _shared_archive_path(source: "ExternalSource", professor: str, month: str) -
     return _shared_archive_dir(source, professor) / f"{month}.json"
 
 
-def get_configured_data_roots() -> List[Tuple[str, Path]]:
+def get_configured_data_roots() -> list[tuple[str, Path]]:
     """Return every data-shaped directory that should be scanned when building an aggregate usage report.
 
     This is this installation's own local ``data/`` folder plus every
-    external source configured in ``data_sources.json`` — see
-    ``src/tracking/source_config.py`` and ``docs/webui-plugin-plan.md``
+    external source configured in ``.settings`` — see
+    ``src/settings_store.py`` and ``docs/webui-plugin-plan.md``
     section 1. Used by ``data/visualize_usage.py`` and, eventually, the web
     UI's spend sidebar, so that logic to combine multiple installations'
     usage history lives in exactly one place.
@@ -111,13 +111,13 @@ def get_configured_data_roots() -> List[Tuple[str, Path]]:
         ``("local", <this installation's data/ folder>)``.
     """
     project_root = Path(__file__).parent.parent.parent
-    roots: List[Tuple[str, Path]] = [("local", project_root / USAGE_DATA_DIR)]
+    roots: list[tuple[str, Path]] = [("local", project_root / USAGE_DATA_DIR)]
     for source in get_configured_sources():
         roots.append((source.label, source.resolved_path()))
     return roots
 
 
-def _read_event_files(event_dir: Path) -> List[Dict[str, Any]]:
+def _read_event_files(event_dir: Path) -> list[dict[str, Any]]:
     """Read every per-call usage record in a shared-write event-file directory.
 
     Each file holds one API call's record (the same shape as a
@@ -130,7 +130,7 @@ def _read_event_files(event_dir: Path) -> List[Dict[str, Any]]:
                    month under a shared source's ``events/`` tree).
                    Missing directories simply yield no records.
     """
-    records: List[Dict[str, Any]] = []
+    records: list[dict[str, Any]] = []
     if not event_dir.exists():
         return records
     for event_file in sorted(event_dir.glob("*.json")):
@@ -142,7 +142,7 @@ def _read_event_files(event_dir: Path) -> List[Dict[str, Any]]:
     return records
 
 
-def fold_usage_records(records: List[Dict[str, Any]], month: str) -> Dict[str, Any]:
+def fold_usage_records(records: list[dict[str, Any]], month: str) -> dict[str, Any]:
     """Build the standard month-summary shape from a flat list of individual call records.
 
     This is the one place that turns "a pile of individual API-call
@@ -168,8 +168,8 @@ def fold_usage_records(records: List[Dict[str, Any]], month: str) -> Dict[str, A
         ``session_history`` (sorted chronologically).
     """
     total = UsageStats()
-    model_usage: Dict[str, Any] = {}
-    daily_usage: Dict[str, Any] = {}
+    model_usage: dict[str, Any] = {}
+    daily_usage: dict[str, Any] = {}
     session_history = sorted(records, key=lambda r: r.get("timestamp", ""))
 
     for rec in session_history:
@@ -198,7 +198,7 @@ def fold_usage_records(records: List[Dict[str, Any]], month: str) -> Dict[str, A
     }
 
 
-def _accumulate_stats_dict(stats: Dict[str, Any], prompt_tokens: int, completion_tokens: int,
+def _accumulate_stats_dict(stats: dict[str, Any], prompt_tokens: int, completion_tokens: int,
                             total_tokens: int, cost: float) -> None:
     """Add one call's numbers into a plain stats dictionary in place (module-level twin of ``TokenTracker._update_stats``)."""
     stats["total_tokens"] += total_tokens
@@ -208,7 +208,7 @@ def _accumulate_stats_dict(stats: Dict[str, Any], prompt_tokens: int, completion
     stats["call_count"] = stats.get("call_count", 0) + 1
 
 
-def load_usage_tree(base_dir: Path) -> Dict[str, Dict[str, Any]]:
+def load_usage_tree(base_dir: Path) -> dict[str, dict[str, Any]]:
     """Read one data-shaped directory into ``{professor: {month: month_data}}``.
 
     Understands every on-disk shape this project produces: a current-month
@@ -230,7 +230,7 @@ def load_usage_tree(base_dir: Path) -> Dict[str, Dict[str, Any]]:
         keys are ``'YYYY-MM'`` month strings, values are month-summary
         dictionaries in the standard shape.
     """
-    result: Dict[str, Dict[str, Any]] = {}
+    result: dict[str, dict[str, Any]] = {}
     if not base_dir.exists():
         return result
 
@@ -316,7 +316,7 @@ class UsageStats:
         self.total_cost += cost
         self.call_count += 1
 
-    def merge_dict(self, d: Dict[str, Any]):
+    def merge_dict(self, d: dict[str, Any]):
         """Add the totals from a raw dictionary (as read from a usage file) into this object."""
         self.total_tokens += d.get("total_tokens", 0)
         self.total_input_tokens += d.get("total_input_tokens", 0)
@@ -324,7 +324,7 @@ class UsageStats:
         self.total_cost += d.get("total_cost", 0.0)
         self.call_count += d.get("call_count", 0)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert this object to a plain dictionary suitable for saving to a JSON file."""
         return asdict(self)
 
@@ -339,8 +339,8 @@ class TokenTracker:
     current file with every archive file.
     """
 
-    def __init__(self, professor: str, data_file: Optional[str] = None,
-                 monthly_limit: Optional[float] = None):
+    def __init__(self, professor: str, data_file: str | None = None,
+                 monthly_limit: float | None = None):
         """Set up token tracking for a professor, loading any existing usage data from disk.
 
         On startup, checks whether the stored usage file belongs to the current
@@ -352,7 +352,7 @@ class TokenTracker:
         When *data_file* is left as ``None`` (normal operation — every real
         caller in this project does this), this also checks whether
         *professor* is configured for shared-write tracking in
-        ``data_sources.json`` (see ``src/tracking/source_config.py``). If so,
+        ``.settings`` (see ``src/settings_store.py``). If so,
         this tracker records usage as individual event files in the shared
         location instead of the local mutable file — see the module
         docstring for why. Tests that pass an explicit *data_file* always get
@@ -374,7 +374,7 @@ class TokenTracker:
         """
         self.professor = professor
         self.source_mode = "local"
-        self._shared_source: Optional[ExternalSource] = None
+        self._shared_source: ExternalSource | None = None
         self._source_id = get_source_id()
 
         if data_file:
@@ -416,7 +416,7 @@ class TokenTracker:
     def _get_current_month() -> str:
         return datetime.now().strftime("%Y-%m")
 
-    def _empty_usage_data(self) -> Dict[str, Any]:
+    def _empty_usage_data(self) -> dict[str, Any]:
         """Return a fresh, empty monthly data structure stamped with the current month."""
         return {
             "month": self._get_current_month(),
@@ -426,7 +426,7 @@ class TokenTracker:
             "session_history": [],
         }
 
-    def _archive_month(self, data: Dict[str, Any], month: str) -> None:
+    def _archive_month(self, data: dict[str, Any], month: str) -> None:
         """Write *data* to the archive file for *month*, skipping if already archived."""
         archive_path = get_archive_path(self.professor, month)
         if archive_path.exists():
@@ -436,7 +436,7 @@ class TokenTracker:
             json.dump(data, f, indent=2)
         logging.info(f"Archived {self.professor} month {month} → {archive_path.name}")
 
-    def _load_usage_data(self) -> Dict[str, Any]:
+    def _load_usage_data(self) -> dict[str, Any]:
         """Load usage data, handling month rollover."""
         if not self.data_file.exists():
             return self._empty_usage_data()
@@ -456,7 +456,7 @@ class TokenTracker:
 
         return data
 
-    def _save_usage_data_to(self, data: Dict[str, Any]) -> None:
+    def _save_usage_data_to(self, data: dict[str, Any]) -> None:
         """Write *data* to self.data_file."""
         self.data_file.parent.mkdir(parents=True, exist_ok=True)
         with open(self.data_file, "w") as f:
@@ -466,7 +466,7 @@ class TokenTracker:
         """Save the current in-memory usage data."""
         self._save_usage_data_to(self.usage_data)
 
-    def _update_stats(self, stats: Dict[str, Any], prompt_tokens: int, completion_tokens: int,
+    def _update_stats(self, stats: dict[str, Any], prompt_tokens: int, completion_tokens: int,
                       total_tokens: int, cost: float) -> None:
         """Mutate a stats dictionary in-place."""
         stats["total_tokens"] += total_tokens
@@ -514,7 +514,7 @@ class TokenTracker:
         self.usage_data = fold_usage_records(records, month)
 
     def _record_usage_shared(self, model: str, prompt_tokens: int, completion_tokens: int,
-                              total_tokens: int, requested_model: Optional[str] = None) -> TokenUsage:
+                              total_tokens: int, requested_model: str | None = None) -> TokenUsage:
         """Shared-write version of ``record_usage()`` — writes one new event file instead of rewriting a shared file.
 
         No read-modify-write happens here at all: the filename itself
@@ -556,7 +556,7 @@ class TokenTracker:
 
         return usage
 
-    def _get_daily_usage_shared(self, date: Optional[str] = None) -> Dict[str, Any]:
+    def _get_daily_usage_shared(self, date: str | None = None) -> dict[str, Any]:
         """Shared-write version of ``get_daily_usage()``."""
         if date is None:
             date = self._get_current_date()
@@ -572,7 +572,7 @@ class TokenTracker:
             return archive.get("daily_usage", {}).get(date, UsageStats().to_dict())
         return UsageStats().to_dict()
 
-    def _get_monthly_usage_shared(self, month: Optional[str] = None) -> Dict[str, Any]:
+    def _get_monthly_usage_shared(self, month: str | None = None) -> dict[str, Any]:
         """Shared-write version of ``get_monthly_usage()``."""
         if month is None:
             month = self._get_current_month()
@@ -588,7 +588,7 @@ class TokenTracker:
             return archive.get("total_usage", UsageStats().to_dict())
         return UsageStats().to_dict()
 
-    def _get_all_time_usage_shared(self) -> Dict[str, Any]:
+    def _get_all_time_usage_shared(self) -> dict[str, Any]:
         """Shared-write version of ``get_all_time_usage()``."""
         combined = UsageStats()
         self._refresh_shared_usage_data()
@@ -658,7 +658,7 @@ class TokenTracker:
     # ------------------------------------------------------------------
 
     def record_usage(self, model: str, prompt_tokens: int, completion_tokens: int,
-                     total_tokens: int, requested_model: Optional[str] = None) -> TokenUsage:
+                     total_tokens: int, requested_model: str | None = None) -> TokenUsage:
         """Record that an API call was made and update all running totals in the usage file.
 
         Updates the professor's totals for the current month, today's date, and
@@ -725,7 +725,7 @@ class TokenTracker:
 
         return usage
 
-    def get_daily_usage(self, date: Optional[str] = None) -> Dict[str, Any]:
+    def get_daily_usage(self, date: str | None = None) -> dict[str, Any]:
         """Return the token totals for a single day from the current month's usage file.
 
         Args:
@@ -744,7 +744,7 @@ class TokenTracker:
             date = self._get_current_date()
         return self.usage_data["daily_usage"].get(date, UsageStats().to_dict())
 
-    def get_monthly_usage(self, month: Optional[str] = None) -> Dict[str, Any]:
+    def get_monthly_usage(self, month: str | None = None) -> dict[str, Any]:
         """Return the token totals for an entire calendar month.
 
         For the current month, reads directly from the in-memory totals.
@@ -779,7 +779,7 @@ class TokenTracker:
 
         return UsageStats().to_dict()
 
-    def get_all_time_usage(self) -> Dict[str, Any]:
+    def get_all_time_usage(self) -> dict[str, Any]:
         """Return the cumulative token totals across every month on record.
 
         Adds together the current month's totals and every archived month file
@@ -807,7 +807,7 @@ class TokenTracker:
 
         return combined.to_dict()
 
-    def list_archived_months(self) -> List[str]:
+    def list_archived_months(self) -> list[str]:
         """Return a sorted list of month strings that have been archived."""
         if self.source_mode == "shared-write":
             archive_dir = _shared_archive_dir(self._shared_source, self.professor)
@@ -815,7 +815,7 @@ class TokenTracker:
             archive_dir = get_archive_dir(self.professor)
         return sorted(p.stem for p in archive_dir.glob("*.json")) if archive_dir.exists() else []
 
-    def _get_monthly_budget_status(self, month: Optional[str] = None) -> Dict[str, Any]:
+    def _get_monthly_budget_status(self, month: str | None = None) -> dict[str, Any]:
         """Return a dict summarising budget consumption for *month*."""
         monthly_usage = self.get_monthly_usage(month)
         usage_pct = (monthly_usage["total_cost"] / self.monthly_limit) * 100 if self.monthly_limit > 0 else 0.0
@@ -828,7 +828,7 @@ class TokenTracker:
             "approaching_limit": usage_pct > BUDGET_WARNING_THRESHOLD,
         }
 
-    def print_usage_report(self, month: Optional[str] = None, include_all_time: bool = False):
+    def print_usage_report(self, month: str | None = None, include_all_time: bool = False):
         """Print a formatted usage report to the terminal.
 
         For the current month, shows token totals, a per-model breakdown,

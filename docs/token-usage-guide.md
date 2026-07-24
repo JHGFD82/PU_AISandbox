@@ -130,7 +130,7 @@ The monthly spending limit and warning threshold are configured in two places:
 | Setting | Location | Default | Effect |
 |---------|----------|---------|--------|
 | `monthly_limit` | `src/model_catalog.json` → `config` | `250.0` | Hard limit shown in usage reports |
-| `warning_threshold_pct` | `settings.toml` → `[budget]` | `80` | Warn when spend exceeds this % of the limit |
+| `warning_threshold_pct` | `settings.default.toml` → `[budget]` | `80` | Warn when spend exceeds this % of the limit |
 
 ---
 

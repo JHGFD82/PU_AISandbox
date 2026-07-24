@@ -5,7 +5,7 @@ python main.py [--show-config | --list-models]
 python main.py <professor> <command> [options]
 ```
 
-`<professor>` is the safe-filename form of a professor's name as configured in `.env` (e.g. `heller`, `smith`). It is case-insensitive.
+`<professor>` is the safe-filename form of a professor's name as configured in `.settings` (e.g. `heller`, `smith`). It is case-insensitive.
 
 ---
 
@@ -170,7 +170,7 @@ Unsupported extensions fall back to `.txt`.
 | Flag | Description |
 |------|-------------|
 | `-f <name>`, `--font <name>` | Custom font name for PDF/Word output (font file must be in `fonts/`) |
-| `--font-size <pt>` | Body font size in points for PDF/Word output (default from `settings.toml`) |
+| `--font-size <pt>` | Body font size in points for PDF/Word output (default from `settings.default.toml`) |
 
 #### Model and performance
 
@@ -240,7 +240,7 @@ python main.py heller transcribe <language> [options]
 | `-i <path>`, `--input <path>` | Input image file or folder of images |
 | `-o <path>`, `--output <path>` | Output file path |
 | `--spread` | Input is a two-page spread (two facing pages scanned together) *(requires `transcription-ea`)* |
-| `-P <int>`, `--passes <int>` | Number of OCR passes; > 1 refines output through multiple rounds (default from `settings.toml`) *(requires `transcription-ea`)* |
+| `-P <int>`, `--passes <int>` | Number of OCR passes; > 1 refines output through multiple rounds (default from `settings.default.toml`) *(requires `transcription-ea`)* |
 | `--preserve-tables` | Hint the model to return tabular data as Markdown tables *(requires `transcription-ea`)* |
 | `-m <model>` | Model to use (must support vision) |
 | `-t <float>` | Temperature override (0.0–2.0) |
@@ -327,8 +327,9 @@ python main.py heller prompt -m google/gemini-2.5-pro
 Supported auto-registration providers: `openai`, `google`. For all other providers, add the model entry to `src/model_catalog.json` manually.
 
 **Alternate endpoint with colon syntax** — prefix with `api_name:` to route to a
-configured endpoint from `apis.json`. The model bypasses the catalog entirely and
-is passed directly to the endpoint:
+configured `[endpoints.<name>]` entry (defined in `settings.default.toml`, a
+shared file, or `settings.local.toml`). The model bypasses the catalog
+entirely and is passed directly to the endpoint:
 
 ```bash
 python main.py heller prompt -m my_cluster:llama-3-70b-instruct
@@ -336,14 +337,16 @@ python main.py heller translate jp-en -i paper.pdf -m my_cluster:llama-3-70b-ins
 python main.py heller prompt -m cloud_provider:model-name
 ```
 
-The part before the colon is the endpoint key from `apis.json`; everything after
-is the model name passed to that endpoint. The API key for the endpoint is read
-from `API_<UPPERCASE_KEY>_KEY` in `.env`. Token usage is still recorded normally.
+The part before the colon is the `[endpoints.<name>]` table's name; everything
+after is the model name passed to that endpoint. The API key for the endpoint
+is read from `endpoints.<name>.key` in `.settings`. Token usage is still
+recorded normally.
 
-**Default endpoint** — if `apis.json` sets a `"default"` endpoint key, all bare
-model strings (no colon, no `provider/` prefix) are routed there automatically.
+**Default endpoint** — if `[config] default_endpoint` is set (in any settings
+layer), all bare model strings (no colon, no `provider/` prefix) are routed
+there automatically.
 
-See [Configuration → apis.json](configuration.md#apisjson----alternate-ai-endpoint-connections)
+See [Configuration → Endpoint definitions](configuration.md#endpoint-definitions-alternate-ai-api-connections)
 for how to define endpoints.
 
 ---

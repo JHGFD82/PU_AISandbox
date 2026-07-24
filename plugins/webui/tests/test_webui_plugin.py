@@ -24,8 +24,8 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from plugins.webui.plugin import WebUiPlugin, plugin  # noqa: E402
-from src.errors import CLIError  # noqa: E402
+from plugins.webui.plugin import WebUiPlugin, plugin
+from src.errors import CLIError
 
 
 class TestPluginIdentity:
@@ -95,13 +95,19 @@ class TestRun:
 
 
 class TestPrintPassphraseHash:
-    def test_prints_env_line(self, monkeypatch, capsys):
+    def test_writes_hash_to_settings(self, monkeypatch, capsys):
         inputs = iter(["hunter2", "hunter2"])
         monkeypatch.setattr("getpass.getpass", lambda *_: next(inputs))
+        written = {}
+        monkeypatch.setattr(
+            "src.settings_store.set_value",
+            lambda path, value: written.setdefault(path, value),
+        )
         from plugins.webui.plugin import _print_passphrase_hash
         _print_passphrase_hash()
         out = capsys.readouterr().out
-        assert "WEBUI_PASSPHRASE_HASH=" in out
+        assert written.get("webui.passphrase_hash")
+        assert "Unlock passphrase set" in out
 
     def test_mismatched_passphrases_raises(self, monkeypatch):
         inputs = iter(["hunter2", "different"])

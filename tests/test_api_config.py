@@ -1,79 +1,68 @@
 """Tests for src/services/api_config.py."""
 
-import os
 from unittest.mock import patch
+
 import pytest
 
 from src.services.api_config import (
     APIConfig,
-    load_api_config,
-    list_apis,
+    credential_path_for_endpoint,
     get_default_api_name,
+    list_apis,
+    load_api_config,
     parse_model_source,
-    _env_key_for,
 )
 
 # ---------------------------------------------------------------------------
-# _env_key_for
+# credential_path_for_endpoint
 # ---------------------------------------------------------------------------
 
-class TestEnvKeyFor:
+class TestCredentialPathForEndpoint:
     def test_underscore_name(self):
-        assert _env_key_for("hpc_cluster") == "API_HPC_CLUSTER_KEY"
+        assert credential_path_for_endpoint("hpc_cluster") == "endpoints.hpc_cluster.key"
 
     def test_hyphen_name(self):
-        assert _env_key_for("my-cluster") == "API_MY_CLUSTER_KEY"
-
-    def test_already_upper(self):
-        assert _env_key_for("UPPER") == "API_UPPER_KEY"
-
-    def test_mixed(self):
-        assert _env_key_for("My_Service-v2") == "API_MY_SERVICE_V2_KEY"
+        assert credential_path_for_endpoint("my-cluster") == "endpoints.my-cluster.key"
 
 
 # ---------------------------------------------------------------------------
-# Helpers — fake apis.json data
+# Helpers — fake merged-settings endpoint data
 # ---------------------------------------------------------------------------
 
-_APIS_WITH_ENDPOINTS = {
-    "default": None,
-    "endpoints": {
-        "hpc_cluster": {
-            "name": "HPC Cluster",
-            "base_url": "https://cluster.example.com/v1",
-            "openai_compatible": True,
-            "default_model": "llama-3-70b-instruct",
-            "timeout": 30,
-            "verify_ssl": True,
-        },
-        "data_service": {
-            "name": "Research Data",
-            "base_url": "https://data.example.com",
-            "openai_compatible": False,
-        },
+_ENDPOINTS_WITH_ENDPOINTS = {
+    "hpc_cluster": {
+        "name": "HPC Cluster",
+        "base_url": "https://cluster.example.com/v1",
+        "openai_compatible": True,
+        "default_model": "llama-3-70b-instruct",
+        "timeout": 30,
+        "verify_ssl": True,
+    },
+    "data_service": {
+        "name": "Research Data",
+        "base_url": "https://data.example.com",
+        "openai_compatible": False,
     },
 }
 
-_APIS_WITH_DEFAULT = {
-    "default": "hpc_cluster",
-    "endpoints": {
-        "hpc_cluster": {
-            "name": "HPC Cluster",
-            "base_url": "https://cluster.example.com/v1",
-            "openai_compatible": True,
-            "default_model": "llama-3-70b-instruct",
-        },
-    },
+_ENDPOINTS_EMPTY: dict = {}
+
+_CREDENTIALS = {
+    "endpoints.hpc_cluster.key": "test-key-123",
+    "endpoints.data_service.key": "rest-key",
 }
 
-_APIS_EMPTY = {}
+
+def _patch_endpoints(data: dict):
+    """Context manager that patches settings.ENDPOINTS to *data*."""
+    return patch("src.services.api_config.settings.ENDPOINTS", data)
 
 
-def _patch_apis(data: dict):
-    """Context manager that patches _load_apis_json to return *data*."""
+def _patch_credentials(mapping: dict):
+    """Context manager that patches settings_store.get_value to look up *mapping*."""
     return patch(
-        "src.services.api_config._load_apis_json",
-        return_value=data,
+        "src.services.api_config.settings_store.get_value",
+        side_effect=lambda path: mapping.get(path),
     )
 
 
@@ -82,9 +71,8 @@ def _patch_apis(data: dict):
 # ---------------------------------------------------------------------------
 
 class TestLoadAPIConfig:
-    def test_openai_compatible(self, monkeypatch):
-        monkeypatch.setenv("API_HPC_CLUSTER_KEY", "test-key-123")
-        with _patch_apis(_APIS_WITH_ENDPOINTS):
+    def test_openai_compatible(self):
+        with _patch_endpoints(_ENDPOINTS_WITH_ENDPOINTS), _patch_credentials(_CREDENTIALS):
             cfg = load_api_config("hpc_cluster")
         assert cfg.api_name == "hpc_cluster"
         assert cfg.display_name == "HPC Cluster"
@@ -95,46 +83,36 @@ class TestLoadAPIConfig:
         assert cfg.timeout == 30
         assert cfg.verify_ssl is True
 
-    def test_generic_rest(self, monkeypatch):
-        monkeypatch.setenv("API_DATA_SERVICE_KEY", "rest-key")
-        with _patch_apis(_APIS_WITH_ENDPOINTS):
+    def test_generic_rest(self):
+        with _patch_endpoints(_ENDPOINTS_WITH_ENDPOINTS), _patch_credentials(_CREDENTIALS):
             cfg = load_api_config("data_service")
         assert cfg.openai_compatible is False
         assert cfg.default_model is None
 
-    def test_defaults_applied(self, monkeypatch):
-        """Fields not in apis.json get sensible defaults."""
-        minimal = {
-            "endpoints": {
-                "minimal": {"base_url": "http://localhost:8000"}
-            }
-        }
-        monkeypatch.setenv("API_MINIMAL_KEY", "k")
-        with _patch_apis(minimal):
+    def test_defaults_applied(self):
+        """Fields not in the endpoint table get sensible defaults."""
+        minimal = {"minimal": {"base_url": "http://localhost:8000"}}
+        with _patch_endpoints(minimal), _patch_credentials({"endpoints.minimal.key": "k"}):
             cfg = load_api_config("minimal")
         assert cfg.display_name == "minimal"  # falls back to api_name
         assert cfg.openai_compatible is False
         assert cfg.timeout == 30
         assert cfg.verify_ssl is True
 
-    def test_extra_fields_preserved(self, monkeypatch):
+    def test_extra_fields_preserved(self):
         """Unknown fields are captured in cfg.extra."""
         data = {
-            "endpoints": {
-                "fancy": {
-                    "base_url": "http://x.com",
-                    "custom_header": "Bearer xyz",
-                }
+            "fancy": {
+                "base_url": "http://x.com",
+                "custom_header": "Bearer xyz",
             }
         }
-        monkeypatch.setenv("API_FANCY_KEY", "k")
-        with _patch_apis(data):
+        with _patch_endpoints(data), _patch_credentials({"endpoints.fancy.key": "k"}):
             cfg = load_api_config("fancy")
         assert "custom_header" in cfg.extra
 
-    def test_returns_api_config_instance(self, monkeypatch):
-        monkeypatch.setenv("API_HPC_CLUSTER_KEY", "k")
-        with _patch_apis(_APIS_WITH_ENDPOINTS):
+    def test_returns_api_config_instance(self):
+        with _patch_endpoints(_ENDPOINTS_WITH_ENDPOINTS), _patch_credentials(_CREDENTIALS):
             cfg = load_api_config("hpc_cluster")
         assert isinstance(cfg, APIConfig)
 
@@ -145,30 +123,28 @@ class TestLoadAPIConfig:
 
 class TestLoadAPIConfigErrors:
     def test_unknown_api_name(self):
-        with _patch_apis(_APIS_WITH_ENDPOINTS):
+        with _patch_endpoints(_ENDPOINTS_WITH_ENDPOINTS):
             with pytest.raises(ValueError, match="not configured"):
                 load_api_config("nonexistent")
 
     def test_unknown_api_hints_available(self):
-        with _patch_apis(_APIS_WITH_ENDPOINTS):
+        with _patch_endpoints(_ENDPOINTS_WITH_ENDPOINTS):
             with pytest.raises(ValueError, match="hpc_cluster"):
                 load_api_config("nonexistent")
 
-    def test_missing_key_raises(self, monkeypatch):
-        monkeypatch.delenv("API_HPC_CLUSTER_KEY", raising=False)
-        with _patch_apis(_APIS_WITH_ENDPOINTS):
-            with pytest.raises(ValueError, match="API_HPC_CLUSTER_KEY"):
+    def test_missing_key_raises(self):
+        with _patch_endpoints(_ENDPOINTS_WITH_ENDPOINTS), _patch_credentials({}):
+            with pytest.raises(ValueError, match="endpoints.hpc_cluster.key"):
                 load_api_config("hpc_cluster")
 
-    def test_missing_base_url_raises(self, monkeypatch):
-        data = {"endpoints": {"bad": {"name": "Bad"}}}
-        monkeypatch.setenv("API_BAD_KEY", "k")
-        with _patch_apis(data):
+    def test_missing_base_url_raises(self):
+        data = {"bad": {"name": "Bad"}}
+        with _patch_endpoints(data), _patch_credentials({"endpoints.bad.key": "k"}):
             with pytest.raises(ValueError, match="base_url"):
                 load_api_config("bad")
 
     def test_no_endpoints_configured(self):
-        with _patch_apis(_APIS_EMPTY):
+        with _patch_endpoints(_ENDPOINTS_EMPTY):
             with pytest.raises(ValueError, match="not configured"):
                 load_api_config("anything")
 
@@ -179,16 +155,12 @@ class TestLoadAPIConfigErrors:
 
 class TestListAPIs:
     def test_returns_names(self):
-        with _patch_apis(_APIS_WITH_ENDPOINTS):
+        with _patch_endpoints(_ENDPOINTS_WITH_ENDPOINTS):
             names = list_apis()
         assert set(names) == {"hpc_cluster", "data_service"}
 
-    def test_empty_when_no_endpoints_key(self):
-        with _patch_apis(_APIS_EMPTY):
-            assert list_apis() == []
-
-    def test_empty_when_endpoints_is_empty(self):
-        with _patch_apis({"default": None, "endpoints": {}}):
+    def test_empty_when_no_endpoints(self):
+        with _patch_endpoints(_ENDPOINTS_EMPTY):
             assert list_apis() == []
 
 
@@ -198,19 +170,11 @@ class TestListAPIs:
 
 class TestGetDefaultApiName:
     def test_returns_default(self):
-        with _patch_apis(_APIS_WITH_DEFAULT):
+        with patch("src.services.api_config.settings.DEFAULT_ENDPOINT", "hpc_cluster"):
             assert get_default_api_name() == "hpc_cluster"
 
-    def test_returns_none_when_null(self):
-        with _patch_apis(_APIS_WITH_ENDPOINTS):
-            assert get_default_api_name() is None
-
-    def test_returns_none_when_empty_string(self):
-        with _patch_apis({"default": "", "endpoints": {}}):
-            assert get_default_api_name() is None
-
-    def test_returns_none_when_no_default_key(self):
-        with _patch_apis(_APIS_EMPTY):
+    def test_returns_none_when_unset(self):
+        with patch("src.services.api_config.settings.DEFAULT_ENDPOINT", None):
             assert get_default_api_name() is None
 
 

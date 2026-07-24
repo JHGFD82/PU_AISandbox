@@ -1,55 +1,56 @@
 """Configuration for alternate AI API endpoints.
 
-Endpoint definitions live in ``apis.json`` at the repository root.  Each
-key inside ``"endpoints"`` becomes the identifier used in colon syntax on
+Endpoint *definitions* (base URL, timeout, whether it's OpenAI-compatible,
+etc.) live in the ``settings.*.toml`` layering — see ``src/settings.py``'s
+``ENDPOINTS`` (merged from ``settings.default.toml`` -> an optional
+shared file -> ``settings.local.toml``, same as every other setting).
+Each key under ``ENDPOINTS`` becomes the identifier used in colon syntax on
 the CLI (e.g. ``-m hpc_cluster:llama-3-70b``).
 
-Set ``"default"`` to route bare model names to a specific endpoint
-instead of the built-in Portkey service::
+The *credential* for each endpoint is kept separate, in ``.settings`` (see
+``src/settings_store.py``) at ``endpoints.<name>.key`` — credentials are
+never meant to be shared or layered the way definitions are.
 
-    {
-      "default": "hpc_cluster",
-      "endpoints": {
-        "hpc_cluster": {
-          "name": "HPC Cluster",
-          "base_url": "http://my-cluster.internal:8000/v1",
-          "openai_compatible": true,
-          "default_model": "llama-3-70b-instruct"
-        }
-      }
-    }
+Set ``[config] default_endpoint`` in any settings layer to route bare model
+names to a specific endpoint instead of the built-in Portkey service::
 
-The API key for each endpoint is read from the environment variable
-``API_<UPPERCASE_NAME>_KEY`` (e.g. ``API_HPC_CLUSTER_KEY``).
+    # settings.local.toml
+    [config]
+    default_endpoint = "hpc_cluster"
+
+    [endpoints.hpc_cluster]
+    name = "HPC Cluster"
+    base_url = "http://my-cluster.internal:8000/v1"
+    openai_compatible = true
+    default_model = "llama-3-70b-instruct"
+
+Then, separately, in .settings (via `python main.py env set endpoints.hpc_cluster.key`):
+
+    [endpoints.hpc_cluster]
+    key = "sk-..."
 
 Colon syntax on the CLI::
 
     python main.py heller prompt -m hpc_cluster:llama-3-70b
     python main.py heller prompt -m cloud_provider:model-name
-    python main.py heller prompt -m llama-3-70b   # uses "default" if set
+    python main.py heller prompt -m llama-3-70b   # uses "default_endpoint" if set
 """
 
 from __future__ import annotations
 
-import json
-import os
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Optional
 
-_ROOT = Path(__file__).parent.parent.parent  # src/services/ -> repo root
-_APIS_JSON_PATH = _ROOT / "apis.json"
+from .. import settings, settings_store
 
 
-def _load_apis_json() -> dict:
-    """Load and return the parsed contents of ``apis.json``.
+def credential_path_for_endpoint(api_name: str) -> str:
+    """Return the dotted ``.settings`` path holding the credential for *api_name*.
 
-    Returns an empty dict when the file is absent.
+    Examples::
+
+        credential_path_for_endpoint("hpc_cluster")   -> "endpoints.hpc_cluster.key"
     """
-    if not _APIS_JSON_PATH.exists():
-        return {}
-    with _APIS_JSON_PATH.open("r", encoding="utf-8") as f:
-        return json.load(f)
+    return f"endpoints.{api_name}.key"
 
 
 @dataclass
@@ -57,10 +58,10 @@ class APIConfig:
     """Configuration for a single AI API endpoint.
 
     Attributes:
-        api_name:           The endpoint key from ``apis.json`` (e.g. ``hpc_cluster``).
+        api_name:           The endpoint key (e.g. ``hpc_cluster``).
         display_name:       Human-readable name shown in logs and --list-apis output.
         base_url:           The root URL for the API (e.g. ``https://example.com/v1``).
-        api_key:            Resolved API key (from environment variable).
+        api_key:            Resolved API key (from ``.settings``).
         openai_compatible:  When True, use the OpenAI SDK with ``base_url`` for LLM calls.
                             When False, use ``requests`` for generic HTTP calls.
         default_model:      Default model name for OpenAI-compatible endpoints.
@@ -73,48 +74,36 @@ class APIConfig:
     base_url: str
     api_key: str
     openai_compatible: bool = False
-    default_model: Optional[str] = None
+    default_model: str | None = None
     timeout: int = 30
     verify_ssl: bool = True
     extra: dict = field(default_factory=dict)
 
 
-def _env_key_for(api_name: str) -> str:
-    """Return the env-var name for the given endpoint name.
-
-    Examples::
-
-        _env_key_for("hpc_cluster")   -> "API_HPC_CLUSTER_KEY"
-        _env_key_for("cloud-provider") -> "API_CLOUD_PROVIDER_KEY"
-    """
-    safe = api_name.upper().replace("-", "_")
-    return f"API_{safe}_KEY"
-
-
 def load_api_config(api_name: str) -> APIConfig:
     """Load and return the ``APIConfig`` for *api_name*.
 
-    Reads the matching entry from ``apis.json`` and resolves the API key
-    from the environment.
+    Combines the endpoint's definition (from the merged ``settings.*.toml``
+    layers) with its credential (from ``.settings``).
 
     Raises:
-        ValueError: If the endpoint is missing from ``apis.json``, or if the
-                    API key environment variable is not set.
+        ValueError: If the endpoint is missing from every settings layer, or
+                    if its credential isn't set in ``.settings``.
     """
-    data = _load_apis_json()
-    endpoints: dict = data.get("endpoints", {})
+    endpoints: dict = settings.ENDPOINTS
 
     if api_name not in endpoints:
         available = list(endpoints.keys())
         hint = (
             f"Available endpoints: {', '.join(available)}"
             if available
-            else "No endpoints are configured in apis.json."
+            else "No endpoints are configured."
         )
         raise ValueError(
-            f"API endpoint '{api_name}' is not configured in apis.json.\n"
+            f"API endpoint '{api_name}' is not configured.\n"
             f"{hint}\n"
-            "Add an entry under \"endpoints\" in apis.json to register an endpoint."
+            "Add an [endpoints.<name>] table to settings.default.toml, a shared "
+            "settings file, or settings.local.toml to register an endpoint."
         )
 
     raw: dict = endpoints[api_name]
@@ -122,15 +111,15 @@ def load_api_config(api_name: str) -> APIConfig:
     base_url: str = raw.get("base_url", "")
     if not base_url:
         raise ValueError(
-            f"apis.json entry '{api_name}' is missing required field 'base_url'."
+            f"Endpoint '{api_name}' is missing required field 'base_url'."
         )
 
-    env_var = _env_key_for(api_name)
-    api_key = os.environ.get(env_var, "")
+    credential_path = credential_path_for_endpoint(api_name)
+    api_key = settings_store.get_value(credential_path) or ""
     if not api_key:
         raise ValueError(
             f"API key for '{api_name}' not found. "
-            f"Set {env_var} in your .env file."
+            f"Set it with: python main.py env set {credential_path}"
         )
 
     known_keys = {"name", "base_url", "openai_compatible", "default_model", "timeout", "verify_ssl"}
@@ -150,42 +139,21 @@ def load_api_config(api_name: str) -> APIConfig:
 
 
 def list_apis() -> list[str]:
-    """Return the names of all endpoints declared in ``apis.json``."""
-    data = _load_apis_json()
-    return list(data.get("endpoints", {}).keys())
+    """Return the names of all endpoints declared in the settings layers."""
+    return list(settings.ENDPOINTS.keys())
 
 
-def env_var_for_endpoint(api_name: str) -> str:
-    """Return the ``.env`` variable name that holds the API key for endpoint *api_name*.
+def get_default_api_name() -> str | None:
+    """Return the default endpoint name, or ``None``.
 
-    Public wrapper around the same derivation ``load_api_config()`` uses
-    internally, exposed so other modules (e.g. ``--show-config``, the
-    ``env`` command) can list which key each configured endpoint expects
-    without duplicating the naming rule.
-
-    Examples::
-
-        env_var_for_endpoint("hpc_cluster")    -> "API_HPC_CLUSTER_KEY"
-        env_var_for_endpoint("cloud-provider")  -> "API_CLOUD_PROVIDER_KEY"
+    Reads ``[config] default_endpoint`` from the merged settings layers.
+    When set, bare model strings (no colon prefix) are routed to this
+    endpoint instead of the built-in Portkey service.
     """
-    return _env_key_for(api_name)
+    return settings.DEFAULT_ENDPOINT
 
 
-def get_default_api_name() -> Optional[str]:
-    """Return the default endpoint name from ``apis.json``, or ``None``.
-
-    Reads the top-level ``"default"`` key::
-
-        { "default": "hpc_cluster", "endpoints": { ... } }
-
-    When set, bare model strings (no colon prefix) are routed to this endpoint
-    instead of the built-in Portkey service.
-    """
-    data = _load_apis_json()
-    return data.get("default") or None
-
-
-def parse_model_source(model: str) -> tuple[Optional[str], str]:
+def parse_model_source(model: str) -> tuple[str | None, str]:
     """Split an optional ``api_name:model`` string into its parts.
 
     The colon separator mirrors URL syntax — the part before the first colon

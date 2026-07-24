@@ -1,5 +1,15 @@
 # Web UI Plugin — Design Plan
 
+> **Superseded references (2026-07):** this document predates the settings
+> consolidation that replaced `.env`, `apis.json`, and `data_sources.json`
+> with a single `.settings` file plus `settings.default.toml` /
+> `settings.shared.toml` / `settings.local.toml` layering. Where this plan
+> mentions `.env`, `data_sources.json`, or `src/tracking/source_config.py`,
+> the current equivalents are `.settings` and `src/settings_store.py` — see
+> `docs/configuration.md` for the up-to-date picture. The narrative below is
+> left as-is as a historical record of the design reasoning; only the file
+> names it refers to have changed.
+
 Status, on branch `feature/webui-and-remote-sources`:
 - Section 1 (external/remote usage-data sources, the migration script, the
   `usage sources` CLI) — **built.** Checked against this installation's real

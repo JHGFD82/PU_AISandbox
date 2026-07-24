@@ -1,55 +1,59 @@
 # Configuration & Templates
 
-Four files control how PU_AISandbox is configured. Two are git-ignored (you create them from templates); two are tracked.
+Three files control how PU_AISandbox is configured. One is git-ignored (you create it from a template, or the migration script creates it for you); the others are TOML layers, one tracked and two optional/git-ignored.
 
 | File | Tracked | Template | Purpose |
 |------|---------|----------|---------|
-| `.env` | ❌ git-ignored | `.env.template` | Professor names and API keys |
+| `.settings` | ❌ git-ignored | `.settings.template` | Professor names/keys, endpoint credentials, webui secrets, external usage-data sources — this installation's own private configuration |
 | `src/model_catalog.json` | ❌ git-ignored | `src/model_catalog.template.json` | Model pricing and capabilities |
-| `settings.toml` | ✅ tracked | — | Runtime defaults (edit freely) |
-| `apis.json` | ✅ tracked | — | Alternate AI endpoint connections (add your own) |
+| `settings.default.toml` | ✅ tracked | — | Runtime defaults (edit freely) and alternate-endpoint *definitions* |
+| A shared file (optional, any path) | ❌ not part of this repo | — | Runtime defaults a group wants to share (e.g. via Dropbox) |
+| `settings.local.toml` | ❌ git-ignored | — | This machine's personal overrides, highest precedence |
+
+For a quick reference on every one of these — where each can live (this machine only, or a synced/shared external location), whether a personal override exists, and how it can be edited today — see [Settings at a Glance](#settings-at-a-glance) near the end of this document.
 
 ---
 
-## `.env` — Professor and API Key Configuration
+## `.settings` — This Installation's Private Configuration
+
+`.settings` is a TOML file at the repository root holding everything that is specific to this one installation and should never be synced or shared: professor names and API keys, the web UI's passphrase hash and session secret, alternate-endpoint credentials, and the list of external usage-data sources this installation reads from. It replaces four things that used to be separate files (`.env`, the credential half of `apis.json`, and `data_sources.json`).
+
+Editing it programmatically (via the `env` command below) is safe specifically because every edit happens locally, driven by a command typed at this machine's own keyboard — never over a network call, never as part of syncing files between machines. That reasoning does not extend to placing `.settings` itself in a synced folder (Dropbox, iCloud, etc.) — never do that.
 
 ### Setup
 
 ```bash
-cp .env.template .env
+cp .settings.template .settings
 ```
 
-Then edit `.env` to add your professors.
+Then either hand-edit `.settings`, or use the `env` command below to add your first professor.
 
 ### Format
 
-Each professor is defined by three environment variables with a shared numeric ID:
+```toml
+[professors.heller]
+name = "Jeff Heller"
+key = "sk-...primary_key..."
+backup_key = "sk-...backup_key..."   # optional
 
-```env
-PROF_1_NAME=Heller
-PROF_1_KEY=sk-...primary_key...
-PROF_1_BACKUP_KEY=sk-...backup_key...
-
-PROF_2_NAME=Smith
-PROF_2_KEY=sk-...primary_key...
-PROF_2_BACKUP_KEY=sk-...backup_key...
+[professors.smith]
+name = "Jane Smith"
+key = "sk-...primary_key..."
 ```
 
-- `PROF_N_NAME` — display name and CLI identifier. The CLI accepts a lowercased, safe-filename form: `Heller` → `heller`, `Van Dyke` → `van_dyke`.
-- `PROF_N_KEY` — primary PortKey API key (obtained through Princeton OIT).
-- `PROF_N_BACKUP_KEY` — fallback if the primary key fails. The application prints a warning when the backup is used.
-
-The ID (`1`, `2`, …) is only used to group the three variables together. IDs do not need to be sequential, but they must be consistent within a group.
+- The table name (`heller`, `smith`) is the safe-filename identifier used on the command line: `Jeff Heller` → `heller`, `Van Dyke` → `van_dyke`.
+- `key` — primary PortKey API key (obtained through Princeton OIT).
+- `backup_key` — fallback if the primary key fails. The application prints a warning when the backup is used.
 
 ### How Professor Names Work
 
 `get_api_key(professor)` in `src/config.py`:
-1. Computes a safe filename from `PROF_N_NAME` (lowercase, non-word chars → `_`)
-2. Matches the CLI argument against both the safe name and the original display name (case-insensitive)
+1. Looks up the professor by safe name (the `[professors.<safe_name>]` table name)
+2. Also matches the CLI argument against the original display name (case-insensitive)
 3. Returns the primary key, or the backup key with a printed warning
 
 ```bash
-# These are all equivalent given PROF_1_NAME=Heller
+# These are all equivalent given [professors.heller] name = "Heller"
 python main.py heller usage report
 python main.py Heller usage report
 ```
@@ -60,7 +64,35 @@ python main.py Heller usage report
 python main.py --show-config
 ```
 
-This prints all configured professors, their data-file paths, and whether those files exist. No API call is made.
+This prints all configured professors, their data-file paths, whether those files exist, and every optional setting registered below (and whether each is currently set — never the value itself).
+
+### Editing `.settings` from the command line
+
+Rather than hand-editing `.settings`, the built-in `env` command can add/remove professors and set any dotted-path value directly. Unlike every other command, `env` never needs a professor name first (you need it precisely when no professor exists yet):
+
+```bash
+python main.py env add-professor            # prompts for name + keys (keys hidden, never a flag)
+python main.py env remove-professor heller  # asks to confirm before deleting
+python main.py env list                     # same optional-settings list as --show-config
+python main.py env set webui.session_secret             # prompts for a value (hidden, since it's a secret)
+python main.py env set webui.session_secret --generate   # or auto-generate a random one
+python main.py env unset webui.session_secret
+```
+
+Secrets are always entered at a hidden prompt — never accepted as a command-line flag — so they can't end up in shell history or be seen by another process listing running commands.
+
+### Optional `.settings` values
+
+Beyond professor keys, a plugin can declare its own optional dotted-path setting (via `register_env_field()` in `src/config.py`, the same mechanism a plugin uses to add a language) so it shows up automatically in `--show-config` and `env list`. Currently registered:
+
+| Dotted path | Set by | Purpose |
+|----------|--------|---------|
+| `webui.passphrase_hash` | `python main.py webui set-passphrase` (writes the hash directly to `.settings`) | Unlock-gate passphrase for the web UI |
+| `webui.session_secret` | `env set webui.session_secret` (or `--generate`) | Keeps browser sessions signed in across server restarts |
+| `shared_settings.path` | `env set shared_settings.path` | Path to a shared settings file — see [Local overrides](#local-overrides) |
+| `endpoints.<name>.key` (one per `[endpoints.<name>]` table in `settings.*.toml`) | `env set endpoints.my_cluster.key` | API key for an alternate endpoint — see [Endpoint definitions](#endpoint-definitions-alternate-ai-api-connections) |
+
+All of these are optional — leaving them unset falls back to documented default behavior (no unlock gate, a fresh session secret each restart, no shared settings, no alternate endpoints).
 
 ---
 
@@ -72,7 +104,7 @@ This prints all configured professors, their data-file paths, and whether those 
 cp src/model_catalog.template.json src/model_catalog.json
 ```
 
-This file is git-ignored so each installation can maintain its own model list and pricing without conflicting with other users.
+This file is git-ignored so each installation can maintain its own model list and pricing without conflicting with other users. It's kept as its own file rather than folded into `.settings` for a practical reason: the package updates it on its own (auto-registering pricing the first time you use `-m provider/model-name`), and that kind of frequent, automatic write is exactly the kind of thing that causes conflicts if it ever ends up in a synced or shared file. Runtime settings and shared defaults change rarely enough that sharing them is safe; model pricing can change every time someone tries a new model.
 
 ### Schema
 
@@ -157,7 +189,7 @@ Prints all models with their pricing, vision support, and any special flags.
 
 ---
 
-## `settings.toml` — Runtime Defaults
+## `settings.default.toml` — Runtime Defaults and Endpoint Definitions
 
 This file is tracked by git. Edit it freely — changes take effect on the next run without touching any Python code.
 
@@ -230,7 +262,11 @@ CLI flags (`-t`, `-T`, `-M`, `-w`, etc.) always override these defaults for the 
 
 ### Local overrides
 
-Create `settings.local.toml` at the repository root to override individual keys without modifying the tracked `settings.toml`. Only the keys you specify are overridden — everything else falls back to `settings.toml`. The file is git-ignored (add it to `.gitignore` if not already present).
+Settings merge from up to three layers, each optional and each overriding only the keys it mentions:
+
+1. **`settings.default.toml`** (tracked) — the repo's defaults, same for everyone.
+2. **A shared file** (optional, any path) — set `shared_settings.path` in `.settings` to the path of a `settings.default.toml`-format file, e.g. one synced across a group with Dropbox. Lets a group share defaults (a cluster's worker count, a group-wide font size, even a shared alternate-endpoint definition) without anyone hand-editing their own copy. Nothing changes unless this value is set.
+3. **`settings.local.toml`** (git-ignored, at the repository root) — this machine's personal overrides. Still the last word: even with a shared file in play, a setting placed here wins, so one person can override just their own quirk without touching the file everyone else reads.
 
 ```toml
 # settings.local.toml — machine-specific overrides (not committed)
@@ -238,104 +274,110 @@ Create `settings.local.toml` at the repository root to override individual keys 
 default_parallel_workers = 4
 ```
 
----
+Note this local-override mechanism is specific to the *root* `settings.default.toml` — a plugin's own `settings.toml` (see [Plugin Settings](#plugin-settings) below) has no equivalent personal-override file today; it's edited directly.
 
-## `apis.json` — Alternate AI Endpoint Connections
+### Endpoint definitions (alternate AI API connections)
 
-`apis.json` lives at the repository root and is tracked by git. It lists any AI
-endpoints you want to reach in addition to (or instead of) the built-in service.
+The `[endpoints.<name>]` tables in `settings.default.toml` (or a shared file, or `settings.local.toml` — they merge through the same three layers as everything else) list any AI endpoints you want to reach in addition to (or instead of) the built-in service.
 
-### Why use this?
+#### Why use this?
 
-Use `apis.json` when you need to call an AI endpoint that isn't the built-in
-service — for example:
+Use an `[endpoints]` table when you need to call an AI endpoint that isn't the built-in service — for example:
 
 - A model running on an **HPC cluster** or other self-hosted inference server
-- An **AI service provider's direct API** (many providers expose an
-  OpenAI-compatible REST interface you can reach with just a URL and an API key)
+- An **AI service provider's direct API** (many providers expose an OpenAI-compatible REST interface you can reach with just a URL and an API key)
 
-### File format
+#### Definition format
 
-```json
-{
-  "_doc": "Human-readable description (ignored by the loader)",
-  "_examples": { "...copy an entry here to try it..." },
-  "default": null,
-  "endpoints": {
-    "my_cluster": {
-      "name": "My HPC Cluster",
-      "base_url": "http://my-cluster.internal:8000/v1",
-      "openai_compatible": true,
-      "default_model": "llama-3-70b-instruct",
-      "timeout": 30,
-      "verify_ssl": false
-    }
-  }
-}
+```toml
+[endpoints.my_cluster]
+name = "My HPC Cluster"
+base_url = "http://my-cluster.internal:8000/v1"
+openai_compatible = true
+default_model = "llama-3-70b-instruct"
+timeout = 30
+verify_ssl = false
 ```
 
-Keys starting with `_` are documentation only — the loader ignores them.
-
-### Endpoint fields
+#### Endpoint fields
 
 | Field | Required | Default | Description |
 |-------|----------|---------|-------------|
-| `name` | No | key name | Human-readable label shown in logs |
+| `name` | No | table name | Human-readable label shown in logs |
 | `base_url` | **Yes** | — | Root URL of the API (e.g. `http://cluster:8000/v1`) |
 | `openai_compatible` | No | `false` | When `true`, uses the OpenAI SDK with `base_url` for LLM calls |
 | `default_model` | No | `null` | Model used when none is specified in the colon syntax |
 | `timeout` | No | `30` | Request timeout in seconds |
 | `verify_ssl` | No | `true` | Whether to verify SSL certificates (set `false` for internal clusters) |
 
-### API keys
+Because `settings.default.toml` is tracked by git, put endpoint *definitions* you're comfortable committing there or in a shared file; anything installation-specific belongs in `settings.local.toml` instead (git-ignored).
 
-Each endpoint's API key is read from an environment variable:
+#### API keys
 
-```
-API_<UPPERCASE_ENDPOINT_KEY>_KEY
-```
+Each endpoint's credential is kept separately, in `.settings` — never alongside the definition, since credentials are never meant to be shared or layered the way definitions are:
 
-Examples:
-- Endpoint key `my_cluster` → `API_MY_CLUSTER_KEY`
-- Endpoint key `cloud-provider` → `API_CLOUD_PROVIDER_KEY`
-
-Add these to your `.env` file (see `.env.template` for the pattern).
-
-### Setting a default endpoint
-
-Set `"default"` to an endpoint key to route **all** bare model strings there
-instead of the built-in service:
-
-```json
-{
-  "default": "my_cluster",
-  "endpoints": { "my_cluster": { ... } }
-}
+```toml
+# .settings
+[endpoints.my_cluster]
+key = "sk-..."
 ```
 
-When `"default"` is `null` (the default), bare model strings are handled by the
-built-in service as before.
+Set it with:
 
-### Built-in examples
+```bash
+python main.py env set endpoints.my_cluster.key
+```
 
-The `_examples` section in `apis.json` shows two ready-to-use patterns:
+#### Setting a default endpoint
 
-- **`hpc_cluster`** — OpenAI-compatible endpoint on an on-premises or HPC cluster
-- **`cloud_provider`** — Direct connection to a commercial AI service provider
-  that exposes an OpenAI-compatible REST API
+Set `[config] default_endpoint` to an endpoint name to route **all** bare model strings there instead of the built-in service:
 
-Copy the relevant example into `"endpoints"` and fill in your URL.
+```toml
+[config]
+default_endpoint = "my_cluster"
 
-### Using a configured endpoint
+[endpoints.my_cluster]
+name = "My HPC Cluster"
+base_url = "http://my-cluster.internal:8000/v1"
+openai_compatible = true
+```
 
-Once an endpoint is in `"endpoints"`, use it on the command line with colon syntax:
+When `default_endpoint` is unset (the default), bare model strings are handled by the built-in service as before.
+
+#### Using a configured endpoint
+
+Once an endpoint is defined, use it on the command line with colon syntax:
 
 ```bash
 python main.py heller prompt -m my_cluster:llama-3-70b
 ```
 
-See [CLI Reference → Specifying Models](cli-reference.md#specifying-models) for
-the full syntax.
+See [CLI Reference → Specifying Models](cli-reference.md#specifying-models) for the full syntax.
+
+---
+
+## External/Remote Usage-Data Sources
+
+The `[usage_sources]` table and `[[usage_sources.external]]` array in `.settings` list this installation's own external/remote usage-data sources. This is git-ignored, per-installation configuration — it's not hand-edited; it's managed entirely through `usage sources` commands.
+
+### Why use this?
+
+Lets one installation of this tool include another installation's usage data when building reports. For example: a professor runs their own copy of this tool and points it at a folder synced with Dropbox; the person who manages several professors' accounts registers that folder as a source on their own installation, so a single report shows everyone's spending without anyone copying files around by hand.
+
+Two modes:
+- **`read-only`** (default) — only the other installation ever writes there; this one just reads it.
+- **`shared-write`** — both installations record usage there, one-file-per-call, so a dumb file-sync service like Dropbox never sees two conflicting edits to the same file.
+
+### Commands
+
+```bash
+python main.py heller usage sources list
+python main.py heller usage sources add --label "Prof. Smith" --path /path/to/shared/data --mode read-only
+python main.py heller usage sources add --label "This installation" --path /path/to/shared/data --mode shared-write --for-professor heller
+python main.py heller usage sources remove "Prof. Smith"
+```
+
+`add` prompts interactively for anything not passed as a flag. A professor name is still required on the command line for these commands for consistency with every other `usage` subcommand, even though the source configuration itself isn't scoped to that professor — see `src/settings_store.py` and `docs/webui-plugin-plan.md` (§1) for the full design.
 
 ---
 
@@ -343,7 +385,7 @@ the full syntax.
 
 Each bundled plugin ships its own `settings.toml` in its plugin directory. The plugin's `src/settings.py` locates it by walking up from `__file__`. These files are tracked alongside their plugin (or, if the plugin is in a separate repo, tracked there).
 
-Plugin settings are isolated from the root `settings.toml` — they have no overlap in section names. See [`plugin-authoring-guide.md`](plugin-authoring-guide.md) for how to add settings to a new plugin.
+Plugin settings are isolated from the root `settings.default.toml` — they have no overlap in section names. See [`plugin-authoring-guide.md`](plugin-authoring-guide.md) for how to add settings to a new plugin.
 
 ### `translation` plugin — `plugins/translation/settings.toml`
 
@@ -407,12 +449,34 @@ pip install openpyxl
 
 ---
 
+## Settings at a Glance
+
+Every configuration surface in the project, where it can live, whether a personal override exists on top of it, and how it's edited today.
+
+| Setting | Where it's stored | External/shared location allowed? | Personal override on top? | Edit via CLI | Edit via web UI |
+|---|---|---|---|---|---|
+| Professor name/keys | `.settings`, repo root, git-ignored | No — never sync `.settings` itself | N/A (this *is* the per-installation value) | ✅ `env add-professor` / `env remove-professor` | Planned (not yet built) |
+| Webui passphrase hash | `.settings` (`webui.passphrase_hash`) | No | N/A | ✅ `webui set-passphrase` (writes directly to `.settings`) | Planned |
+| Webui session secret | `.settings` (`webui.session_secret`) | No | N/A | ✅ `env set` / `env set --generate` | Planned |
+| Shared settings pointer | `.settings` (`shared_settings.path`) | No (it's just a path) | N/A | ✅ `env set` / `env unset` | Planned |
+| Alternate-endpoint API keys | `.settings` (`endpoints.<name>.key`) | No | N/A | ✅ `env set` / `env unset` | Planned |
+| Endpoint definitions (URL, timeout, etc.) | `settings.default.toml` (or shared file, or `settings.local.toml`), repo root | Definitions may live in the tracked file or a shared file | ✅ `settings.local.toml` can override a definition | ❌ hand-edit TOML only | Not planned yet |
+| Model pricing/capabilities | `src/model_catalog.json`, git-ignored | Not designed for this — per-installation by convention, deliberately kept separate to avoid concurrent-write conflicts | N/A (whole file is the "local" copy) | Indirectly — using `-m provider/model` auto-registers pricing | Not planned yet |
+| Runtime defaults (temperature, retries, etc.) | `settings.default.toml`, repo root, tracked by git | N/A — this is the shared baseline | ✅ `settings.local.toml` | ❌ hand-edit TOML only | Not planned yet |
+| Shared runtime defaults | Wherever `shared_settings.path` points | **Yes — this is the point** (e.g. a Dropbox-synced `.toml` file) | ✅ `settings.local.toml` still wins over it | Pointer is CLI-editable (`env set shared_settings.path`); file contents are hand-edited TOML | Not planned yet |
+| Plugin defaults (e.g. `plugins/webui/settings.toml`) | Inside each plugin's own directory, tracked by git (or in the EA plugin's separate repo) | N/A | **No** — no per-plugin local-override file exists today | ❌ hand-edit TOML only | Not planned yet |
+| External usage-data sources | `.settings` (`[usage_sources]`), repo root, git-ignored | **Yes — the whole point** (points at another installation's `data/` folder, e.g. via Dropbox) | N/A (flat list, no layering) | ✅ `usage sources add/list/remove` | Not yet in scope for the planned forms, but a natural fit |
+
+Rows marked "Planned (not yet built)" refer to a follow-up: web UI forms on top of the same `env`/settings logic described above, with secrets masked by default and gated behind the existing unlock passphrase. Nothing there exists yet.
+
+---
+
 ## First-Run Checklist
 
 ```bash
-# 1. Copy and populate .env
-cp .env.template .env
-# edit .env — add your professors
+# 1. Copy and populate .settings
+cp .settings.template .settings
+python main.py env add-professor   # or hand-edit .settings — see the Format section above
 
 # 2. Copy the model catalog
 cp src/model_catalog.template.json src/model_catalog.json
@@ -422,3 +486,14 @@ cp src/model_catalog.template.json src/model_catalog.json
 python main.py --show-config    # checks professor setup (no API call)
 python main.py --list-models    # checks model catalog
 ```
+
+## Migrating an Existing Installation
+
+If you have an existing installation with the older `.env` / `apis.json` / `data_sources.json` files, run the one-time migration script instead of starting from scratch:
+
+```bash
+python scripts/migrate_config_to_settings.py            # writes .settings and settings.local.toml
+python scripts/migrate_config_to_settings.py --dry-run   # preview without writing anything
+```
+
+It reads your existing `.env`, `apis.json`, and `data_sources.json`, writes the equivalent `.settings` and `settings.local.toml` content, and renames the old files to `.bak` (it never deletes anything). Refuses to overwrite an existing `.settings` unless `--force` is passed.
