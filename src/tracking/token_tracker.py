@@ -1,24 +1,58 @@
-"""Per-professor token usage tracking with monthly isolation and automatic archive rollover."""
+"""Per-professor token usage tracking with monthly isolation and automatic archive rollover.
+
+Every professor is tracked in one of two ways, chosen automatically and
+invisibly to callers:
+
+- **local** (the default, unchanged from before): one mutable JSON file per
+  month, rewritten in place on every call, exactly as this module has
+  always worked.
+- **shared-write**: for a professor configured in ``data_sources.json``
+  (see ``src/tracking/source_config.py``) as sharing usage tracking with
+  another installation over a synced folder like Dropbox. Instead of
+  rewriting one file — unsafe once two machines might do it near-
+  simultaneously, since a plain file-sync service like Dropbox has no way
+  to merge two conflicting edits — every API call writes its own small,
+  uniquely-named file that's never edited again. Monthly/daily/model
+  totals are computed by summing whatever event files exist. See
+  ``docs/webui-plugin-plan.md`` section 1 for the full design and the
+  reasoning behind it.
+
+Every public method on ``TokenTracker`` (``record_usage``,
+``get_daily_usage``, ``get_monthly_usage``, ``get_all_time_usage``,
+``list_archived_months``) behaves identically from the caller's point of
+view in both modes — a plugin never needs to know or care which mode a
+given professor is in.
+"""
 
 import json
 import logging
+import os
+import secrets
 import threading
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 from dataclasses import dataclass, asdict
 
 from ..models.catalog import (
     get_model_pricing, get_pricing_unit,
     get_monthly_limit,
 )
+from ..config import make_safe_filename
 from ..console import print_banner, print_subsection
 from ..settings import BUDGET_WARNING_THRESHOLD
+from .source_config import (
+    ExternalSource,
+    get_configured_sources,
+    get_shared_write_source,
+    get_source_id,
+)
 
 
 # Constants
 USAGE_DATA_DIR = "data"
 ARCHIVES_SUBDIR = "archives"
+EVENTS_SUBDIR = "events"
 
 
 def get_usage_data_path(professor: str) -> Path:
@@ -42,6 +76,210 @@ def get_archive_path(professor: str, month: str) -> Path:
     return get_archive_dir(professor) / f"{month}.json"
 
 
+def _shared_event_dir(source: "ExternalSource", professor: str, month: str) -> Path:
+    """Return the event-file directory for one professor/month inside a shared-write source."""
+    return source.resolved_path() / EVENTS_SUBDIR / make_safe_filename(professor) / month
+
+
+def _shared_events_root(source: "ExternalSource", professor: str) -> Path:
+    """Return the directory holding every month's event files for one professor."""
+    return source.resolved_path() / EVENTS_SUBDIR / make_safe_filename(professor)
+
+
+def _shared_archive_dir(source: "ExternalSource", professor: str) -> Path:
+    """Return the archive directory for one professor inside a shared-write source."""
+    return source.resolved_path() / ARCHIVES_SUBDIR / make_safe_filename(professor)
+
+
+def _shared_archive_path(source: "ExternalSource", professor: str, month: str) -> Path:
+    """Return the archive file path for one professor/month inside a shared-write source."""
+    return _shared_archive_dir(source, professor) / f"{month}.json"
+
+
+def get_configured_data_roots() -> List[Tuple[str, Path]]:
+    """Return every data-shaped directory that should be scanned when building an aggregate usage report.
+
+    This is this installation's own local ``data/`` folder plus every
+    external source configured in ``data_sources.json`` — see
+    ``src/tracking/source_config.py`` and ``docs/webui-plugin-plan.md``
+    section 1. Used by ``data/visualize_usage.py`` and, eventually, the web
+    UI's spend sidebar, so that logic to combine multiple installations'
+    usage history lives in exactly one place.
+
+    Returns:
+        A list of ``(label, path)`` pairs, always starting with
+        ``("local", <this installation's data/ folder>)``.
+    """
+    project_root = Path(__file__).parent.parent.parent
+    roots: List[Tuple[str, Path]] = [("local", project_root / USAGE_DATA_DIR)]
+    for source in get_configured_sources():
+        roots.append((source.label, source.resolved_path()))
+    return roots
+
+
+def _read_event_files(event_dir: Path) -> List[Dict[str, Any]]:
+    """Read every per-call usage record in a shared-write event-file directory.
+
+    Each file holds one API call's record (the same shape as a
+    ``TokenUsage``, saved as JSON). Files that can't be parsed are skipped
+    with a warning rather than aborting the whole read, matching how
+    corrupt archive files are already handled elsewhere in this module.
+
+    Args:
+        event_dir: The directory to read (e.g. one professor's current
+                   month under a shared source's ``events/`` tree).
+                   Missing directories simply yield no records.
+    """
+    records: List[Dict[str, Any]] = []
+    if not event_dir.exists():
+        return records
+    for event_file in sorted(event_dir.glob("*.json")):
+        try:
+            with open(event_file, "r") as f:
+                records.append(json.load(f))
+        except (json.JSONDecodeError, OSError) as e:
+            logging.warning(f"Could not read usage event file {event_file.name}: {e}")
+    return records
+
+
+def fold_usage_records(records: List[Dict[str, Any]], month: str) -> Dict[str, Any]:
+    """Build the standard month-summary shape from a flat list of individual call records.
+
+    This is the one place that turns "a pile of individual API-call
+    records" into the same ``{total_usage, model_usage, daily_usage,
+    session_history}`` shape every local monthly file and archive already
+    uses — needed because shared-write mode stores one file per call rather
+    than one continuously-updated summary file (see the module docstring).
+    Reused for the in-memory totals a live ``TokenTracker`` shows, for
+    folding a closed month's event files into an archive, and by
+    ``load_usage_tree()`` below when reading someone else's shared-write
+    directory for a report.
+
+    Args:
+        records: A list of plain dictionaries, each shaped like a
+                 ``TokenUsage`` (as read from event files or a
+                 ``session_history`` list).
+        month: The month string (``'YYYY-MM'``) this batch of records
+               belongs to, stamped onto the returned summary.
+
+    Returns:
+        A dictionary with the same keys as ``TokenTracker._empty_usage_data()``:
+        ``month``, ``total_usage``, ``model_usage``, ``daily_usage``, and
+        ``session_history`` (sorted chronologically).
+    """
+    total = UsageStats()
+    model_usage: Dict[str, Any] = {}
+    daily_usage: Dict[str, Any] = {}
+    session_history = sorted(records, key=lambda r: r.get("timestamp", ""))
+
+    for rec in session_history:
+        prompt_tokens = rec.get("prompt_tokens", 0)
+        completion_tokens = rec.get("completion_tokens", 0)
+        total_tokens = rec.get("total_tokens", 0)
+        cost = rec.get("total_cost", 0.0)
+
+        total.add_usage(prompt_tokens, completion_tokens, total_tokens, cost)
+
+        model = rec.get("model", "unknown")
+        model_usage.setdefault(model, UsageStats().to_dict())
+        _accumulate_stats_dict(model_usage[model], prompt_tokens, completion_tokens, total_tokens, cost)
+
+        day = rec.get("timestamp", "")[:10]
+        if day:
+            daily_usage.setdefault(day, UsageStats().to_dict())
+            _accumulate_stats_dict(daily_usage[day], prompt_tokens, completion_tokens, total_tokens, cost)
+
+    return {
+        "month": month,
+        "total_usage": total.to_dict(),
+        "model_usage": model_usage,
+        "daily_usage": daily_usage,
+        "session_history": session_history,
+    }
+
+
+def _accumulate_stats_dict(stats: Dict[str, Any], prompt_tokens: int, completion_tokens: int,
+                            total_tokens: int, cost: float) -> None:
+    """Add one call's numbers into a plain stats dictionary in place (module-level twin of ``TokenTracker._update_stats``)."""
+    stats["total_tokens"] += total_tokens
+    stats["total_input_tokens"] += prompt_tokens
+    stats["total_output_tokens"] += completion_tokens
+    stats["total_cost"] += cost
+    stats["call_count"] = stats.get("call_count", 0) + 1
+
+
+def load_usage_tree(base_dir: Path) -> Dict[str, Dict[str, Any]]:
+    """Read one data-shaped directory into ``{professor: {month: month_data}}``.
+
+    Understands every on-disk shape this project produces: a current-month
+    mutable file (``token_usage_{professor}.json``), closed-month archive
+    files (``archives/{professor}/{month}.json``), and still-open
+    shared-write event files (``events/{professor}/{month}/*.json``,
+    folded into the same shape on the fly via ``fold_usage_records()``).
+    This is the one place this logic lives, reused by
+    ``data/visualize_usage.py`` and, eventually, the web UI's spend
+    sidebar — see ``docs/webui-plugin-plan.md`` section 1.
+
+    Args:
+        base_dir: A directory shaped like this project's ``data/`` folder —
+                  typically either this installation's own local ``data/``,
+                  or one entry from ``get_configured_data_roots()``.
+
+    Returns:
+        A nested dictionary: outer keys are professor safe-names, inner
+        keys are ``'YYYY-MM'`` month strings, values are month-summary
+        dictionaries in the standard shape.
+    """
+    result: Dict[str, Dict[str, Any]] = {}
+    if not base_dir.exists():
+        return result
+
+    # 1. Current-month mutable files (local / read-only professors)
+    for active_file in sorted(base_dir.glob("token_usage_*.json")):
+        prof = active_file.stem.replace("token_usage_", "")
+        try:
+            with open(active_file, "r") as f:
+                data = json.load(f)
+        except (json.JSONDecodeError, OSError) as e:
+            logging.warning(f"Could not read usage file {active_file.name}: {e}")
+            continue
+        result.setdefault(prof, {})[data.get("month", "")] = data
+
+    # 2. Closed-month archives — works for both local rollover and shared-write rollover output
+    archives_root = base_dir / ARCHIVES_SUBDIR
+    if archives_root.exists():
+        for prof_dir in sorted(archives_root.iterdir()):
+            if not prof_dir.is_dir():
+                continue
+            prof = prof_dir.name
+            for archive_file in sorted(prof_dir.glob("*.json")):
+                month = archive_file.stem
+                try:
+                    with open(archive_file, "r") as f:
+                        data = json.load(f)
+                except (json.JSONDecodeError, OSError) as e:
+                    logging.warning(f"Could not read archive {archive_file.name}: {e}")
+                    continue
+                result.setdefault(prof, {})[month] = data
+
+    # 3. Still-open shared-write event files (usually just the current month)
+    events_root = base_dir / EVENTS_SUBDIR
+    if events_root.exists():
+        for prof_dir in sorted(events_root.iterdir()):
+            if not prof_dir.is_dir():
+                continue
+            prof = prof_dir.name
+            for month_dir in sorted(prof_dir.iterdir()):
+                if not month_dir.is_dir():
+                    continue
+                month = month_dir.name
+                records = _read_event_files(month_dir)
+                if records:
+                    result.setdefault(prof, {})[month] = fold_usage_records(records, month)
+
+    return result
+
+
 @dataclass
 class TokenUsage:
     """A record of the tokens and cost consumed by a single API call.
@@ -58,6 +296,7 @@ class TokenUsage:
     input_cost: float
     output_cost: float
     total_cost: float
+    source: str = ""  # which installation made this call — see module docstring
 
 
 @dataclass
@@ -110,6 +349,16 @@ class TokenTracker:
         rollover). All subsequent calls to ``record_usage()`` write to the new
         file.
 
+        When *data_file* is left as ``None`` (normal operation — every real
+        caller in this project does this), this also checks whether
+        *professor* is configured for shared-write tracking in
+        ``data_sources.json`` (see ``src/tracking/source_config.py``). If so,
+        this tracker records usage as individual event files in the shared
+        location instead of the local mutable file — see the module
+        docstring for why. Tests that pass an explicit *data_file* always get
+        the local, single-file behavior, since they're testing a specific
+        file directly.
+
         Args:
             professor: The professor's safe-filename identifier, used to locate
                        and name the usage file (e.g. ``'heller'`` maps to
@@ -124,19 +373,36 @@ class TokenTracker:
                            the catalog. Only non-``None`` in tests.
         """
         self.professor = professor
+        self.source_mode = "local"
+        self._shared_source: Optional[ExternalSource] = None
+        self._source_id = get_source_id()
 
         if data_file:
             self.data_file = Path(data_file)
         else:
-            self.data_file = get_usage_data_path(professor)
+            shared_source = get_shared_write_source(professor)
+            if shared_source is not None:
+                self.source_mode = "shared-write"
+                self._shared_source = shared_source
+                self.data_file = None  # not used in shared-write mode
+            else:
+                self.data_file = get_usage_data_path(professor)
 
         self.monthly_limit = monthly_limit if monthly_limit is not None else get_monthly_limit()
 
         self._lock = threading.Lock()
 
-        self.usage_data = self._load_usage_data()
+        if self.source_mode == "shared-write":
+            self._rollover_closed_shared_months()
+            self._refresh_shared_usage_data()
+        else:
+            self.usage_data = self._load_usage_data()
 
-        logging.debug(f"Token tracking initialized for Professor {professor.title()}: {self.data_file}")
+        logging.debug(
+            f"Token tracking initialized for Professor {professor.title()} "
+            f"(mode={self.source_mode}): "
+            f"{self.data_file if self.data_file else self._shared_source.resolved_path()}"
+        )
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -220,6 +486,174 @@ class TokenTracker:
         return input_cost, output_cost, input_cost + output_cost
 
     # ------------------------------------------------------------------
+    # Shared-write mode — event-file recording and reading
+    #
+    # Every method here is the shared-write counterpart of a same-named
+    # public method above (e.g. _record_usage_shared / record_usage). See
+    # the module docstring for why this mode exists and how it differs
+    # from the default local mode.
+    # ------------------------------------------------------------------
+
+    def _refresh_shared_usage_data(self) -> None:
+        """Recompute ``self.usage_data`` for the current month from whatever event files exist right now.
+
+        Shared-write mode has no single mutable file to be the source of
+        truth, since another installation could be adding files to the same
+        folder at any moment — so instead of trusting an in-memory cache,
+        this re-reads every event file for the current month each time it's
+        called and rebuilds the same ``{total_usage, model_usage,
+        daily_usage, session_history}`` shape local mode keeps in memory.
+        Keeping ``self.usage_data`` populated this way (rather than leaving
+        it unset in this mode) means ``print_usage_report()`` and anything
+        else that reads ``self.usage_data`` directly keep working unchanged
+        in either mode.
+        """
+        month = self._get_current_month()
+        event_dir = _shared_event_dir(self._shared_source, self.professor, month)
+        records = _read_event_files(event_dir)
+        self.usage_data = fold_usage_records(records, month)
+
+    def _record_usage_shared(self, model: str, prompt_tokens: int, completion_tokens: int,
+                              total_tokens: int, requested_model: Optional[str] = None) -> TokenUsage:
+        """Shared-write version of ``record_usage()`` — writes one new event file instead of rewriting a shared file.
+
+        No read-modify-write happens here at all: the filename itself
+        (timestamp + a short random suffix + this installation's source id)
+        is guaranteed unique, so there's nothing for a concurrent write from
+        another installation to collide with — this is what makes it safe
+        over a plain file-sync service like Dropbox, which has no way to
+        merge two conflicting edits to the same file. See the module
+        docstring.
+        """
+        with self._lock:
+            timestamp = datetime.now().isoformat()
+            pricing_model = requested_model if requested_model else model
+            if requested_model and requested_model != model:
+                logging.debug(f"Using requested model '{requested_model}' for pricing instead of API model '{model}'")
+
+            input_cost, output_cost, total_cost = self._calculate_costs(pricing_model, prompt_tokens, completion_tokens)
+
+            usage = TokenUsage(
+                model=model,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                total_tokens=total_tokens,
+                timestamp=timestamp,
+                input_cost=input_cost,
+                output_cost=output_cost,
+                total_cost=total_cost,
+                source=self._source_id,
+            )
+
+            month = self._get_current_month()
+            event_dir = _shared_event_dir(self._shared_source, self.professor, month)
+            event_dir.mkdir(parents=True, exist_ok=True)
+            filename = f"{datetime.now().strftime('%Y%m%dT%H%M%S%f')}_{secrets.token_hex(3)}_{self._source_id}.json"
+            with open(event_dir / filename, "w") as f:
+                json.dump(asdict(usage), f, indent=2)
+
+            self._refresh_shared_usage_data()
+
+        return usage
+
+    def _get_daily_usage_shared(self, date: Optional[str] = None) -> Dict[str, Any]:
+        """Shared-write version of ``get_daily_usage()``."""
+        if date is None:
+            date = self._get_current_date()
+        month = date[:7]
+        if month == self._get_current_month():
+            self._refresh_shared_usage_data()
+            return self.usage_data["daily_usage"].get(date, UsageStats().to_dict())
+
+        archive_path = _shared_archive_path(self._shared_source, self.professor, month)
+        if archive_path.exists():
+            with open(archive_path, "r") as f:
+                archive = json.load(f)
+            return archive.get("daily_usage", {}).get(date, UsageStats().to_dict())
+        return UsageStats().to_dict()
+
+    def _get_monthly_usage_shared(self, month: Optional[str] = None) -> Dict[str, Any]:
+        """Shared-write version of ``get_monthly_usage()``."""
+        if month is None:
+            month = self._get_current_month()
+
+        if month == self._get_current_month():
+            self._refresh_shared_usage_data()
+            return self.usage_data["total_usage"]
+
+        archive_path = _shared_archive_path(self._shared_source, self.professor, month)
+        if archive_path.exists():
+            with open(archive_path, "r") as f:
+                archive = json.load(f)
+            return archive.get("total_usage", UsageStats().to_dict())
+        return UsageStats().to_dict()
+
+    def _get_all_time_usage_shared(self) -> Dict[str, Any]:
+        """Shared-write version of ``get_all_time_usage()``."""
+        combined = UsageStats()
+        self._refresh_shared_usage_data()
+        combined.merge_dict(self.usage_data["total_usage"])
+
+        archive_dir = _shared_archive_dir(self._shared_source, self.professor)
+        if archive_dir.exists():
+            for archive_file in sorted(archive_dir.glob("*.json")):
+                try:
+                    with open(archive_file, "r") as f:
+                        arc = json.load(f)
+                    combined.merge_dict(arc.get("total_usage", {}))
+                except (json.JSONDecodeError, KeyError) as e:
+                    logging.warning(f"Could not read shared archive {archive_file.name}: {e}")
+
+        return combined.to_dict()
+
+    def _rollover_closed_shared_months(self) -> None:
+        """Fold any event-file months older than the current month into a single archive file.
+
+        Only ever touches months nobody is still writing to, which is what
+        makes this safe to run from either installation without
+        coordination: whichever installation gets to a given closed month
+        first writes its archive file (skipped if one already exists,
+        mirroring ``_archive_month()``'s existing-file check), and cleanup
+        of the now-redundant event files is best-effort — if another
+        installation already deleted one, that's not treated as an error,
+        since the archive is correct either way. Note this can't be made
+        fully airtight against genuinely simultaneous rollover from two
+        machines, since Dropbox-style sync is eventually consistent rather
+        than a live shared filesystem — an acceptable limitation for a
+        once-a-month, already-closed-data operation.
+        """
+        events_root = _shared_events_root(self._shared_source, self.professor)
+        if not events_root.exists():
+            return
+
+        current_month = self._get_current_month()
+        for month_dir in sorted(events_root.iterdir()):
+            if not month_dir.is_dir() or month_dir.name >= current_month:
+                continue
+            month = month_dir.name
+            archive_path = _shared_archive_path(self._shared_source, self.professor, month)
+            if not archive_path.exists():
+                records = _read_event_files(month_dir)
+                if records:
+                    folded = fold_usage_records(records, month)
+                    archive_path.parent.mkdir(parents=True, exist_ok=True)
+                    tmp_path = archive_path.with_suffix(".tmp")
+                    with open(tmp_path, "w") as f:
+                        json.dump(folded, f, indent=2)
+                    os.replace(tmp_path, archive_path)
+                    logging.info(f"Folded shared-write month {month} for {self.professor} → {archive_path.name}")
+
+            for event_file in month_dir.glob("*.json"):
+                try:
+                    event_file.unlink()
+                except FileNotFoundError:
+                    pass  # another installation already cleaned this one up
+            try:
+                month_dir.rmdir()
+            except OSError:
+                pass  # not empty (rare race) or already removed — fine either way
+
+    # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
 
@@ -252,6 +686,9 @@ class TokenTracker:
             A ``TokenUsage`` record with the full breakdown of tokens and costs
             for this call.
         """
+        if self.source_mode == "shared-write":
+            return self._record_usage_shared(model, prompt_tokens, completion_tokens, total_tokens, requested_model)
+
         with self._lock:
             timestamp = datetime.now().isoformat()
             pricing_model = requested_model if requested_model else model
@@ -269,6 +706,7 @@ class TokenTracker:
                 input_cost=input_cost,
                 output_cost=output_cost,
                 total_cost=total_cost,
+                source=self._source_id,
             )
 
             self._update_stats(self.usage_data["total_usage"], prompt_tokens, completion_tokens, total_tokens, total_cost)
@@ -299,6 +737,9 @@ class TokenTracker:
             ``call_count``, and related fields. Returns a zeroed-out stats
             dictionary if no usage was recorded for that date.
         """
+        if self.source_mode == "shared-write":
+            return self._get_daily_usage_shared(date)
+
         if date is None:
             date = self._get_current_date()
         return self.usage_data["daily_usage"].get(date, UsageStats().to_dict())
@@ -320,6 +761,9 @@ class TokenTracker:
             ``call_count``, and related fields. Returns a zeroed-out stats
             dictionary if no archive file exists for the requested month.
         """
+        if self.source_mode == "shared-write":
+            return self._get_monthly_usage_shared(month)
+
         if month is None:
             month = self._get_current_month()
 
@@ -346,6 +790,9 @@ class TokenTracker:
             A stats dictionary with the combined ``total_tokens``,
             ``total_cost``, ``call_count``, and related fields across all time.
         """
+        if self.source_mode == "shared-write":
+            return self._get_all_time_usage_shared()
+
         combined = UsageStats()
         combined.merge_dict(self.usage_data["total_usage"])
 
@@ -362,8 +809,11 @@ class TokenTracker:
 
     def list_archived_months(self) -> List[str]:
         """Return a sorted list of month strings that have been archived."""
-        archive_dir = get_archive_dir(self.professor)
-        return sorted(p.stem for p in archive_dir.glob("*.json"))
+        if self.source_mode == "shared-write":
+            archive_dir = _shared_archive_dir(self._shared_source, self.professor)
+        else:
+            archive_dir = get_archive_dir(self.professor)
+        return sorted(p.stem for p in archive_dir.glob("*.json")) if archive_dir.exists() else []
 
     def _get_monthly_budget_status(self, month: Optional[str] = None) -> Dict[str, Any]:
         """Return a dict summarising budget consumption for *month*."""

@@ -43,6 +43,10 @@ fonts/*
 # Model catalog - local copy with personal pricing is not tracked; use model_catalog.template.json as starting point
 src/model_catalog.json
 
+# External/remote usage-data source config - per-installation, holds real filesystem
+# paths; use data_sources.template.json as a starting point
+data_sources.json
+
 # Token usage - exclude token tracker files but keep directory structure
 token_usage.json
 data/token_usage_*.json

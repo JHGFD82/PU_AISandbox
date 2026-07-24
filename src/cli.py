@@ -156,6 +156,50 @@ def _build_usage_subparser(subparsers: argparse._SubParsersAction) -> None:
         help='Date in YYYY-MM-DD format (defaults to today)',
     )
 
+    # usage sources list|add|remove
+    _build_usage_sources_subparser(usage_subparsers)
+
+
+def _build_usage_sources_subparser(usage_subparsers: argparse._SubParsersAction) -> None:
+    """Register 'usage sources' and its list/add/remove subcommands.
+
+    Lets one installation of this package include another installation's
+    usage-tracking data when building reports (e.g. a professor's own copy
+    of this tool, synced to a shared Dropbox folder). See
+    ``docs/webui-plugin-plan.md`` section 1 and ``src/tracking/source_config.py``
+    for the full design.
+    """
+    sources_parser = usage_subparsers.add_parser(
+        'sources',
+        help='Manage external/remote usage-data sources for aggregate reports',
+    )
+    _add_debug_flags(sources_parser)
+    sources_sub = sources_parser.add_subparsers(dest='sources_subcommand', help='Sources subcommand')
+
+    sources_list = sources_sub.add_parser('list', help='List configured external sources')
+    _add_debug_flags(sources_list)
+
+    sources_add = sources_sub.add_parser(
+        'add',
+        help='Add an external usage-data source (prompts interactively for anything not passed as a flag)',
+    )
+    _add_debug_flags(sources_add)
+    sources_add.add_argument('--label', type=str, default=None, help="A short name for this source, e.g. 'Prof. Smith'")
+    sources_add.add_argument('--path', type=str, default=None, help="The other installation's data/ folder")
+    sources_add.add_argument(
+        '--mode', type=str, choices=['read-only', 'shared-write'], default=None,
+        help="'read-only' (default) if only the other side writes there; 'shared-write' if this "
+             "installation records usage there too",
+    )
+    sources_add.add_argument(
+        '--for-professor', dest='for_professor', type=str, default=None, metavar='PROFESSOR',
+        help='Which professor this source is for (required for --mode shared-write)',
+    )
+
+    sources_remove = sources_sub.add_parser('remove', help='Remove a configured external source by label')
+    _add_debug_flags(sources_remove)
+    sources_remove.add_argument('label', type=str, help='The label of the source to remove (see: usage sources list)')
+
 
 def create_argument_parser(
     plugins: Optional[dict[str, ModePlugin]] = None,

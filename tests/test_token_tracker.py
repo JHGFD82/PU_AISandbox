@@ -309,8 +309,15 @@ class TestTokenUsage:
         names = {f.name for f in fields(TokenUsage)}
         assert names == {
             "model", "prompt_tokens", "completion_tokens", "total_tokens",
-            "timestamp", "input_cost", "output_cost", "total_cost",
+            "timestamp", "input_cost", "output_cost", "total_cost", "source",
         }
+
+    def test_source_defaults_to_empty_string(self):
+        usage = TokenUsage(
+            model="gpt-4o", prompt_tokens=1, completion_tokens=1, total_tokens=2,
+            timestamp="2026-03-12T10:00:00", input_cost=0.0, output_cost=0.0, total_cost=0.0,
+        )
+        assert usage.source == ""
 
 
 # ---------------------------------------------------------------------------

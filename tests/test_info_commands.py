@@ -14,6 +14,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 import src.runtime.info_commands as info_mod
+import src.tracking.source_config as source_config_mod
 from src.errors import CLIError
 from src.runtime.info_commands import (
     _print_daily_usage,
@@ -21,6 +22,12 @@ from src.runtime.info_commands import (
     list_available_models,
     show_professor_config,
 )
+
+
+@pytest.fixture(autouse=True)
+def _redirect_data_sources_file(tmp_path, monkeypatch):
+    """Keep 'usage sources' tests from touching the real repo-root data_sources.json."""
+    monkeypatch.setattr(source_config_mod, "DATA_SOURCES_FILE", tmp_path / "data_sources.json")
 
 # ---------------------------------------------------------------------------
 # Shared test catalog (matches model_catalog.json schema)
@@ -61,6 +68,11 @@ def _make_ns(**kwargs) -> argparse.Namespace:
         month=None,
         all_time=False,
         date="today",
+        sources_subcommand=None,
+        label=None,
+        path=None,
+        mode=None,
+        for_professor=None,
     )
     defaults.update(kwargs)
     return argparse.Namespace(**defaults)
@@ -280,6 +292,103 @@ class TestHandleInfoCommandsUsage:
                             usage_subcommand="unknown")
             with pytest.raises(CLIError, match="Invalid usage subcommand"):
                 handle_info_commands(args)
+
+
+# ---------------------------------------------------------------------------
+# handle_info_commands — usage sources subcommand branches
+# ---------------------------------------------------------------------------
+
+
+class TestHandleInfoCommandsUsageSources:
+
+    def test_sources_list_returns_true(self, capsys):
+        args = _make_ns(command="usage", professor="testprof",
+                        usage_subcommand="sources", sources_subcommand="list")
+        assert handle_info_commands(args) is True
+
+    def test_sources_list_prints_no_sources_message_when_empty(self, capsys):
+        args = _make_ns(command="usage", professor="testprof",
+                        usage_subcommand="sources", sources_subcommand="list")
+        handle_info_commands(args)
+        out = capsys.readouterr().out
+        assert "No external usage-data sources configured" in out
+
+    def test_sources_add_read_only_with_flags(self, capsys, tmp_path):
+        args = _make_ns(command="usage", professor="testprof",
+                        usage_subcommand="sources", sources_subcommand="add",
+                        label="Johnson", path=str(tmp_path), mode="read-only")
+        result = handle_info_commands(args)
+        assert result is True
+        out = capsys.readouterr().out
+        assert "Added source 'Johnson'" in out
+
+    def test_sources_add_then_list_shows_it(self, capsys, tmp_path):
+        add_args = _make_ns(command="usage", professor="testprof",
+                            usage_subcommand="sources", sources_subcommand="add",
+                            label="Johnson", path=str(tmp_path), mode="read-only")
+        handle_info_commands(add_args)
+        capsys.readouterr()  # discard
+
+        list_args = _make_ns(command="usage", professor="testprof",
+                             usage_subcommand="sources", sources_subcommand="list")
+        handle_info_commands(list_args)
+        out = capsys.readouterr().out
+        assert "Johnson" in out
+
+    def test_sources_add_shared_write_requires_for_professor_prompt(self, capsys, tmp_path, monkeypatch):
+        monkeypatch.setattr("builtins.input", lambda *_: "smith")
+        args = _make_ns(command="usage", professor="testprof",
+                        usage_subcommand="sources", sources_subcommand="add",
+                        label="Smith", path=str(tmp_path), mode="shared-write", for_professor=None)
+        handle_info_commands(args)
+        out = capsys.readouterr().out
+        assert "Add this on the other installation" in out
+        assert "--for-professor smith" in out
+
+    def test_sources_add_shared_write_with_for_professor_flag_skips_prompt(self, capsys, tmp_path):
+        args = _make_ns(command="usage", professor="testprof",
+                        usage_subcommand="sources", sources_subcommand="add",
+                        label="Smith", path=str(tmp_path), mode="shared-write", for_professor="smith")
+        handle_info_commands(args)
+        out = capsys.readouterr().out
+        assert "smiths-imac" not in out  # sanity: no leftover placeholder text
+        assert "--for-professor smith" in out
+
+    def test_sources_remove_existing(self, capsys, tmp_path):
+        add_args = _make_ns(command="usage", professor="testprof",
+                            usage_subcommand="sources", sources_subcommand="add",
+                            label="Johnson", path=str(tmp_path), mode="read-only")
+        handle_info_commands(add_args)
+        capsys.readouterr()
+
+        remove_args = _make_ns(command="usage", professor="testprof",
+                               usage_subcommand="sources", sources_subcommand="remove",
+                               label="Johnson")
+        handle_info_commands(remove_args)
+        out = capsys.readouterr().out
+        assert "Removed source 'Johnson'" in out
+
+    def test_sources_remove_missing_reports_not_found(self, capsys):
+        args = _make_ns(command="usage", professor="testprof",
+                        usage_subcommand="sources", sources_subcommand="remove",
+                        label="Nobody")
+        handle_info_commands(args)
+        out = capsys.readouterr().out
+        assert "No configured source named 'Nobody'" in out
+
+    def test_sources_invalid_subcommand_raises(self):
+        args = _make_ns(command="usage", professor="testprof",
+                        usage_subcommand="sources", sources_subcommand="bogus")
+        with pytest.raises(CLIError, match="Invalid usage sources subcommand"):
+            handle_info_commands(args)
+
+    def test_sources_does_not_construct_token_tracker(self, capsys):
+        """'usage sources' shouldn't need a working professor config at all."""
+        with patch("src.runtime.info_commands.TokenTracker") as mock_cls:
+            args = _make_ns(command="usage", professor="testprof",
+                            usage_subcommand="sources", sources_subcommand="list")
+            handle_info_commands(args)
+        mock_cls.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

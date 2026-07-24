@@ -10,6 +10,7 @@ from ..config import load_professor_config, LANGUAGE_MAP
 from ..models.catalog import load_model_catalog, get_pricing_unit
 from ..errors import CLIError
 from ..tracking.token_tracker import TokenTracker, get_usage_data_path, get_archive_dir
+from ..tracking.source_config import add_source, get_configured_sources, get_source_id, remove_source
 
 logger = logging.getLogger(__name__)
 
@@ -118,8 +119,13 @@ def handle_info_commands(args: argparse.Namespace) -> bool:
         if not args.professor:
             raise CLIError("Professor name is required for usage commands.")
 
-        token_tracker = TokenTracker(professor=args.professor)
         usage_subcommand = getattr(args, 'usage_subcommand', None)
+
+        if usage_subcommand == 'sources':
+            _handle_usage_sources(args)
+            return True
+
+        token_tracker = TokenTracker(professor=args.professor)
 
         if usage_subcommand == 'report':
             month = getattr(args, 'month', None)
@@ -145,6 +151,95 @@ def handle_info_commands(args: argparse.Namespace) -> bool:
             _print_daily_usage(token_tracker, args.professor, date)
             return True
 
-        raise CLIError("Invalid usage subcommand. Use 'report' or 'daily'.")
+        raise CLIError("Invalid usage subcommand. Use 'report', 'months', 'daily', or 'sources'.")
 
     return False
+
+
+def _handle_usage_sources(args: argparse.Namespace) -> None:
+    """Handle 'usage sources list/add/remove'. See docs/webui-plugin-plan.md section 1.
+
+    Note that the external-source configuration itself (data_sources.json)
+    isn't scoped to the professor named on the command line — every usage
+    subcommand requires a professor argument for consistency, but 'sources'
+    manages this installation's config as a whole. The professor named on
+    the command line only matters here as "which professor's data source
+    to add/remove," via --for-professor.
+    """
+    sub = getattr(args, 'sources_subcommand', None)
+
+    if sub == 'list':
+        _print_configured_sources()
+        return
+
+    if sub == 'remove':
+        label = args.label
+        if remove_source(label):
+            print(f"Removed source '{label}'.")
+        else:
+            print(f"No configured source named '{label}'. Run 'usage sources list' to see what's configured.")
+        return
+
+    if sub == 'add':
+        _add_source_interactive(args)
+        return
+
+    raise CLIError("Invalid usage sources subcommand. Use 'list', 'add', or 'remove'.")
+
+
+def _print_configured_sources() -> None:
+    """Print this installation's source id and every configured external source."""
+    print(f"\nThis installation's source id: {get_source_id()}")
+    sources = get_configured_sources()
+    if not sources:
+        print("No external usage-data sources configured.")
+        print("Add one with: python main.py <professor> usage sources add")
+        return
+    print("\nConfigured external sources:")
+    for s in sources:
+        prof_note = f", for={s.professor}" if s.professor else ""
+        print(f"  {s.label}  [{s.mode}{prof_note}]  {s.path}")
+
+
+def _add_source_interactive(args: argparse.Namespace) -> None:
+    """Add a source, prompting interactively for any value not already passed as a flag."""
+    label = getattr(args, 'label', None) or input("Label for this source (e.g. 'Prof. Smith'): ").strip()
+    path = getattr(args, 'path', None) or input("Path to the other installation's data/ folder: ").strip()
+
+    mode = getattr(args, 'mode', None)
+    if not mode:
+        raw = input("Mode — 'read-only' or 'shared-write' [read-only]: ").strip().lower()
+        mode = raw or 'read-only'
+
+    for_professor = getattr(args, 'for_professor', None)
+    if mode == 'shared-write' and not for_professor:
+        for_professor = input(
+            "Which professor is this source for (safe name, e.g. 'smith'): "
+        ).strip()
+
+    resolved_path = os.path.expanduser(path)
+    if not os.path.exists(resolved_path):
+        print(
+            f"Note: '{resolved_path}' doesn't exist yet. That's fine if it will appear once the "
+            f"other side syncs — just double check the path if that's unexpected."
+        )
+
+    try:
+        add_source(label=label, path=path, mode=mode, professor=for_professor)
+    except ValueError as e:
+        raise CLIError(str(e)) from e
+
+    print(f"\nAdded source '{label}' ({mode}) -> {path}")
+
+    if mode == 'shared-write':
+        this_source_id = get_source_id()
+        print(
+            "\nAdd this on the other installation so both sides see each other's activity:\n\n"
+            f"    python main.py {for_professor} usage sources add \\\n"
+            f"        --label \"This installation\" \\\n"
+            f"        --path \"{path}\" \\\n"
+            f"        --mode shared-write \\\n"
+            f"        --for-professor {for_professor}\n"
+            f"\n(This installation's own source id is '{this_source_id}' — every usage record "
+            f"it writes from now on will be tagged with that.)"
+        )

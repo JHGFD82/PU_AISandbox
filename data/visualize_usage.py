@@ -19,6 +19,12 @@ from pathlib import Path
 from datetime import datetime
 from collections import defaultdict
 
+# Make src/ importable when this script is run directly (python data/visualize_usage.py),
+# since a directly-run script only gets its own directory on sys.path by default.
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from src.tracking.token_tracker import get_configured_data_roots, load_usage_tree  # noqa: E402
+
 DATA_DIR = Path(__file__).parent
 ARCHIVES_DIR = DATA_DIR / "archives"
 
@@ -45,32 +51,26 @@ def clean_model_name(name: str) -> str:
 
 
 def load_all_data() -> dict:
-    """Return {professor_safe_name: {YYYY-MM: month_dict}}."""
+    """Return {professor_safe_name: {YYYY-MM: month_dict}}, merged across every configured data root.
+
+    "Every configured data root" means this installation's own local
+    ``data/`` folder plus any external sources registered via
+    ``python main.py <professor> usage sources add`` (see
+    ``docs/webui-plugin-plan.md`` section 1 and
+    ``src/tracking/token_tracker.py::load_usage_tree``). If the same
+    professor+month somehow appears in more than one root (e.g. stale
+    local data left over from before a professor switched to a
+    shared-write source), the later root in the configured list wins —
+    external sources are listed after "local", so a shared-write source
+    naturally supersedes stale local data for that professor.
+    """
     result: dict = {}
-
-    # Active (current-month) files
-    for active_file in sorted(DATA_DIR.glob("token_usage_*.json")):
-        prof = active_file.stem.replace("token_usage_", "")
-        if prof in EXCLUDED_PROFESSORS:
-            continue
-        with open(active_file, encoding="utf-8") as f:
-            data = json.load(f)
-        result.setdefault(prof, {})[data["month"]] = data
-
-    # Archived months
-    if ARCHIVES_DIR.exists():
-        for prof_dir in sorted(ARCHIVES_DIR.iterdir()):
-            if not prof_dir.is_dir():
-                continue
-            prof = prof_dir.name
+    for _label, root in get_configured_data_roots():
+        tree = load_usage_tree(root)
+        for prof, months in tree.items():
             if prof in EXCLUDED_PROFESSORS:
                 continue
-            for archive_file in sorted(prof_dir.glob("*.json")):
-                month = archive_file.stem
-                with open(archive_file, encoding="utf-8") as f:
-                    data = json.load(f)
-                result.setdefault(prof, {})[month] = data
-
+            result.setdefault(prof, {}).update(months)
     return result
 
 
@@ -172,6 +172,19 @@ def build_charts_data(all_data: dict) -> dict:
     model_labels = sorted(model_totals.keys())
     model_values = [round(model_totals[k], 4) for k in model_labels]
 
+    # 5. Activity by source — who made each call (see docs/webui-plugin-plan.md
+    # section 1). Only meaningful for professors tracked via a shared-write
+    # source; calls with no source tag (older, pre-migration records) are
+    # grouped under "unspecified" rather than dropped.
+    source_totals: dict = defaultdict(float)
+    for prof_data in all_data.values():
+        for month_data in prof_data.values():
+            for record in month_data.get("session_history", []):
+                source = record.get("source") or "unspecified"
+                source_totals[source] += record.get("total_cost", 0)
+    source_labels = sorted(source_totals.keys())
+    source_values = [round(source_totals[k], 4) for k in source_labels]
+
     return {
         "months": months,
         "professors": professors,
@@ -183,6 +196,8 @@ def build_charts_data(all_data: dict) -> dict:
         "daily_cost_by_prof": daily_cost_by_prof,
         "model_labels": model_labels,
         "model_values": model_values,
+        "source_labels": source_labels,
+        "source_values": source_values,
     }
 
 
@@ -316,6 +331,11 @@ HTML_TEMPLATE = """\
     <canvas id="modelShareChart"></canvas>
   </div>
 
+  <div class="chart-card">
+    <h2>All-time cost by source</h2>
+    <canvas id="sourceShareChart"></canvas>
+  </div>
+
 </div>
 
 <footer>Princeton University AI Sandbox</footer>
@@ -428,6 +448,32 @@ new Chart(document.getElementById('modelShareChart'), {{
     datasets: [{{
       data: DATA.model_values,
       backgroundColor: DATA.model_labels.map((_, i) => MODEL_PALETTE[i % MODEL_PALETTE.length]),
+      borderWidth: 2,
+      borderColor: '#fff',
+    }}]
+  }},
+  options: {{
+    responsive: true,
+    cutout: '60%',
+    plugins: {{
+      legend: {{ position: 'bottom', labels: {{ boxWidth: 12, font: {{ size: 11 }} }} }},
+      tooltip: {{
+        callbacks: {{
+          label: ctx => ' ' + ctx.label + ': $' + ctx.parsed.toFixed(4)
+        }}
+      }},
+    }}
+  }}
+}});
+
+// 5. Source share doughnut — "your activity vs. theirs" for shared-write professors
+new Chart(document.getElementById('sourceShareChart'), {{
+  type: 'doughnut',
+  data: {{
+    labels: DATA.source_labels,
+    datasets: [{{
+      data: DATA.source_values,
+      backgroundColor: DATA.source_labels.map((_, i) => PROF_COLORS[i % PROF_COLORS.length]),
       borderWidth: 2,
       borderColor: '#fff',
     }}]

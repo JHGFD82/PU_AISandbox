@@ -97,6 +97,51 @@ class TestPromptSubcommand:
 # Global flags (no professor required)
 # ---------------------------------------------------------------------------
 
+class TestUsageSourcesSubcommand:
+
+    def test_sources_list_parses(self, parser):
+        args = parser.parse_args(["heller", "usage", "sources", "list"])
+        assert args.command == "usage"
+        assert args.usage_subcommand == "sources"
+        assert args.sources_subcommand == "list"
+
+    def test_sources_add_flags_parse(self, parser):
+        args = parser.parse_args([
+            "heller", "usage", "sources", "add",
+            "--label", "Prof. Smith", "--path", "/tmp/shared",
+            "--mode", "shared-write", "--for-professor", "smith",
+        ])
+        assert args.label == "Prof. Smith"
+        assert args.path == "/tmp/shared"
+        assert args.mode == "shared-write"
+        assert args.for_professor == "smith"
+
+    def test_sources_add_flags_default_none(self, parser):
+        args = parser.parse_args(["heller", "usage", "sources", "add"])
+        assert args.label is None
+        assert args.path is None
+        assert args.mode is None
+        assert args.for_professor is None
+
+    def test_sources_add_rejects_invalid_mode(self, parser):
+        with pytest.raises(SystemExit):
+            parser.parse_args([
+                "heller", "usage", "sources", "add", "--mode", "read-write",
+            ])
+
+    def test_sources_remove_requires_label(self, parser):
+        args = parser.parse_args(["heller", "usage", "sources", "remove", "Johnson"])
+        assert args.label == "Johnson"
+
+    def test_professor_flag_not_shadowed_by_for_professor(self, parser):
+        """--for-professor must not collide with the top-level positional professor."""
+        args = parser.parse_args([
+            "heller", "usage", "sources", "add", "--for-professor", "smith",
+        ])
+        assert args.professor == "heller"
+        assert args.for_professor == "smith"
+
+
 class TestGlobalFlags:
 
     def test_list_models_flag(self, parser):
