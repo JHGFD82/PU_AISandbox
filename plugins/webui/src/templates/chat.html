@@ -79,7 +79,7 @@
   </div>
 
 <script>
-const state = { professor: null, conversationId: null, models: [], defaultModel: null };
+const state = { professor: null, conversationId: null, conversationModel: null, models: [], defaultModel: null };
 
 async function api(path, opts) {
   const res = await fetch(path, Object.assign({ headers: { "Content-Type": "application/json" } }, opts));
@@ -176,6 +176,7 @@ function renderMessages(conv) {
 async function openConversation(id) {
   state.conversationId = id;
   const conv = await api(`/api/conversations/${id}?professor=${encodeURIComponent(state.professor)}`);
+  state.conversationModel = conv.model;
   document.getElementById("model-field").value = conv.model;
   renderMessages(conv);
   await loadConversations();
@@ -188,6 +189,7 @@ document.getElementById("new-conv").addEventListener("click", async () => {
     body: JSON.stringify({ professor: state.professor, model }),
   });
   state.conversationId = conv.id;
+  state.conversationModel = conv.model;
   renderMessages(conv);
   await loadConversations();
 });
@@ -211,13 +213,25 @@ async function sendMessage() {
   const input = document.getElementById("input");
   const text = input.value.trim();
   if (!text) return;
+
+  const chosenModel = document.getElementById("model-field").value || state.defaultModel;
+  if (state.conversationId && state.conversationModel && chosenModel !== state.conversationModel) {
+    const proceed = confirm(
+      `This conversation has been using "${state.conversationModel}". ` +
+      `Switching to "${chosenModel}" now won't change anything the model already said — ` +
+      `the new model didn't generate those earlier replies, so it may answer inconsistently ` +
+      `with them or not "remember" details the same way.\n\nSend with "${chosenModel}" anyway?`
+    );
+    if (!proceed) return;
+  }
+
   if (!state.conversationId) {
-    const model = document.getElementById("model-field").value || state.defaultModel;
     const conv = await api("/api/conversations", {
       method: "POST",
-      body: JSON.stringify({ professor: state.professor, model }),
+      body: JSON.stringify({ professor: state.professor, model: chosenModel }),
     });
     state.conversationId = conv.id;
+    state.conversationModel = conv.model;
     await loadConversations();
   }
   input.value = "";
@@ -227,7 +241,7 @@ async function sendMessage() {
   const box = document.getElementById("messages");
   let assistantDiv = null;
   try {
-    const model = document.getElementById("model-field").value;
+    const model = chosenModel;
     const res = await fetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -267,6 +281,7 @@ async function sendMessage() {
           // Authoritative re-render (adds the model/cost meta line, and
           // matches exactly what's now saved server-side).
           renderMessages(event.conversation);
+          state.conversationModel = event.conversation.model;
           await Promise.all([loadUsage(), loadConversations()]);
         } else if (event.type === "error") {
           throw new Error(event.message);
