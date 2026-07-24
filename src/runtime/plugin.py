@@ -38,6 +38,19 @@ class ModePlugin(Protocol):
         ``TokenTracker(professor=professor)`` instance — this is mandatory
         for every plugin, so that per-professor usage reporting stays
         accurate. See ``plugin.py.template`` for the required pattern.
+
+    Optional attribute:
+        ``requires_professor`` — set this to ``False`` on a plugin whose
+        command doesn't belong to any one professor (e.g. a plugin that
+        starts a shared local web server rather than making a single
+        professor's API calls). Every plugin is checked for this attribute
+        with ``getattr(plugin, "requires_professor", True)``, so plugins
+        that don't define it at all keep today's behavior — a professor
+        name is still required before the command runs. Only a plugin that
+        explicitly sets ``requires_professor = False`` is allowed to run
+        with ``professor=None``; that plugin's ``run()`` method must handle
+        ``professor`` being ``None`` itself (e.g. by prompting the user to
+        pick one at runtime rather than assuming it was supplied up front).
     """
 
     commands: list[str]

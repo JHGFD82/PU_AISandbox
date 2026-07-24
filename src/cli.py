@@ -331,8 +331,17 @@ def _dispatch(args: argparse.Namespace, plugins: dict[str, ModePlugin]) -> None:
         handle_info_commands(args)
         return
 
+    # A plugin can opt out of the professor requirement (e.g. a shared local
+    # web server, not a per-professor API call) by setting
+    # requires_professor = False on its plugin object. Every other plugin —
+    # including ones that don't define this attribute at all — still
+    # requires a professor name, which is why this defaults to True.
+    command_requires_professor = getattr(
+        plugins.get(args.command), "requires_professor", True
+    )
+
     # All other commands require professor name
-    if not args.professor:
+    if not args.professor and command_requires_professor:
         raise CLIError(
             "Professor name is required.\n"
             "Usage: python main.py <professor_name> <command> [options]"
@@ -362,6 +371,47 @@ def _dispatch(args: argparse.Namespace, plugins: dict[str, ModePlugin]) -> None:
         raise CLIError(f"Unknown command: {args.command}")
 
 
+def _insert_professor_placeholder_if_needed(
+    argv: list[str], plugins: dict[str, ModePlugin]
+) -> list[str]:
+    """Work around a real argparse limitation for professor-less commands like ``webui``.
+
+    The command line is built as an optional ``professor`` positional
+    followed immediately by a subparsers action (``command``). Argparse
+    resolves this correctly when exactly one token follows — e.g.
+    ``python main.py webui`` parses as ``professor=None, command='webui'``
+    on its own — but does *not* reliably do the same once a second token
+    is added, such as ``python main.py webui serve``: argparse instead
+    consumes ``'webui'`` into the ``professor`` slot and then fails because
+    ``'serve'`` isn't a valid top-level command. This is a known rough edge
+    of mixing an optional positional with subparsers, not something specific
+    to this project's commands.
+
+    The fix is to detect that situation before parsing and insert an empty
+    string in the ``professor`` slot ourselves, which argparse *does*
+    consistently route correctly regardless of how many tokens follow. The
+    empty string is converted back to ``None`` after parsing (see
+    ``main()``) — callers never see the placeholder.
+
+    Args:
+        argv: The raw command-line arguments, not including the program
+              name (i.e. ``sys.argv[1:]``).
+        plugins: The command-name-to-plugin mapping from ``load_plugins()``,
+                 used to check whether the first argument names a command
+                 that declared ``requires_professor = False``.
+
+    Returns:
+        *argv* unchanged, or with an empty-string placeholder inserted at
+        the front when needed.
+    """
+    if not argv:
+        return argv
+    plugin = plugins.get(argv[0])
+    if plugin is not None and not getattr(plugin, "requires_professor", True):
+        return [""] + argv
+    return argv
+
+
 def main() -> None:
     """Run the AI Sandbox tool from the command line.
 
@@ -376,7 +426,10 @@ def main() -> None:
 
     try:
         parser = create_argument_parser(_plugins)
-        args = parser.parse_args()
+        argv = _insert_professor_placeholder_if_needed(sys.argv[1:], _plugins)
+        args = parser.parse_args(argv)
+        if args.professor == "":
+            args.professor = None
 
         setup_logging(verbose=getattr(args, 'verbose', False))
         if getattr(args, 'debug_api', False):

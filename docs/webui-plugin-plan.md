@@ -1,11 +1,66 @@
 # Web UI Plugin — Design Plan
 
-Status: section 1 (external/remote usage-data sources, the migration
-script, and the `usage sources` CLI) is **built**, on branch
-`feature/webui-and-remote-sources` — manually verified but not yet run
-through the real `pytest` suite (see the verification note at the end of
-section 1). Everything else below (the web UI plugin itself, sections 2
-onward) is **still planning only.**
+Status, on branch `feature/webui-and-remote-sources`:
+- Section 1 (external/remote usage-data sources, the migration script, the
+  `usage sources` CLI) — **built.** Checked against this installation's real
+  `data/` on 2026-07-24: every existing record (all ~6,045 of them, back to
+  July 2025) already had a `source` tag, because `TokenTracker` has been
+  stamping it on every write since section 1 was merged — there were never
+  any pre-section-1 records left to convert. The migration script itself
+  was not run (nothing for it to do), and is still there for the
+  hypothetical case of importing genuinely old, pre-feature data later.
+- Sections 2-7 (the web UI plugin itself: `requires_professor` core
+  plumbing, the `plugins/webui/` skeleton, the passphrase auth gate,
+  professor switcher, non-streaming chat, model picker, and the spend
+  sidebar's current-month view) — **built.** Manually/structurally
+  verified in a sandbox without network access to install this project's
+  real dependencies (same limitation as section 1 — see that section's
+  verification note); **not yet run through the real `pytest` suite on a
+  machine with `fastapi`/`uvicorn`/etc. installed.**
+- Historical + combined-sources usage in the sidebar, streaming responses,
+  compaction, `CasBackend`, and memory notes (the rest of section 9's build
+  order) — **still planning only.**
+
+Two real deviations were found and fixed while building sections 2-7,
+worth recording here because both contradict something stated earlier in
+this document as already confirmed:
+
+1. **The "confirmed by testing argparse" claim in section 2 was wrong.**
+   `python main.py webui serve` (two tokens after the optional `professor`
+   positional) does *not* parse correctly on its own — argparse only
+   resolves the professor-vs-command ambiguity correctly when exactly one
+   token follows, not two or more (a known rough edge of mixing an optional
+   positional with subparsers). What was actually tested before was
+   apparently just `python main.py webui` alone. Fixed with a small
+   pre-parsing step in `src/cli.py` (`_insert_professor_placeholder_if_needed`)
+   that detects a `requires_professor = False` command as the first
+   argument and inserts an empty-string placeholder so argparse routes
+   everything correctly regardless of how many tokens follow. This is now
+   part of the "changes required outside plugins/" list in section 5.
+2. **Section 3's `from .src.app import run_server` sketch doesn't work
+   as written.** Plugins in this project are loaded by executing
+   `plugin.py` under a *fabricated* module name
+   (`pu_plugin.<name>.plugin`) whose parent package never actually exists
+   (see `src/runtime/plugin_loader.py`) — a literal relative import
+   inside that file fails the instant Python's real import machinery tries
+   to resolve the non-existent parent. The existing `_register()` pattern
+   already works around exactly this for plugin-owned *services*
+   (`src.services.<name>`) and *settings* (`pu_plugin.<name>.settings`),
+   because their only consumers (`SandboxProcessor.__getattr__`,
+   `src.settings.__getattr__`) look them up via a direct `sys.modules`
+   dictionary access, never a real import statement. `plugin.py` calling
+   into its *own* `app.py`, and `app.py` calling into its own `auth.py`/
+   `conversation.py`, don't have that luxury — those really are literal
+   import statements. Fixed by registering those three files under flat,
+   dot-free names (`_pu_webui_app`, `_pu_webui_auth`,
+   `_pu_webui_conversation`) instead of a deeper fabricated dotted path —
+   a dot-free name resolves straight out of `sys.modules` with no parent
+   chain to fail on. `src.services.chat_service` (this plugin's actual
+   AI-calling code) keeps the normal dotted convention, since
+   `src.services` is a real, already-existing package and that's
+   specifically what lets `SandboxProcessor` find it. See the module
+   docstring in `plugins/webui/src/app.py` for the full explanation kept
+   next to the code itself.
 
 This plans out a new `plugins/webui/` plugin that gives you a browser-based
 chat interface (conversation history, memory, context compaction, model
@@ -359,48 +414,57 @@ Browser  ──HTTP/SSE──►  FastAPI route (plugins/webui/src/routes/chat.p
                                                          per-professor tracking
 ```
 
-Confirmed by testing argparse directly: `python main.py webui serve` can
-be typed without a professor positional and argparse resolves
-`professor=None, command='webui'` correctly on its own — no parser
-restructuring needed. `src/cli.py::_dispatch()` still needs a small change
-because it currently raises `"Professor name is required"` before even
-looking at which command was requested (see §5).
+`src/cli.py::_dispatch()` needed a small change because it currently
+raises `"Professor name is required"` before even looking at which
+command was requested (see §5) — and, as it turned out once this was
+actually built and tested end-to-end, argparse itself also needed a small
+assist: see the deviation note near the top of this document for why
+`python main.py webui serve` doesn't parse correctly on its own the way
+this section originally assumed.
 
 ---
 
 ## 3. New plugin: `plugins/webui/`
 
+Status: **built**, with one deliberate structural simplification from the
+layout originally sketched here — routes live inside `app.py` (as inline
+route functions, organized with comments rather than separate files) and
+auth is one file instead of an `auth/` package, because both changes
+minimize how many of this plugin's own internal files need to import each
+other, which — as covered in the deviation note near the top of this
+document — is more constrained in this project than an ordinary Python
+package would be. Functionally nothing from the original sketch was
+dropped; `memory_store.py`/`static/` remain not-yet-built (phase 2 and
+"not needed yet" respectively — the current templates keep their CSS/JS
+inline).
+
 ```
 plugins/webui/
-├── plugin.py                       # commands=["webui"], requires_professor=False
+├── plugin.py                       # commands=["webui"], requires_professor=False; wires everything together
 ├── settings.toml                   # host/port defaults, compaction thresholds, session cookie name
 ├── src/
-│   ├── settings.py                 # standard plugin settings loader (see plugin-authoring-guide.md)
-│   ├── app.py                      # FastAPI app factory — mounts routes, session middleware, static files
-│   ├── auth/
-│   │   ├── base.py                 # AuthBackend protocol: authenticate(request) -> bool
-│   │   ├── passphrase_backend.py   # built now — checks WEBUI_PASSPHRASE_HASH
-│   │   └── cas_backend.py          # documented, not built yet — see §4
-│   ├── routes/
-│   │   ├── unlock.py               # POST /unlock, POST /lock
-│   │   ├── professors.py           # GET /api/professors — populates the switcher from .env
-│   │   ├── chat.py                 # GET/POST /api/conversations, POST /api/chat (SSE)
-│   │   ├── models.py               # GET /api/models — catalog + "request a new model" auto-register
-│   │   └── usage.py                # GET /api/usage — active professor's spend + (optional) combined view
+│   ├── settings.py                 # registered as pu_plugin.webui.settings — same walk-up pattern as translation
+│   ├── app.py                      # FastAPI app factory + every route (registered as flat name _pu_webui_app — see its own docstring)
+│   ├── auth.py                     # AuthBackend protocol + PassphraseBackend (registered as _pu_webui_auth); CasBackend still just documented, §4
+│   ├── conversation.py             # Message/Conversation dataclasses + ConversationStore (registered as _pu_webui_conversation)
 │   ├── services/
-│   │   └── chat_service.py         # registered as src.services.chat_service; ChatService(BaseService)
-│   ├── conversation.py             # Conversation/Message dataclasses, compaction logic
-│   ├── conversation_store.py       # reads/writes data/conversations/{professor}/{id}.json
-│   ├── memory_store.py             # reads/writes data/webui_memory/{professor}.json (phase 2)
-│   ├── static/                     # CSS/JS — plain JS + fetch()/EventSource, no build step
-│   └── templates/                  # Jinja2: unlock page, chat shell
+│   │   └── chat_service.py         # registered as src.services.chat_service (real convention); ChatService(BaseService)
+│   └── templates/
+│       ├── unlock.html             # Jinja2, inline CSS
+│       └── chat.html               # Jinja2, inline CSS/JS — professor switcher, conversations, model field, spend sidebar
 └── tests/
-    ├── conftest.py                 # mirrors other plugins' conftest.py; injects sys.modules entries
+    ├── conftest.py                 # registers every module above into sys.modules, mirroring other plugins' conftest.py
     ├── test_plugin.py
+    ├── test_auth.py
+    ├── test_conversation.py
     ├── test_chat_service.py
-    ├── test_conversation_compaction.py
-    └── test_auth.py
+    └── test_app.py                 # FastAPI TestClient integration tests
 ```
+
+Not yet built: `memory_store.py` (phase 2, §6), `conversation_compaction`
+logic (§6/§9 step 10), streaming (§9 step 9), and a `static/` directory
+(not needed yet since CSS/JS is inline in the two templates — may be split
+out later if it grows).
 
 `plugin.py` follows the same contract every plugin uses, with one addition
 (the `requires_professor` flag from §5):
@@ -424,8 +488,11 @@ class WebUiPlugin:
         if args.webui_subcommand == "set-passphrase":
             _print_passphrase_hash()   # prompts via getpass, prints the .env line to paste in
         else:
-            from .src.app import run_server
-            run_server(host=args.host, port=args.port)   # blocks — this is the long-running process
+            # NOT a real relative import — see the deviation note near the
+            # top of this document for why. The actual code fetches the
+            # already-registered app module via sys.modules["_pu_webui_app"].
+            app_module = sys.modules["_pu_webui_app"]
+            app_module.run_server(host=args.host, port=args.port)   # blocks — long-running process
 ```
 
 `webui set-passphrase` prompts for a passphrase (hidden input via
@@ -447,15 +514,24 @@ scoped down to "does this one request get past the front door" instead of
 "which professor is this."
 
 ```python
-# plugins/webui/src/auth/base.py
+# plugins/webui/src/auth.py
 class AuthBackend(Protocol):
-    def authenticate(self, request: Request) -> bool: ...
+    async def authenticate(self, request: Request) -> bool: ...
 ```
 
 **`PassphraseBackend`** (built now) — checks a submitted passphrase
-against `WEBUI_PASSPHRASE_HASH` in `.env` (bcrypt via `passlib`, generated
-by `webui set-passphrase`). Empty/unset = no gate, useful for a strictly
+against `WEBUI_PASSPHRASE_HASH` in `.env` (bcrypt, generated by
+`webui set-passphrase`). Empty/unset = no gate, useful for a strictly
 `127.0.0.1`-only setup. This is what ships first.
+
+Uses the `bcrypt` package directly rather than going through `passlib` as
+originally sketched — found while testing that `passlib`'s bcrypt wrapper
+is unmaintained and breaks outright against `bcrypt>=5.0.0` (it removed the
+`__about__` attribute passlib's version-detection probes for, and the
+underlying algorithm now raises instead of silently truncating passwords
+past 72 bytes). The `bcrypt` package's own `hashpw()`/`checkpw()` don't
+have either problem; `auth.py` truncates to 72 bytes itself before hashing
+to keep behavior predictable regardless of input length.
 
 **`CasBackend`** (documented here, not built yet) — authenticates against
 Princeton's Central Authentication Service instead of a passphrase.
@@ -499,8 +575,9 @@ session middleware) holding just `{"unlocked": true, "active_professor":
 
 | File | Change | Why |
 |---|---|---|
-| `src/runtime/plugin.py` | Document an **optional** `requires_professor: bool` attribute (defaults to `True` via `getattr`, so every existing plugin is unaffected) | Lets a plugin declare its command isn't scoped to one professor at CLI-invocation time |
-| `src/cli.py` (`_dispatch`) | Before raising `"Professor name is required"`, check `getattr(plugins.get(args.command), "requires_professor", True)`; if `False`, allow `professor=None` through to `plugin.run()` | Today the professor check fires unconditionally before the command is even looked at |
+| `src/runtime/plugin.py` | Document an **optional** `requires_professor: bool` attribute (defaults to `True` via `getattr`, so every existing plugin is unaffected) | Lets a plugin declare its command isn't scoped to one professor at CLI-invocation time — **built** |
+| `src/cli.py` (`_dispatch`) | Before raising `"Professor name is required"`, check `getattr(plugins.get(args.command), "requires_professor", True)`; if `False`, allow `professor=None` through to `plugin.run()` | Today the professor check fires unconditionally before the command is even looked at — **built** |
+| `src/cli.py` (`main`) | Added `_insert_professor_placeholder_if_needed()`, called before `parser.parse_args()` | Works around a real argparse limitation found while testing: `python main.py webui serve` (2+ tokens) doesn't parse correctly without it, even though `python main.py webui` (1 token) does — see the deviation note near the top of this document — **built** |
 | `src/tracking/token_tracker.py` | Add the `shared-write` event-file recording/reading path alongside today's single-mutable-file path (default, unchanged); add `load_usage_tree()` and `get_configured_data_roots()`; add closed-month event-file rollover (§1) | External-source aggregation and safe multi-writer usage tracking over a synced folder like Dropbox |
 | `src/settings.py` | Expose `SOURCE_ID`, `EXTERNAL_SOURCES` from the new `[storage]` section | Same pattern as every other constant here |
 | `settings.toml` | Add a commented-out `[storage]` section documenting the shape | Discoverability without committing anyone's real path |
@@ -509,7 +586,7 @@ session middleware) holding just `{"unlocked": true, "active_professor":
 | `.env.template` | Document the new optional `WEBUI_PASSPHRASE_HASH` field | Keep the template in sync |
 | `src/models/catalog.py` | Add two optional per-model fields (`supports_streaming`, default `True`; `context_window`, integer) and matching getters `model_supports_streaming()` / `get_model_context_window()`, following the existing `supports_vision`/`fixed_parameters` pattern | Controls streaming fallback and compaction threshold; backward-compatible |
 | `src/services/base_service.py` | Add a streaming variant of `_create_completion()` (`stream=True, stream_options={"include_usage": True}`) and a usage-recording path that accumulates the final chunk's usage instead of a full response object | Generic capability, reusable by any future plugin |
-| `requirements.txt` | Add `fastapi`, `uvicorn[standard]`, `jinja2`, `python-multipart`, `passlib[bcrypt]`, `itsdangerous`, `httpx` (tests) | New runtime/test dependencies |
+| `requirements.txt` | Add `fastapi`, `uvicorn[standard]`, `jinja2`, `python-multipart`, `bcrypt`, `itsdangerous`, `httpx2` (tests) | New runtime/test dependencies — `bcrypt` directly rather than `passlib[bcrypt]` as first sketched (see §4's deviation note); `httpx2` rather than `httpx` since Starlette's `TestClient` deprecated plain `httpx` |
 | `pytest.ini` | Add `plugins/webui/tests` to `testpaths` | Same as every other bundled plugin |
 | `pyrightconfig.json` | No change planned — leave `plugins/webui/src/` out of the ignore list, matching `prompt/`'s precedent | Hold the new plugin to the same bar; revisit only if FastAPI's typing proves noisy |
 | `docs/architecture.md`, `docs/plugin-authoring-guide.md` | Document `requires_professor`, the `[storage]` settings, and the "long-running server" plugin shape once built | Keep docs in sync |
@@ -614,21 +691,22 @@ without leaving the chat UI.
 ## 9. Suggested build order
 
 1. ~~External data sources (§1)~~ — **done**, on `feature/webui-and-remote-sources`.
-2. Run `scripts/migrate_usage_records.py` once against your real `data/`
-   folder — it's built and works, but hasn't been run for real yet since
-   that's your call to make (it changes real files, even though it backs
-   them up first). After running it, no legacy-format handling exists
-   anywhere in the codebase (§1).
-3. Core plumbing: `requires_professor` in `cli.py`/`plugin.py`, empty
+2. ~~Run `scripts/migrate_usage_records.py` once against your real `data/`
+   folder~~ — **done** (checked 2026-07-24; nothing needed converting, see
+   the status note at the top of this document).
+3. ~~Core plumbing: `requires_professor` in `cli.py`/`plugin.py`, empty
    `plugins/webui/` skeleton serving a "hello" FastAPI app on
-   `webui serve`.
-4. Auth gate (`AuthBackend` + `PassphraseBackend`) + professor switcher.
-5. `ChatService` (non-streaming first) + conversation store + basic chat
-   page.
-6. Model picker wired to the existing catalog/`resolve_model()`, including
-   free-text `provider/model` requests.
-7. Spend sidebar (`/api/usage`, active professor, current month) + hide/
-   show toggle.
+   `webui serve`.~~ — **done.**
+4. ~~Auth gate (`AuthBackend` + `PassphraseBackend`) + professor switcher.~~ — **done.**
+5. ~~`ChatService` (non-streaming first) + conversation store + basic chat
+   page.~~ — **done.**
+6. ~~Model picker wired to the existing catalog/`resolve_model()`, including
+   free-text `provider/model` requests.~~ — **done** (the model field in
+   the chat page is free text with a datalist of catalog names; any text
+   typed there is passed straight through to `SandboxProcessor(model=...)`,
+   the same auto-registration path the CLI's `-m` flag already uses).
+7. ~~Spend sidebar (`/api/usage`, active professor, current month) + hide/
+   show toggle.~~ — **done.**
 8. Historical + combined-sources usage in the sidebar.
 9. Streaming responses (SSE) + the `supports_streaming` catalog flag +
    fallback path.
@@ -637,5 +715,48 @@ without leaving the chat UI.
     hostname/TLS/OIT service-URL registration is in place — no other
     part of the app needs to change to support it.
 12. Memory notes (phase 2).
+
+### Verification note (sections 2-7)
+
+Initial build had the same sandbox limitation as section 1 (no network
+access here to install `fastapi`/`uvicorn`/`jinja2`/etc.), so first-pass
+verification was a structural simulation — lightweight stand-ins for the
+missing third-party packages driving the *actual* `load_plugins()`,
+`create_argument_parser()`, and `_dispatch()` functions from this codebase
+against the real `plugins/webui/plugin.py`. That caught the argparse bug
+above but couldn't exercise real FastAPI routing or Jinja2 rendering.
+
+The real `pytest` run (on your machine, with actual dependencies installed)
+then caught three more real bugs, all now fixed:
+
+1. **Test collection collision.** `plugins/webui/tests/test_plugin.py`
+   collided with `plugins/prompt/tests/test_plugin.py` — pytest's default
+   import mode can't have two same-named test modules without `__init__.py`
+   files disambiguating them. Renamed to `test_webui_plugin.py` rather than
+   adding `__init__.py` everywhere, to keep the fix scoped to the file that
+   introduced the collision.
+2. **`TemplateResponse` signature.** The installed Starlette version has
+   fully removed the old `TemplateResponse(name, {"request": request, ...})`
+   calling convention (deprecated for a while, apparently gone now) in
+   favor of `TemplateResponse(request, name, context)` — `request` as an
+   explicit first argument, not folded into the context dict. `app.py`'s
+   three template calls were written against the old form and needed
+   updating.
+3. **`passlib`'s bcrypt wrapper is broken against current `bcrypt`.**
+   `passlib` (unmaintained) does an internal self-test against the
+   installed `bcrypt` package on first use; `bcrypt>=5.0.0` removed the
+   attribute that self-test reads (`AttributeError: module 'bcrypt' has no
+   attribute '__about__'`) and also stopped silently truncating passwords
+   over 72 bytes the way `passlib` expects, surfacing as a
+   `ValueError: password cannot be longer than 72 bytes` even for short,
+   ordinary passphrases — the 72-byte string passlib was actually hashing
+   was its own internal bug-detection probe, not anything a person typed.
+   Fixed by dropping `passlib` and using the `bcrypt` package directly in
+   `auth.py` (see the deviation note in §4) — this also removes a
+   dependency on an unmaintained wrapper going forward.
+
+All three fixes address every failure/error pytest reported (10 failed, 13
+errored, all traced to one of the three causes above) — not yet
+re-confirmed with a clean run at time of writing.
 
 Each step is independently testable and shippable.

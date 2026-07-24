@@ -54,16 +54,28 @@ data/archives/*
 data/usage_report.html
 !data/README.md
 
+# One-time backup made by scripts/migrate_usage_records.py before it edits
+# anything — a full copy of real per-professor usage/billing data, same
+# reason data/token_usage_*.json and data/archives/* above are excluded
+data/_pre_migration_backup/
+
+# Web UI plugin data - real conversation content and per-professor memory
+# notes are local to this installation, not tracked
+data/conversations/*
+data/webui_memory/*
+
 # Plugins — each plugin is a separately cloned/developed git repo.
 # The plugins/ folder is committed (via .gitkeep) so it exists on a fresh
 # clone; the contents of each plugin repo are not tracked by the main repo.
-# plugins/prompt/ is the exception: it ships with this repo as a reference
-# implementation and template for building new plugins.
+# plugins/prompt/ and plugins/webui/ are the exceptions: they ship with this
+# repo (prompt as a reference implementation/template, webui as a built-in
+# feature — see docs/webui-plugin-plan.md).
 plugins/*
 !plugins/.gitkeep
 !plugins/prompt/
 !plugins/translation/
 !plugins/transcription/
+!plugins/webui/
 
 # External files
 Presentation/
