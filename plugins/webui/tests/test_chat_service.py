@@ -225,3 +225,51 @@ class TestStreamMessage:
         with patch.object(svc, "_create_completion_stream", side_effect=fake_stream):
             list(svc.stream_message(history))
         assert captured == history
+
+    def test_model_access_error_removes_model_and_raises_clean_message(self, svc, monkeypatch):
+        """The 'invalid target name found in the query router' error PortKey
+        returns when a model's license/access has been revoked should trigger
+        the same model_catalog.json cleanup every other service gets via
+        handle_api_errors() — see plugins/prompt/src/services/prompt_service.py's
+        send_prompt() for the established pattern this mirrors."""
+        mock_remove = MagicMock(return_value=True)
+        monkeypatch.setattr("src.services.api_errors.remove_model_from_catalog", mock_remove)
+
+        def boom(*a, **kw):
+            raise Exception(
+                "Error code: 400 - {'status': 'failure', 'message': "
+                "'Invalid target name found in the query router: unknown-model'}"
+            )
+
+        with patch.object(svc, "_create_completion_stream", side_effect=boom):
+            with pytest.raises(ValueError, match="not accessible"):
+                list(svc.stream_message([{"role": "user", "content": "hi"}]))
+        mock_remove.assert_called_once_with("gpt-4o")
+
+    def test_error_partway_through_stream_still_triggers_cleanup(self, svc, monkeypatch):
+        """A model-access error doesn't only happen at stream creation — it
+        can surface after some chunks were already yielded. Cleanup must
+        still run, and whatever text already streamed to the caller stays
+        yielded (it can't be un-sent)."""
+        mock_remove = MagicMock(return_value=True)
+        monkeypatch.setattr("src.services.api_errors.remove_model_from_catalog", mock_remove)
+
+        def flaky_stream():
+            yield _Chunk(content="partial", model="gpt-4o")
+            raise Exception("invalid target name found in the query router: unknown-model")
+
+        with patch.object(svc, "_create_completion_stream", return_value=flaky_stream()):
+            events = []
+            with pytest.raises(ValueError, match="not accessible"):
+                for event in svc.stream_message([{"role": "user", "content": "hi"}]):
+                    events.append(event)
+        assert events == [{"type": "delta", "text": "partial"}]
+        mock_remove.assert_called_once_with("gpt-4o")
+
+    def test_unrelated_errors_are_not_swallowed(self, svc):
+        def boom(*a, **kw):
+            raise RuntimeError("connection reset")
+
+        with patch.object(svc, "_create_completion_stream", side_effect=boom):
+            with pytest.raises(RuntimeError, match="connection reset"):
+                list(svc.stream_message([{"role": "user", "content": "hi"}]))

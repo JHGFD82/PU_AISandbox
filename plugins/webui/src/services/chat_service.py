@@ -13,6 +13,7 @@ import logging
 from typing import Any, Optional
 
 from src.models import get_model_system_role
+from src.services.api_errors import handle_api_errors
 from src.services.base_service import BaseService
 from src.settings import PROMPT_MAX_TOKENS, PROMPT_TEMPERATURE, PROMPT_TOP_P
 
@@ -143,12 +144,19 @@ class ChatService(BaseService):
             wasn't billed," not as an error.
 
         Raises:
-            Whatever the underlying API call raises partway through the
-            stream. Unlike ``send_message()``, a failure here is never
-            retried — see ``BaseService._create_completion_stream()``'s
-            docstring for why restarting a partially-delivered stream isn't
-            safe. Callers should treat a raised exception as a hard stop and
-            surface it, not retry the call themselves.
+            ValueError: If the model is no longer accessible through the AI
+                        gateway (e.g. this installation's license to it was
+                        revoked) — the model is removed from
+                        ``model_catalog.json`` first, same as every other
+                        service's ``handle_api_errors()`` cleanup, so later
+                        requests won't try it again.
+            Exception: Whatever else the underlying API call raises. Unlike
+                       ``send_message()``, a failure here is never retried —
+                       see ``BaseService._create_completion_stream()``'s
+                       docstring for why restarting a partially-delivered
+                       stream isn't safe. Callers should treat a raised
+                       exception as a hard stop and surface it, not retry the
+                       call themselves.
         """
         model = self._get_model()
         temperature, top_p, max_tokens = self._resolve_sampling_params(
@@ -160,33 +168,48 @@ class ChatService(BaseService):
             api_messages.append({"role": get_model_system_role(model), "content": system_prompt})
         api_messages.extend(messages)
 
-        stream = self._create_completion_stream(
-            model=model,
-            messages=api_messages,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            top_p=top_p,
-        )
-
         content_parts: list[str] = []
         response_model = model
         prompt_tokens: Optional[int] = None
         completion_tokens: Optional[int] = None
         total_tokens: Optional[int] = None
 
-        for chunk in stream:
-            if getattr(chunk, "model", None):
-                response_model = chunk.model
-            if chunk.choices:
-                text = getattr(chunk.choices[0].delta, "content", None)
-                if text:
-                    content_parts.append(text)
-                    yield {"type": "delta", "text": text}
-            usage = getattr(chunk, "usage", None)
-            if usage:
-                prompt_tokens = usage.prompt_tokens
-                completion_tokens = usage.completion_tokens
-                total_tokens = usage.total_tokens
+        try:
+            stream = self._create_completion_stream(
+                model=model,
+                messages=api_messages,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                top_p=top_p,
+            )
+            for chunk in stream:
+                if getattr(chunk, "model", None):
+                    response_model = chunk.model
+                if chunk.choices:
+                    text = getattr(chunk.choices[0].delta, "content", None)
+                    if text:
+                        content_parts.append(text)
+                        yield {"type": "delta", "text": text}
+                usage = getattr(chunk, "usage", None)
+                if usage:
+                    prompt_tokens = usage.prompt_tokens
+                    completion_tokens = usage.completion_tokens
+                    total_tokens = usage.total_tokens
+        except Exception as e:
+            # Same classification every other service uses (see
+            # plugins/prompt/src/services/prompt_service.py's send_prompt()):
+            # if this is the PortKey router saying the model is no longer
+            # accessible (e.g. our license to it was revoked), that model is
+            # removed from model_catalog.json here so the next request won't
+            # try it again, and a clearer message replaces the raw gateway
+            # error. Anything else is re-raised unchanged. Not routed through
+            # BaseService._run_with_retry() like send_message() is, because a
+            # stream that already delivered visible partial text can't be
+            # safely retried from scratch (see _create_completion_stream()'s
+            # docstring) — but the model-access cleanup still needs to run
+            # even without a retry loop around it.
+            handle_api_errors(e, model)
+            raise
 
         cost: Optional[float] = None
         if prompt_tokens is not None and completion_tokens is not None and total_tokens is not None:
