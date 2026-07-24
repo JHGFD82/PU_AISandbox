@@ -7,6 +7,7 @@ are made (the /api/chat route's SandboxProcessor is monkeypatched).
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -158,16 +159,30 @@ class TestConversations:
         assert smith_list.json()["conversations"] == []
 
 
+def _parse_sse(text: str) -> list[dict]:
+    """Turn a raw "data: {...}\\n\\n" SSE response body into a list of parsed event dicts."""
+    events = []
+    for block in text.strip().split("\n\n"):
+        for line in block.strip().split("\n"):
+            if line.startswith("data:"):
+                events.append(json.loads(line[len("data:"):].strip()))
+    return events
+
+
 class TestChat:
-    def test_chat_turn_appends_messages_and_returns_usage(self, unlocked_client, monkeypatch):
+    def test_chat_turn_streams_deltas_then_done_with_usage(self, unlocked_client, monkeypatch):
         create = unlocked_client.post("/api/conversations", json={"professor": "heller", "model": "gpt-4o"})
         conv_id = create.json()["id"]
 
         fake_sandbox = MagicMock()
-        fake_sandbox.chat_service.send_message.return_value = {
-            "content": "Hello back!", "model": "gpt-4o",
-            "prompt_tokens": 5, "completion_tokens": 7, "cost": 0.001,
-        }
+        fake_sandbox.chat_service.stream_message.return_value = iter([
+            {"type": "delta", "text": "Hello "},
+            {"type": "delta", "text": "back!"},
+            {
+                "type": "done", "content": "Hello back!", "model": "gpt-4o",
+                "prompt_tokens": 5, "completion_tokens": 7, "cost": 0.001,
+            },
+        ])
         monkeypatch.setattr(
             "src.runtime.sandbox_processor.SandboxProcessor",
             lambda *a, **kw: fake_sandbox,
@@ -177,7 +192,14 @@ class TestChat:
             "professor": "heller", "conversation_id": conv_id, "message": "Hi there", "model": "gpt-4o",
         })
         assert resp.status_code == 200
-        conv = resp.json()["conversation"]
+        events = _parse_sse(resp.text)
+
+        deltas = [e for e in events if e["type"] == "delta"]
+        assert [d["text"] for d in deltas] == ["Hello ", "back!"]
+
+        done_events = [e for e in events if e["type"] == "done"]
+        assert len(done_events) == 1
+        conv = done_events[0]["conversation"]
         assert conv["messages"][-2] == {
             "role": "user", "content": "Hi there", "timestamp": conv["messages"][-2]["timestamp"],
             "model": None, "prompt_tokens": None, "completion_tokens": None, "cost": None,
@@ -192,7 +214,10 @@ class TestChat:
         })
         assert resp.status_code == 404
 
-    def test_chat_service_failure_becomes_502(self, unlocked_client, monkeypatch):
+    def test_chat_service_failure_emits_error_event(self, unlocked_client, monkeypatch):
+        """Once streaming has begun the HTTP status can't change, so a failure
+        partway through the model call surfaces as an in-band SSE error event
+        instead of an HTTP error status (unlike the old one-shot /api/chat)."""
         create = unlocked_client.post("/api/conversations", json={"professor": "heller", "model": "gpt-4o"})
         conv_id = create.json()["id"]
 
@@ -203,7 +228,31 @@ class TestChat:
         resp = unlocked_client.post("/api/chat", json={
             "professor": "heller", "conversation_id": conv_id, "message": "Hi", "model": "gpt-4o",
         })
-        assert resp.status_code == 502
+        assert resp.status_code == 200
+        events = _parse_sse(resp.text)
+        assert len(events) == 1
+        assert events[0]["type"] == "error"
+        assert "upstream API error" in events[0]["message"]
+
+    def test_user_message_is_saved_even_if_the_model_call_fails(self, unlocked_client, monkeypatch):
+        """The user's message is persisted before the model is called at all,
+        so a failed turn doesn't lose what was actually sent."""
+        create = unlocked_client.post("/api/conversations", json={"professor": "heller", "model": "gpt-4o"})
+        conv_id = create.json()["id"]
+
+        def _boom(*a, **kw):
+            raise RuntimeError("upstream API error")
+        monkeypatch.setattr("src.runtime.sandbox_processor.SandboxProcessor", _boom)
+
+        unlocked_client.post("/api/chat", json={
+            "professor": "heller", "conversation_id": conv_id, "message": "Hi", "model": "gpt-4o",
+        })
+
+        got = unlocked_client.get(f"/api/conversations/{conv_id}", params={"professor": "heller"})
+        assert got.json()["messages"][-1] == {
+            "role": "user", "content": "Hi", "timestamp": got.json()["messages"][-1]["timestamp"],
+            "model": None, "prompt_tokens": None, "completion_tokens": None, "cost": None,
+        }
 
 
 # ---------------------------------------------------------------------------

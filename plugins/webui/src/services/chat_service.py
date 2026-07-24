@@ -115,3 +115,97 @@ class ChatService(BaseService):
             "completion_tokens": completion_tokens,
             "cost": cost,
         }
+
+    def stream_message(
+        self,
+        messages: list[dict[str, Any]],
+        system_prompt: Optional[str] = None,
+    ):
+        """Send a full conversation to the AI model, yielding the reply as it arrives.
+
+        Same inputs as ``send_message()``, but for a browser chat UI that
+        wants to show text appearing live instead of waiting for the whole
+        response before showing anything.
+
+        Args:
+            messages: Same as ``send_message()``.
+            system_prompt: Same as ``send_message()``.
+
+        Yields:
+            One ``{'type': 'delta', 'text': str}`` dict per piece of new text
+            as it arrives, followed by exactly one final
+            ``{'type': 'done', 'content': str, 'model': str,
+            'prompt_tokens': int | None, 'completion_tokens': int | None,
+            'cost': float | None}`` dict once the model finishes. The billing
+            fields are ``None`` if this call's usage wasn't reported (the
+            same thing ``send_message()`` already tolerates for a
+            non-streamed reply) — the caller should treat that as "this turn
+            wasn't billed," not as an error.
+
+        Raises:
+            Whatever the underlying API call raises partway through the
+            stream. Unlike ``send_message()``, a failure here is never
+            retried — see ``BaseService._create_completion_stream()``'s
+            docstring for why restarting a partially-delivered stream isn't
+            safe. Callers should treat a raised exception as a hard stop and
+            surface it, not retry the call themselves.
+        """
+        model = self._get_model()
+        temperature, top_p, max_tokens = self._resolve_sampling_params(
+            model, PROMPT_TEMPERATURE, PROMPT_TOP_P, PROMPT_MAX_TOKENS,
+        )
+
+        api_messages: list[dict[str, Any]] = []
+        if system_prompt:
+            api_messages.append({"role": get_model_system_role(model), "content": system_prompt})
+        api_messages.extend(messages)
+
+        stream = self._create_completion_stream(
+            model=model,
+            messages=api_messages,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            top_p=top_p,
+        )
+
+        content_parts: list[str] = []
+        response_model = model
+        prompt_tokens: Optional[int] = None
+        completion_tokens: Optional[int] = None
+        total_tokens: Optional[int] = None
+
+        for chunk in stream:
+            if getattr(chunk, "model", None):
+                response_model = chunk.model
+            if chunk.choices:
+                text = getattr(chunk.choices[0].delta, "content", None)
+                if text:
+                    content_parts.append(text)
+                    yield {"type": "delta", "text": text}
+            usage = getattr(chunk, "usage", None)
+            if usage:
+                prompt_tokens = usage.prompt_tokens
+                completion_tokens = usage.completion_tokens
+                total_tokens = usage.total_tokens
+
+        cost: Optional[float] = None
+        if prompt_tokens is not None and completion_tokens is not None and total_tokens is not None:
+            usage_record = self.token_tracker.record_usage(
+                model=response_model,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                total_tokens=total_tokens,
+                requested_model=model,
+            )
+            cost = usage_record.total_cost
+        else:
+            logging.warning("webui chat turn (streamed): no token usage information in final chunk.")
+
+        yield {
+            "type": "done",
+            "content": "".join(content_parts),
+            "model": response_model,
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "cost": cost,
+        }

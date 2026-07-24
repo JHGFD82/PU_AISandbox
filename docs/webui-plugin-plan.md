@@ -43,9 +43,31 @@ Status, on branch `feature/webui-and-remote-sources`:
   `TestSettingsPage`/`TestSettingsProfessors`/`TestSettingsPassphrase`/
   `TestSettingsValues`/`TestSettingsSources` classes, run through the real
   `pytest` suite.
-- Historical + combined-sources usage in the sidebar, streaming responses,
-  compaction, `CasBackend`, and memory notes (the rest of section 9's build
-  order) — **still planning only.**
+- Streaming responses (2026-07-24) — **built.** `/api/chat` now returns a
+  `text/event-stream` `StreamingResponse` instead of one JSON blob:
+  `ChatService.stream_message()` (`plugins/webui/src/services/chat_service.py`)
+  wraps `BaseService._create_completion_stream()` (`stream=True`,
+  `stream_options={"include_usage": True}`) and yields one `delta` event per
+  chunk of text plus a final `done` event; `chat.html` reads the response
+  body with `fetch()` + a `ReadableStream` reader (not `EventSource`, which
+  can't send a POST body) and appends each `delta` to the assistant bubble
+  as it arrives. The user's own message is now saved to the conversation
+  store immediately, before the model call starts — this is also what
+  powers the sent message's brief "waiting..." indicator, which is removed
+  as soon as the first `delta` arrives (or the whole turn is resynced from
+  the server on failure). Usage/cost is read off the stream's final chunk;
+  if a streamed response is ever missing usage data, that turn is logged and
+  left unbilled rather than raising, the same tolerance `send_message()`
+  already had for a non-streamed reply — this was an explicit tradeoff since
+  Portkey's docs don't confirm usage is always present on a streamed Claude
+  response, and blocking the feature on a live test wasn't worth it. Covered
+  by `plugins/webui/tests/test_chat_service.py`'s `TestStreamMessage` class
+  and `plugins/webui/tests/test_app.py`'s `TestChat` class (SSE event
+  parsing, missing-usage fallback, and the user message surviving a
+  mid-stream failure), run through the real `pytest` suite.
+- Historical + combined-sources usage in the sidebar, compaction,
+  `CasBackend`, and memory notes (the rest of section 9's build order) —
+  **still planning only.**
 
 Two real deviations were found and fixed while building sections 2-7,
 worth recording here because both contradict something stated earlier in

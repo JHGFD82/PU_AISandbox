@@ -35,6 +35,29 @@ class _FakeResponse:
         self.choices = [_Choice(content)]
 
 
+class _Delta:
+    def __init__(self, content=None):
+        self.content = content
+
+
+class _ChunkChoice:
+    def __init__(self, content=None):
+        self.delta = _Delta(content)
+
+
+class _Chunk:
+    """A fake OpenAI-style ChatCompletionChunk, as yielded by a streaming response.
+
+    A real final chunk (carrying only usage) has an empty ``choices`` list —
+    pass ``no_choices=True`` to model that.
+    """
+
+    def __init__(self, content=None, model=None, usage=None, no_choices=False):
+        self.model = model
+        self.usage = usage
+        self.choices = [] if no_choices else [_ChunkChoice(content)]
+
+
 @pytest.fixture
 def svc():
     tracker = MagicMock()
@@ -131,3 +154,74 @@ class TestSendMessage:
             result = svc.send_message([{"role": "user", "content": "hi"}])
         assert result["content"] == "recovered"
         assert calls["n"] == 2
+
+
+class TestStreamMessage:
+    def test_yields_delta_events_then_done(self, svc):
+        chunks = [
+            _Chunk(content="Hel", model="gpt-4o"),
+            _Chunk(content="lo"),
+            _Chunk(usage=_Usage(prompt_tokens=5, completion_tokens=7, total_tokens=12), no_choices=True),
+        ]
+        with patch.object(svc, "_create_completion_stream", return_value=iter(chunks)):
+            events = list(svc.stream_message([{"role": "user", "content": "hi"}]))
+        assert events[0] == {"type": "delta", "text": "Hel"}
+        assert events[1] == {"type": "delta", "text": "lo"}
+        assert events[-1]["type"] == "done"
+        assert events[-1]["content"] == "Hello"
+        assert events[-1]["model"] == "gpt-4o"
+        assert events[-1]["prompt_tokens"] == 5
+        assert events[-1]["completion_tokens"] == 7
+        assert events[-1]["cost"] == 0.0042
+        svc.token_tracker.record_usage.assert_called_once()
+
+    def test_missing_usage_in_final_chunk_skips_billing(self, svc):
+        chunks = [_Chunk(content="hi", model="gpt-4o")]
+        with patch.object(svc, "_create_completion_stream", return_value=iter(chunks)):
+            events = list(svc.stream_message([{"role": "user", "content": "hi"}]))
+        svc.token_tracker.record_usage.assert_not_called()
+        assert events[-1]["type"] == "done"
+        assert events[-1]["cost"] is None
+        assert events[-1]["prompt_tokens"] is None
+
+    def test_role_only_chunk_produces_no_delta(self, svc):
+        """A chunk whose delta has no text content (e.g. an opening role-only
+        chunk some providers send) should not be yielded as a delta event."""
+        chunks = [
+            _Chunk(content=None, model="gpt-4o"),
+            _Chunk(content="hi"),
+            _Chunk(usage=_Usage(), no_choices=True),
+        ]
+        with patch.object(svc, "_create_completion_stream", return_value=iter(chunks)):
+            events = list(svc.stream_message([{"role": "user", "content": "hi"}]))
+        deltas = [e for e in events if e["type"] == "delta"]
+        assert len(deltas) == 1
+        assert deltas[0]["text"] == "hi"
+
+    def test_system_prompt_is_prepended(self, svc):
+        captured = []
+
+        def fake_stream(model, messages, max_tokens, **kw):
+            captured.extend(messages)
+            return iter([_Chunk(content="ok"), _Chunk(usage=_Usage(), no_choices=True)])
+
+        with patch.object(svc, "_create_completion_stream", side_effect=fake_stream):
+            list(svc.stream_message([{"role": "user", "content": "hello"}], system_prompt="Be concise."))
+        assert captured[0] == {"role": "system", "content": "Be concise."}
+        assert captured[1] == {"role": "user", "content": "hello"}
+
+    def test_full_conversation_history_forwarded(self, svc):
+        captured = []
+
+        def fake_stream(model, messages, max_tokens, **kw):
+            captured.extend(messages)
+            return iter([_Chunk(content="ok"), _Chunk(usage=_Usage(), no_choices=True)])
+
+        history = [
+            {"role": "user", "content": "first"},
+            {"role": "assistant", "content": "reply"},
+            {"role": "user", "content": "second"},
+        ]
+        with patch.object(svc, "_create_completion_stream", side_effect=fake_stream):
+            list(svc.stream_message(history))
+        assert captured == history

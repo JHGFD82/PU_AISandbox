@@ -29,13 +29,14 @@ exists on disk and that's what lets ``SandboxProcessor`` find it.
 
 from __future__ import annotations
 
+import json
 import secrets
 import sys
 from datetime import datetime
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from starlette.middleware.sessions import SessionMiddleware
@@ -468,6 +469,16 @@ def create_app() -> FastAPI:
 
     @app.post("/api/chat")
     async def api_chat(request: Request, body: ChatBody):
+        """Stream one chat turn back to the browser as Server-Sent Events.
+
+        Emits a ``{"type": "delta", "text": ...}`` event per piece of new
+        text as the model generates it, then exactly one final event: either
+        ``{"type": "done", "conversation": {...}}`` with the fully updated
+        conversation, or ``{"type": "error", "message": ...}`` if the model
+        call failed. A plain ``fetch()`` + stream reader on the front end
+        parses these — not the browser's native ``EventSource``, since that
+        only supports GET requests and this needs a POST body.
+        """
         _require_unlocked(request)
         professor = _validated_professor(body.professor)
         store = conversation.ConversationStore(professor)
@@ -479,37 +490,60 @@ def create_app() -> FastAPI:
         conv.messages.append(
             conversation.Message(role="user", content=body.message, timestamp=datetime.now().isoformat())
         )
-
-        # Imported here, not at module level. SandboxProcessor's class
-        # statement discovers every installed plugin's registered mixins
-        # from sys.modules the first time this module is imported — safe
-        # only once load_plugins() has finished registering every plugin,
-        # which is guaranteed by the time a request is being handled, but
-        # NOT while this file itself is first executed during plugin
-        # loading (see the module docstring above and
-        # plugins/prompt/plugin.py for the same pattern).
-        from src.runtime.sandbox_processor import SandboxProcessor
-
-        try:
-            sandbox = SandboxProcessor(professor, model=conv.model)
-            result = sandbox.chat_service.send_message(conv.api_messages())
-        except Exception as e:
-            raise HTTPException(502, f"Chat request failed: {e}") from e
-
-        conv.messages.append(conversation.Message(
-            role="assistant",
-            content=result["content"],
-            timestamp=datetime.now().isoformat(),
-            model=result["model"],
-            prompt_tokens=result["prompt_tokens"],
-            completion_tokens=result["completion_tokens"],
-            cost=result["cost"],
-        ))
-        if conv.title == "New conversation" and len(conv.messages) >= 2:
-            conv.title = body.message.strip()[:60] or conv.title
+        # Saved immediately, before the model has replied at all — unlike
+        # the old one-shot version, a page refresh (or a failed call below)
+        # no longer loses the message that was actually sent.
         store.save(conv)
+        title_source = body.message
 
-        return {"conversation": conv.to_dict()}
+        async def event_stream():
+            # Imported here, not at module level. SandboxProcessor's class
+            # statement discovers every installed plugin's registered mixins
+            # from sys.modules the first time this module is imported —
+            # safe only once load_plugins() has finished registering every
+            # plugin, which is guaranteed by the time a request is being
+            # handled, but NOT while this file itself is first executed
+            # during plugin loading (see the module docstring above and
+            # plugins/prompt/plugin.py for the same pattern).
+            from src.runtime.sandbox_processor import SandboxProcessor
+
+            final: dict | None = None
+            try:
+                sandbox = SandboxProcessor(professor, model=conv.model)
+                for event in sandbox.chat_service.stream_message(conv.api_messages()):
+                    if event["type"] == "delta":
+                        yield f"data: {json.dumps(event)}\n\n"
+                    else:
+                        final = event
+            except Exception as e:
+                yield f"data: {json.dumps({'type': 'error', 'message': f'Chat request failed: {e}'})}\n\n"
+                return
+
+            if final is None:
+                # stream_message() always yields exactly one "done" event
+                # once it stops iterating without raising — this only fires
+                # if that contract is ever broken.
+                yield f"data: {json.dumps({'type': 'error', 'message': 'Chat request failed: no reply received.'})}\n\n"
+                return
+
+            conv.messages.append(conversation.Message(
+                role="assistant",
+                content=final["content"],
+                timestamp=datetime.now().isoformat(),
+                model=final["model"],
+                prompt_tokens=final["prompt_tokens"],
+                completion_tokens=final["completion_tokens"],
+                cost=final["cost"],
+            ))
+            if conv.title == "New conversation" and len(conv.messages) >= 2:
+                conv.title = title_source.strip()[:60] or conv.title
+            store.save(conv)
+
+            yield f"data: {json.dumps({'type': 'done', 'conversation': conv.to_dict()})}\n\n"
+
+        return StreamingResponse(
+            event_stream(), media_type="text/event-stream", headers={"Cache-Control": "no-cache"}
+        )
 
     return app
 

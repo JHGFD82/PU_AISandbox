@@ -119,6 +119,68 @@ class TestCreateCompletion:
         assert "presence_penalty" not in call_kwargs.kwargs
 
 
+class TestCreateCompletionStream:
+    """_create_completion_stream() shares _build_completion_kwargs() with
+    _create_completion(), so the model-specific quirks only need re-checking
+    for the two stream-specific additions (stream=True, stream_options)."""
+
+    def _messages(self):
+        return [{"role": "user", "content": "hi"}]
+
+    def test_sets_stream_true(self, monkeypatch):
+        svc = _make_svc(monkeypatch)
+        monkeypatch.setattr("src.services.base_service.model_uses_max_completion_tokens", lambda m: False)
+        monkeypatch.setattr("src.services.base_service.model_has_fixed_parameters", lambda m: False)
+        svc._create_completion_stream("gpt-4o", self._messages(), 512)
+        call_kwargs = svc.client.chat.completions.create.call_args
+        assert call_kwargs.kwargs["stream"] is True
+
+    def test_requests_usage_in_final_chunk(self, monkeypatch):
+        svc = _make_svc(monkeypatch)
+        monkeypatch.setattr("src.services.base_service.model_uses_max_completion_tokens", lambda m: False)
+        monkeypatch.setattr("src.services.base_service.model_has_fixed_parameters", lambda m: False)
+        svc._create_completion_stream("gpt-4o", self._messages(), 512)
+        call_kwargs = svc.client.chat.completions.create.call_args
+        assert call_kwargs.kwargs["stream_options"] == {"include_usage": True}
+
+    def test_non_streaming_call_has_no_stream_options(self, monkeypatch):
+        svc = _make_svc(monkeypatch)
+        monkeypatch.setattr("src.services.base_service.model_uses_max_completion_tokens", lambda m: False)
+        monkeypatch.setattr("src.services.base_service.model_has_fixed_parameters", lambda m: False)
+        svc._create_completion("gpt-4o", self._messages(), 512)
+        call_kwargs = svc.client.chat.completions.create.call_args
+        assert "stream_options" not in call_kwargs.kwargs
+        assert call_kwargs.kwargs["stream"] is False
+
+    def test_reasoning_model_uses_max_completion_tokens_when_streaming(self, monkeypatch):
+        svc = _make_svc(monkeypatch)
+        monkeypatch.setattr("src.services.base_service.model_uses_max_completion_tokens", lambda m: True)
+        monkeypatch.setattr("src.services.base_service.model_has_fixed_parameters", lambda m: False)
+        svc._create_completion_stream("o1", self._messages(), 512, temperature=0.5, top_p=0.9)
+        call_kwargs = svc.client.chat.completions.create.call_args
+        assert "max_completion_tokens" in call_kwargs.kwargs
+        assert "max_tokens" not in call_kwargs.kwargs
+        assert call_kwargs.kwargs.get("temperature") == 0.5
+
+    def test_fixed_params_model_strips_temperature_and_top_p_when_streaming(self, monkeypatch):
+        svc = _make_svc(monkeypatch)
+        monkeypatch.setattr("src.services.base_service.model_uses_max_completion_tokens", lambda m: True)
+        monkeypatch.setattr("src.services.base_service.model_has_fixed_parameters", lambda m: True)
+        svc._create_completion_stream("o1-mini", self._messages(), 512, temperature=0.5, top_p=0.9)
+        call_kwargs = svc.client.chat.completions.create.call_args
+        assert "temperature" not in call_kwargs.kwargs
+        assert "top_p" not in call_kwargs.kwargs
+
+    def test_returns_client_create_return_value(self, monkeypatch):
+        svc = _make_svc(monkeypatch)
+        monkeypatch.setattr("src.services.base_service.model_uses_max_completion_tokens", lambda m: False)
+        monkeypatch.setattr("src.services.base_service.model_has_fixed_parameters", lambda m: False)
+        fake_stream = iter([MagicMock()])
+        svc.client.chat.completions.create.return_value = fake_stream
+        result = svc._create_completion_stream("gpt-4o", self._messages(), 512)
+        assert result is fake_stream
+
+
 # ---------------------------------------------------------------------------
 # _record_response_usage
 # ---------------------------------------------------------------------------

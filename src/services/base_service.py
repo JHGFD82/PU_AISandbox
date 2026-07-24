@@ -202,6 +202,73 @@ class BaseService:
 
         return {"type": "image_url", "image_url": {"url": data_url}}
 
+    def _build_completion_kwargs(
+        self,
+        model: str,
+        messages: list[dict[str, Any]],
+        max_tokens: int,
+        temperature: Optional[float],
+        top_p: Optional[float],
+        stream: bool,
+        extra_kwargs: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Assemble the keyword arguments for a chat completion request, streaming or not.
+
+        Shared by ``_create_completion()`` and ``_create_completion_stream()``
+        so the model-specific quirks (the ``max_tokens`` vs
+        ``max_completion_tokens`` parameter name, which models reject
+        ``temperature``/``top_p`` entirely) are handled in exactly one place
+        regardless of which one a caller uses.
+
+        Args:
+            model: The model to use for this request (e.g. ``'gpt-4o'``).
+            messages: The conversation history to send, as a list of
+                      ``{'role': ..., 'content': ...}`` dictionaries.
+            max_tokens: Maximum number of tokens allowed in the response.
+            temperature: How varied or creative the response should be
+                         (``0.0``–``2.0``). ``None`` omits this parameter
+                         from the API call entirely.
+            top_p: Alternative response-variety control (``0.0``–``1.0``).
+                   ``None`` omits this parameter.
+            stream: Whether this request should stream its response back
+                    incrementally. When ``True``, also asks the API for a
+                    final usage-only chunk (``stream_options.include_usage``)
+                    so billing can still be recorded once the stream ends.
+            extra_kwargs: Any additional keyword arguments to forward
+                          directly to the API call (e.g. ``frequency_penalty``).
+
+        Returns:
+            The complete keyword-argument dictionary ready to pass to
+            ``self.client.chat.completions.create(**kwargs)``.
+        """
+        use_completion_tokens = model_uses_max_completion_tokens(model)
+        fixed_params = model_has_fixed_parameters(model)
+        omit_sampling_params = model_omit_sampling_params(model)
+
+        kwargs: dict[str, Any] = {
+            "model": model,
+            "stream": stream,
+            "messages": messages,
+            **extra_kwargs,
+        }
+        if stream:
+            kwargs["stream_options"] = {"include_usage": True}
+        if temperature is not None:
+            kwargs["temperature"] = temperature
+        if top_p is not None:
+            kwargs["top_p"] = top_p
+
+        if fixed_params or omit_sampling_params:
+            for key in ("temperature", "top_p", "frequency_penalty", "presence_penalty"):
+                kwargs.pop(key, None)
+            if omit_sampling_params and not fixed_params:
+                logging.debug(
+                    f"Omitting sampling params for model '{model}' due to catalog configuration."
+                )
+
+        kwargs["max_completion_tokens" if use_completion_tokens else "max_tokens"] = max_tokens
+        return kwargs
+
     def _create_completion(
         self,
         model: str,
@@ -235,38 +302,57 @@ class BaseService:
             ``_record_response_usage()`` to log token counts and to
             ``_extract_response_content()`` to extract the text.
         """
-        use_completion_tokens = model_uses_max_completion_tokens(model)
-        fixed_params = model_has_fixed_parameters(model)
-        omit_sampling_params = model_omit_sampling_params(model)
-
-        base_kwargs: dict[str, Any] = {
-            "model": model,
-            "stream": False,
-            "messages": messages,
-            **extra_kwargs,
-        }
-        if temperature is not None:
-            base_kwargs["temperature"] = temperature
-        if top_p is not None:
-            base_kwargs["top_p"] = top_p
-
-        if fixed_params or omit_sampling_params:
-            for key in ("temperature", "top_p", "frequency_penalty", "presence_penalty"):
-                base_kwargs.pop(key, None)
-            if omit_sampling_params and not fixed_params:
-                logging.debug(
-                    f"Omitting sampling params for model '{model}' due to catalog configuration."
-                )
-
-        if use_completion_tokens:
-            return self.client.chat.completions.create(  # type: ignore[misc]
-                max_completion_tokens=max_tokens,
-                **base_kwargs,
-            )
-        return self.client.chat.completions.create(  # type: ignore[misc]
-            max_tokens=max_tokens,
-            **base_kwargs,
+        kwargs = self._build_completion_kwargs(
+            model, messages, max_tokens, temperature, top_p, stream=False, extra_kwargs=extra_kwargs,
         )
+        return self.client.chat.completions.create(**kwargs)  # type: ignore[misc]
+
+    def _create_completion_stream(
+        self,
+        model: str,
+        messages: list[dict[str, Any]],
+        max_tokens: int,
+        temperature: Optional[float] = None,
+        top_p: Optional[float] = None,
+        **extra_kwargs: Any,
+    ) -> Any:
+        """Send a chat request and return a live stream of response chunks instead of one final reply.
+
+        Each yielded chunk follows the OpenAI ``ChatCompletionChunk`` shape
+        (Portkey normalizes every provider, including Anthropic/Claude, into
+        this same format) — most chunks carry a small piece of new text at
+        ``chunk.choices[0].delta.content``; because this method asks for
+        ``stream_options.include_usage``, one final chunk (with an empty
+        ``choices`` list) carries the completed call's token counts at
+        ``chunk.usage`` instead of any text. See ``ChatService.stream_message()``
+        for how the two are told apart and turned into billing data.
+
+        Note: unlike ``_create_completion()``, callers of this method handle
+        their own errors — ``_run_with_retry()``'s retry-on-transient-error
+        behavior doesn't extend cleanly to a stream that fails partway
+        through, since visible partial content has already reached the
+        person by then; restarting it from scratch would silently duplicate
+        or discard what they've already seen. Only the request itself (before
+        any chunk is yielded) is safe to retry, so streaming callers are
+        expected to treat a mid-stream failure as a hard stop, not a retry.
+
+        Args:
+            model: The model to use for this request (e.g. ``'gpt-4o'``).
+            messages: The conversation history to send, as a list of
+                      ``{'role': ..., 'content': ...}`` dictionaries.
+            max_tokens: Maximum number of tokens allowed in the response.
+            temperature: How varied or creative the response should be
+                         (``0.0``–``2.0``). ``None`` omits this parameter.
+            top_p: Alternative response-variety control (``0.0``–``1.0``).
+                   ``None`` omits this parameter.
+
+        Returns:
+            An iterator of response chunks, consumed as they arrive.
+        """
+        kwargs = self._build_completion_kwargs(
+            model, messages, max_tokens, temperature, top_p, stream=True, extra_kwargs=extra_kwargs,
+        )
+        return self.client.chat.completions.create(**kwargs)  # type: ignore[misc]
 
     def _record_response_usage(self, response: Any, model: str, critical: bool = False) -> None:
         """Record token usage from an API response and log a summary.
