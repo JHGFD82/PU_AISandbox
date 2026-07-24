@@ -79,7 +79,10 @@
   </div>
 
 <script>
-const state = { professor: null, conversationId: null, conversationModel: null, models: [], defaultModel: null };
+const state = {
+  professor: null, conversationId: null, conversationModel: null, conversationHasMessages: false,
+  models: [], defaultModel: null,
+};
 
 async function api(path, opts) {
   const res = await fetch(path, Object.assign({ headers: { "Content-Type": "application/json" } }, opts));
@@ -177,6 +180,7 @@ async function openConversation(id) {
   state.conversationId = id;
   const conv = await api(`/api/conversations/${id}?professor=${encodeURIComponent(state.professor)}`);
   state.conversationModel = conv.model;
+  state.conversationHasMessages = conv.messages.length > 0;
   document.getElementById("model-field").value = conv.model;
   renderMessages(conv);
   await loadConversations();
@@ -190,6 +194,7 @@ document.getElementById("new-conv").addEventListener("click", async () => {
   });
   state.conversationId = conv.id;
   state.conversationModel = conv.model;
+  state.conversationHasMessages = false;
   renderMessages(conv);
   await loadConversations();
 });
@@ -215,7 +220,7 @@ async function sendMessage() {
   if (!text) return;
 
   const chosenModel = document.getElementById("model-field").value || state.defaultModel;
-  if (state.conversationId && state.conversationModel && chosenModel !== state.conversationModel) {
+  if (state.conversationHasMessages && state.conversationModel && chosenModel !== state.conversationModel) {
     const proceed = confirm(
       `This conversation has been using "${state.conversationModel}". ` +
       `Switching to "${chosenModel}" now won't change anything the model already said — ` +
@@ -282,6 +287,7 @@ async function sendMessage() {
           // matches exactly what's now saved server-side).
           renderMessages(event.conversation);
           state.conversationModel = event.conversation.model;
+          state.conversationHasMessages = event.conversation.messages.length > 0;
           await Promise.all([loadUsage(), loadConversations()]);
         } else if (event.type === "error") {
           throw new Error(event.message);
