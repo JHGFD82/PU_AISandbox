@@ -27,6 +27,22 @@ Status, on branch `feature/webui-and-remote-sources`:
   real dependencies (same limitation as section 1 — see that section's
   verification note); **not yet run through the real `pytest` suite on a
   machine with `fastapi`/`uvicorn`/etc. installed.**
+- The `/settings` page (2026-07-24, after the settings consolidation above)
+  — **built.** A browser front-end over `src/settings_store.py`: add/remove
+  professors and replace their keys, set the webui passphrase (hashed
+  server-side, via a dedicated endpoint — never stored or transmitted as a
+  plain value once set) and session secret, set the shared-settings pointer
+  and any alternate-endpoint credentials (endpoint *definitions* stay
+  hand-edited TOML — the page shows them read-only with a copyable
+  snippet), and manage external usage-data sources. A first-time visitor
+  with zero professors configured is redirected to `/settings` instead of
+  an empty chat screen; the section order flips between "professors first"
+  (nothing configured yet) and "shared settings first" (at least one
+  professor already exists) since that's the more likely thing someone
+  returns to tweak. Covered by `plugins/webui/tests/test_app.py`'s
+  `TestSettingsPage`/`TestSettingsProfessors`/`TestSettingsPassphrase`/
+  `TestSettingsValues`/`TestSettingsSources` classes, run through the real
+  `pytest` suite.
 - Historical + combined-sources usage in the sidebar, streaming responses,
   compaction, `CasBackend`, and memory notes (the rest of section 9's build
   order) — **still planning only.**

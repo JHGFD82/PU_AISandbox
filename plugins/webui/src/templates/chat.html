@@ -50,6 +50,7 @@
     <div id="conv-list"></div>
 
     <h2>Session</h2>
+    <button class="secondary" id="settings-btn" style="width:100%; margin-bottom:0.4rem">Settings</button>
     <button class="secondary" id="lock-btn" style="width:100%">Lock</button>
   </div>
 
@@ -228,6 +229,9 @@ document.getElementById("input").addEventListener("keydown", (e) => {
 document.getElementById("lock-btn").addEventListener("click", async () => {
   await fetch("/lock", { method: "POST" });
   window.location.href = "/";
+});
+document.getElementById("settings-btn").addEventListener("click", () => {
+  window.location.href = "/settings";
 });
 document.getElementById("spend-toggle-btn").addEventListener("click", () => {
   const panel = document.getElementById("spend");

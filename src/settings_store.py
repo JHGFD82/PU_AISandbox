@@ -235,6 +235,59 @@ def add_professor(name: str, key: str, backup_key: str | None = None) -> str:
     return safe_name
 
 
+def set_professor_key(safe_name: str, key: str) -> None:
+    """Replace an existing professor's primary API key.
+
+    Unlike ``add_professor``, this updates a professor that's already
+    configured — used when someone's key needs rotating (e.g. from the web
+    UI's settings page) without having to remove and re-add them first.
+
+    Args:
+        safe_name: The professor's safe-filename identifier (e.g. ``'heller'``).
+        key: The new primary API key.
+
+    Raises:
+        ValueError: If *key* is blank, or no professor matches *safe_name*.
+    """
+    key = key.strip()
+    if not key:
+        raise ValueError("Primary API key cannot be blank.")
+
+    doc = _load()
+    professors = _get_table(doc, "professors")
+    if professors is None or safe_name not in professors:
+        raise ValueError(f"No configured professor with safe name '{safe_name}'.")
+
+    professors[safe_name]["key"] = key
+    _save(doc)
+
+
+def set_professor_backup_key(safe_name: str, backup_key: str | None) -> None:
+    """Replace or clear an existing professor's backup API key.
+
+    Args:
+        safe_name: The professor's safe-filename identifier (e.g. ``'heller'``).
+        backup_key: The new backup API key, or a blank/``None`` value to
+                    remove the backup key entirely (the professor then has
+                    only a primary key, same as never having set one).
+
+    Raises:
+        ValueError: If no professor matches *safe_name*.
+    """
+    doc = _load()
+    professors = _get_table(doc, "professors")
+    if professors is None or safe_name not in professors:
+        raise ValueError(f"No configured professor with safe name '{safe_name}'.")
+
+    record = professors[safe_name]
+    cleaned = backup_key.strip() if backup_key else ""
+    if cleaned:
+        record["backup_key"] = cleaned
+    elif "backup_key" in record:
+        del record["backup_key"]
+    _save(doc)
+
+
 def remove_professor(identifier: str) -> str:
     """Remove a professor's configuration from ``.settings`` by safe name or display name.
 

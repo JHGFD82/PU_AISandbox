@@ -23,7 +23,7 @@ from ..tracking.token_tracker import TokenTracker, get_archive_dir, get_usage_da
 logger = logging.getLogger(__name__)
 
 
-def _list_optional_env_fields() -> list[tuple[str, str, str, bool]]:
+def list_optional_env_fields() -> list[tuple[str, str, str, bool]]:
     """Return every optional ``.settings`` value this installation knows about, for display.
 
     Combines two sources: plugin-declared fields (registered via
@@ -31,6 +31,10 @@ def _list_optional_env_fields() -> list[tuple[str, str, str, bool]]:
     alternate-API-endpoint credential paths derived from the configured
     endpoints (which don't go through the registry since their names depend
     on what's configured in ``settings.*.toml``, not on any plugin).
+
+    Shared by both the CLI (``--show-config``/``env list``) and the web
+    UI's settings page, so the two never drift on what counts as a known,
+    safe-to-edit dotted path.
 
     Returns:
         A list of ``(dotted_path, label, section, secret)`` tuples, sorted
@@ -105,7 +109,7 @@ def _print_optional_settings() -> None:
     automatically once a plugin registers them, no separate "what's new"
     tracking needed.
     """
-    fields = _list_optional_env_fields()
+    fields = list_optional_env_fields()
     if not fields:
         return
 
@@ -304,7 +308,7 @@ def _env_set_value(args: argparse.Namespace) -> None:
     turns out to be a key would not be.
     """
     path = args.key.strip()
-    known_secrets = {k: secret for k, _label, _section, secret in _list_optional_env_fields()}
+    known_secrets = {k: secret for k, _label, _section, secret in list_optional_env_fields()}
     is_secret = known_secrets.get(path, True)
 
     if getattr(args, 'generate', False):

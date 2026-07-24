@@ -39,3 +39,15 @@ _register("_pu_webui_auth", "src/auth.py")
 _register("_pu_webui_conversation", "src/conversation.py")
 _register("src.services.chat_service", "src/services/chat_service.py")
 _register("_pu_webui_app", "src/app.py")
+
+# Also import the real plugin.py module (not just the src/*.py files above,
+# which conftest registers directly to avoid needing the full plugin loader).
+# plugin.py's own _register() calls are no-ops for anything already
+# registered above, but its module-level register_env_field() calls for
+# webui.passphrase_hash/webui.session_secret only run once this actually
+# imports — without this, tests that depend on those two paths being known
+# (e.g. the /api/settings routes' "which paths are directly editable" check)
+# would only pass if some other test file happened to import plugin.py
+# first, which depends on alphabetical test-file collection order rather
+# than being reliably true.
+import plugins.webui.plugin  # noqa: F401
