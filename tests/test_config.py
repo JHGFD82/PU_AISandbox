@@ -12,14 +12,16 @@ import argparse
 
 import pytest
 
+import src.config as config_mod
 from src.config import (
     get_api_key,
+    get_registered_env_fields,
     load_professor_config,
     make_safe_filename,
     parse_language_code,
     parse_single_language_code,
+    register_env_field,
 )
-
 
 # ---------------------------------------------------------------------------
 # make_safe_filename
@@ -328,3 +330,58 @@ class TestGetApiKey:
         monkeypatch.setattr("src.config.os.getenv", _patched_getenv)
         with pytest.raises(ValueError, match="No API key"):
             get_api_key("jeff_heller")
+
+    def test_professor_not_found_mentions_add_professor(self, monkeypatch):
+        self._setup_one_prof(monkeypatch)
+        with pytest.raises(ValueError, match="env add-professor"):
+            get_api_key("nobody")
+
+    def test_no_professors_configured_mentions_add_professor(self, monkeypatch):
+        for key in list(__import__("os").environ.keys()):
+            if key.startswith("PROF_"):
+                monkeypatch.delenv(key, raising=False)
+        with pytest.raises(ValueError, match="env add-professor"):
+            get_api_key("heller")
+
+
+# ---------------------------------------------------------------------------
+# register_env_field / get_registered_env_fields
+# ---------------------------------------------------------------------------
+
+class TestEnvFieldRegistry:
+
+    @pytest.fixture(autouse=True)
+    def _isolate_registry(self, monkeypatch):
+        """Don't let test registrations leak into other tests or the real registry."""
+        monkeypatch.setattr(config_mod, "_ENV_FIELDS", {})
+
+    def test_register_and_retrieve(self):
+        register_env_field("TEST_VAR", "A test variable", section="Testing", secret=True)
+        fields = get_registered_env_fields()
+        assert len(fields) == 1
+        assert fields[0].key == "TEST_VAR"
+        assert fields[0].label == "A test variable"
+        assert fields[0].section == "Testing"
+        assert fields[0].secret is True
+
+    def test_defaults_section_other_and_not_secret(self):
+        register_env_field("TEST_VAR", "A test variable")
+        fields = get_registered_env_fields()
+        assert fields[0].section == "Other"
+        assert fields[0].secret is False
+
+    def test_registering_same_key_twice_replaces(self):
+        register_env_field("TEST_VAR", "First label")
+        register_env_field("TEST_VAR", "Second label")
+        fields = get_registered_env_fields()
+        assert len(fields) == 1
+        assert fields[0].label == "Second label"
+
+    def test_sorted_by_section_then_key(self):
+        register_env_field("Z_VAR", "z", section="B")
+        register_env_field("A_VAR", "a", section="A")
+        fields = get_registered_env_fields()
+        assert [f.key for f in fields] == ["A_VAR", "Z_VAR"]
+
+    def test_empty_registry_returns_empty_list(self):
+        assert get_registered_env_fields() == []

@@ -155,6 +155,22 @@ def list_apis() -> list[str]:
     return list(data.get("endpoints", {}).keys())
 
 
+def env_var_for_endpoint(api_name: str) -> str:
+    """Return the ``.env`` variable name that holds the API key for endpoint *api_name*.
+
+    Public wrapper around the same derivation ``load_api_config()`` uses
+    internally, exposed so other modules (e.g. ``--show-config``, the
+    ``env`` command) can list which key each configured endpoint expects
+    without duplicating the naming rule.
+
+    Examples::
+
+        env_var_for_endpoint("hpc_cluster")    -> "API_HPC_CLUSTER_KEY"
+        env_var_for_endpoint("cloud-provider")  -> "API_CLOUD_PROVIDER_KEY"
+    """
+    return _env_key_for(api_name)
+
+
 def get_default_api_name() -> Optional[str]:
     """Return the default endpoint name from ``apis.json``, or ``None``.
 

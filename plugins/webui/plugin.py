@@ -75,7 +75,24 @@ _register("_pu_webui_conversation", "src/conversation.py")
 _register("src.services.chat_service", "src/services/chat_service.py")
 _register("_pu_webui_app", "src/app.py")
 
+from src.config import register_env_field  # noqa: E402
 from src.errors import CLIError  # noqa: E402
+
+# Lets `--show-config` and `python main.py env set/list` discover these two
+# optional variables without needing to know anything about the webui plugin
+# specifically — see register_env_field()'s docstring in src/config.py.
+register_env_field(
+    "WEBUI_PASSPHRASE_HASH",
+    "Unlock passphrase hash (generate via 'webui set-passphrase')",
+    section="Web UI plugin",
+    secret=True,
+)
+register_env_field(
+    "WEBUI_SESSION_SECRET",
+    "Session signing secret (any long random string; 'env set WEBUI_SESSION_SECRET --generate' works)",
+    section="Web UI plugin",
+    secret=True,
+)
 
 
 class WebUiPlugin:

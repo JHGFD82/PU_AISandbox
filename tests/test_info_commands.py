@@ -13,6 +13,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+import src.env_editor as env_editor_mod
 import src.runtime.info_commands as info_mod
 import src.tracking.source_config as source_config_mod
 from src.errors import CLIError
@@ -28,6 +29,15 @@ from src.runtime.info_commands import (
 def _redirect_data_sources_file(tmp_path, monkeypatch):
     """Keep 'usage sources' tests from touching the real repo-root data_sources.json."""
     monkeypatch.setattr(source_config_mod, "DATA_SOURCES_FILE", tmp_path / "data_sources.json")
+
+
+@pytest.fixture(autouse=True)
+def _redirect_env_path(tmp_path, monkeypatch):
+    """Keep 'env' tests from touching the real repo-root .env file."""
+    monkeypatch.setattr(env_editor_mod, "ENV_PATH", tmp_path / ".env")
+    for key in list(__import__("os").environ.keys()):
+        if key.startswith("PROF_") or key in ("TEST_SECRET_VAR",):
+            monkeypatch.delenv(key, raising=False)
 
 # ---------------------------------------------------------------------------
 # Shared test catalog (matches model_catalog.json schema)
@@ -73,6 +83,11 @@ def _make_ns(**kwargs) -> argparse.Namespace:
         path=None,
         mode=None,
         for_professor=None,
+        env_subcommand=None,
+        name=None,
+        identifier=None,
+        key=None,
+        generate=False,
     )
     defaults.update(kwargs)
     return argparse.Namespace(**defaults)
@@ -472,3 +487,95 @@ class TestHandleInfoCommandsShowConfig:
         monkeypatch.setattr(info_mod, "show_professor_config", lambda: called.append(True))
         handle_info_commands(_make_ns(show_config=True))
         assert called
+
+
+# ---------------------------------------------------------------------------
+# handle_info_commands — env subcommand branches
+# ---------------------------------------------------------------------------
+
+
+class TestHandleInfoCommandsEnv:
+
+    def test_add_professor_with_flag_and_prompted_keys(self, capsys, monkeypatch):
+        monkeypatch.setattr("getpass.getpass", lambda *_: "sk-test-key")
+        args = _make_ns(command="env", env_subcommand="add-professor", name="Jeff Heller")
+        result = handle_info_commands(args)
+        assert result is True
+        out = capsys.readouterr().out
+        assert "Added professor 'Jeff Heller'" in out
+        assert "jeff_heller" in out
+
+    def test_add_professor_prompts_for_name_when_not_given(self, capsys, monkeypatch):
+        monkeypatch.setattr("builtins.input", lambda *_: "Jeff Heller")
+        monkeypatch.setattr("getpass.getpass", lambda *_: "sk-test-key")
+        args = _make_ns(command="env", env_subcommand="add-professor", name=None)
+        handle_info_commands(args)
+        out = capsys.readouterr().out
+        assert "Jeff Heller" in out
+
+    def test_add_professor_blank_name_raises_cli_error(self, monkeypatch):
+        monkeypatch.setattr("getpass.getpass", lambda *_: "sk-test-key")
+        args = _make_ns(command="env", env_subcommand="add-professor", name="   ")
+        with pytest.raises(CLIError, match="blank"):
+            handle_info_commands(args)
+
+    def test_remove_professor_confirmed(self, capsys, monkeypatch):
+        monkeypatch.setattr("getpass.getpass", lambda *_: "sk-test-key")
+        handle_info_commands(_make_ns(command="env", env_subcommand="add-professor", name="Jeff Heller"))
+        capsys.readouterr()
+
+        monkeypatch.setattr("builtins.input", lambda *_: "y")
+        args = _make_ns(command="env", env_subcommand="remove-professor", identifier="jeff_heller")
+        handle_info_commands(args)
+        out = capsys.readouterr().out
+        assert "Removed professor 'Jeff Heller'" in out
+
+    def test_remove_professor_declined(self, capsys, monkeypatch):
+        monkeypatch.setattr("getpass.getpass", lambda *_: "sk-test-key")
+        handle_info_commands(_make_ns(command="env", env_subcommand="add-professor", name="Jeff Heller"))
+        capsys.readouterr()
+
+        monkeypatch.setattr("builtins.input", lambda *_: "n")
+        args = _make_ns(command="env", env_subcommand="remove-professor", identifier="jeff_heller")
+        handle_info_commands(args)
+        out = capsys.readouterr().out
+        assert "Cancelled" in out
+
+    def test_remove_unknown_professor_raises_cli_error(self, monkeypatch):
+        monkeypatch.setattr("builtins.input", lambda *_: "y")
+        args = _make_ns(command="env", env_subcommand="remove-professor", identifier="nobody")
+        with pytest.raises(CLIError, match="No configured professor"):
+            handle_info_commands(args)
+
+    def test_set_secret_value_hides_it_in_output(self, capsys, monkeypatch):
+        monkeypatch.setattr("getpass.getpass", lambda *_: "super-secret")
+        args = _make_ns(command="env", env_subcommand="set", key="WEBUI_SESSION_SECRET", generate=False)
+        handle_info_commands(args)
+        out = capsys.readouterr().out
+        assert "super-secret" not in out
+        assert "hidden" in out
+
+    def test_set_generate_produces_a_value_without_prompting(self, capsys, monkeypatch):
+        def _boom(*_a, **_k):
+            raise AssertionError("should not prompt when --generate is used")
+        monkeypatch.setattr("getpass.getpass", _boom)
+        args = _make_ns(command="env", env_subcommand="set", key="WEBUI_SESSION_SECRET", generate=True)
+        handle_info_commands(args)
+        import os
+        assert os.environ.get("WEBUI_SESSION_SECRET")
+
+    def test_unset_removes_value(self, monkeypatch):
+        monkeypatch.setattr("getpass.getpass", lambda *_: "some-value")
+        handle_info_commands(_make_ns(command="env", env_subcommand="set", key="WEBUI_SESSION_SECRET"))
+        handle_info_commands(_make_ns(command="env", env_subcommand="unset", key="WEBUI_SESSION_SECRET"))
+        import os
+        assert "WEBUI_SESSION_SECRET" not in os.environ
+
+    def test_no_subcommand_raises_cli_error(self):
+        args = _make_ns(command="env", env_subcommand=None)
+        with pytest.raises(CLIError, match="No env subcommand"):
+            handle_info_commands(args)
+
+    def test_list_returns_true(self):
+        args = _make_ns(command="env", env_subcommand="list")
+        assert handle_info_commands(args) is True

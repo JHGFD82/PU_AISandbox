@@ -10,7 +10,8 @@ Professor configuration and model pricing are kept separate — pricing lives in
 import argparse
 import os
 import re
-from typing import Dict, Tuple, Union
+from dataclasses import dataclass
+from typing import Dict, List, Tuple, Union
 
 # Language registry — starts empty; populated by plugins at import time via
 # register_language().  The framework needs this dict and the parser functions
@@ -20,6 +21,65 @@ LANGUAGE_MAP: Dict[str, str] = {}
 
 # Tracks which codes were registered by plugins.
 _PLUGIN_LANGUAGES: set[str] = set()
+
+
+@dataclass(frozen=True)
+class EnvField:
+    """One optional ``.env`` variable that a plugin or core feature knows how to use.
+
+    Lets ``--show-config`` and the ``env`` command list every optional
+    setting in the project without hard-coding plugin-specific knowledge —
+    each plugin declares its own fields by calling ``register_env_field()``
+    once at import time, the same way it calls ``register_language()`` to
+    add a language.
+
+    Attributes:
+        key: The exact environment-variable name, matching what appears in
+             ``.env`` (e.g. ``'WEBUI_SESSION_SECRET'``).
+        label: A short, plain-English description shown next to it in
+               ``--show-config`` (e.g. ``'Session signing secret'``).
+        section: A group heading used to cluster related fields when they're
+                 displayed (e.g. ``'Web UI plugin'``).
+        secret: Whether the value is sensitive. When ``True``, only whether
+                it is set is ever shown — never the value itself.
+    """
+
+    key: str
+    label: str
+    section: str = "Other"
+    secret: bool = False
+
+
+# Populated by plugins (and core) at import time via register_env_field().
+_ENV_FIELDS: Dict[str, EnvField] = {}
+
+
+def register_env_field(key: str, label: str, *, section: str = "Other", secret: bool = False) -> None:
+    """Declare an optional ``.env`` variable so it shows up in ``--show-config`` and ``env`` commands.
+
+    Call this once, at import time, for every optional environment variable
+    a plugin reads — mirroring how ``register_language()`` works for
+    languages. Without this, a person running ``--show-config`` would have
+    no way to discover an optional setting exists short of reading that
+    plugin's source code.
+
+    Args:
+        key: The exact environment-variable name (e.g.
+             ``'WEBUI_SESSION_SECRET'``).
+        label: A short, plain-English description of what the setting is for.
+        section: A group heading for display purposes (e.g.
+                 ``'Web UI plugin'``). Defaults to ``'Other'``.
+        secret: Set to ``True`` if the value is sensitive — an API key, a
+                password, a signing secret — so its value is never printed
+                or echoed back, only whether it's currently set. Defaults to
+                ``False``.
+    """
+    _ENV_FIELDS[key] = EnvField(key=key, label=label, section=section, secret=secret)
+
+
+def get_registered_env_fields() -> List[EnvField]:
+    """Return every optional ``.env`` field registered so far, grouped by section for display."""
+    return sorted(_ENV_FIELDS.values(), key=lambda f: (f.section, f.key))
 
 
 def register_language(code: str, name: str) -> None:
@@ -238,12 +298,14 @@ def get_api_key(professor_name: str) -> Tuple[str, str]:
                 error_msg = (
                     f"Professor '{professor_name}' not found. Available professors:\n"
                     f"Full names: {', '.join(available_names)}\n"
-                    f"CLI names: {', '.join(available_safe)}"
+                    f"CLI names: {', '.join(available_safe)}\n\n"
+                    f"To add a new professor: python main.py env add-professor"
                 )
             else:
                 error_msg = (
-                    "No professors configured. Please set up professor configuration in .env file.\n"
-                    "Example: PROF_1_NAME=John Doe, PROF_1_KEY=your_api_key"
+                    "No professors configured yet.\n"
+                    "Add one with: python main.py env add-professor\n"
+                    "(or by hand — see .env.template for the PROF_[ID]_NAME/KEY format)"
                 )
             raise ValueError(error_msg)
 

@@ -1,18 +1,51 @@
 """Info/report command handlers for CLI runtime actions."""
 
 import argparse
+import getpass
 import logging
 import os
+import secrets
 from datetime import datetime
 from typing import Optional
 
-from ..config import load_professor_config, LANGUAGE_MAP
-from ..models.catalog import load_model_catalog, get_pricing_unit
+from .. import env_editor
+from ..config import LANGUAGE_MAP, get_registered_env_fields, load_professor_config
 from ..errors import CLIError
-from ..tracking.token_tracker import TokenTracker, get_usage_data_path, get_archive_dir
-from ..tracking.source_config import add_source, get_configured_sources, get_source_id, remove_source
+from ..models.catalog import get_pricing_unit, load_model_catalog
+from ..services.api_config import env_var_for_endpoint, list_apis
+from ..tracking.source_config import (
+    add_source,
+    get_configured_sources,
+    get_source_id,
+    remove_source,
+)
+from ..tracking.token_tracker import TokenTracker, get_archive_dir, get_usage_data_path
 
 logger = logging.getLogger(__name__)
+
+
+def _list_optional_env_fields() -> list[tuple[str, str, str, bool]]:
+    """Return every optional .env variable this installation knows about, for display.
+
+    Combines two sources: plugin-declared fields (registered via
+    ``register_env_field()``, e.g. the webui plugin's secrets) and
+    alternate-API-endpoint keys derived from ``apis.json`` (which don't go
+    through the registry since their names depend on what's configured
+    there, not on any plugin).
+
+    Returns:
+        A list of ``(key, label, section, secret)`` tuples, sorted by
+        section then key.
+    """
+    fields = [(f.key, f.label, f.section, f.secret) for f in get_registered_env_fields()]
+    for api_name in list_apis():
+        fields.append((
+            env_var_for_endpoint(api_name),
+            f"API key for the '{api_name}' endpoint (see apis.json)",
+            "Alternate API endpoints",
+            True,
+        ))
+    return sorted(fields, key=lambda t: (t[2], t[0]))
 
 
 def show_professor_config() -> None:
@@ -21,10 +54,12 @@ def show_professor_config() -> None:
 
     if not professors:
         print("No professors configured in .env file.")
-        print("Add entries in the format:")
+        print("Add one with: python main.py env add-professor")
+        print("Or by hand, in the format:")
         print("  PROF_[ID]_NAME=Professor Name")
         print("  PROF_[ID]_KEY=api_key")
         print("  PROF_[ID]_BACKUP_KEY=backup_api_key")
+        _print_optional_settings()
         return
 
     print("\nCurrent Professor Configuration:")
@@ -61,6 +96,33 @@ def show_professor_config() -> None:
     print("Language codes (install a plugin to add more):")
     for code, name in sorted(LANGUAGE_MAP.items()):
         print(f"  {code}  {name}")
+
+    _print_optional_settings()
+
+
+def _print_optional_settings() -> None:
+    """Print every optional .env setting this installation knows about and whether it's set.
+
+    Never prints a secret's value — only whether it's currently set. Run
+    after a `git pull` (or any update) to see whether a new optional
+    feature has shown up since you last checked; new entries appear here
+    automatically once a plugin registers them, no separate "what's new"
+    tracking needed.
+    """
+    fields = _list_optional_env_fields()
+    if not fields:
+        return
+
+    print("\n" + "=" * 60)
+    print("Optional settings (all unset by default — see .env.template):")
+    current_section = None
+    for key, label, section, _secret in fields:
+        if section != current_section:
+            print(f"\n  [{section}]")
+            current_section = section
+        status = "set" if os.environ.get(key) else "not set"
+        print(f"    {key}  ({status})  {label}")
+    print("\nSet one with: python main.py env set <KEY>")
 
 
 def list_available_models() -> None:
@@ -114,6 +176,10 @@ def handle_info_commands(args: argparse.Namespace) -> bool:
         list_available_models()
         return True
 
+    if getattr(args, 'command', None) == 'env':
+        _handle_env_command(args)
+        return True
+
     # Usage commands (professor required)
     if getattr(args, 'command', None) == 'usage':
         if not args.professor:
@@ -154,6 +220,119 @@ def handle_info_commands(args: argparse.Namespace) -> bool:
         raise CLIError("Invalid usage subcommand. Use 'report', 'months', 'daily', or 'sources'.")
 
     return False
+
+
+def _handle_env_command(args: argparse.Namespace) -> None:
+    """Handle 'env add-professor/remove-professor/list/set/unset'.
+
+    This is the CLI-side half of directly editing .env — see
+    ``src/env_editor.py`` for why writing to .env directly is safe here
+    (every edit is triggered by a person typing a command at their own
+    keyboard, never over a network call or as part of syncing between
+    machines).
+    """
+    sub = getattr(args, 'env_subcommand', None)
+
+    if sub == 'add-professor':
+        _env_add_professor_interactive(args)
+        return
+    if sub == 'remove-professor':
+        _env_remove_professor(args)
+        return
+    if sub == 'list':
+        _print_optional_settings()
+        return
+    if sub == 'set':
+        _env_set_value(args)
+        return
+    if sub == 'unset':
+        _env_unset_value(args)
+        return
+
+    raise CLIError(
+        "No env subcommand specified.\n"
+        "Usage: python main.py env add-professor\n"
+        "       python main.py env remove-professor <identifier>\n"
+        "       python main.py env list\n"
+        "       python main.py env set <KEY>\n"
+        "       python main.py env unset <KEY>"
+    )
+
+
+def _env_add_professor_interactive(args: argparse.Namespace) -> None:
+    """Add a professor, prompting interactively for their name and keys.
+
+    Keys are always entered at a hidden prompt (never a command-line flag),
+    so they never end up in shell history or a process listing.
+    """
+    name = getattr(args, 'name', None) or input("Professor's display name (e.g. 'Jeff Heller'): ").strip()
+    primary_key = getpass.getpass("Primary API key (hidden): ")
+    backup_key = getpass.getpass("Backup API key (optional, hidden — press Enter to skip): ")
+
+    try:
+        safe_name = env_editor.add_professor(name, primary_key, backup_key or None)
+    except ValueError as e:
+        raise CLIError(str(e)) from e
+
+    print(f"\nAdded professor '{name}' (safe name: '{safe_name}').")
+    print(f"Try it out: python main.py {safe_name} usage report")
+
+
+def _env_remove_professor(args: argparse.Namespace) -> None:
+    """Remove a professor by safe name or display name, after a yes/no confirmation.
+
+    Confirmation matters here specifically because this deletes real key
+    material from .env, not just a display entry.
+    """
+    identifier = args.identifier
+    confirm = input(
+        f"Remove professor '{identifier}' from .env? This deletes their API key(s). [y/N]: "
+    ).strip().lower()
+    if confirm not in ("y", "yes"):
+        print("Cancelled — nothing was removed.")
+        return
+    try:
+        removed_name = env_editor.remove_professor(identifier)
+    except ValueError as e:
+        raise CLIError(str(e)) from e
+    print(f"Removed professor '{removed_name}'.")
+
+
+def _env_set_value(args: argparse.Namespace) -> None:
+    """Set an optional .env variable, prompting for the value (hidden input if it's a secret).
+
+    Unregistered keys are treated as secret by default — hiding input when
+    it wasn't necessary is a minor inconvenience; echoing a value that
+    turns out to be a key would not be.
+    """
+    key = args.key.strip().upper()
+    known_secrets = {k: secret for k, _label, _section, secret in _list_optional_env_fields()}
+    is_secret = known_secrets.get(key, True)
+
+    if getattr(args, 'generate', False):
+        if not is_secret:
+            raise CLIError(
+                f"--generate is only for secret values; '{key}' isn't registered as one. "
+                f"Use 'python main.py env set {key}' instead."
+            )
+        value = secrets.token_urlsafe(32)
+    else:
+        prompt = f"Value for {key}: "
+        value = getpass.getpass(prompt) if is_secret else input(prompt).strip()
+
+    try:
+        env_editor.set_optional_value(key, value)
+    except ValueError as e:
+        raise CLIError(str(e)) from e
+
+    print(f"\n{key} set (value hidden)." if is_secret else f"\n{key}={value}")
+
+
+def _env_unset_value(args: argparse.Namespace) -> None:
+    """Remove an optional .env variable."""
+    key = args.key.strip().upper()
+    env_editor.unset_optional_value(key)
+    print(f"{key} removed (if it was set).")
 
 
 def _handle_usage_sources(args: argparse.Namespace) -> None:

@@ -201,6 +201,67 @@ def _build_usage_sources_subparser(usage_subparsers: argparse._SubParsersAction)
     sources_remove.add_argument('label', type=str, help='The label of the source to remove (see: usage sources list)')
 
 
+def _build_env_subparser(subparsers: argparse._SubParsersAction) -> None:
+    """Register the 'env' command: add/remove professors and manage optional .env settings.
+
+    Unlike every other built-in command, 'env' never requires a professor
+    name on the command line — you need it precisely when no professor
+    exists yet (adding the first one). See
+    ``_insert_professor_placeholder_if_needed()`` and ``_dispatch()`` below
+    for how that exception is wired in, the same way an individual plugin
+    can opt out via ``requires_professor = False``.
+
+    API keys and other secrets are always entered at a hidden prompt by the
+    command handler, never accepted as a flag — so they never end up in
+    shell history or a process listing.
+    """
+    env_parser = subparsers.add_parser(
+        'env', help="Add/remove professors and manage optional .env settings"
+    )
+    _add_debug_flags(env_parser)
+    env_sub = env_parser.add_subparsers(dest='env_subcommand', help='env subcommand')
+
+    add_prof = env_sub.add_parser(
+        'add-professor',
+        help='Add a new professor (prompts interactively for anything not passed as a flag)',
+    )
+    _add_debug_flags(add_prof)
+    add_prof.add_argument(
+        '--name', type=str, default=None,
+        help="The professor's display name, e.g. 'Jeff Heller'",
+    )
+
+    remove_prof = env_sub.add_parser('remove-professor', help='Remove a configured professor')
+    _add_debug_flags(remove_prof)
+    remove_prof.add_argument(
+        'identifier', type=str,
+        help='Safe name or display name of the professor to remove (see: --show-config)',
+    )
+
+    list_parser = env_sub.add_parser(
+        'list', help='List optional .env settings and whether each is currently set',
+    )
+    _add_debug_flags(list_parser)
+
+    set_parser = env_sub.add_parser(
+        'set',
+        help='Set an optional .env variable (prompts for the value; hidden input for secrets)',
+    )
+    _add_debug_flags(set_parser)
+    set_parser.add_argument(
+        'key', type=str,
+        help="The variable to set, e.g. WEBUI_SESSION_SECRET or API_HPC_CLUSTER_KEY",
+    )
+    set_parser.add_argument(
+        '--generate', action='store_true',
+        help='Auto-generate a random value instead of prompting (secrets only)',
+    )
+
+    unset_parser = env_sub.add_parser('unset', help='Remove an optional .env variable')
+    _add_debug_flags(unset_parser)
+    unset_parser.add_argument('key', type=str, help='The variable to remove')
+
+
 def create_argument_parser(
     plugins: Optional[dict[str, ModePlugin]] = None,
 ) -> argparse.ArgumentParser:
@@ -284,6 +345,7 @@ Run 'python main.py <professor> <command> --help' for plugin-specific usage.
     subparsers = parser.add_subparsers(dest='command', help='Command to execute')
 
     _build_usage_subparser(subparsers)
+    _build_env_subparser(subparsers)
 
     # translate, transcribe, transcription_review, and prompt are all registered
     # by their respective plugins in plugins/.
@@ -302,6 +364,10 @@ def _available_commands_hint(plugins: dict[str, ModePlugin]) -> str:
         "  usage report [YYYY-MM] [--all-time]  Token usage report",
         "  usage months                         List archived month files",
         "  usage daily [YYYY-MM-DD]             Daily usage",
+        "  env add-professor                    Add a new professor (no professor name needed first)",
+        "  env remove-professor <identifier>    Remove a configured professor",
+        "  env list                             List optional .env settings and their status",
+        "  env set <KEY> / env unset <KEY>       Set or remove an optional .env variable",
     ]
     if plugins:
         lines.append("\nPlugin commands: " + ", ".join(sorted(plugins)))
@@ -314,7 +380,11 @@ def _dispatch(args: argparse.Namespace, plugins: dict[str, ModePlugin]) -> None:
     Handles global commands (``--show-config``, ``--list-models``) first, since
     those don't require a professor name. Otherwise, confirms that both a
     professor name and a command were supplied before routing to the ``usage``
-    reporter or a plugin command (e.g., ``translate``, ``prompt``).
+    reporter or a plugin command (e.g., ``translate``, ``prompt``). The
+    built-in ``env`` command is the other exception to "a professor name is
+    required" — you need it precisely when no professor is configured yet,
+    so it's exempted the same way a plugin can opt out via
+    ``requires_professor = False`` (see ``webui`` for an example).
 
     Args:
         args: The object holding all parsed command-line flags for the current
@@ -336,7 +406,7 @@ def _dispatch(args: argparse.Namespace, plugins: dict[str, ModePlugin]) -> None:
     # requires_professor = False on its plugin object. Every other plugin —
     # including ones that don't define this attribute at all — still
     # requires a professor name, which is why this defaults to True.
-    command_requires_professor = getattr(
+    command_requires_professor = args.command != "env" and getattr(
         plugins.get(args.command), "requires_professor", True
     )
 
@@ -356,7 +426,7 @@ def _dispatch(args: argparse.Namespace, plugins: dict[str, ModePlugin]) -> None:
             + "\n\nRun 'python main.py --help' for full usage information."
         )
 
-    if args.command == 'usage':
+    if args.command in ('usage', 'env'):
         handle_info_commands(args)
     elif args.command in plugins:
         plugins[args.command].run(
@@ -393,6 +463,11 @@ def _insert_professor_placeholder_if_needed(
     empty string is converted back to ``None`` after parsing (see
     ``main()``) — callers never see the placeholder.
 
+    ``env`` needs the same treatment even though it isn't a plugin — it's
+    a built-in command, but one that (like ``webui``) never requires a
+    professor name, and for the same reason ``webui`` doesn't: it needs to
+    work before any professor exists yet (``env add-professor``).
+
     Args:
         argv: The raw command-line arguments, not including the program
               name (i.e. ``sys.argv[1:]``).
@@ -406,6 +481,8 @@ def _insert_professor_placeholder_if_needed(
     """
     if not argv:
         return argv
+    if argv[0] == "env":
+        return [""] + argv
     plugin = plugins.get(argv[0])
     if plugin is not None and not getattr(plugin, "requires_professor", True):
         return [""] + argv

@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from src.cli import create_argument_parser
+from src.cli import _insert_professor_placeholder_if_needed, create_argument_parser
 from src.runtime.plugin_loader import load_plugins
 
 _PLUGINS_DIR = Path(__file__).parent.parent / "plugins"
@@ -18,6 +18,22 @@ _PLUGINS_DIR = Path(__file__).parent.parent / "plugins"
 @pytest.fixture
 def parser():
     return create_argument_parser(load_plugins(_PLUGINS_DIR))
+
+
+@pytest.fixture
+def parse_professor_optional(parser):
+    """Parse argv the same way main() does: through the placeholder-insertion
+    workaround for professor-less commands (env, webui) before parse_args().
+    Calling parser.parse_args() directly on these argv would hit the same
+    argparse ambiguity _insert_professor_placeholder_if_needed() exists to
+    fix — see that function's docstring in src/cli.py.
+    """
+    plugins = load_plugins(_PLUGINS_DIR)
+
+    def _parse(argv):
+        return parser.parse_args(_insert_professor_placeholder_if_needed(argv, plugins))
+
+    return _parse
 
 
 # ---------------------------------------------------------------------------
@@ -140,6 +156,44 @@ class TestUsageSourcesSubcommand:
         ])
         assert args.professor == "heller"
         assert args.for_professor == "smith"
+
+
+class TestEnvSubcommand:
+
+    def test_env_requires_no_professor(self, parse_professor_optional):
+        # 'env' alone parses fine with no professor positional supplied.
+        args = parse_professor_optional(["env", "list"])
+        assert args.command == "env"
+        # main() converts the "" placeholder back to None after parse_args();
+        # parse_args() alone still returns the raw placeholder value.
+        assert args.professor == ""
+        assert args.env_subcommand == "list"
+
+    def test_env_add_professor_parses(self, parse_professor_optional):
+        args = parse_professor_optional(["env", "add-professor"])
+        assert args.env_subcommand == "add-professor"
+        assert args.name is None
+
+    def test_env_add_professor_name_flag(self, parse_professor_optional):
+        args = parse_professor_optional(["env", "add-professor", "--name", "Jeff Heller"])
+        assert args.name == "Jeff Heller"
+
+    def test_env_remove_professor_requires_identifier(self, parse_professor_optional):
+        args = parse_professor_optional(["env", "remove-professor", "heller"])
+        assert args.identifier == "heller"
+
+    def test_env_set_requires_key(self, parse_professor_optional):
+        args = parse_professor_optional(["env", "set", "WEBUI_SESSION_SECRET"])
+        assert args.key == "WEBUI_SESSION_SECRET"
+        assert args.generate is False
+
+    def test_env_set_generate_flag(self, parse_professor_optional):
+        args = parse_professor_optional(["env", "set", "WEBUI_SESSION_SECRET", "--generate"])
+        assert args.generate is True
+
+    def test_env_unset_requires_key(self, parse_professor_optional):
+        args = parse_professor_optional(["env", "unset", "WEBUI_SESSION_SECRET"])
+        assert args.key == "WEBUI_SESSION_SECRET"
 
 
 class TestGlobalFlags:
