@@ -218,24 +218,32 @@
   .spend-row { display: flex; justify-content: space-between; font-size: 0.85rem; padding: 0.2rem 0; }
   .empty { color: var(--text-muted); font-size: 0.85rem; text-align: center; margin-top: 2rem; }
 
-  /* ── Settings modal ──────────────────────────────────────────────────
+  /* ── Modal backdrop (shared by the settings modal and the job modal) ──
+     A single .modal-backdrop class rather than ID-scoped rules per modal —
+     job-modal-backdrop previously had no positioning rules of its own at
+     all (only #settings-modal-backdrop was ever styled as a fixed,
+     centered overlay), so it rendered as a plain block-level div and
+     became a stray grid item in <body>'s own CSS Grid layout instead of a
+     floating dialog — any later layout shift elsewhere on the page (the
+     sidebar or message list re-rendering) could visually bury or push it
+     out of view, which is what made it look like it had "closed itself."
      The settings page is embedded via a same-origin iframe rather than
      rebuilt as an in-page panel — same-origin means it automatically
      shares this page's localStorage, so /settings picks up the saved
      theme on its own with no cross-frame messaging needed. */
-  #settings-modal-backdrop {
+  .modal-backdrop {
     position: fixed; inset: 0; background: rgba(0, 0, 0, 0.4); z-index: 100;
     display: flex; align-items: center; justify-content: center;
     opacity: 0; transition: opacity 0.2s ease;
   }
-  #settings-modal-backdrop[hidden] { display: none; }
-  #settings-modal-backdrop.open { opacity: 1; }
+  .modal-backdrop[hidden] { display: none; }
+  .modal-backdrop.open { opacity: 1; }
   .modal-panel {
     width: min(760px, 92vw); height: min(85vh, 780px); background: var(--panel-bg);
     border-radius: 12px; overflow: hidden; display: flex; flex-direction: column;
     box-shadow: 0 20px 60px var(--shadow); transform: scale(0.97); transition: transform 0.2s ease;
   }
-  #settings-modal-backdrop.open .modal-panel { transform: scale(1); }
+  .modal-backdrop.open .modal-panel { transform: scale(1); }
   .modal-header {
     display: flex; align-items: center; justify-content: space-between;
     padding: 0.7rem 1rem; border-bottom: 1px solid var(--border); background: var(--panel-bg); flex: none;
@@ -416,7 +424,7 @@
     <div id="spend-by-model"></div>
   </div>
 
-  <div id="settings-modal-backdrop" hidden>
+  <div id="settings-modal-backdrop" class="modal-backdrop" hidden>
     <div class="modal-panel">
       <div class="modal-header">
         <h2 style="margin:0; text-transform:none; font-size:1rem; letter-spacing:normal;">Settings</h2>
@@ -433,7 +441,7 @@
        docs/webui-plugin-plan.md section 10. This is --dry-run made
        interactive: the right side re-renders after every change to a field
        on the left, without ever making a real API call. -->
-  <div id="job-modal-backdrop" hidden>
+  <div id="job-modal-backdrop" class="modal-backdrop" hidden>
     <div class="modal-panel job-modal-panel">
       <div class="modal-header">
         <h2 id="job-modal-title" style="margin:0; text-transform:none; font-size:1rem; letter-spacing:normal;">Plugin action</h2>
