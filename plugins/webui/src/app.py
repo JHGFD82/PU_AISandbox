@@ -59,6 +59,8 @@ from src.models import (
     DEFAULT_FALLBACK_MODEL,
     get_available_models,
     get_monthly_limit,
+    model_has_fixed_parameters,
+    model_omit_sampling_params,
     model_supports_vision,
 )
 from src.runtime.info_commands import list_optional_env_fields
@@ -136,6 +138,15 @@ class ChatBody(BaseModel):
     message: str
     model: str | None = None
     attachment: ChatAttachmentBody | None = None
+    # Sampling overrides — None means "leave the conversation's current
+    # value alone" (which itself may be None, meaning "use the model's
+    # default"), the same one-sided-update pattern as `model` just above.
+    # There's no separate "clear this override" signal yet; a professor
+    # clears one by re-opening the options popover and blanking the field,
+    # which the front end sends as an explicit None.
+    temperature: float | None = None
+    top_p: float | None = None
+    max_tokens: int | None = None
 
 
 class RenameConversationBody(BaseModel):
@@ -462,7 +473,19 @@ def create_app() -> FastAPI:
         _require_unlocked(request)
         _validated_professor(professor)
         names = sorted(get_available_models())
-        models = [{"name": m, "supports_vision": model_supports_vision(m)} for m in names]
+        models = [
+            {
+                "name": m,
+                "supports_vision": model_supports_vision(m),
+                # Whether this model accepts temperature/top-p at all — some
+                # reasoning models reject them entirely (see
+                # model_has_fixed_parameters's docstring). The front end
+                # uses this to hide/disable those two controls rather than
+                # let a professor set them and have the request fail.
+                "accepts_sampling_params": not (model_has_fixed_parameters(m) or model_omit_sampling_params(m)),
+            }
+            for m in names
+        ]
         default = DEFAULT_FALLBACK_MODEL if DEFAULT_FALLBACK_MODEL in names else (names[0] if names else None)
         return {"models": models, "default": default}
 
@@ -631,6 +654,29 @@ def create_app() -> FastAPI:
         languages.sort(key=lambda lang: lang["name"])
         return {"languages": languages}
 
+    @app.get("/api/plugin-actions/{action_id}/extension-fields")
+    async def api_plugin_action_extension_fields(request: Request, action_id: str, target_language: str = ""):
+        """List any extra composer fields a language-extension plugin contributes for one destination language.
+
+        See ``ExtensionUiHooks``'s docstring (``src/runtime/ui_action.py``)
+        and ``docs/webui-plugin-plan.md`` section 10: a language-extension
+        plugin (e.g. an East-Asian translation extension) never gets its
+        own composer entry, but can still register extra fields that appear
+        as a subsection once its language is picked as the destination —
+        this is the endpoint the composer polls (on every destination-
+        language change) to know what to render. ``action_id`` is accepted
+        for symmetry with the sibling ``/preview`` route but not otherwise
+        used — the registry is keyed by language token, not by action,
+        since a future non-translation action could use the same
+        mechanism. Always returns an empty list (never an error) when no
+        extension is installed for the given language, which is the normal
+        case for most installations.
+        """
+        _require_unlocked(request)
+        from src.runtime.ui_action import get_extension_ui_fields
+        fields = get_extension_ui_fields(target_language)
+        return {"fields": [asdict(f) for f in fields]}
+
     @app.post("/api/plugin-actions/{action_id}/preview")
     async def api_plugin_action_preview(request: Request, action_id: str):
         """Build the live system/user prompt preview for one composer action's form.
@@ -770,6 +816,15 @@ def create_app() -> FastAPI:
             )
         if body.model:
             conv.model = body.model
+        # Unlike `model` above, these three are applied unconditionally,
+        # not gated on truthiness — the options popover always sends the
+        # sampling values it currently shows (any of which may legitimately
+        # be None, meaning "no override, use the model's default"), so this
+        # is how a professor clears a previously-set override rather than
+        # only ever being able to add one.
+        conv.temperature = body.temperature
+        conv.top_p = body.top_p
+        conv.max_tokens = body.max_tokens
 
         # An attached document's text rides along in api_content (what the
         # model actually reads) rather than content (what the transcript
@@ -837,7 +892,10 @@ def create_app() -> FastAPI:
 
             final: dict | None = None
             try:
-                sandbox = SandboxProcessor(professor, model=conv.model)
+                sandbox = SandboxProcessor(
+                    professor, model=conv.model,
+                    temperature=conv.temperature, top_p=conv.top_p, max_tokens=conv.max_tokens,
+                )
                 for event in sandbox.chat_service.stream_message(conv.api_messages()):
                     if event["type"] == "delta":
                         yield f"data: {json.dumps(event)}\n\n"

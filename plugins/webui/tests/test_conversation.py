@@ -40,6 +40,31 @@ class TestConversationRoundTrip:
         assert restored.id == conv.id
         assert restored.messages[0].content == "hi"
         assert restored.compacted_summary is None
+        assert restored.temperature is None
+        assert restored.top_p is None
+        assert restored.max_tokens is None
+
+    def test_sampling_overrides_round_trip(self):
+        conv = Conversation(
+            id="c_1", title="Test", created_at="t", updated_at="t", model="gpt-4o",
+            temperature=0.4, top_p=0.9, max_tokens=2048,
+        )
+        restored = Conversation.from_dict(conv.to_dict())
+        assert restored.temperature == 0.4
+        assert restored.top_p == 0.9
+        assert restored.max_tokens == 2048
+
+    def test_sampling_overrides_default_none_for_old_records(self):
+        # A conversation file saved before these fields existed has none of
+        # these keys at all — from_dict must not raise on their absence.
+        data = {
+            "id": "c_1", "title": "Test", "created_at": "t", "updated_at": "t",
+            "model": "gpt-4o", "messages": [],
+        }
+        restored = Conversation.from_dict(data)
+        assert restored.temperature is None
+        assert restored.top_p is None
+        assert restored.max_tokens is None
 
     def test_api_messages_shape(self):
         conv = Conversation(

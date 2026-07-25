@@ -329,25 +329,76 @@ def _run_job(
         return
 
     job_store.set_status(job.id, "done")
-    conv = conversation_store.load(job.conversation_id)
-    if conv is not None:
-        conv.messages.append(conversation.Message(
-            role="assistant",
-            content=result.summary,
-            timestamp=datetime.now().isoformat(),
-            kind="job_result",
-            job_id=job.id,
-            output_filename=result.output_filename,
-            output_path=result.output_path,
-        ))
-        conv.active_job_id = None
-        if conv.title == "New conversation":
-            # No AI-generated title for a job-only conversation — unlike
-            # chat's generate_title(), that would be a whole extra billed
-            # API call just to name something the job's own summary
-            # already describes in plain language.
-            conv.title = result.summary.strip()[:60] or conv.title
-        conversation_store.save(conv)
+    try:
+        conv = conversation_store.load(job.conversation_id)
+        if conv is not None:
+            conv.messages.append(conversation.Message(
+                role="assistant",
+                content=result.summary,
+                timestamp=datetime.now().isoformat(),
+                kind="job_result",
+                job_id=job.id,
+                output_filename=result.output_filename,
+                output_path=result.output_path,
+                # Same fields a chat turn's reply carries — reused here
+                # (rather than left None) so the webui's existing "model ·
+                # cost" meta line under an assistant bubble also shows up
+                # for a finished job, letting a professor see whether e.g.
+                # a translation's page-by-page calls used their full
+                # response budget. None for a plugin that doesn't report
+                # usage on its UiJobResult.
+                prompt_tokens=result.prompt_tokens,
+                completion_tokens=result.completion_tokens,
+                cost=result.cost,
+            ))
+            conv.active_job_id = None
+            if conv.title == "New conversation":
+                # No AI-generated title for a job-only conversation — unlike
+                # chat's generate_title(), that would be a whole extra billed
+                # API call just to name something the job's own summary
+                # already describes in plain language.
+                conv.title = result.summary.strip()[:60] or conv.title
+            conversation_store.save(conv)
+    except Exception as e:
+        # The plugin's own work already finished successfully by this point
+        # (run_ui_action returned a result) — this only covers a failure
+        # while *recording* that result. Without this, an error here (a
+        # disk hiccup, a permissions issue, anything) would propagate out of
+        # this background thread silently: active_job_id would never get
+        # cleared, no job_result would ever appear, and no job_error would
+        # appear either, since that path only runs when run_ui_action itself
+        # raises. The conversation would stay locked forever with nothing
+        # to show for it and nothing in the logs pointing at why — exactly
+        # the "results never showed up" symptom this closes off.
+        logger.error(
+            "Job %s (%s) succeeded but recording its result failed: %s",
+            job.id, job.action_id, e, exc_info=True,
+        )
+        job_store.set_status(job.id, "error", error=f"Result recording failed: {e}")
+        try:
+            conv = conversation_store.load(job.conversation_id)
+            if conv is not None:
+                conv.messages.append(conversation.Message(
+                    role="assistant",
+                    content=(
+                        f"The {job.action_id} job finished, but saving its result to this "
+                        f"conversation failed ({e}). The output file may still exist on the "
+                        "server even though it isn't linked here."
+                    ),
+                    timestamp=datetime.now().isoformat(),
+                    kind="job_error",
+                    job_id=job.id,
+                ))
+                conv.active_job_id = None
+                conversation_store.save(conv)
+        except Exception:
+            # Two independent save failures in a row — nothing more we can
+            # safely do without risking further corruption. The conversation
+            # stays locked, but this is now loud in the logs at least.
+            logger.error(
+                "Job %s (%s): also failed while trying to record that failure.",
+                job.id, job.action_id, exc_info=True,
+            )
 
 
 def sweep_stale_jobs(professors: list[str], conversation_store_factory) -> int:

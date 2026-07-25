@@ -92,6 +92,22 @@ class TestRunUiAction:
         assert "English" in result.summary
         fake_sandbox.process_image.assert_called_once()
 
+    def test_result_includes_session_token_usage(self, monkeypatch, plugin_module, tmp_path):
+        fake_sandbox = self._patch_sandbox(monkeypatch, process_image_side_effect=self._write_output_file)
+        fake_sandbox.token_tracker.get_session_usage.return_value = {
+            "prompt_tokens": 800, "completion_tokens": 150, "total_tokens": 950, "total_cost": 0.021,
+        }
+        src_file = tmp_path / "scan.jpg"
+        src_file.write_bytes(b"fake")
+
+        result = plugin_module.plugin.run_ui_action(
+            fields={"target_language": "en", "file_path": str(src_file), "file_name": "scan.jpg"},
+            professor="fake", model=None, on_progress=None, output_dir=str(tmp_path / "job_output"),
+        )
+        assert result.prompt_tokens == 800
+        assert result.completion_tokens == 150
+        assert result.cost == 0.021
+
     def test_folder_input_delegates_to_process_image_folder_with_progress(self, monkeypatch, plugin_module, tmp_path):
         fake_sandbox = self._patch_sandbox(monkeypatch, process_folder_side_effect=self._write_output_file)
         folder = tmp_path / "scans"
@@ -141,6 +157,39 @@ class TestRunUiAction:
         with pytest.raises(CLIError, match="Invalid target language"):
             plugin_module.plugin.run_ui_action(
                 fields={"target_language": "not-a-real-code", "file_path": str(src_file), "file_name": "scan.jpg"},
+                professor="fake", model=None, on_progress=None, output_dir=str(tmp_path / "out"),
+            )
+
+    def test_sampling_params_passed_through_to_sandbox(self, monkeypatch, plugin_module, tmp_path):
+        fake_sandbox = MagicMock()
+        fake_sandbox.image_processor_service = MagicMock()
+        fake_sandbox.process_image.side_effect = self._write_output_file
+        sandbox_cls = MagicMock(return_value=fake_sandbox)
+        monkeypatch.setattr("src.runtime.sandbox_processor.SandboxProcessor", sandbox_cls)
+        src_file = tmp_path / "scan.jpg"
+        src_file.write_bytes(b"fake")
+
+        plugin_module.plugin.run_ui_action(
+            fields={
+                "target_language": "en", "file_path": str(src_file), "file_name": "scan.jpg",
+                "temperature": "0.2", "top_p": "0.8", "max_tokens": "1024",
+            },
+            professor="fake", model="gpt-4o", on_progress=None, output_dir=str(tmp_path / "out"),
+        )
+        sandbox_cls.assert_called_once_with(
+            "fake", model="gpt-4o", temperature=0.2, top_p=0.8, max_tokens=1024,
+        )
+
+    def test_invalid_max_tokens_raises_cli_error(self, monkeypatch, plugin_module, tmp_path):
+        self._patch_sandbox(monkeypatch, process_image_side_effect=self._write_output_file)
+        src_file = tmp_path / "scan.jpg"
+        src_file.write_bytes(b"fake")
+        with pytest.raises(CLIError, match="max tokens"):
+            plugin_module.plugin.run_ui_action(
+                fields={
+                    "target_language": "en", "file_path": str(src_file), "file_name": "scan.jpg",
+                    "max_tokens": "a lot",
+                },
                 professor="fake", model=None, on_progress=None, output_dir=str(tmp_path / "out"),
             )
 

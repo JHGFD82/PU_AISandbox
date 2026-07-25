@@ -413,6 +413,11 @@ class TranscriptionPlugin:
           readable output filename.
         - ``notes``: optional free text, applied to both the system and
           user prompts (the same effect as the CLI's ``-nb`` flag).
+        - ``temperature`` / ``top_p`` / ``max_tokens``: optional sampling
+          overrides, same as the CLI's ``-t``/``-T``/``-M`` flags. The web
+          UI only shows these controls for models that accept them (see
+          ``src.models.catalog.model_has_fixed_parameters``); blank means
+          "use the model's default."
 
         Args:
             fields: The submitted form's values, keyed by ``UiField.name``.
@@ -450,7 +455,31 @@ class TranscriptionPlugin:
         file_name = fields.get("file_name") or os.path.basename(file_path)
         notes = (fields.get("notes") or "").strip() or None
 
-        sandbox = SandboxProcessor(professor, model=model)
+        def _to_float(value, field_label: str) -> Optional[float]:
+            raw = str(value if value is not None else "").strip()
+            if not raw:
+                return None
+            try:
+                return float(raw)
+            except ValueError:
+                raise CLIError(f"Invalid {field_label} '{raw}' — must be a number.") from None
+
+        def _to_int(value, field_label: str) -> Optional[int]:
+            raw = str(value if value is not None else "").strip()
+            if not raw:
+                return None
+            try:
+                return int(raw)
+            except ValueError:
+                raise CLIError(f"Invalid {field_label} '{raw}' — must be a whole number.") from None
+
+        temperature = _to_float(fields.get("temperature"), "temperature")
+        top_p = _to_float(fields.get("top_p"), "top-p")
+        max_tokens = _to_int(fields.get("max_tokens"), "max tokens")
+
+        sandbox = SandboxProcessor(
+            professor, model=model, temperature=temperature, top_p=top_p, max_tokens=max_tokens,
+        )
         if notes:
             sandbox.image_processor_service.system_note = notes
             sandbox.image_processor_service.user_note = notes
@@ -470,7 +499,13 @@ class TranscriptionPlugin:
         if not os.path.exists(output_path):
             raise CLIError("Transcription finished but no output file was produced.")
 
-        return UiJobResult(output_path=output_path, output_filename=output_filename, summary=summary)
+        session_usage = sandbox.token_tracker.get_session_usage()
+        return UiJobResult(
+            output_path=output_path, output_filename=output_filename, summary=summary,
+            prompt_tokens=session_usage["prompt_tokens"],
+            completion_tokens=session_usage["completion_tokens"],
+            cost=session_usage["total_cost"],
+        )
 
     def preview_ui_action(
         self,

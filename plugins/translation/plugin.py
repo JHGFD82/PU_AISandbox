@@ -79,6 +79,33 @@ directory and adapt it as follows:
      translation rather than the source (see its docstring below for
      details).
 
+  8. Optionally call ``register_extension_ui_hooks(token, fields, apply)``
+     (from ``src.runtime.ui_action``) at import time to add your own
+     field(s) to the web UI composer's job modal — e.g. a checkbox like
+     "Use Kanbun reading conventions" — shown as a subsection that appears
+     once a professor picks your language as the *destination* in the
+     composer, the same trigger point as ``get_peer_guidance`` above but for
+     form fields instead of prompt text. See
+     ``ExtensionUiHooks``'s docstring in ``src/runtime/ui_action.py`` for
+     the exact shape, and ``docs/webui-plugin-plan.md`` section 10 for the
+     full design and reasoning (a plain global registry, not routed through
+     ``DispatchPlugin`` — see that section for why). Example::
+
+         from src.runtime.ui_action import UiField, register_extension_ui_hooks
+
+         def _apply_kanbun(sandbox, fields):
+             if str(fields.get("kanbun", "")).strip().lower() in ("true", "1", "on", "yes"):
+                 sandbox.translation_service.variant_notes.append(KANBUN_NOTE)
+
+         register_extension_ui_hooks(
+             token="jp",
+             fields=[UiField(
+                 name="kanbun", label="Use Kanbun reading conventions",
+                 kind="checkbox", required=False, group="Japanese (kanbun)",
+             )],
+             apply=_apply_kanbun,
+         )
+
 How plugin-owned service files stay importable
 -----------------------------------------------
 ``_register()`` (called once, at import time, below) loads each shared
@@ -187,7 +214,10 @@ from src.processors.json_processor import JsonProcessor           # noqa: E402
 from src.processors.markdown_processor import MarkdownProcessor   # noqa: E402
 from src.processors.pdf_processor import generate_process_text    # noqa: E402
 from src.processors.txt_processor import TxtProcessor             # noqa: E402
-from src.runtime.ui_action import ProgressCallback, UiAction, UiField, UiJobResult, UiPromptPreview  # noqa: E402
+from src.runtime.ui_action import (  # noqa: E402
+    ProgressCallback, UiAction, UiField, UiJobResult, UiPromptPreview,
+    apply_extension_ui_hooks,
+)
 from src.services.constants import DEFAULT_PARALLEL_WORKERS       # noqa: E402
 from src.settings import DEFAULT_PAGE_SIZE                        # noqa: E402
 
@@ -735,6 +765,23 @@ class TranslationPlugin:
           field."
         - ``notes``: optional free text, applied to both the system and
           user prompts (the same effect as the CLI's ``-nb``/note-both flag).
+        - ``output_format``: optional, one of ``'same'`` (default —
+          ``.docx`` in, ``.docx`` out; anything else in, ``.txt`` out),
+          ``'docx'``, ``'pdf'``, ``'txt'``, or ``'md'`` — mirrors ``-o``'s
+          extension-driven format choice on the CLI.
+        - ``preserve_tables``, ``toc``, ``preserve_media``, ``spread``:
+          optional checkboxes, same meaning as the matching CLI flags
+          (``--preserve-tables``, ``--toc``, ``--preserve-media``,
+          ``--spread``).
+        - ``workers``: optional whole number of parallel translation
+          workers, same as ``-w``/``--workers`` (default 1).
+        - ``font`` / ``font_size``: optional, same as ``-f``/``--font`` and
+          ``--font-size`` (Word/PDF output only).
+        - ``temperature`` / ``top_p`` / ``max_tokens``: optional sampling
+          overrides, same as the CLI's ``-t``/``-T``/``-M`` flags. The web
+          UI only shows these controls for models that accept them (see
+          ``src.models.catalog.model_has_fixed_parameters``); blank means
+          "use the model's default."
 
         Args:
             fields: The submitted form's values, keyed by ``UiField.name``.
@@ -755,7 +802,8 @@ class TranslationPlugin:
 
         Raises:
             CLIError: If a required field is missing, a language code isn't
-                recognized, or the underlying translation call fails.
+                recognized, a numeric field isn't a valid number, or the
+                underlying translation call fails.
         """
         import os
 
@@ -768,52 +816,123 @@ class TranslationPlugin:
                 raise CLIError(f"Invalid {field_label} '{code}'. Use one of: {valid}.")
             return LANGUAGE_MAP[normalized]
 
+        def _to_bool(value) -> bool:
+            return str(value if value is not None else "").strip().lower() in ("true", "1", "on", "yes")
+
+        def _to_int(value, field_label: str) -> Optional[int]:
+            raw = str(value if value is not None else "").strip()
+            if not raw:
+                return None
+            try:
+                return int(raw)
+            except ValueError:
+                raise CLIError(f"Invalid {field_label} '{raw}' — must be a whole number.") from None
+
+        def _to_float(value, field_label: str) -> Optional[float]:
+            raw = str(value if value is not None else "").strip()
+            if not raw:
+                return None
+            try:
+                return float(raw)
+            except ValueError:
+                raise CLIError(f"Invalid {field_label} '{raw}' — must be a number.") from None
+
+        target_code_raw = fields.get("target_language", "")
         source_language = _resolve_language(fields.get("source_language", ""), "source language")
-        target_language = _resolve_language(fields.get("target_language", ""), "target language")
+        target_language = _resolve_language(target_code_raw, "target language")
 
         file_path = fields.get("file_path")
         if not file_path:
             raise CLIError("No file was attached to this translate job.")
         file_name = fields.get("file_name") or os.path.basename(file_path)
 
-        scanned = str(fields.get("scanned", "")).strip().lower() in ("true", "1", "on", "yes")
+        scanned = _to_bool(fields.get("scanned"))
+        spread = _to_bool(fields.get("spread"))
+        preserve_tables = _to_bool(fields.get("preserve_tables"))
+        toc = _to_bool(fields.get("toc"))
+        preserve_media = _to_bool(fields.get("preserve_media"))
         page_nums = (fields.get("page_nums") or "").strip() or None
         notes = (fields.get("notes") or "").strip() or None
+        font = (fields.get("font") or "").strip() or None
+        font_size = _to_int(fields.get("font_size"), "font size")
+        workers = _to_int(fields.get("workers"), "number of parallel workers") or 1
+        if workers < 1:
+            raise CLIError("Number of parallel workers must be at least 1.")
+        temperature = _to_float(fields.get("temperature"), "temperature")
+        top_p = _to_float(fields.get("top_p"), "top-p")
+        max_tokens = _to_int(fields.get("max_tokens"), "max tokens")
 
-        sandbox = SandboxProcessor(professor, model=model)
+        sandbox = SandboxProcessor(
+            professor, model=model, temperature=temperature, top_p=top_p, max_tokens=max_tokens,
+        )
         if notes:
             sandbox.translation_service.system_note = notes
             sandbox.translation_service.user_note = notes
             sandbox.image_translation_service.system_note = notes
             sandbox.image_translation_service.user_note = notes
+        if preserve_tables:
+            sandbox.translation_service.tables = True
+            sandbox.image_translation_service.tables = True
+        if toc:
+            sandbox.translation_service.toc = True
+        # A language-extension plugin's own composer field (e.g.
+        # translation-ea's Kanbun checkbox) — registered separately, not
+        # part of this plugin's own declared fields, so it's applied
+        # through the shared registry rather than read directly here. A
+        # no-op when nothing is registered for this destination token
+        # (the normal case without that extension installed).
+        apply_extension_ui_hooks(target_code_raw, sandbox, fields)
 
         base_name = os.path.splitext(file_name)[0] or "document"
-        # Only a .docx source gets a formatted .docx output (matching
-        # _execute_translate's own output_is_docx gate for table-aware
-        # output) — everything else is a plain-text result, the same safe
-        # default the CLI falls back to without an explicit -o.
-        out_ext = ".docx" if file_name.lower().endswith(".docx") else ".txt"
+        requested_format = (fields.get("output_format") or "same").strip().lower()
+        _format_ext = {"docx": ".docx", "pdf": ".pdf", "txt": ".txt", "md": ".md"}
+        if requested_format in _format_ext:
+            out_ext = _format_ext[requested_format]
+        else:
+            # "same" (or anything unrecognized) falls back to the existing
+            # default: a .docx source gets a formatted .docx output,
+            # everything else gets plain text — matching
+            # _execute_translate's own output_is_docx gate.
+            out_ext = ".docx" if file_name.lower().endswith(".docx") else ".txt"
+        if preserve_media and out_ext != ".docx":
+            raise CLIError(
+                "Preserving embedded images requires a Word (.docx) output format."
+            )
+
         output_filename = f"{base_name}_{source_language}_to_{target_language}{out_ext}"
         output_path = os.path.join(output_dir, output_filename)
         os.makedirs(output_dir, exist_ok=True)
+
+        opts = OutputOptions(
+            output_file=output_path,
+            custom_font=font,
+            preserve_media=preserve_media,
+            font_size=font_size,
+        )
 
         sandbox.translate_document(
             file_path,
             source_language,
             target_language,
             page_nums=page_nums,
-            opts=OutputOptions(output_file=output_path),
+            opts=opts,
             scanned=scanned,
+            workers=workers,
+            spread=spread,
             on_progress=on_progress,
         )
 
         if not os.path.exists(output_path):
             raise CLIError("Translation finished but no output file was produced.")
 
+        session_usage = sandbox.token_tracker.get_session_usage()
         return UiJobResult(
             output_path=output_path,
             output_filename=output_filename,
             summary=f"Translated {file_name} from {source_language} to {target_language}.",
+            prompt_tokens=session_usage["prompt_tokens"],
+            completion_tokens=session_usage["completion_tokens"],
+            cost=session_usage["total_cost"],
         )
 
     def preview_ui_action(
@@ -855,6 +974,8 @@ class TranslationPlugin:
         target_language = _lang_name(fields.get("target_language"))
         scanned = str(fields.get("scanned", "")).strip().lower() in ("true", "1", "on", "yes")
         notes = (fields.get("notes") or "").strip() or None
+        preserve_tables = str(fields.get("preserve_tables", "")).strip().lower() in ("true", "1", "on", "yes")
+        toc = str(fields.get("toc", "")).strip().lower() in ("true", "1", "on", "yes")
 
         sandbox = SandboxProcessor(professor, model=model)
         if notes:
@@ -862,6 +983,15 @@ class TranslationPlugin:
             sandbox.translation_service.user_note = notes
             sandbox.image_translation_service.system_note = notes
             sandbox.image_translation_service.user_note = notes
+        if preserve_tables:
+            sandbox.translation_service.tables = True
+            sandbox.image_translation_service.tables = True
+        if toc:
+            sandbox.translation_service.toc = True
+        apply_extension_ui_hooks(fields.get("target_language"), sandbox, fields)
+
+        requested_format = (fields.get("output_format") or "").strip().lower()
+        output_format = requested_format if requested_format in ("docx", "pdf", "txt", "md") else "console"
 
         if scanned:
             svc = sandbox.image_translation_service
@@ -870,7 +1000,9 @@ class TranslationPlugin:
         else:
             svc = sandbox.translation_service
             placeholder = generate_process_text("", f"[{source_language} document text]", "")
-            sys_p, usr_p = svc.build_prompts(placeholder, source_language, target_language)
+            sys_p, usr_p = svc.build_prompts(
+                placeholder, source_language, target_language, output_format=output_format,
+            )
             note = None
 
         return UiPromptPreview(
@@ -890,15 +1022,57 @@ ui_action = UiAction(
     label="Translate a document",
     command="translate",
     fields=[
-        UiField(name="source_language", label="Source language", kind="language"),
-        UiField(name="target_language", label="Target language", kind="language"),
-        UiField(name="file", label="Document", kind="file"),
-        UiField(name="scanned", label="Scanned PDF (render pages as images)", kind="checkbox", required=False),
+        UiField(name="source_language", label="Source language", kind="language", group="Document"),
+        UiField(name="target_language", label="Target language", kind="language", group="Document"),
+        UiField(name="file", label="Document", kind="file", group="Document"),
         UiField(
             name="page_nums", label="Page range (e.g. 8-12 — leave blank for the whole document)",
-            kind="text", required=False,
+            kind="text", required=False, group="Document",
         ),
-        UiField(name="notes", label="Notes for the model", kind="text", required=False),
+        UiField(
+            name="scanned", label="Scanned PDF (render pages as images)", kind="checkbox",
+            required=False, group="Scanned / images",
+        ),
+        UiField(
+            name="spread", label="Two-page spread (facing pages scanned together)", kind="checkbox",
+            required=False, group="Scanned / images",
+        ),
+        UiField(
+            name="output_format", label="Output format", kind="select", required=False,
+            choices=[
+                {"value": "same", "label": "Same as source document (default)"},
+                {"value": "docx", "label": "Word (.docx)"},
+                {"value": "pdf", "label": "PDF"},
+                {"value": "txt", "label": "Plain text (.txt)"},
+                {"value": "md", "label": "Markdown (.md)"},
+            ],
+            group="Output",
+        ),
+        UiField(
+            name="preserve_tables", label="Preserve tables (format tabular data as tables)",
+            kind="checkbox", required=False, group="Output",
+        ),
+        UiField(
+            name="toc", label="Document has a table of contents (normalize dot leaders)",
+            kind="checkbox", required=False, group="Output",
+        ),
+        UiField(
+            name="preserve_media", label="Preserve embedded images (Word-to-Word only)",
+            kind="checkbox", required=False, group="Output",
+        ),
+        UiField(
+            name="font", label="Custom font name (must already be installed in fonts/)",
+            kind="text", required=False, group="Output",
+        ),
+        UiField(
+            name="font_size", label="Body font size in points (default 9)",
+            kind="text", required=False, group="Output",
+        ),
+        UiField(
+            name="workers", label="Parallel workers (1 = sequential with live progress)",
+            kind="text", required=False, group="Performance",
+        ),
+        UiField(name="notes", label="Notes for the model", kind="text", required=False, group="Notes"),
     ],
     progress_verb="Translating",
 )

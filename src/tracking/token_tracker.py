@@ -392,6 +392,21 @@ class TokenTracker:
 
         self._lock = threading.Lock()
 
+        # Running total for calls made through this one TokenTracker
+        # instance specifically — separate from the persisted monthly/daily/
+        # all-time totals above, which mix in everything else this
+        # professor has ever done. Since a fresh TokenTracker is created
+        # per CLI run and per webui request/background job (see
+        # SandboxProcessor.__init__), this is exactly "how much this one
+        # run has spent so far" — e.g. so a multi-page translate job can
+        # report its total token spend without diffing before/after
+        # snapshots of the shared monthly file (which would be racy against
+        # other concurrent activity for the same professor).
+        self._session_lock = threading.Lock()
+        self.session_usage: dict[str, Any] = {
+            "prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "total_cost": 0.0,
+        }
+
         if self.source_mode == "shared-write":
             self._rollover_closed_shared_months()
             self._refresh_shared_usage_data()
@@ -687,7 +702,9 @@ class TokenTracker:
             for this call.
         """
         if self.source_mode == "shared-write":
-            return self._record_usage_shared(model, prompt_tokens, completion_tokens, total_tokens, requested_model)
+            usage = self._record_usage_shared(model, prompt_tokens, completion_tokens, total_tokens, requested_model)
+            self._accumulate_session_usage(usage)
+            return usage
 
         with self._lock:
             timestamp = datetime.now().isoformat()
@@ -723,7 +740,43 @@ class TokenTracker:
             self.usage_data["session_history"].append(asdict(usage))
             self._save_usage_data()
 
+        self._accumulate_session_usage(usage)
         return usage
+
+    def _accumulate_session_usage(self, usage: TokenUsage) -> None:
+        """Add one API call's usage to this instance's running session total.
+
+        Args:
+            usage: The ``TokenUsage`` just recorded, from either code path
+                   in ``record_usage()``.
+        """
+        with self._session_lock:
+            self.session_usage["prompt_tokens"] += usage.prompt_tokens
+            self.session_usage["completion_tokens"] += usage.completion_tokens
+            self.session_usage["total_tokens"] += usage.total_tokens
+            self.session_usage["total_cost"] += usage.total_cost
+
+    def get_session_usage(self) -> dict[str, Any]:
+        """Return the running token/cost total for everything recorded through this TokenTracker instance.
+
+        Unlike ``get_monthly_usage()``/``get_all_time_usage()``, this has
+        nothing to do with calendar months or this professor's overall
+        history — it's scoped to this one instance's lifetime, which in
+        practice means "this one CLI run" or "this one webui request/
+        background job" (see ``SandboxProcessor.__init__``, which creates
+        exactly one ``TokenTracker`` per run). Useful for reporting how much
+        a single multi-call operation (e.g. translating a multi-page
+        document, one API call per page) spent in total, without needing to
+        diff before/after snapshots of the shared persisted totals.
+
+        Returns:
+            A dict with ``'prompt_tokens'``, ``'completion_tokens'``,
+            ``'total_tokens'`` (all ``int``), and ``'total_cost'``
+            (``float``) — all ``0``/``0.0`` if nothing has been recorded
+            yet through this instance.
+        """
+        with self._session_lock:
+            return dict(self.session_usage)
 
     def get_daily_usage(self, date: str | None = None) -> dict[str, Any]:
         """Return the token totals for a single day from the current month's usage file.

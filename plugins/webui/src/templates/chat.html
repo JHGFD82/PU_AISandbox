@@ -177,6 +177,18 @@
   .model-add-popover input { padding: 0.4rem; font-size: 0.82rem; }
   .model-add-popover button { padding: 0.4rem 0.6rem; font-size: 0.8rem; flex: none; }
 
+  .sampling-options { position: relative; }
+  .sampling-options-popover {
+    position: absolute; top: calc(100% + 4px); right: 0; width: 240px;
+    background: var(--panel-bg); border: 1px solid var(--border); border-radius: 8px;
+    box-shadow: 0 6px 18px var(--shadow); z-index: 20; padding: 0.7rem 0.8rem;
+  }
+  .sampling-options-popover[hidden] { display: none; }
+  .sampling-options-popover .job-field { margin-bottom: 0.7rem; }
+  .sampling-options-popover .job-field label { font-size: 0.76rem; }
+  .sampling-options-footer { display: flex; justify-content: flex-end; gap: 0.4rem; margin-top: 0.3rem; }
+  .sampling-options-footer button { padding: 0.4rem 0.6rem; font-size: 0.8rem; }
+
   #messages { flex: 1; overflow-y: auto; padding: 1.5rem; }
   .msg { position: relative; max-width: 70%; margin-bottom: 1rem; padding: 0.7rem 0.9rem; border-radius: 10px; line-height: 1.4; white-space: pre-wrap; font-size: 0.92rem; }
   .msg.user { background: var(--orange); color: white; margin-left: auto; }
@@ -314,11 +326,27 @@
      independently scrollable. */
   .job-modal-panel { width: min(1100px, 95vw); height: min(88vh, 820px); }
   .job-modal-body { flex: 1; display: flex; min-height: 0; }
-  .job-options { flex: 0 0 280px; overflow-y: auto; padding: 1rem; border-right: 1px solid var(--border); }
-  .job-field { margin-bottom: 0.9rem; }
-  .job-field label { display: block; font-size: 0.8rem; font-weight: 600; margin-bottom: 0.3rem; }
+  .job-options { flex: 0 0 300px; overflow-y: auto; padding: 1.1rem 1.2rem; border-right: 1px solid var(--border); }
+  .job-field { margin-bottom: 1.15rem; }
+  .job-field label { display: block; font-size: 0.8rem; font-weight: 600; margin-bottom: 0.35rem; }
   .job-field-checkbox { display: flex; align-items: center; gap: 0.5rem; }
   .job-field-checkbox label { margin: 0; font-weight: 400; }
+  /* A group label reads as a section break in what would otherwise be one
+     long, dense column of fields — purely cosmetic (see UiField.group's
+     docstring), not a real fieldset. */
+  .job-field-group-label {
+    font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
+    color: var(--text-muted); margin: 1.4rem 0 0.7rem;
+  }
+  /* Scoped to a direct child of #job-options specifically (not any nested
+     container's first child) — the dynamic extension-fields subsection
+     (#job-extension-fields) is its own container inside #job-options, and
+     its first group header should keep the normal top margin as a visual
+     break from the plugin's own fields above it, not collapse to zero. */
+  #job-options > .job-field-group-label:first-child { margin-top: 0; }
+  .modal-header-actions { display: flex; align-items: center; gap: 0.15rem; }
+  .modal-header-actions .icon-btn { width: 30px; height: 30px; }
+  .modal-header-actions .icon-btn svg { width: 15px; height: 15px; }
   .job-preview { flex: 1; min-width: 0; display: flex; flex-direction: column; }
   .job-preview-pane { flex: 1; min-height: 0; display: flex; flex-direction: column; }
   .job-preview-pane + .job-preview-pane { border-top: 1px solid var(--border); }
@@ -420,6 +448,33 @@
             <button type="button" id="model-add-confirm">Use</button>
           </div>
         </div>
+        <div class="sampling-options" id="sampling-options">
+          <button type="button" class="icon-btn neutral" id="sampling-options-btn"
+                  title="Sampling options" aria-label="Temperature, top-p, and max-tokens options">
+            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="10" cy="10" r="2.6"/>
+              <path d="M10 2.2v2.1M10 15.7v2.1M17.8 10h-2.1M4.3 10H2.2M15.2 4.8l-1.5 1.5M6.3 13.7l-1.5 1.5M15.2 15.2l-1.5-1.5M6.3 6.3L4.8 4.8"/>
+            </svg>
+          </button>
+          <div class="sampling-options-popover" id="sampling-options-popover" hidden>
+            <div class="job-field" id="sampling-temperature-field">
+              <label for="sampling-temperature">Temperature (0.0–2.0)</label>
+              <input type="text" id="sampling-temperature" placeholder="Model default">
+            </div>
+            <div class="job-field" id="sampling-top-p-field">
+              <label for="sampling-top-p">Top-p (0.0–1.0)</label>
+              <input type="text" id="sampling-top-p" placeholder="Model default">
+            </div>
+            <div class="job-field">
+              <label for="sampling-max-tokens">Max response tokens</label>
+              <input type="text" id="sampling-max-tokens" placeholder="Model default">
+            </div>
+            <div class="sampling-options-footer">
+              <button type="button" class="secondary" id="sampling-options-clear">Clear</button>
+              <button type="button" id="sampling-options-done">Done</button>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
     <div id="messages"><div class="empty">Select or start a conversation.</div></div>
@@ -479,9 +534,20 @@
     <div class="modal-panel job-modal-panel">
       <div class="modal-header">
         <h2 id="job-modal-title" style="margin:0; text-transform:none; font-size:1rem; letter-spacing:normal;">Plugin action</h2>
-        <button type="button" class="icon-btn" id="job-modal-close" title="Close" aria-label="Close">
-          <svg viewBox="0 0 14 14"><path d="M1 1l12 12M13 1L1 13" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
-        </button>
+        <div class="modal-header-actions">
+          <button type="button" class="icon-btn neutral" id="job-modal-reset" title="Reset fields" aria-label="Reset all fields to blank">
+            <!-- Two arrows chasing each other in a circle, like a browser
+                 reload button — clearing the form back to blank, distinct
+                 from just closing it (which now preserves values). -->
+            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M4 9a6 6 0 0110.5-3.9M16 9a6 6 0 01-10.5 3.9"/>
+              <path d="M14.5 2.6v2.9h-2.9M5.5 17.4v-2.9h2.9"/>
+            </svg>
+          </button>
+          <button type="button" class="icon-btn" id="job-modal-close" title="Close" aria-label="Close">
+            <svg viewBox="0 0 14 14"><path d="M1 1l12 12M13 1L1 13" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+          </button>
+        </div>
       </div>
       <div class="job-modal-body">
         <div class="job-options" id="job-options"></div>
@@ -510,6 +576,21 @@ const state = {
   professor: null, conversationId: null, conversationModel: null, conversationHasMessages: false,
   models: [], defaultModel: null,
   pluginActions: [], languages: null, jobPollTimer: null, jobLocked: false, activeAction: null,
+  // The job modal's full field list for whichever action is open right now
+  // — the plugin's own declared fields plus the shared sampling fields this
+  // page adds on top (see samplingFieldsFor()) — kept in sync with what's
+  // actually rendered so collectJobFieldValues()/restore/reset don't need
+  // to duplicate that logic.
+  activeActionFields: null,
+  // Field values captured when the job modal is closed via the × button,
+  // Escape, or Cancel (not a successful submit or the Reset button) —
+  // keyed by action id, restored the next time that same action's modal is
+  // opened, so an accidental close doesn't lose what was typed.
+  jobFieldValues: {},
+  // This conversation's sampling overrides (temperature/top-p/max-tokens),
+  // shown in the topbar's tune popover and sent with every /api/chat call —
+  // see conv.temperature/top_p/max_tokens in conversation.py.
+  sampling: { temperature: null, top_p: null, max_tokens: null },
 };
 
 // ── Dark mode ────────────────────────────────────────────────────────────
@@ -590,6 +671,7 @@ function renderModelList() {
     opt.textContent = m.name;
     opt.addEventListener("click", () => {
       document.getElementById("model-field").value = m.name;
+      applySamplingVisibility();
       closeModelList();
     });
     list.appendChild(opt);
@@ -634,6 +716,7 @@ function closeModelAddPopover() { document.getElementById("model-add-popover").h
 function confirmModelAdd() {
   const val = document.getElementById("model-add-input").value.trim();
   if (val) document.getElementById("model-field").value = val;
+  applySamplingVisibility();
   closeModelAddPopover();
 }
 document.getElementById("model-add-btn").addEventListener("click", (e) => {
@@ -651,7 +734,67 @@ document.addEventListener("click", (e) => {
   if (!document.getElementById("model-combobox").contains(e.target)) closeModelList();
   if (!document.getElementById("model-add").contains(e.target)) closeModelAddPopover();
   if (!document.getElementById("plugin-action-wrap").contains(e.target)) closeActionPicker();
+  if (!document.getElementById("sampling-options").contains(e.target)) closeSamplingPopover();
   closeConvMenu();
+});
+
+// ── Sampling options (temperature/top-p/max-tokens) ─────────────────────────
+// Applies to the open conversation, persisted on it (see Conversation.
+// temperature/top_p/max_tokens) and sent with every /api/chat call — not a
+// one-off per-message setting. Temperature/top-p are hidden entirely for a
+// model that doesn't accept them (some reasoning models reject the request
+// outright — see GET /api/models's accepts_sampling_params), rather than
+// shown disabled with no explanation.
+function applySamplingVisibility() {
+  const modelName = document.getElementById("model-field").value || state.defaultModel;
+  const model = (state.models || []).find(m => m.name === modelName);
+  const accepts = !model || model.accepts_sampling_params !== false;
+  document.getElementById("sampling-temperature-field").style.display = accepts ? "" : "none";
+  document.getElementById("sampling-top-p-field").style.display = accepts ? "" : "none";
+}
+
+function openSamplingPopover() {
+  document.getElementById("sampling-temperature").value = state.sampling.temperature ?? "";
+  document.getElementById("sampling-top-p").value = state.sampling.top_p ?? "";
+  document.getElementById("sampling-max-tokens").value = state.sampling.max_tokens ?? "";
+  applySamplingVisibility();
+  document.getElementById("sampling-options-popover").hidden = false;
+}
+function closeSamplingPopover() { document.getElementById("sampling-options-popover").hidden = true; }
+function toggleSamplingPopover() {
+  const popover = document.getElementById("sampling-options-popover");
+  if (popover.hidden) openSamplingPopover(); else closeSamplingPopover();
+}
+
+function readSamplingInputs() {
+  const temp = document.getElementById("sampling-temperature").value.trim();
+  const topP = document.getElementById("sampling-top-p").value.trim();
+  const maxTok = document.getElementById("sampling-max-tokens").value.trim();
+  state.sampling = {
+    temperature: temp === "" ? null : parseFloat(temp),
+    top_p: topP === "" ? null : parseFloat(topP),
+    max_tokens: maxTok === "" ? null : parseInt(maxTok, 10),
+  };
+}
+
+document.getElementById("sampling-options-btn").addEventListener("click", (e) => {
+  e.stopPropagation();
+  toggleSamplingPopover();
+});
+["sampling-temperature", "sampling-top-p", "sampling-max-tokens"].forEach(id => {
+  document.getElementById(id).addEventListener("input", readSamplingInputs);
+});
+document.getElementById("sampling-options-done").addEventListener("click", (e) => {
+  e.stopPropagation();
+  readSamplingInputs();
+  closeSamplingPopover();
+});
+document.getElementById("sampling-options-clear").addEventListener("click", (e) => {
+  e.stopPropagation();
+  document.getElementById("sampling-temperature").value = "";
+  document.getElementById("sampling-top-p").value = "";
+  document.getElementById("sampling-max-tokens").value = "";
+  state.sampling = { temperature: null, top_p: null, max_tokens: null };
 });
 
 // ── Export ───────────────────────────────────────────────────────────────
@@ -730,6 +873,101 @@ let jobPreviewDebounce = null;
 
 function jobFieldControlId(name) { return `job-field-${name}`; }
 
+// Temperature/top-p/max-tokens aren't declared per-plugin — every job runs
+// through the same model the conversation is already using (shown in the
+// topbar), so this is one shared, composer-wide set of fields rather than
+// something each plugin repeats. Built as plain UiField-shaped objects so
+// they flow through exactly the same rendering/collection/restore code as
+// a plugin's own fields, with no special-casing elsewhere. Temperature and
+// top-p are left out entirely for a model that doesn't accept them (see
+// GET /api/models's accepts_sampling_params) rather than shown disabled —
+// a control that only fails at submit time is worse than one that isn't
+// there. Max-tokens is always offered: every model accepts some response-
+// length cap, only the parameter name differs, which the backend already
+// handles.
+function samplingFieldsFor(modelName) {
+  const model = (state.models || []).find(m => m.name === modelName);
+  const acceptsSampling = !model || model.accepts_sampling_params !== false;
+  const fields = [];
+  if (acceptsSampling) {
+    fields.push({
+      name: "temperature", label: "Temperature (0.0–2.0, blank = model default)",
+      kind: "text", required: false, group: "Sampling",
+    });
+    fields.push({
+      name: "top_p", label: "Top-p (0.0–1.0, blank = model default)",
+      kind: "text", required: false, group: "Sampling",
+    });
+  }
+  fields.push({
+    name: "max_tokens", label: "Max response tokens (blank = model default)",
+    kind: "text", required: false, group: "Sampling",
+  });
+  return fields;
+}
+
+// Renders one set of fields (with group headers) into a container,
+// appending rather than clearing it first — shared by the static
+// action-owned fields, the dynamic extension-fields subsection, and the
+// sampling fields, so all three read as one consistent column.
+function appendFieldGroup(container, fields, startGroup) {
+  let lastGroup = startGroup;
+  fields.forEach(field => {
+    if (field.group !== lastGroup) {
+      lastGroup = field.group;
+      if (field.group) {
+        const header = document.createElement("div");
+        header.className = "job-field-group-label";
+        header.textContent = field.group;
+        container.appendChild(header);
+      }
+    }
+    container.appendChild(buildJobFieldControl(field));
+  });
+  return lastGroup;
+}
+
+// The subsection a language-extension plugin contributes once its
+// language is picked as the destination (e.g. translation-ea's Kanbun
+// checkbox once Japanese is selected) — see ExtensionUiHooks's docstring
+// in src/runtime/ui_action.py. Rendered as its own container placed right
+// after the plugin's own fields ("a subsection after the translation
+// plugin options"), refreshed on every change to the target-language
+// field. Returns [] (renders nothing) for any installation without a
+// matching extension plugin, which is the normal case.
+async function refreshJobExtensionFields() {
+  const action = state.activeAction;
+  if (!action) return;
+  const box = document.getElementById("job-extension-fields");
+  const targetEl = document.getElementById(jobFieldControlId("target_language"));
+  const targetLanguage = targetEl ? targetEl.value : "";
+  let fields = [];
+  if (targetLanguage) {
+    try {
+      const data = await api(
+        `/api/plugin-actions/${encodeURIComponent(action.id)}/extension-fields`
+        + `?target_language=${encodeURIComponent(targetLanguage)}`
+      );
+      if (state.activeAction !== action) return; // stale — modal moved on
+      fields = data.fields || [];
+    } catch (e) {
+      fields = [];
+    }
+  }
+  if (state.activeAction !== action) return;
+
+  box.innerHTML = "";
+  appendFieldGroup(box, fields);
+
+  const model = document.getElementById("model-field").value || state.defaultModel;
+  state.activeActionFields = action.fields.concat(fields, samplingFieldsFor(model));
+  // A field that just appeared (e.g. reopening this same action after
+  // Japanese was already selected before) should show whatever was typed
+  // into it last time, same as every other field.
+  restoreJobFieldValues(action.id, fields);
+  scheduleJobPreview();
+}
+
 async function openJobModal(action) {
   state.activeAction = action;
   document.getElementById("job-modal-title").textContent = action.label;
@@ -742,22 +980,93 @@ async function openJobModal(action) {
 
   if (action.fields.some(f => f.kind === "language")) await loadLanguages();
 
+  const model = document.getElementById("model-field").value || state.defaultModel;
+  const samplingFields = samplingFieldsFor(model);
+  // Provisional — refreshJobExtensionFields() below fills in the middle
+  // section and updates this once it resolves (it's async: a network call).
+  state.activeActionFields = action.fields.concat(samplingFields);
+
   const optionsBox = document.getElementById("job-options");
   optionsBox.innerHTML = "";
-  action.fields.forEach(field => optionsBox.appendChild(buildJobFieldControl(field)));
+  const lastGroup = appendFieldGroup(optionsBox, action.fields);
+
+  const extBox = document.createElement("div");
+  extBox.id = "job-extension-fields";
+  optionsBox.appendChild(extBox);
+
+  appendFieldGroup(optionsBox, samplingFields, lastGroup);
+
+  // Restore whatever was typed before an earlier accidental close (× /
+  // Escape / Cancel) of this same action's modal — see state.jobFieldValues'
+  // docstring above and the Reset button, the only thing that explicitly
+  // clears this.
+  restoreJobFieldValues(action.id, state.activeActionFields);
+
+  const targetEl = document.getElementById(jobFieldControlId("target_language"));
+  if (targetEl) targetEl.addEventListener("change", refreshJobExtensionFields);
 
   const backdrop = document.getElementById("job-modal-backdrop");
   backdrop.hidden = false;
   requestAnimationFrame(() => backdrop.classList.add("open"));
+  refreshJobExtensionFields();
   refreshJobPreview();
 }
 
-function closeJobModal() {
+function restoreJobFieldValues(actionId, fields) {
+  const saved = state.jobFieldValues[actionId];
+  if (!saved) return;
+  fields.forEach(field => {
+    const el = document.getElementById(jobFieldControlId(field.name));
+    if (!el) return;
+    if (field.kind === "checkbox") {
+      if (field.name in saved.values) el.checked = !!saved.values[field.name];
+    } else if (field.kind === "file") {
+      if (saved.file) {
+        try {
+          const dt = new DataTransfer();
+          dt.items.add(saved.file);
+          el.files = dt.files;
+        } catch (e) {
+          // DataTransfer-based file restoration isn't supported in every
+          // browser — falling back to an empty file input is safe; the
+          // person just has to re-attach it, same as before this existed.
+        }
+      }
+    } else if (field.name in saved.values) {
+      el.value = saved.values[field.name];
+    }
+  });
+}
+
+// preserveValues: true for the × button, Cancel, and Escape (an accidental
+// close shouldn't lose what was typed); false after a successful submit or
+// an explicit Reset, where starting fresh next time is the right default.
+function closeJobModal(preserveValues = true) {
+  const action = state.activeAction;
+  if (action) {
+    if (preserveValues) {
+      state.jobFieldValues[action.id] = collectJobFieldValues(state.activeActionFields || action.fields);
+    } else {
+      delete state.jobFieldValues[action.id];
+    }
+  }
   const backdrop = document.getElementById("job-modal-backdrop");
   backdrop.classList.remove("open");
   setTimeout(() => { backdrop.hidden = true; }, 200);
   state.activeAction = null;
+  state.activeActionFields = null;
   clearTimeout(jobPreviewDebounce);
+}
+
+function resetJobModalFields() {
+  const action = state.activeAction;
+  if (!action) return;
+  delete state.jobFieldValues[action.id];
+  document.querySelectorAll("#job-options input, #job-options select, #job-options textarea").forEach(el => {
+    if (el.type === "checkbox") el.checked = false;
+    else el.value = "";
+  });
+  scheduleJobPreview();
 }
 
 function buildJobFieldControl(field) {
@@ -797,6 +1106,16 @@ function buildJobFieldControl(field) {
       input.appendChild(opt);
     });
     input.addEventListener("change", scheduleJobPreview);
+  } else if (field.kind === "select") {
+    input = document.createElement("select");
+    input.id = jobFieldControlId(field.name);
+    (field.choices || []).forEach(choice => {
+      const opt = document.createElement("option");
+      opt.value = choice.value;
+      opt.textContent = choice.label;
+      input.appendChild(opt);
+    });
+    input.addEventListener("change", scheduleJobPreview);
   } else if (field.kind === "file") {
     input = document.createElement("input");
     input.type = "file";
@@ -821,10 +1140,10 @@ function scheduleJobPreview() {
 // preview the prompt text (the preview always substitutes placeholder
 // document text, same as the CLI's own --dry-run), so it's kept separate
 // from the JSON-encoded field values sent to the preview endpoint.
-function collectJobFieldValues(action) {
+function collectJobFieldValues(fields) {
   const values = {};
   let file = null;
-  action.fields.forEach(field => {
+  (fields || []).forEach(field => {
     const el = document.getElementById(jobFieldControlId(field.name));
     if (!el) return;
     if (field.kind === "checkbox") {
@@ -841,7 +1160,7 @@ function collectJobFieldValues(action) {
 async function refreshJobPreview() {
   const action = state.activeAction;
   if (!action) return;
-  const { values } = collectJobFieldValues(action);
+  const { values } = collectJobFieldValues(state.activeActionFields);
   const model = document.getElementById("model-field").value || state.defaultModel;
   const systemEl = document.getElementById("job-preview-system");
   const userEl = document.getElementById("job-preview-user");
@@ -880,13 +1199,14 @@ async function startJobFromModal() {
   const errorEl = document.getElementById("job-modal-error");
   errorEl.textContent = "";
 
-  const { values, file } = collectJobFieldValues(action);
-  const fileField = action.fields.find(f => f.kind === "file");
+  const fields = state.activeActionFields || action.fields;
+  const { values, file } = collectJobFieldValues(fields);
+  const fileField = fields.find(f => f.kind === "file");
   if (fileField && fileField.required && !file) {
     errorEl.textContent = "Please choose a file.";
     return;
   }
-  const missing = action.fields.filter(
+  const missing = fields.filter(
     f => f.required && f.kind !== "checkbox" && f.kind !== "file" && !values[f.name]
   );
   if (missing.length > 0) {
@@ -919,7 +1239,7 @@ async function startJobFromModal() {
     const resp = await fetch("/api/jobs", { method: "POST", body: formData });
     if (!resp.ok) { throw new Error(await resp.text()); }
 
-    closeJobModal();
+    closeJobModal(false);
     await openConversation(state.conversationId);
   } catch (e) {
     errorEl.textContent = "Couldn't start job: " + e.message;
@@ -928,9 +1248,15 @@ async function startJobFromModal() {
   }
 }
 
-document.getElementById("job-modal-close").addEventListener("click", closeJobModal);
-document.getElementById("job-modal-cancel").addEventListener("click", closeJobModal);
+document.getElementById("job-modal-close").addEventListener("click", () => closeJobModal());
+document.getElementById("job-modal-cancel").addEventListener("click", () => closeJobModal());
+document.getElementById("job-modal-reset").addEventListener("click", resetJobModalFields);
 document.getElementById("job-modal-start").addEventListener("click", startJobFromModal);
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !document.getElementById("job-modal-backdrop").hidden) {
+    closeJobModal();
+  }
+});
 document.getElementById("job-modal-backdrop").addEventListener("click", (e) => {
   if (e.target.id === "job-modal-backdrop") closeJobModal();
 });
@@ -1265,7 +1591,18 @@ function renderMessages(conv) {
     if (m.role === "assistant" && m.cost != null) {
       const meta = document.createElement("div");
       meta.className = "meta";
-      meta.textContent = `${m.model} · ${fmtMoney(m.cost)}`;
+      // Token counts (not just cost) so a professor can tell a reply
+      // used its full response budget — e.g. completion_tokens landing
+      // right at the conversation's max-tokens setting is a sign a
+      // translation or long answer may have been cut off and the cap
+      // should be raised, which the dollar cost alone wouldn't reveal.
+      const bits = [];
+      if (m.model) bits.push(m.model);
+      bits.push(fmtMoney(m.cost));
+      if (m.prompt_tokens != null && m.completion_tokens != null) {
+        bits.push(`${m.prompt_tokens} in / ${m.completion_tokens} out tokens`);
+      }
+      meta.textContent = bits.join(" · ");
       div.appendChild(meta);
     }
     if (m.kind === "job_result" && m.job_id) {
@@ -1287,7 +1624,11 @@ async function openConversation(id) {
   const conv = await api(`/api/conversations/${id}?professor=${encodeURIComponent(state.professor)}`);
   state.conversationModel = conv.model;
   state.conversationHasMessages = conv.messages.length > 0;
+  state.sampling = {
+    temperature: conv.temperature ?? null, top_p: conv.top_p ?? null, max_tokens: conv.max_tokens ?? null,
+  };
   document.getElementById("model-field").value = conv.model;
+  applySamplingVisibility();
   renderMessages(conv);
   if (conv.active_job_id) {
     // Reopening a conversation that has a job running (e.g. after
@@ -1313,6 +1654,7 @@ document.getElementById("new-conv").addEventListener("click", async () => {
   state.conversationId = conv.id;
   state.conversationModel = conv.model;
   state.conversationHasMessages = false;
+  state.sampling = { temperature: null, top_p: null, max_tokens: null };
   renderMessages(conv);
   await loadConversations();
 });
@@ -1371,6 +1713,7 @@ async function sendMessage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         professor: state.professor, conversation_id: state.conversationId, message: text, model,
+        temperature: state.sampling.temperature, top_p: state.sampling.top_p, max_tokens: state.sampling.max_tokens,
       }),
     });
     if (!res.ok) { throw new Error(await res.text()); }

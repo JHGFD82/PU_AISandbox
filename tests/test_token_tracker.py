@@ -543,6 +543,61 @@ class TestRecordUsage:
         assert t.usage_data["model_usage"]["gpt-4o"]["total_tokens"] == 300
 
 
+class TestSessionUsage:
+    """get_session_usage() — a running total scoped to one TokenTracker
+    instance's own lifetime, separate from the persisted monthly/daily/
+    all-time totals. See its docstring: this is what a multi-page
+    translate job (one API call per page, all through the same
+    SandboxProcessor/TokenTracker) reads to report its total spend."""
+
+    def _make_tracker(self, tmp_path):
+        data_file = str(tmp_path / "token_usage_test.json")
+        return TokenTracker("testprof", data_file=data_file, monthly_limit=100.0)
+
+    def _mock_pricing(self):
+        return (
+            patch("src.tracking.token_tracker.get_pricing_unit", return_value=1_000_000),
+            patch("src.tracking.token_tracker.get_model_pricing",
+                  return_value={"input": 2.0, "output": 8.0}),
+        )
+
+    def test_starts_at_zero(self, tmp_path):
+        t = self._make_tracker(tmp_path)
+        usage = t.get_session_usage()
+        assert usage == {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "total_cost": 0.0}
+
+    def test_accumulates_across_multiple_calls(self, tmp_path):
+        t = self._make_tracker(tmp_path)
+        p1, p2 = self._mock_pricing()
+        with p1, p2:
+            t.record_usage("gpt-4o", 100, 50, 150)
+            t.record_usage("gpt-4o", 200, 100, 300)
+        usage = t.get_session_usage()
+        assert usage["prompt_tokens"] == 300
+        assert usage["completion_tokens"] == 150
+        assert usage["total_tokens"] == 450
+        assert usage["total_cost"] > 0
+
+    def test_two_trackers_do_not_share_session_totals(self, tmp_path):
+        # Each SandboxProcessor gets its own TokenTracker (one per CLI run
+        # or webui request/job) — a second instance's calls must not leak
+        # into the first's session total, even though they may write to the
+        # same underlying persisted monthly file.
+        t1 = self._make_tracker(tmp_path)
+        t2 = self._make_tracker(tmp_path)
+        p1, p2 = self._mock_pricing()
+        with p1, p2:
+            t1.record_usage("gpt-4o", 100, 50, 150)
+        assert t1.get_session_usage()["total_tokens"] == 150
+        assert t2.get_session_usage()["total_tokens"] == 0
+
+    def test_returned_dict_is_a_copy(self, tmp_path):
+        t = self._make_tracker(tmp_path)
+        usage = t.get_session_usage()
+        usage["prompt_tokens"] = 9999
+        assert t.get_session_usage()["prompt_tokens"] == 0
+
+
 # ---------------------------------------------------------------------------
 # TokenTracker.get_daily_usage
 # ---------------------------------------------------------------------------

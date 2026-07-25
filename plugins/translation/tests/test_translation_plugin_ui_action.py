@@ -18,6 +18,8 @@ import pytest
 
 from src.config import register_language
 from src.errors import CLIError
+from src.runtime import ui_action as ui_action_module
+from src.runtime.ui_action import UiField, register_extension_ui_hooks
 
 _PLUGIN_FILE = Path(__file__).resolve().parents[1] / "plugin.py"
 
@@ -47,7 +49,13 @@ class TestUiActionDeclaration:
 
     def test_declares_expected_fields_in_order(self, plugin_module):
         names = [f.name for f in plugin_module.ui_action.fields]
-        assert names == ["source_language", "target_language", "file", "scanned", "page_nums", "notes"]
+        assert names == [
+            "source_language", "target_language", "file", "page_nums",
+            "scanned", "spread",
+            "output_format", "preserve_tables", "toc", "preserve_media", "font", "font_size",
+            "workers",
+            "notes",
+        ]
 
     def test_id_and_command_are_translate(self, plugin_module):
         assert plugin_module.ui_action.id == "translate"
@@ -69,8 +77,32 @@ class TestUiActionDeclaration:
         assert kinds["target_language"] == "language"
         assert kinds["file"] == "file"
         assert kinds["scanned"] == "checkbox"
+        assert kinds["spread"] == "checkbox"
         assert kinds["page_nums"] == "text"
         assert kinds["notes"] == "text"
+        assert kinds["output_format"] == "select"
+        assert kinds["preserve_tables"] == "checkbox"
+        assert kinds["toc"] == "checkbox"
+        assert kinds["preserve_media"] == "checkbox"
+        assert kinds["font"] == "text"
+        assert kinds["font_size"] == "text"
+        assert kinds["workers"] == "text"
+
+    def test_output_format_choices(self, plugin_module):
+        field = next(f for f in plugin_module.ui_action.fields if f.name == "output_format")
+        values = [c["value"] for c in field.choices]
+        assert values == ["same", "docx", "pdf", "txt", "md"]
+
+    def test_fields_are_grouped_for_display(self, plugin_module):
+        # Purely cosmetic (see UiField.group's docstring) but every field
+        # beyond the always-visible core three should belong to some group,
+        # so the composer never renders a dense, header-less wall of extras.
+        groups = {f.name: f.group for f in plugin_module.ui_action.fields}
+        assert groups["source_language"] == "Document"
+        assert groups["output_format"] == "Output"
+        assert groups["workers"] == "Performance"
+        assert groups["notes"] == "Notes"
+        assert all(g is not None for g in groups.values())
 
     def test_ui_action_is_reachable_from_the_plugin_instance(self, plugin_module):
         # jobs.py's find_plugin_for_action()/list_ui_actions() call
@@ -102,6 +134,25 @@ class TestRunUiAction:
         opts = kwargs["opts"]
         with open(opts.output_file, "w", encoding="utf-8") as f:
             f.write("translated content")
+
+    def test_result_includes_session_token_usage(self, monkeypatch, plugin_module, tmp_path):
+        fake_sandbox = self._patch_sandbox(monkeypatch, translate_side_effect=self._write_output)
+        fake_sandbox.token_tracker.get_session_usage.return_value = {
+            "prompt_tokens": 1200, "completion_tokens": 300, "total_tokens": 1500, "total_cost": 0.0456,
+        }
+        src_file = tmp_path / "upload.txt"
+        src_file.write_text("hello", encoding="utf-8")
+
+        result = plugin_module.plugin.run_ui_action(
+            fields={
+                "source_language": "ja", "target_language": "en",
+                "file_path": str(src_file), "file_name": "upload.txt",
+            },
+            professor="fake", model=None, on_progress=None, output_dir=str(tmp_path / "out"),
+        )
+        assert result.prompt_tokens == 1200
+        assert result.completion_tokens == 300
+        assert result.cost == 0.0456
 
     def test_success_writes_output_and_builds_result(self, monkeypatch, plugin_module, tmp_path):
         fake_sandbox = self._patch_sandbox(monkeypatch, translate_side_effect=self._write_output)
@@ -226,6 +277,147 @@ class TestRunUiAction:
                 professor="fake", model=None, on_progress=None, output_dir=str(tmp_path / "out"),
             )
 
+    def test_output_format_overrides_source_derived_extension(self, monkeypatch, plugin_module, tmp_path):
+        self._patch_sandbox(monkeypatch, translate_side_effect=self._write_output)
+        src_file = tmp_path / "upload.txt"
+        src_file.write_text("hello", encoding="utf-8")
+
+        result = plugin_module.plugin.run_ui_action(
+            fields={
+                "source_language": "ja", "target_language": "en",
+                "file_path": str(src_file), "file_name": "upload.txt",
+                "output_format": "docx",
+            },
+            professor="fake", model=None, on_progress=None, output_dir=str(tmp_path / "out"),
+        )
+        assert result.output_filename.endswith(".docx")
+
+    def test_blank_output_format_falls_back_to_source_derived_extension(self, monkeypatch, plugin_module, tmp_path):
+        self._patch_sandbox(monkeypatch, translate_side_effect=self._write_output)
+        src_file = tmp_path / "upload.docx"
+        src_file.write_bytes(b"fake docx bytes")
+
+        result = plugin_module.plugin.run_ui_action(
+            fields={
+                "source_language": "ja", "target_language": "en",
+                "file_path": str(src_file), "file_name": "upload.docx",
+                "output_format": "same",
+            },
+            professor="fake", model=None, on_progress=None, output_dir=str(tmp_path / "out"),
+        )
+        assert result.output_filename.endswith(".docx")
+
+    def test_preserve_media_without_docx_output_raises_cli_error(self, monkeypatch, plugin_module, tmp_path):
+        self._patch_sandbox(monkeypatch, translate_side_effect=self._write_output)
+        src_file = tmp_path / "upload.txt"
+        src_file.write_text("hello", encoding="utf-8")
+        with pytest.raises(CLIError, match="Word .*docx"):
+            plugin_module.plugin.run_ui_action(
+                fields={
+                    "source_language": "ja", "target_language": "en",
+                    "file_path": str(src_file), "file_name": "upload.txt",
+                    "preserve_media": "true", "output_format": "txt",
+                },
+                professor="fake", model=None, on_progress=None, output_dir=str(tmp_path / "out"),
+            )
+
+    def test_preserve_tables_and_toc_set_on_both_services(self, monkeypatch, plugin_module, tmp_path):
+        fake_sandbox = self._patch_sandbox(monkeypatch, translate_side_effect=self._write_output)
+        src_file = tmp_path / "upload.txt"
+        src_file.write_text("hello", encoding="utf-8")
+
+        plugin_module.plugin.run_ui_action(
+            fields={
+                "source_language": "ja", "target_language": "en",
+                "file_path": str(src_file), "file_name": "upload.txt",
+                "preserve_tables": "true", "toc": "true",
+            },
+            professor="fake", model=None, on_progress=None, output_dir=str(tmp_path / "out"),
+        )
+        assert fake_sandbox.translation_service.tables is True
+        assert fake_sandbox.image_translation_service.tables is True
+        assert fake_sandbox.translation_service.toc is True
+
+    def test_workers_and_spread_forwarded_to_translate_document(self, monkeypatch, plugin_module, tmp_path):
+        fake_sandbox = self._patch_sandbox(monkeypatch, translate_side_effect=self._write_output)
+        src_file = tmp_path / "upload.txt"
+        src_file.write_text("hello", encoding="utf-8")
+
+        plugin_module.plugin.run_ui_action(
+            fields={
+                "source_language": "ja", "target_language": "en",
+                "file_path": str(src_file), "file_name": "upload.txt",
+                "workers": "4", "spread": "true",
+            },
+            professor="fake", model=None, on_progress=None, output_dir=str(tmp_path / "out"),
+        )
+        _, kwargs = fake_sandbox.translate_document.call_args
+        assert kwargs["workers"] == 4
+        assert kwargs["spread"] is True
+
+    def test_font_and_font_size_forwarded_via_output_options(self, monkeypatch, plugin_module, tmp_path):
+        fake_sandbox = self._patch_sandbox(monkeypatch, translate_side_effect=self._write_output)
+        src_file = tmp_path / "upload.txt"
+        src_file.write_text("hello", encoding="utf-8")
+
+        plugin_module.plugin.run_ui_action(
+            fields={
+                "source_language": "ja", "target_language": "en",
+                "file_path": str(src_file), "file_name": "upload.txt",
+                "font": "Times New Roman", "font_size": "11",
+            },
+            professor="fake", model=None, on_progress=None, output_dir=str(tmp_path / "out"),
+        )
+        _, kwargs = fake_sandbox.translate_document.call_args
+        assert kwargs["opts"].custom_font == "Times New Roman"
+        assert kwargs["opts"].font_size == 11
+
+    def test_invalid_workers_raises_cli_error(self, monkeypatch, plugin_module, tmp_path):
+        self._patch_sandbox(monkeypatch, translate_side_effect=self._write_output)
+        src_file = tmp_path / "upload.txt"
+        src_file.write_text("hello", encoding="utf-8")
+        with pytest.raises(CLIError, match="parallel workers"):
+            plugin_module.plugin.run_ui_action(
+                fields={
+                    "source_language": "ja", "target_language": "en",
+                    "file_path": str(src_file), "file_name": "upload.txt",
+                    "workers": "not-a-number",
+                },
+                professor="fake", model=None, on_progress=None, output_dir=str(tmp_path / "out"),
+            )
+
+    def test_sampling_params_passed_through_to_sandbox(self, monkeypatch, plugin_module, tmp_path):
+        sandbox_cls = MagicMock(return_value=self._patch_sandbox(monkeypatch, translate_side_effect=self._write_output))
+        monkeypatch.setattr("src.runtime.sandbox_processor.SandboxProcessor", sandbox_cls)
+        src_file = tmp_path / "upload.txt"
+        src_file.write_text("hello", encoding="utf-8")
+
+        plugin_module.plugin.run_ui_action(
+            fields={
+                "source_language": "ja", "target_language": "en",
+                "file_path": str(src_file), "file_name": "upload.txt",
+                "temperature": "0.4", "top_p": "0.9", "max_tokens": "2048",
+            },
+            professor="fake", model="gpt-4o", on_progress=None, output_dir=str(tmp_path / "out"),
+        )
+        sandbox_cls.assert_called_once_with(
+            "fake", model="gpt-4o", temperature=0.4, top_p=0.9, max_tokens=2048,
+        )
+
+    def test_invalid_temperature_raises_cli_error(self, monkeypatch, plugin_module, tmp_path):
+        self._patch_sandbox(monkeypatch, translate_side_effect=self._write_output)
+        src_file = tmp_path / "upload.txt"
+        src_file.write_text("hello", encoding="utf-8")
+        with pytest.raises(CLIError, match="temperature"):
+            plugin_module.plugin.run_ui_action(
+                fields={
+                    "source_language": "ja", "target_language": "en",
+                    "file_path": str(src_file), "file_name": "upload.txt",
+                    "temperature": "hot",
+                },
+                professor="fake", model=None, on_progress=None, output_dir=str(tmp_path / "out"),
+            )
+
 
 class TestPreviewUiAction:
     """The composer's live two-pane prompt preview — see UiPromptPreview's
@@ -295,3 +487,135 @@ class TestPreviewUiAction:
         monkeypatch.setattr("src.runtime.sandbox_processor.SandboxProcessor", sandbox_cls)
         plugin_module.plugin.preview_ui_action(fields={}, professor="fake", model="gpt-4o")
         sandbox_cls.assert_called_once_with("fake", model="gpt-4o")
+
+    def test_output_format_forwarded_to_build_prompts(self, monkeypatch, plugin_module):
+        fake_sandbox = self._patch_sandbox(monkeypatch)
+        plugin_module.plugin.preview_ui_action(
+            fields={"source_language": "ja", "target_language": "en", "output_format": "docx"},
+            professor="fake", model=None,
+        )
+        _, kwargs = fake_sandbox.translation_service.build_prompts.call_args
+        assert kwargs["output_format"] == "docx"
+
+    def test_missing_output_format_defaults_to_console(self, monkeypatch, plugin_module):
+        fake_sandbox = self._patch_sandbox(monkeypatch)
+        plugin_module.plugin.preview_ui_action(
+            fields={"source_language": "ja", "target_language": "en"}, professor="fake", model=None,
+        )
+        _, kwargs = fake_sandbox.translation_service.build_prompts.call_args
+        assert kwargs["output_format"] == "console"
+
+    def test_preserve_tables_and_toc_reflected_in_preview(self, monkeypatch, plugin_module):
+        fake_sandbox = self._patch_sandbox(monkeypatch)
+        plugin_module.plugin.preview_ui_action(
+            fields={"preserve_tables": "true", "toc": "true"}, professor="fake", model=None,
+        )
+        assert fake_sandbox.translation_service.tables is True
+        assert fake_sandbox.translation_service.toc is True
+
+
+class TestExtensionUiHooksIntegration:
+    """A language-extension plugin (e.g. translation-ea, a separate
+    git-ignored repo not present in this checkout) contributes its own
+    composer fields via register_extension_ui_hooks() rather than a
+    per-plugin UiField declaration — see ExtensionUiHooks's docstring in
+    src/runtime/ui_action.py. These tests stand in for that real extension
+    with a fake registration, since the real one can't be exercised here."""
+
+    @pytest.fixture(autouse=True)
+    def _isolated_registry(self, monkeypatch):
+        monkeypatch.setattr(ui_action_module, "_EXTENSION_UI_HOOKS", {})
+
+    def _patch_sandbox(self, monkeypatch, translate_side_effect=None):
+        fake_sandbox = MagicMock()
+        fake_sandbox.translation_service = MagicMock()
+        fake_sandbox.image_translation_service = MagicMock()
+        if translate_side_effect is not None:
+            fake_sandbox.translate_document.side_effect = translate_side_effect
+        monkeypatch.setattr(
+            "src.runtime.sandbox_processor.SandboxProcessor",
+            MagicMock(return_value=fake_sandbox),
+        )
+        return fake_sandbox
+
+    def _write_output(self, *args, **kwargs):
+        opts = kwargs["opts"]
+        with open(opts.output_file, "w", encoding="utf-8") as f:
+            f.write("translated content")
+
+    def test_run_ui_action_applies_registered_hook_for_destination_token(self, monkeypatch, plugin_module, tmp_path):
+        fake_sandbox = self._patch_sandbox(monkeypatch, translate_side_effect=self._write_output)
+        calls = []
+        register_extension_ui_hooks(
+            token="ja",  # matches the "ja" -> Japanese registration this test file's own fixture adds
+            fields=[UiField(name="kanbun", label="Use Kanbun conventions", kind="checkbox", required=False)],
+            apply=lambda sandbox, fields: calls.append((sandbox, fields)),
+        )
+        src_file = tmp_path / "upload.txt"
+        src_file.write_text("hello", encoding="utf-8")
+
+        plugin_module.plugin.run_ui_action(
+            fields={
+                "source_language": "en", "target_language": "ja",
+                "file_path": str(src_file), "file_name": "upload.txt",
+                "kanbun": "true",
+            },
+            professor="fake", model=None, on_progress=None, output_dir=str(tmp_path / "out"),
+        )
+        assert len(calls) == 1
+        sandbox_arg, fields_arg = calls[0]
+        assert sandbox_arg is fake_sandbox
+        assert fields_arg["kanbun"] == "true"
+
+    def test_run_ui_action_does_not_apply_hook_for_a_different_destination(self, monkeypatch, plugin_module, tmp_path):
+        self._patch_sandbox(monkeypatch, translate_side_effect=self._write_output)
+        calls = []
+        register_extension_ui_hooks(
+            token="ja", fields=[], apply=lambda sandbox, fields: calls.append(1),
+        )
+        src_file = tmp_path / "upload.txt"
+        src_file.write_text("hello", encoding="utf-8")
+
+        plugin_module.plugin.run_ui_action(
+            fields={
+                "source_language": "ja", "target_language": "en",
+                "file_path": str(src_file), "file_name": "upload.txt",
+            },
+            professor="fake", model=None, on_progress=None, output_dir=str(tmp_path / "out"),
+        )
+        assert calls == []
+
+    def test_run_ui_action_tolerates_no_hook_registered(self, monkeypatch, plugin_module, tmp_path):
+        # The normal case for any installation without a matching language
+        # extension plugin — must not raise.
+        self._patch_sandbox(monkeypatch, translate_side_effect=self._write_output)
+        src_file = tmp_path / "upload.txt"
+        src_file.write_text("hello", encoding="utf-8")
+
+        plugin_module.plugin.run_ui_action(
+            fields={
+                "source_language": "en", "target_language": "ja",
+                "file_path": str(src_file), "file_name": "upload.txt",
+            },
+            professor="fake", model=None, on_progress=None, output_dir=str(tmp_path / "out"),
+        )  # no exception
+
+    def test_preview_ui_action_applies_registered_hook(self, monkeypatch, plugin_module):
+        fake_sandbox = MagicMock()
+        fake_sandbox.translation_service = MagicMock()
+        fake_sandbox.translation_service.build_prompts.return_value = ("SYS", "USR")
+        fake_sandbox.translation_service._get_model.return_value = "resolved-model"
+        fake_sandbox.image_translation_service = MagicMock()
+        monkeypatch.setattr(
+            "src.runtime.sandbox_processor.SandboxProcessor",
+            MagicMock(return_value=fake_sandbox),
+        )
+        calls = []
+        register_extension_ui_hooks(
+            token="ja", fields=[], apply=lambda sandbox, fields: calls.append(fields),
+        )
+        plugin_module.plugin.preview_ui_action(
+            fields={"source_language": "en", "target_language": "ja", "kanbun": "true"},
+            professor="fake", model=None,
+        )
+        assert calls == [{"source_language": "en", "target_language": "ja", "kanbun": "true"}]

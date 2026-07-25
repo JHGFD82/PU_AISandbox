@@ -210,6 +210,34 @@ def _parse_sse(text: str) -> list[dict]:
     return events
 
 
+class TestModelsEndpoint:
+    def test_includes_accepts_sampling_params_flag(self, unlocked_client, monkeypatch):
+        app_module = sys.modules["_pu_webui_app"]
+        monkeypatch.setattr(app_module, "get_available_models", lambda: ["gpt-4o", "o3-mini"])
+        monkeypatch.setattr(app_module, "model_supports_vision", lambda m: m == "gpt-4o")
+        monkeypatch.setattr(app_module, "model_has_fixed_parameters", lambda m: m == "o3-mini")
+        monkeypatch.setattr(app_module, "model_omit_sampling_params", lambda m: False)
+
+        resp = unlocked_client.get("/api/models", params={"professor": "heller"})
+        assert resp.status_code == 200
+        by_name = {m["name"]: m for m in resp.json()["models"]}
+        assert by_name["gpt-4o"]["accepts_sampling_params"] is True
+        assert by_name["o3-mini"]["accepts_sampling_params"] is False
+
+    def test_omit_sampling_params_also_hides_the_controls(self, unlocked_client, monkeypatch):
+        # A model can be "not fully fixed" but still on a provider route
+        # that rejects temperature/top-p — see model_omit_sampling_params's
+        # docstring. Either flag alone should hide the controls.
+        app_module = sys.modules["_pu_webui_app"]
+        monkeypatch.setattr(app_module, "get_available_models", lambda: ["some-model"])
+        monkeypatch.setattr(app_module, "model_supports_vision", lambda m: False)
+        monkeypatch.setattr(app_module, "model_has_fixed_parameters", lambda m: False)
+        monkeypatch.setattr(app_module, "model_omit_sampling_params", lambda m: True)
+
+        resp = unlocked_client.get("/api/models", params={"professor": "heller"})
+        assert resp.json()["models"][0]["accepts_sampling_params"] is False
+
+
 class TestChat:
     def test_chat_turn_streams_deltas_then_done_with_usage(self, unlocked_client, monkeypatch):
         create = unlocked_client.post("/api/conversations", json={"professor": "heller", "model": "gpt-4o"})
@@ -256,6 +284,36 @@ class TestChat:
         assert conv["messages"][-1]["content"] == "Hello back!"
         assert conv["messages"][-1]["cost"] == 0.001
         assert conv["title"] == "Hi there"
+
+    def test_sampling_overrides_persist_and_are_passed_to_sandbox(self, unlocked_client, monkeypatch):
+        create = unlocked_client.post("/api/conversations", json={"professor": "heller", "model": "gpt-4o"})
+        conv_id = create.json()["id"]
+
+        fake_sandbox = MagicMock()
+        fake_sandbox.chat_service.stream_message.return_value = iter([
+            {"type": "done", "content": "ok", "model": "gpt-4o",
+             "prompt_tokens": 1, "completion_tokens": 1, "cost": 0.0001},
+        ])
+        fake_sandbox.chat_service.generate_title.return_value = None
+        sandbox_cls = MagicMock(return_value=fake_sandbox)
+        monkeypatch.setattr("src.runtime.sandbox_processor.SandboxProcessor", sandbox_cls)
+
+        resp = unlocked_client.post("/api/chat", json={
+            "professor": "heller", "conversation_id": conv_id, "message": "Hi", "model": "gpt-4o",
+            "temperature": 0.3, "top_p": 0.85, "max_tokens": 1500,
+        })
+        assert resp.status_code == 200
+        sandbox_cls.assert_called_once_with(
+            "heller", model="gpt-4o", temperature=0.3, top_p=0.85, max_tokens=1500,
+        )
+
+        # And it's saved on the conversation, not just used for this one call.
+        conv = unlocked_client.get(
+            "/api/conversations/" + conv_id, params={"professor": "heller"}
+        ).json()
+        assert conv["temperature"] == 0.3
+        assert conv["top_p"] == 0.85
+        assert conv["max_tokens"] == 1500
 
     def test_first_turn_uses_generated_title_when_available(self, unlocked_client, monkeypatch):
         create = unlocked_client.post("/api/conversations", json={"professor": "heller", "model": "gpt-4o"})
@@ -643,6 +701,72 @@ class TestPluginActionPreview:
 
     def test_requires_unlock(self, client):
         resp = client.post("/api/plugin-actions/translate/preview", json={"professor": "heller", "fields": {}})
+        assert resp.status_code == 401
+
+
+class TestPluginActionExtensionFields:
+    """GET /api/plugin-actions/{action_id}/extension-fields — the composer's
+    dynamic subsection for whatever a language-extension plugin (e.g.
+    translation-ea) registers via register_extension_ui_hooks(), keyed by
+    destination-language token. See ExtensionUiHooks's docstring in
+    src/runtime/ui_action.py."""
+
+    @pytest.fixture(autouse=True)
+    def _isolated_registry(self, monkeypatch):
+        from src.runtime import ui_action as ui_action_module
+        monkeypatch.setattr(ui_action_module, "_EXTENSION_UI_HOOKS", {})
+
+    def test_returns_empty_list_when_nothing_registered(self, unlocked_client):
+        resp = unlocked_client.get(
+            "/api/plugin-actions/translate/extension-fields", params={"target_language": "jp"}
+        )
+        assert resp.status_code == 200
+        assert resp.json() == {"fields": []}
+
+    def test_returns_registered_fields_for_matching_token(self, unlocked_client):
+        from src.runtime.ui_action import UiField, register_extension_ui_hooks
+        register_extension_ui_hooks(
+            token="jp",
+            fields=[UiField(name="kanbun", label="Use Kanbun conventions", kind="checkbox", required=False)],
+            apply=lambda sandbox, fields: None,
+        )
+        resp = unlocked_client.get(
+            "/api/plugin-actions/translate/extension-fields", params={"target_language": "jp"}
+        )
+        assert resp.status_code == 200
+        assert resp.json() == {
+            "fields": [{
+                "name": "kanbun", "label": "Use Kanbun conventions", "kind": "checkbox",
+                "required": False, "choices": None, "group": None,
+            }]
+        }
+
+    def test_blank_target_language_returns_empty_list(self, unlocked_client):
+        from src.runtime.ui_action import UiField, register_extension_ui_hooks
+        register_extension_ui_hooks(
+            token="jp", fields=[UiField(name="kanbun", label="Kanbun", kind="checkbox", required=False)],
+            apply=lambda sandbox, fields: None,
+        )
+        resp = unlocked_client.get(
+            "/api/plugin-actions/translate/extension-fields", params={"target_language": ""}
+        )
+        assert resp.json() == {"fields": []}
+
+    def test_unmatched_token_returns_empty_list(self, unlocked_client):
+        from src.runtime.ui_action import UiField, register_extension_ui_hooks
+        register_extension_ui_hooks(
+            token="jp", fields=[UiField(name="kanbun", label="Kanbun", kind="checkbox", required=False)],
+            apply=lambda sandbox, fields: None,
+        )
+        resp = unlocked_client.get(
+            "/api/plugin-actions/translate/extension-fields", params={"target_language": "zh"}
+        )
+        assert resp.json() == {"fields": []}
+
+    def test_requires_unlock(self, client):
+        resp = client.get(
+            "/api/plugin-actions/translate/extension-fields", params={"target_language": "jp"}
+        )
         assert resp.status_code == 401
 
 

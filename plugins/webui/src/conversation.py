@@ -173,6 +173,20 @@ class Conversation:
                        set, ``POST /api/chat`` on this conversation is
                        rejected and the composer is shown locked — a
                        conversation can only run one job at a time.
+        temperature: This conversation's sampling-temperature override
+                     (``0.0``-``2.0``), or ``None`` to use the selected
+                     model's default. Persisted per-conversation the same
+                     way ``model`` is, so it doesn't reset every time the
+                     page is reloaded. Only meaningful for models that
+                     accept it — see
+                     ``src.models.catalog.model_has_fixed_parameters``.
+        top_p: This conversation's nucleus-sampling override (``0.0``-``1.0``),
+               or ``None`` for the model's default. Same persistence and
+               model-support caveat as ``temperature``.
+        max_tokens: This conversation's response-length cap override, or
+                    ``None`` for the model's default. Same persistence as
+                    ``temperature``, but (unlike temperature/top-p) every
+                    model accepts a max-tokens cap of some kind.
     """
 
     id: str
@@ -183,6 +197,9 @@ class Conversation:
     messages: list[Message] = field(default_factory=list)
     compacted_summary: Optional[str] = None
     active_job_id: Optional[str] = None
+    temperature: Optional[float] = None
+    top_p: Optional[float] = None
+    max_tokens: Optional[int] = None
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
@@ -200,6 +217,9 @@ class Conversation:
             messages=messages,
             compacted_summary=data.get("compacted_summary"),
             active_job_id=data.get("active_job_id"),
+            temperature=data.get("temperature"),
+            top_p=data.get("top_p"),
+            max_tokens=data.get("max_tokens"),
         )
 
     def api_messages(self) -> list[dict[str, str]]:

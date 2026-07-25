@@ -819,6 +819,90 @@ preview panel are all in place and wired together. (Earlier the same day,
 this status line said "backend built and tested, front end not yet
 built" — that was true for a few hours, until the front-end pass below.)
 
+**Second pass, same day, after manual testing surfaced a real bug and more
+requests came in:**
+- **Silent job-failure fix**: `jobs.py`'s success path (append `job_result`,
+  clear `active_job_id`, save) had no exception handling at all, unlike the
+  failure path right next to it. Any error while *recording* an
+  already-successful job's result (not the job itself failing) left
+  `active_job_id` set forever with no result and no error ever shown — a
+  plausible explanation for "results aren't showing up." Now wrapped, with
+  a `job_error` fallback so the conversation always unlocks either way.
+  Covered by a new regression test in `plugins/webui/tests/test_jobs.py`
+  that simulates the save failing.
+- **Temperature/top-p/max-tokens**, end to end: `Conversation` gained
+  `temperature`/`top_p`/`max_tokens` (persisted per-conversation like
+  `model`), `POST /api/chat` applies them, `GET /api/models` now reports
+  `accepts_sampling_params` per model (`model_has_fixed_parameters()`/
+  `model_omit_sampling_params()` from `src/models/catalog.py`) so the front
+  end hides temperature/top-p entirely for a model that would reject them
+  rather than showing controls that fail at submit time. A small "tune"
+  icon next to the model picker exposes these for ordinary chat; the job
+  modal gets the same three fields appended under a "Sampling" group,
+  built as synthetic `UiField`s (`samplingFieldsFor()` in `chat.html`) so
+  they flow through the exact same render/collect/restore code as a
+  plugin's own fields rather than needing special-casing.
+- **Token spend on every reply**: chat turns already carried
+  `prompt_tokens`/`completion_tokens`/`cost` on `Message`, just never
+  rendered the token counts (only cost). Now shown — `"gpt-4o · $0.02 ·
+  1200 in / 340 out tokens"` — so a person can tell a reply used its full
+  response budget, not just what it cost. Job results (translate/
+  transcribe) now report this too: `TokenTracker` gained
+  `get_session_usage()`, a running total scoped to *one instance's*
+  lifetime (one CLI run, or one webui request/job — see
+  `SandboxProcessor.__init__`), read by `run_ui_action` after the job
+  finishes and threaded onto `UiJobResult`/the `job_result` `Message`.
+- **Translate composer options expanded**: `output_format` (select:
+  same-as-source/docx/pdf/txt/md — mirrors `-o`'s extension-driven choice,
+  and now genuinely affects the live prompt preview via `build_prompts()`'s
+  `output_format` kwarg), `preserve_tables`, `toc`, `preserve_media`,
+  `font`, `font_size`, `workers`, `spread`. `UiField` gained an optional
+  `group` (a cosmetic section-header string) and `choices` (for the new
+  `'select'` kind) — every translate field now has a group so 14 fields
+  reads as five short sections instead of one dense column.
+- **Job modal polish**: increased field spacing, group headers, Escape
+  now closes the modal (previously only the settings modal had this), a
+  Reset button (circular double-arrow icon) next to Close that explicitly
+  blanks the form, and — the flip side of Reset existing — closing via ×,
+  Cancel, or Escape now **preserves** whatever was typed (`state.jobFieldValues`,
+  keyed by action id) instead of wiping it, restored the next time that
+  same action's modal reopens. A file selection is restored too, via
+  `DataTransfer` (falls back to leaving the file field empty in browsers
+  that don't support it).
+
+**Resolved, same day:** asked whether to generalize the composer so
+extension plugins (Kanbun on `translation-ea`, etc.) can contribute their
+own fields. Your call: a subsection appearing right after the base
+plugin's own options, refreshing whenever the destination language is
+picked — since that's the same moment `get_peer_guidance()` already kicks
+in for an extension plugin. Built as a plain, decoupled global registry in
+`src/runtime/ui_action.py` (`ExtensionUiHooks`/`register_extension_ui_hooks()`/
+`get_extension_ui_fields()`/`apply_extension_ui_hooks()`) rather than
+routed through `DispatchPlugin` — necessary because `run_ui_action` is
+looked up directly off the primary plugin instance (`DispatchPlugin.__getattr__`
+forwards it straight through, never calling anything on `DispatchPlugin`
+itself), so it has no way to ask "which extension owns this destination
+token" through `DispatchPlugin` the way `run()`'s `args._peer_guidance`
+injection does. Mirrors `register_language()`'s existing pattern instead:
+any plugin calls `register_extension_ui_hooks(token, fields, apply)` at
+import time; `TranslationPlugin.run_ui_action`/`preview_ui_action` call
+`apply_extension_ui_hooks(target_code, sandbox, fields)` right alongside
+where `notes`/`preserve_tables` are already applied; a new
+`GET /api/plugin-actions/{action_id}/extension-fields?target_language=...`
+endpoint is what the composer polls on every destination-language change.
+`plugins/translation/plugin.py`'s TEMPLATE GUIDE documents the exact call
+an extension plugin author makes (step 8), with a worked Kanbun example.
+
+**Important caveat**: `translation-ea` itself lives in a separate,
+git-ignored repo not present in this checkout, so this was built and
+tested against a *fake* registered extension (see
+`TestExtensionUiHooksIntegration` in
+`plugins/translation/tests/test_translation_plugin_ui_action.py` and
+`TestExtensionUiHooksRegistry` in `tests/test_ui_action.py`). Kanbun itself
+won't actually appear in the composer until `translation-ea`'s own
+`plugin.py` adds the few lines shown in the template guide — that's a
+follow-up in that other repo, not something finishable from here.
+
 The generic "attach a document to chat" icon and its upload wiring were
 already **removed** from `chat.html` in an earlier pass, before this
 backend work started. Reasoning, unchanged: that icon extracted text from

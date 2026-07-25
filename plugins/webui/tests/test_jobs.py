@@ -289,6 +289,98 @@ class TestStartJob:
         _wait_until(lambda: job_store.get(job.id).status != "running")
         assert store.load(conv.id).title == "My real title"
 
+    def test_result_recording_failure_still_unlocks_and_records_an_error(self, tmp_path):
+        """Regression test: a real bug found by re-reading _run_job() after a
+        user reported that finished job results sometimes never showed up.
+        The success path (append job_result, clear active_job_id, save) had
+        no exception handling at all, unlike the failure path right above
+        it — any error while *recording* an already-successful job's result
+        (a disk hiccup, anything) would silently kill the background thread,
+        leaving active_job_id set forever with no result and no error ever
+        shown. This simulates exactly that: the plugin's own work succeeds,
+        but the first attempt to save that result raises."""
+        store = _make_store(tmp_path)
+        conv = store.create(model="gpt-4o")
+        job_store = jobs.JobStore()
+
+        real_save = store.save
+        calls = {"result_attempts": 0}
+
+        def flaky_save(c):
+            if any(m.kind == "job_result" for m in c.messages):
+                calls["result_attempts"] += 1
+                if calls["result_attempts"] == 1:
+                    raise OSError("simulated disk error while saving the result")
+            real_save(c)
+
+        store.save = flaky_save
+
+        def fake_run(fields, professor, model, on_progress, output_dir):
+            from src.runtime.ui_action import UiJobResult
+            return UiJobResult(output_path=f"{output_dir}/out.txt", output_filename="out.txt", summary="Done.")
+
+        p = _FakePlugin(run_ui_action=fake_run)
+        job = jobs.start_job(
+            plugins={"translate": p}, action_id="translate", fields={}, professor="heller", model=None,
+            conversation_id=conv.id, conversation_store=store, job_store=job_store,
+        )
+        _wait_until(lambda: job_store.get(job.id).status != "running")
+
+        assert job_store.get(job.id).status == "error"
+        reloaded = store.load(conv.id)
+        # Must not stay locked just because recording the result failed once.
+        assert reloaded.active_job_id is None
+        assert not any(m.kind == "job_result" for m in reloaded.messages)
+        error_msgs = [m for m in reloaded.messages if m.kind == "job_error"]
+        assert len(error_msgs) == 1
+        assert "finished" in error_msgs[0].content.lower()
+        assert "saving" in error_msgs[0].content.lower()
+
+    def test_job_result_message_carries_token_and_cost_fields(self, tmp_path):
+        store = _make_store(tmp_path)
+        conv = store.create(model="gpt-4o")
+        job_store = jobs.JobStore()
+
+        def fake_run(fields, professor, model, on_progress, output_dir):
+            from src.runtime.ui_action import UiJobResult
+            return UiJobResult(
+                output_path=f"{output_dir}/out.txt", output_filename="out.txt", summary="Done.",
+                prompt_tokens=500, completion_tokens=120, cost=0.0123,
+            )
+
+        p = _FakePlugin(run_ui_action=fake_run)
+        job = jobs.start_job(
+            plugins={"translate": p}, action_id="translate", fields={}, professor="heller", model=None,
+            conversation_id=conv.id, conversation_store=store, job_store=job_store,
+        )
+        _wait_until(lambda: job_store.get(job.id).status != "running")
+
+        result_msg = next(m for m in store.load(conv.id).messages if m.kind == "job_result")
+        assert result_msg.prompt_tokens == 500
+        assert result_msg.completion_tokens == 120
+        assert result_msg.cost == 0.0123
+
+    def test_job_result_message_tolerates_plugin_not_reporting_usage(self, tmp_path):
+        store = _make_store(tmp_path)
+        conv = store.create(model="gpt-4o")
+        job_store = jobs.JobStore()
+
+        def fake_run(fields, professor, model, on_progress, output_dir):
+            from src.runtime.ui_action import UiJobResult
+            return UiJobResult(output_path=f"{output_dir}/out.txt", output_filename="out.txt", summary="Done.")
+
+        p = _FakePlugin(run_ui_action=fake_run)
+        job = jobs.start_job(
+            plugins={"translate": p}, action_id="translate", fields={}, professor="heller", model=None,
+            conversation_id=conv.id, conversation_store=store, job_store=job_store,
+        )
+        _wait_until(lambda: job_store.get(job.id).status != "running")
+
+        result_msg = next(m for m in store.load(conv.id).messages if m.kind == "job_result")
+        assert result_msg.prompt_tokens is None
+        assert result_msg.completion_tokens is None
+        assert result_msg.cost is None
+
     def test_on_progress_appends_progress_messages_in_order(self, tmp_path):
         store = _make_store(tmp_path)
         conv = store.create(model="gpt-4o")
