@@ -4,40 +4,79 @@
 <meta charset="utf-8">
 <title>Settings — Princeton AI Sandbox</title>
 <style>
-  :root { --orange: #E77500; --border: #d2d2d7; --bg: #f5f5f7; }
+  /* Kept identical to chat.html's variables so this page (embedded there in
+     a modal iframe) is visually indistinguishable from the rest of the app,
+     in either theme. */
+  :root {
+    --orange: #E77500;
+    --border: #d2d2d7;
+    --bg: #f5f5f7;
+    --panel-bg: #ffffff;
+    --input-bg: #ffffff;
+    --text: #1d1d1f;
+    --text-muted: #6e6e73;
+    --hover-bg: #eeeef0;
+    --shadow: rgba(0, 0, 0, 0.14);
+    --badge-set-bg: #e5f5e6;
+    --badge-set-text: #1c7c2b;
+    --danger-text: #d70015;
+    --danger-border: #f3c6c6;
+    --danger-hover-bg: #fdf0f0;
+  }
+  [data-theme="dark"] {
+    --border: #3a3a3c;
+    --bg: #1c1c1e;
+    --panel-bg: #262628;
+    --input-bg: #1c1c1e;
+    --text: #f2f2f7;
+    --text-muted: #9a9a9e;
+    --hover-bg: #333335;
+    --shadow: rgba(0, 0, 0, 0.5);
+    --badge-set-bg: #16321a;
+    --badge-set-text: #6fd67f;
+    --danger-text: #ff6b6b;
+    --danger-border: #5c2b2b;
+    --danger-hover-bg: #3a1f1f;
+  }
   * { box-sizing: border-box; }
-  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 0; background: var(--bg); color: #1d1d1f; }
-  #topbar { display: flex; align-items: center; gap: 0.75rem; padding: 0.8rem 1.5rem; border-bottom: 1px solid var(--border); background: white; }
+  body, #topbar, .card, input, select, .badge, button.secondary, button.danger {
+    transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+  }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 0; background: var(--bg); color: var(--text); }
+  #topbar { display: flex; align-items: center; gap: 0.75rem; padding: 0.8rem 1.5rem; border-bottom: 1px solid var(--border); background: var(--panel-bg); }
   #topbar h1 { font-size: 1rem; margin: 0; flex: 1; }
-  #topbar a { color: #1d1d1f; text-decoration: none; font-size: 0.85rem; }
+  #topbar a { color: var(--text); text-decoration: none; font-size: 0.85rem; }
   #topbar a:hover { text-decoration: underline; }
   #page { max-width: 720px; margin: 0 auto; padding: 1.5rem; display: flex; flex-direction: column; gap: 1.25rem; }
-  .card { background: white; border: 1px solid var(--border); border-radius: 10px; padding: 1.25rem 1.5rem; }
+  .card { background: var(--panel-bg); border: 1px solid var(--border); border-radius: 10px; padding: 1.25rem 1.5rem; }
   .card h2 { font-size: 1rem; margin: 0 0 0.25rem; }
-  .card .hint { font-size: 0.82rem; color: #6e6e73; margin: 0 0 1rem; line-height: 1.4; }
+  .card .hint { font-size: 0.82rem; color: var(--text-muted); margin: 0 0 1rem; line-height: 1.4; }
   .row { display: flex; align-items: center; gap: 0.6rem; padding: 0.5rem 0; border-bottom: 1px solid var(--bg); }
   .row:last-child { border-bottom: none; }
   .row .main { flex: 1; min-width: 0; }
   .row .name { font-size: 0.9rem; font-weight: 500; }
-  .row .sub { font-size: 0.78rem; color: #6e6e73; }
+  .row .sub { font-size: 0.78rem; color: var(--text-muted); }
   .badge { font-size: 0.72rem; padding: 0.15rem 0.5rem; border-radius: 20px; white-space: nowrap; }
-  .badge.set { background: #e5f5e6; color: #1c7c2b; }
-  .badge.unset { background: #f0f0f2; color: #6e6e73; }
-  label { display: block; font-size: 0.78rem; color: #6e6e73; margin: 0.6rem 0 0.2rem; }
-  input[type=text], input[type=password], select { width: 100%; padding: 0.5rem; font-size: 0.88rem; border: 1px solid var(--border); border-radius: 6px; font-family: inherit; }
+  .badge.set { background: var(--badge-set-bg); color: var(--badge-set-text); }
+  .badge.unset { background: var(--hover-bg); color: var(--text-muted); }
+  label { display: block; font-size: 0.78rem; color: var(--text-muted); margin: 0.6rem 0 0.2rem; }
+  input[type=text], input[type=password], select {
+    width: 100%; padding: 0.5rem; font-size: 0.88rem; border: 1px solid var(--border);
+    border-radius: 6px; font-family: inherit; background: var(--input-bg); color: var(--text);
+  }
   form.inline { display: flex; gap: 0.5rem; align-items: flex-end; flex-wrap: wrap; margin-top: 0.75rem; }
   form.inline > div { flex: 1; min-width: 140px; }
   button { padding: 0.45rem 0.8rem; font-size: 0.85rem; background: var(--orange); color: white; border: none; border-radius: 6px; cursor: pointer; white-space: nowrap; }
   button:hover { background: #cc6600; }
-  button.secondary { background: transparent; color: #1d1d1f; border: 1px solid var(--border); }
-  button.secondary:hover { background: var(--bg); }
-  button.danger { background: transparent; color: #d70015; border: 1px solid #f3c6c6; }
-  button.danger:hover { background: #fdf0f0; }
+  button.secondary { background: transparent; color: var(--text); border: 1px solid var(--border); }
+  button.secondary:hover { background: var(--hover-bg); }
+  button.danger { background: transparent; color: var(--danger-text); border: 1px solid var(--danger-border); }
+  button.danger:hover { background: var(--danger-hover-bg); }
   button:disabled { opacity: 0.5; cursor: default; }
   details.manage { margin-top: 0.4rem; }
   details.manage summary { font-size: 0.78rem; color: var(--orange); cursor: pointer; }
   .snippet { background: var(--bg); border-radius: 6px; padding: 0.75rem; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.78rem; white-space: pre; overflow-x: auto; margin-top: 0.5rem; }
-  .empty { font-size: 0.85rem; color: #6e6e73; }
+  .empty { font-size: 0.85rem; color: var(--text-muted); }
   .field-set { display: flex; gap: 0.5rem; align-items: center; }
   .field-set input { flex: 1; }
 </style>
@@ -167,6 +206,23 @@ default_model = "llama-3-70b-instruct"</div>
   </div>
 
 <script>
+// Applied immediately, before anything else, so there's no flash of the
+// wrong theme — same localStorage key chat.html uses, since this page is
+// served from the same origin (whether reached directly or embedded in
+// chat.html's Settings modal, both read/write the same "theme" value).
+// No toggle button here on purpose: the only place to switch themes is
+// chat.html's topbar, and this page just reflects whatever was last set.
+(function applySavedTheme() {
+  const theme = localStorage.getItem("theme")
+    || (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+  document.documentElement.setAttribute("data-theme", theme);
+})();
+
+// True when this page is loaded inside chat.html's Settings modal iframe
+// rather than navigated to directly (e.g. the first-run redirect when no
+// professors are configured yet, or a bookmarked /settings URL).
+const embeddedInModal = window.self !== window.top;
+
 async function api(path, opts) {
   const res = await fetch(path, Object.assign({ headers: { "Content-Type": "application/json" } }, opts));
   if (!res.ok) { throw new Error(await res.text()); }
@@ -429,16 +485,22 @@ async function loadSettings() {
   renderWebui(data);
   renderShared(data);
   renderSources(data);
-  document.getElementById("back-link").style.display = data.has_professors ? "inline" : "none";
+  // Inside the modal, chat.html's own close button already covers "go
+  // back" — this link would just be a second, ambiguous way to do the
+  // same thing, so it's only shown when this page was reached directly.
+  document.getElementById("back-link").style.display =
+    (!embeddedInModal && data.has_professors) ? "inline" : "none";
 }
 
 document.getElementById("back-link").addEventListener("click", (ev) => {
   ev.preventDefault();
-  window.location.href = "/";
+  window.top.location.href = "/";
 });
 document.getElementById("lock-btn").addEventListener("click", async () => {
   await fetch("/lock", { method: "POST" });
-  window.location.href = "/";
+  // window.top, not window — this needs to break out of the modal iframe
+  // and lock/redirect the whole app, not just the embedded settings page.
+  window.top.location.href = "/";
 });
 
 loadSettings().catch(e => alert("Error loading settings: " + e.message));

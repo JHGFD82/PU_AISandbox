@@ -173,6 +173,31 @@
   .spend-label { font-size: 0.78rem; color: var(--text-muted); }
   .spend-row { display: flex; justify-content: space-between; font-size: 0.85rem; padding: 0.2rem 0; }
   .empty { color: var(--text-muted); font-size: 0.85rem; text-align: center; margin-top: 2rem; }
+
+  /* ── Settings modal ──────────────────────────────────────────────────
+     The settings page is embedded via a same-origin iframe rather than
+     rebuilt as an in-page panel — same-origin means it automatically
+     shares this page's localStorage, so /settings picks up the saved
+     theme on its own with no cross-frame messaging needed. */
+  #settings-modal-backdrop {
+    position: fixed; inset: 0; background: rgba(0, 0, 0, 0.4); z-index: 100;
+    display: flex; align-items: center; justify-content: center;
+    opacity: 0; transition: opacity 0.2s ease;
+  }
+  #settings-modal-backdrop[hidden] { display: none; }
+  #settings-modal-backdrop.open { opacity: 1; }
+  .modal-panel {
+    width: min(760px, 92vw); height: min(85vh, 780px); background: var(--panel-bg);
+    border-radius: 12px; overflow: hidden; display: flex; flex-direction: column;
+    box-shadow: 0 20px 60px var(--shadow); transform: scale(0.97); transition: transform 0.2s ease;
+  }
+  #settings-modal-backdrop.open .modal-panel { transform: scale(1); }
+  .modal-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0.7rem 1rem; border-bottom: 1px solid var(--border); background: var(--panel-bg); flex: none;
+  }
+  .modal-header h2 { margin: 0; }
+  #settings-iframe { flex: 1; border: none; width: 100%; background: var(--panel-bg); }
 </style>
 </head>
 <body>
@@ -249,6 +274,18 @@
     <div class="spend-figure" id="spend-alltime">$0.00</div>
     <h2>By model (this month)</h2>
     <div id="spend-by-model"></div>
+  </div>
+
+  <div id="settings-modal-backdrop" hidden>
+    <div class="modal-panel">
+      <div class="modal-header">
+        <h2 style="margin:0; text-transform:none; font-size:1rem; letter-spacing:normal;">Settings</h2>
+        <button type="button" class="icon-btn" id="settings-modal-close" title="Close" aria-label="Close settings">
+          <svg viewBox="0 0 14 14"><path d="M1 1l12 12M13 1L1 13" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+        </button>
+      </div>
+      <iframe id="settings-iframe" title="Settings"></iframe>
+    </div>
   </div>
 
 <script>
@@ -698,8 +735,42 @@ document.getElementById("lock-btn").addEventListener("click", async () => {
   await fetch("/lock", { method: "POST" });
   window.location.href = "/";
 });
-document.getElementById("settings-btn").addEventListener("click", () => {
-  window.location.href = "/settings";
+// ── Settings modal ──────────────────────────────────────────────────────
+function openSettingsModal() {
+  const backdrop = document.getElementById("settings-modal-backdrop");
+  const iframe = document.getElementById("settings-iframe");
+  iframe.src = "/settings";
+  backdrop.hidden = false;
+  // Set src and un-hide first, then add the class on the next frame so the
+  // opacity/transform transition actually plays instead of jumping straight
+  // to its end state.
+  requestAnimationFrame(() => backdrop.classList.add("open"));
+}
+
+function closeSettingsModal() {
+  const backdrop = document.getElementById("settings-modal-backdrop");
+  const iframe = document.getElementById("settings-iframe");
+  backdrop.classList.remove("open");
+  setTimeout(() => {
+    backdrop.hidden = true;
+    iframe.src = "about:blank";
+  }, 200);
+  // Settings changes (a professor added/removed, a model catalog edit,
+  // etc.) may have happened inside the modal — refresh this page's own
+  // state the same way a full reload of chat.html would, without actually
+  // reloading it.
+  loadProfessors().then(() => Promise.all([loadModels(), loadConversations(), loadUsage()]));
+}
+
+document.getElementById("settings-btn").addEventListener("click", openSettingsModal);
+document.getElementById("settings-modal-close").addEventListener("click", closeSettingsModal);
+document.getElementById("settings-modal-backdrop").addEventListener("click", (e) => {
+  if (e.target.id === "settings-modal-backdrop") closeSettingsModal();
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !document.getElementById("settings-modal-backdrop").hidden) {
+    closeSettingsModal();
+  }
 });
 document.getElementById("spend-toggle-btn").addEventListener("click", () => {
   const btn = document.getElementById("spend-toggle-btn");
