@@ -34,9 +34,10 @@ def _wait_until(predicate, timeout=2.0, interval=0.01):
 class _FakePlugin:
     """A minimal stand-in for a plugin declaring ui_action + run_ui_action."""
 
-    def __init__(self, action_id="translate", run_ui_action=None):
+    def __init__(self, action_id="translate", run_ui_action=None, progress_verb=None):
         from src.runtime.ui_action import UiAction
-        self.ui_action = UiAction(id=action_id, label="Fake action", command=action_id)
+        kwargs = {"progress_verb": progress_verb} if progress_verb is not None else {}
+        self.ui_action = UiAction(id=action_id, label="Fake action", command=action_id, **kwargs)
         self.calls = []
         self._run_ui_action = run_ui_action
 
@@ -311,6 +312,78 @@ class TestStartJob:
         progress_msgs = [m for m in reloaded.messages if m.kind == "job_progress"]
         assert len(progress_msgs) == 3
         assert all(m.job_id == job.id for m in progress_msgs)
+
+    def test_progress_message_uses_plugin_progress_verb_correctly_spelled(self, tmp_path):
+        # Regression guard for a real bug found via manual testing: the
+        # progress message used to be built as
+        # f"{job.action_id.capitalize()}ing..." — for action_id="translate"
+        # that produces "Translateing...", not "Translating...". It's now
+        # built from the plugin's own UiAction.progress_verb instead.
+        store = _make_store(tmp_path)
+        conv = store.create(model="gpt-4o")
+        job_store = jobs.JobStore()
+
+        def fake_run(fields, professor, model, on_progress, output_dir):
+            from src.runtime.ui_action import UiJobResult
+            on_progress(1, 3)
+            return UiJobResult(output_path=f"{output_dir}/out.txt", output_filename="out.txt", summary="Done.")
+
+        p = _FakePlugin(action_id="translate", run_ui_action=fake_run, progress_verb="Translating")
+        job = jobs.start_job(
+            plugins={"translate": p}, action_id="translate", fields={}, professor="heller", model=None,
+            conversation_id=conv.id, conversation_store=store, job_store=job_store,
+        )
+        _wait_until(lambda: job_store.get(job.id).status != "running")
+
+        reloaded = store.load(conv.id)
+        progress_msgs = [m for m in reloaded.messages if m.kind == "job_progress"]
+        assert progress_msgs[0].content == "Translating... 1 of 3 done."
+        assert "Translateing" not in progress_msgs[0].content
+
+    def test_progress_message_falls_back_to_processing_when_no_verb_declared(self, tmp_path):
+        store = _make_store(tmp_path)
+        conv = store.create(model="gpt-4o")
+        job_store = jobs.JobStore()
+
+        def fake_run(fields, professor, model, on_progress, output_dir):
+            from src.runtime.ui_action import UiJobResult
+            on_progress(1, 1)
+            return UiJobResult(output_path=f"{output_dir}/out.txt", output_filename="out.txt", summary="Done.")
+
+        p = _FakePlugin(run_ui_action=fake_run)  # no progress_verb -> UiAction's own default
+        job = jobs.start_job(
+            plugins={"translate": p}, action_id="translate", fields={}, professor="heller", model=None,
+            conversation_id=conv.id, conversation_store=store, job_store=job_store,
+        )
+        _wait_until(lambda: job_store.get(job.id).status != "running")
+
+        reloaded = store.load(conv.id)
+        progress_msgs = [m for m in reloaded.messages if m.kind == "job_progress"]
+        assert progress_msgs[0].content == "Processing... 1 of 1 done."
+
+    def test_progress_message_carries_numeric_done_and_total(self, tmp_path):
+        # The webui's progress bar needs real numbers to compute a
+        # percentage-width fill from, not just the pre-formatted sentence.
+        store = _make_store(tmp_path)
+        conv = store.create(model="gpt-4o")
+        job_store = jobs.JobStore()
+
+        def fake_run(fields, professor, model, on_progress, output_dir):
+            from src.runtime.ui_action import UiJobResult
+            on_progress(2, 5)
+            return UiJobResult(output_path=f"{output_dir}/out.txt", output_filename="out.txt", summary="Done.")
+
+        p = _FakePlugin(run_ui_action=fake_run, progress_verb="Translating")
+        job = jobs.start_job(
+            plugins={"translate": p}, action_id="translate", fields={}, professor="heller", model=None,
+            conversation_id=conv.id, conversation_store=store, job_store=job_store,
+        )
+        _wait_until(lambda: job_store.get(job.id).status != "running")
+
+        reloaded = store.load(conv.id)
+        progress_msgs = [m for m in reloaded.messages if m.kind == "job_progress"]
+        assert progress_msgs[0].progress_done == 2
+        assert progress_msgs[0].progress_total == 5
 
     def test_error_path_appends_job_error_and_unlocks(self, tmp_path):
         store = _make_store(tmp_path)

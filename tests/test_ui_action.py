@@ -24,6 +24,22 @@ class TestUiAction:
         action = UiAction(id="translate", label="Translate a document", command="translate")
         assert action.fields == []
 
+    def test_progress_verb_defaults_to_processing(self):
+        # Regression guard: progress_verb exists specifically because
+        # deriving a gerund mechanically (e.g. "translate".capitalize() +
+        # "ing") produces the misspelled "Translateing" — a plugin that
+        # doesn't bother to set this gets a plain, correctly-spelled
+        # fallback instead.
+        action = UiAction(id="translate", label="Translate a document", command="translate")
+        assert action.progress_verb == "Processing"
+
+    def test_progress_verb_can_be_overridden(self):
+        action = UiAction(
+            id="translate", label="Translate a document", command="translate",
+            progress_verb="Translating",
+        )
+        assert action.progress_verb == "Translating"
+
     def test_holds_declared_fields_in_order(self):
         fields = [
             UiField(name="source_language", label="Source language", kind="language"),

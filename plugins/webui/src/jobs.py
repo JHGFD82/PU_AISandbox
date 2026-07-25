@@ -284,6 +284,14 @@ def _run_job(
     Not called directly outside this module — see ``start_job()``.
     """
 
+    # UiAction.progress_verb is a plain string a plugin sets itself (e.g.
+    # "Translating"), not derived by mechanically appending "ing" to the
+    # action id — "translate".capitalize() + "ing" produces the misspelled
+    # "Translateing", which is exactly the bug this replaced. Falls back to
+    # "Processing" if the plugin's ui_action doesn't set one (or, in the
+    # unlikely case getattr fails entirely, doesn't have one at all).
+    progress_verb = getattr(getattr(plugin, "ui_action", None), "progress_verb", None) or "Processing"
+
     def on_progress(done: int, total: int) -> None:
         conv = conversation_store.load(job.conversation_id)
         if conv is None:
@@ -291,10 +299,12 @@ def _run_job(
             return
         conv.messages.append(conversation.Message(
             role="assistant",
-            content=f"{job.action_id.capitalize()}ing... {done} of {total} done.",
+            content=f"{progress_verb}... {done} of {total} done.",
             timestamp=datetime.now().isoformat(),
             kind="job_progress",
             job_id=job.id,
+            progress_done=done,
+            progress_total=total,
         ))
         conversation_store.save(conv)
 

@@ -152,6 +152,8 @@ class TestJobFields:
         assert m.job_id is None
         assert m.output_filename is None
         assert m.output_path is None
+        assert m.progress_done is None
+        assert m.progress_total is None
 
     def test_message_from_dict_tolerates_records_without_job_fields(self):
         # Conversations saved before this feature existed have none of
@@ -182,6 +184,27 @@ class TestJobFields:
         restored = Conversation.from_dict(conv.to_dict())
         assert restored.messages[0].kind == "job_progress"
         assert restored.messages[0].job_id == "job_abc123"
+
+    def test_job_progress_numeric_fields_round_trip(self):
+        # The webui's progress bar reads these directly to compute a
+        # percentage width — must survive a save/load cycle intact.
+        conv = Conversation(id="c_1", title="T", created_at="t", updated_at="t", model="gpt-4o")
+        conv.messages.append(Message(
+            role="assistant", content="Translating... 3 of 12 done.", timestamp="t",
+            kind="job_progress", job_id="job_abc123", progress_done=3, progress_total=12,
+        ))
+        restored = Conversation.from_dict(conv.to_dict())
+        assert restored.messages[0].progress_done == 3
+        assert restored.messages[0].progress_total == 12
+
+    def test_job_progress_numeric_fields_default_none_for_old_records(self):
+        data = {
+            "role": "assistant", "content": "Translating... 3 of 12 done.", "timestamp": "t",
+            "kind": "job_progress", "job_id": "job_abc123",
+        }
+        m = Message.from_dict(data)
+        assert m.progress_done is None
+        assert m.progress_total is None
 
     def test_job_result_message_carries_output_fields(self):
         conv = Conversation(id="c_1", title="T", created_at="t", updated_at="t", model="gpt-4o")

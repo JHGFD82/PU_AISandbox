@@ -86,7 +86,10 @@ class Message:
               interrupted). See docs/webui-plugin-plan.md section 10 — job
               messages are deliberately excluded from ``api_messages()``
               and ``display_messages()`` below, since they aren't real
-              dialogue for the model to reason over.
+              dialogue for the model to reason over. The webui's own chat
+              transcript excludes ``'job_progress'`` too, rendering it in a
+              dedicated progress bar under the composer instead — see
+              ``progress_done``/``progress_total``.
         job_id: Which background job this message reports on. ``None`` for
                 an ordinary chat message.
         output_filename: For a ``'job_result'`` message, the filename to
@@ -97,6 +100,15 @@ class Message:
                      download endpoint looks this up server-side by
                      ``job_id`` rather than trusting a client-supplied path.
                      ``None`` otherwise.
+        progress_done: For a ``'job_progress'`` message, how many units of
+                       work (pages, images) had finished as of this ping.
+                       Kept as a separate number rather than only baked into
+                       ``content``'s text, so the webui can render a real
+                       percentage-width progress bar instead of parsing it
+                       back out of a sentence. ``None`` otherwise.
+        progress_total: For a ``'job_progress'`` message, the total number
+                        of units of work this job expects to do. ``None``
+                        otherwise.
     """
 
     role: str
@@ -112,6 +124,8 @@ class Message:
     job_id: Optional[str] = None
     output_filename: Optional[str] = None
     output_path: Optional[str] = None
+    progress_done: Optional[int] = None
+    progress_total: Optional[int] = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -133,6 +147,8 @@ class Message:
             job_id=data.get("job_id"),
             output_filename=data.get("output_filename"),
             output_path=data.get("output_path"),
+            progress_done=data.get("progress_done"),
+            progress_total=data.get("progress_total"),
         )
 
 

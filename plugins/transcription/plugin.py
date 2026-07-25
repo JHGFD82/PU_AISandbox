@@ -536,6 +536,7 @@ ui_action = UiAction(
         UiField(name="file", label="Image", kind="file"),
         UiField(name="notes", label="Notes for the model", kind="text", required=False),
     ],
+    progress_verb="Transcribing",
 )
 
 # See the matching comment in plugins/translation/plugin.py: jobs.py looks

@@ -251,6 +251,7 @@ class TestChat:
             "model": None, "prompt_tokens": None, "completion_tokens": None, "cost": None,
             "attachments": [], "api_content": None,
             "kind": "message", "job_id": None, "output_filename": None, "output_path": None,
+            "progress_done": None, "progress_total": None,
         }
         assert conv["messages"][-1]["content"] == "Hello back!"
         assert conv["messages"][-1]["cost"] == 0.001
@@ -362,6 +363,7 @@ class TestChat:
             "model": None, "prompt_tokens": None, "completion_tokens": None, "cost": None,
             "attachments": [], "api_content": None,
             "kind": "message", "job_id": None, "output_filename": None, "output_path": None,
+            "progress_done": None, "progress_total": None,
         }
 
     def test_attachment_becomes_message_attachment_and_api_content(self, unlocked_client, monkeypatch):

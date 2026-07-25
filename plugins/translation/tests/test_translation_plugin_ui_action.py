@@ -53,6 +53,12 @@ class TestUiActionDeclaration:
         assert plugin_module.ui_action.id == "translate"
         assert plugin_module.ui_action.command == "translate"
 
+    def test_progress_verb_is_correctly_spelled_gerund(self, plugin_module):
+        # Regression guard for the "Translateing..." bug: jobs.py used to
+        # derive this by string manipulation instead of reading a plugin-
+        # declared value.
+        assert plugin_module.ui_action.progress_verb == "Translating"
+
     def test_only_languages_and_file_are_required(self, plugin_module):
         required = {f.name for f in plugin_module.ui_action.fields if f.required}
         assert required == {"source_language", "target_language", "file"}

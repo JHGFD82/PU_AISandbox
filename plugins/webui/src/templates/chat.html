@@ -261,11 +261,9 @@
   .action-picker[hidden] { display: none; }
   .action-picker-empty { padding: 0.5rem 0.7rem; font-size: 0.82rem; color: var(--text-muted); max-width: 220px; }
 
-  /* Job status messages rendered inline in the transcript. */
-  .msg.job-progress {
-    background: transparent; border: 1px dashed var(--border); max-width: 100%;
-    font-size: 0.82rem; font-style: italic; color: var(--text-muted);
-  }
+  /* job_result/job_error still render as bubbles in the transcript — a
+     job's progress pings (job_progress) do not; those are shown only in
+     #job-progress-box below the composer instead. */
   .msg.job-result { border-color: var(--orange); }
   .msg.job-error { border-color: #d64545; }
   [data-theme="dark"] .msg.job-error { border-color: #ff6b6b; }
@@ -277,10 +275,38 @@
   .job-download-link:hover { background: #cc6600; }
 
   /* A background job is running in this conversation: composer is
-     visually disabled and its placeholder explains why, rather than the
-     job silently blocking a send attempt with only a 409 to go on. */
+     visually disabled (the "why" is explained in #job-progress-box
+     below it instead of a placeholder), rather than the job silently
+     blocking a send attempt with only a 409 to go on. */
   #composer.job-locked textarea, #composer.job-locked #send-btn, #composer.job-locked .plugin-action-btn {
     opacity: 0.55; pointer-events: none;
+  }
+
+  /* Background job progress bar, below the composer. */
+  #job-progress-box { padding: 0 1rem 0.9rem; background: var(--panel-bg); }
+  #job-progress-box[hidden] { display: none; }
+  .job-progress-track {
+    height: 6px; border-radius: 999px; background: var(--hover-bg); overflow: hidden;
+  }
+  .job-progress-fill {
+    height: 100%; width: 0%; background: var(--orange); border-radius: 999px;
+    transition: width 0.4s ease;
+  }
+  /* Before the first progress ping arrives, the total unit count isn't
+     known yet — a small sliding block stands in for a real percentage
+     instead of sitting frozen at 0%, which reads as "stalled," not
+     "starting." */
+  .job-progress-fill.indeterminate {
+    width: 30%; transition: none; animation: job-progress-slide 1.2s ease-in-out infinite;
+  }
+  @keyframes job-progress-slide {
+    0% { margin-left: 0%; }
+    50% { margin-left: 68%; }
+    100% { margin-left: 0%; }
+  }
+  .job-progress-label { margin-top: 0.45rem; font-size: 0.82rem; color: var(--text); }
+  .job-progress-advisory {
+    margin-top: 0.25rem; font-size: 0.76rem; font-style: italic; color: var(--text-muted);
   }
 
   /* Job modal: options on the left, a much larger two-pane live prompt
@@ -411,6 +437,14 @@
       </div>
       <textarea id="input" placeholder="Message..."></textarea>
       <button id="send-btn">Send</button>
+    </div>
+    <!-- Background job progress: hidden unless a job is running in the
+         open conversation. Lives below the composer rather than as a
+         chat bubble — see docs/webui-plugin-plan.md section 10. -->
+    <div id="job-progress-box" hidden>
+      <div class="job-progress-track"><div class="job-progress-fill" id="job-progress-fill"></div></div>
+      <div class="job-progress-label" id="job-progress-label"></div>
+      <div class="job-progress-advisory">A background job is running in this conversation — open a new conversation if you'd like to keep chatting while it finishes.</div>
     </div>
   </div>
 
@@ -916,9 +950,38 @@ function setComposerLocked(locked) {
   input.readOnly = locked;
   document.getElementById("send-btn").disabled = locked;
   document.getElementById("plugin-action-btn").disabled = locked;
-  input.placeholder = locked
-    ? "A background job is running in this conversation — open a new conversation if you'd like to keep chatting while it finishes."
-    : "Message...";
+  document.getElementById("job-progress-box").hidden = !locked;
+  if (!locked) resetJobProgressBox();
+}
+
+// Reads the latest job_progress message out of a conversation (if any) and
+// updates the progress bar/label under the composer. Called both right
+// after opening a conversation that already has a job running, and on
+// every polling tick while one is running.
+function updateJobProgressFromConversation(conv) {
+  const fill = document.getElementById("job-progress-fill");
+  const label = document.getElementById("job-progress-label");
+  const progressMsgs = conv.messages.filter(m => m.kind === "job_progress");
+  const latest = progressMsgs.length ? progressMsgs[progressMsgs.length - 1] : null;
+  if (!latest || !latest.progress_total) {
+    // No ping yet — the job has started but hasn't finished a first unit
+    // of work, so there's nothing to compute a real percentage from.
+    fill.classList.add("indeterminate");
+    fill.style.width = "";
+    label.textContent = "Starting…";
+    return;
+  }
+  fill.classList.remove("indeterminate");
+  const pct = Math.max(0, Math.min(100, Math.round((latest.progress_done / latest.progress_total) * 100)));
+  fill.style.width = pct + "%";
+  label.textContent = latest.content;
+}
+
+function resetJobProgressBox() {
+  const fill = document.getElementById("job-progress-fill");
+  fill.classList.remove("indeterminate");
+  fill.style.width = "0%";
+  document.getElementById("job-progress-label").textContent = "";
 }
 
 function stopJobPolling() {
@@ -935,6 +998,7 @@ function startJobPolling(conversationId) {
     try {
       const conv = await api(`/api/conversations/${conversationId}?professor=${encodeURIComponent(state.professor)}`);
       renderMessages(conv);
+      updateJobProgressFromConversation(conv);
       state.conversationHasMessages = conv.messages.length > 0;
       if (!conv.active_job_id) {
         stopJobPolling();
@@ -1182,11 +1246,15 @@ function renderMessages(conv) {
   if (!conv) { box.innerHTML = '<div class="empty">Select or start a conversation.</div>'; return; }
   box.innerHTML = "";
   conv.messages.forEach(m => {
+    // A running job's progress pings are shown only in #job-progress-box
+    // under the composer (see updateJobProgressFromConversation()), not
+    // as a bubble here — skip them entirely rather than rendering an
+    // empty or redundant transcript entry for each one.
+    if (m.kind === "job_progress") return;
     const div = document.createElement("div");
-    // Background-job status messages (job_progress/job_result/job_error —
-    // see docs/webui-plugin-plan.md section 10) get their own bubble style
-    // and skip the copy/export row below; they're status pings, not
-    // dialogue someone would want to copy or export.
+    // job_result/job_error still get their own bubble style and skip the
+    // copy/export row below; they're status pings, not dialogue someone
+    // would want to copy or export.
     const isJobMessage = m.kind && m.kind !== "message";
     div.className = "msg " + m.role + (isJobMessage ? " " + m.kind.replace(/_/g, "-") : "");
     div.textContent = m.content;
@@ -1226,6 +1294,7 @@ async function openConversation(id) {
     // switching away and back) — resume the lock and polling rather than
     // leaving the composer looking usable when it isn't.
     setComposerLocked(true);
+    updateJobProgressFromConversation(conv);
     startJobPolling(id);
   } else {
     setComposerLocked(false);

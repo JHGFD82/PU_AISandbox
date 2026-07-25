@@ -42,6 +42,9 @@ class TestUiActionDeclaration:
         assert plugin_module.ui_action.id == "transcribe"
         assert plugin_module.ui_action.command == "transcribe"
 
+    def test_progress_verb_is_correctly_spelled_gerund(self, plugin_module):
+        assert plugin_module.ui_action.progress_verb == "Transcribing"
+
     def test_only_language_and_file_are_required(self, plugin_module):
         required = {f.name for f in plugin_module.ui_action.fields if f.required}
         assert required == {"target_language", "file"}

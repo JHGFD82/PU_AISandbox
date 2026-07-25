@@ -900,6 +900,7 @@ ui_action = UiAction(
         ),
         UiField(name="notes", label="Notes for the model", kind="text", required=False),
     ],
+    progress_verb="Translating",
 )
 
 # jobs.py's find_plugin_for_action()/list_ui_actions() look for ui_action on

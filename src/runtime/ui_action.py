@@ -78,12 +78,23 @@ class UiAction:
                  needs to line up with a real parsed-flags shape.
         fields: The form fields the composer should render for this
                 action, in display order.
+        progress_verb: The present-participle ("-ing") verb shown in a
+                       running job's progress messages, e.g.
+                       ``'Translating'`` -> "Translating... 3 of 12 done."
+                       Plain string, not derived automatically from
+                       anything else — English gerunds aren't a
+                       mechanical transformation of a plugin's id or label
+                       (``"translate".capitalize() + "ing"`` produces the
+                       misspelled "Translateing", which is exactly the bug
+                       this field replaces). Defaults to ``'Processing'``
+                       for a plugin that doesn't bother to set one.
     """
 
     id: str
     label: str
     command: str
     fields: list[UiField] = field(default_factory=list)
+    progress_verb: str = "Processing"
 
 
 @dataclass
