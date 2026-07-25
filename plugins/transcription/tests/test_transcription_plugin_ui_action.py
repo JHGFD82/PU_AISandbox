@@ -36,7 +36,17 @@ class TestUiActionDeclaration:
 
     def test_declares_expected_fields_in_order(self, plugin_module):
         names = [f.name for f in plugin_module.ui_action.fields]
-        assert names == ["target_language", "file", "notes"]
+        assert names == ["target_language", "file", "output_format", "notes"]
+
+    def test_output_format_offers_the_same_writers_as_the_cli_extension_switch(self, plugin_module):
+        # -o result.docx / -o result.pdf / -o result.md / -o result.txt on
+        # the CLI already picks the writer by extension (save_translation_output
+        # in src/output/file_output.py) — this field is a dropdown for the
+        # same choice, not a new capability, so it must offer exactly those.
+        field = next(f for f in plugin_module.ui_action.fields if f.name == "output_format")
+        assert field.kind == "select"
+        assert field.required is False
+        assert {c["value"] for c in field.choices} == {"txt", "docx", "pdf", "md"}
 
     def test_id_and_command_are_transcribe(self, plugin_module):
         assert plugin_module.ui_action.id == "transcribe"
@@ -91,6 +101,54 @@ class TestRunUiAction:
         assert os.path.exists(result.output_path)
         assert "English" in result.summary
         fake_sandbox.process_image.assert_called_once()
+
+    def test_output_format_defaults_to_txt_when_omitted(self, monkeypatch, plugin_module, tmp_path):
+        self._patch_sandbox(monkeypatch, process_image_side_effect=self._write_output_file)
+        src_file = tmp_path / "scan.jpg"
+        src_file.write_bytes(b"fake")
+
+        result = plugin_module.plugin.run_ui_action(
+            fields={"target_language": "en", "file_path": str(src_file), "file_name": "scan.jpg"},
+            professor="fake", model=None, on_progress=None, output_dir=str(tmp_path / "job_output"),
+        )
+        assert result.output_filename == "scan_English.txt"
+
+    @pytest.mark.parametrize("requested_format,expected_ext", [
+        ("docx", ".docx"),
+        ("pdf", ".pdf"),
+        ("md", ".md"),
+        ("txt", ".txt"),
+    ])
+    def test_output_format_selects_matching_extension(
+        self, monkeypatch, plugin_module, tmp_path, requested_format, expected_ext,
+    ):
+        self._patch_sandbox(monkeypatch, process_image_side_effect=self._write_output_file)
+        src_file = tmp_path / "scan.jpg"
+        src_file.write_bytes(b"fake")
+
+        result = plugin_module.plugin.run_ui_action(
+            fields={
+                "target_language": "en", "file_path": str(src_file), "file_name": "scan.jpg",
+                "output_format": requested_format,
+            },
+            professor="fake", model=None, on_progress=None, output_dir=str(tmp_path / "job_output"),
+        )
+        assert result.output_filename == f"scan_English{expected_ext}"
+        assert result.output_path.endswith(expected_ext)
+
+    def test_unrecognized_output_format_falls_back_to_txt(self, monkeypatch, plugin_module, tmp_path):
+        self._patch_sandbox(monkeypatch, process_image_side_effect=self._write_output_file)
+        src_file = tmp_path / "scan.jpg"
+        src_file.write_bytes(b"fake")
+
+        result = plugin_module.plugin.run_ui_action(
+            fields={
+                "target_language": "en", "file_path": str(src_file), "file_name": "scan.jpg",
+                "output_format": "not-a-real-format",
+            },
+            professor="fake", model=None, on_progress=None, output_dir=str(tmp_path / "job_output"),
+        )
+        assert result.output_filename == "scan_English.txt"
 
     def test_result_includes_session_token_usage(self, monkeypatch, plugin_module, tmp_path):
         fake_sandbox = self._patch_sandbox(monkeypatch, process_image_side_effect=self._write_output_file)

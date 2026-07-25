@@ -971,6 +971,38 @@ Full suite re-run clean after this pass: 1572 passed, 19 deselected
 unrelated failure
 (`test_model_catalog.py::TestResolveModel::test_provider_model_not_in_catalog_auto_registers`).
 
+**Fourth pass, same day: bring transcribe's composer up to parity with its own CLI options,**
+before moving on to Kanbun. Checked what `transcribe`'s actual CLI surface
+is (`plugins/transcription/plugin.py`'s `register_subparsers()`): just
+`language_code`, `-i/--input`, the shared common flags (`-o`/`-m`/`-t`/`-T`/
+`-M`/`--dry-run`), and notes flags — much thinner than translate's. Notably,
+`vertical`/`spread`/`passes`/`workers` are **not** base-CLI flags at all for
+transcribe; `process_image`/`process_image_folder` in
+`plugins/transcription/src/runtime/image_handler.py` accept those
+parameters, but only `transcription-ea`'s `register_command_flags()` ever
+sets them via a CLI flag (the base `run()` always calls with the defaults).
+Those stay out of the base composer for the same reason Kanbun's fields
+stay out of translate's base composer — they belong behind the same
+extension-field registry mechanism, as a follow-up once transcription-ea
+itself is touched, not duplicated into the base plugin now.
+
+What *is* a genuine, currently-missing base-CLI capability: `-o result.docx`
+vs. `-o result.pdf` vs. `-o result.txt` already picks the output writer by
+extension (same `save_translation_output()` translate uses), but the webui
+composer hardcoded `.txt` regardless. Added an `output_format` select field
+(txt/docx/pdf/md — same choices as translate's, minus its "same as source"
+option, since an image has no source-format extension to match), grouped
+alongside `target_language`/`file` under "Document" and "Output" section
+headers mirroring translate's now-established grouping convention.
+`run_ui_action` reads it and picks the output extension the same way
+translate's does. Covered by new tests in
+`test_transcription_plugin_ui_action.py`: format-to-extension mapping for
+all four choices, default-to-txt when omitted, and fallback-to-txt for an
+unrecognized value.
+
+Full suite re-run clean: 1579 passed, 19 deselected, the same one
+pre-existing unrelated failure.
+
 The generic "attach a document to chat" icon and its upload wiring were
 already **removed** from `chat.html` in an earlier pass, before this
 backend work started. Reasoning, unchanged: that icon extracted text from

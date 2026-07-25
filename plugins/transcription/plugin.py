@@ -412,6 +412,12 @@ class TranscriptionPlugin:
           since ``process_image_folder`` needed no separate work here.)
         - ``file_name``: the original filename, used only to build a
           readable output filename.
+        - ``output_format``: optional, one of ``'txt'`` (default),
+          ``'docx'``, ``'pdf'``, or ``'md'`` — mirrors the CLI's own
+          extension-driven format choice (passing ``-o result.docx`` vs.
+          ``-o result.txt`` already picks the writer by extension; this is
+          the same behavior, just chosen from a dropdown instead of typed
+          into a filename).
         - ``notes``: optional free text, applied to both the system and
           user prompts (the same effect as the CLI's ``-nb`` flag).
         - ``temperature`` / ``top_p`` / ``max_tokens``: optional sampling
@@ -491,7 +497,15 @@ class TranscriptionPlugin:
             sandbox.image_processor_service.user_note = notes
 
         base_name = os.path.splitext(file_name)[0] or "transcription"
-        output_filename = f"{base_name}_{target_language}.txt"
+        # Extension-driven format choice, same idea as -o on the CLI (the
+        # underlying save_translation_output() call already picks its
+        # writer by the output path's extension — this just gives the
+        # composer a dropdown instead of requiring a professor to know
+        # "type .docx at the end of a filename" is even a thing).
+        requested_format = (fields.get("output_format") or "txt").strip().lower()
+        _format_ext = {"docx": ".docx", "pdf": ".pdf", "txt": ".txt", "md": ".md"}
+        out_ext = _format_ext.get(requested_format, ".txt")
+        output_filename = f"{base_name}_{target_language}{out_ext}"
         output_path = os.path.join(output_dir, output_filename)
         os.makedirs(output_dir, exist_ok=True)
 
@@ -573,9 +587,19 @@ ui_action = UiAction(
     label="Transcribe an image (OCR)",
     command="transcribe",
     fields=[
-        UiField(name="target_language", label="Language in the image", kind="language"),
-        UiField(name="file", label="Image", kind="file"),
-        UiField(name="notes", label="Notes for the model", kind="text", required=False),
+        UiField(name="target_language", label="Language in the image", kind="language", group="Document"),
+        UiField(name="file", label="Image", kind="file", group="Document"),
+        UiField(
+            name="output_format", label="Output format", kind="select", required=False,
+            choices=[
+                {"value": "txt", "label": "Plain text (.txt) (default)"},
+                {"value": "docx", "label": "Word (.docx)"},
+                {"value": "pdf", "label": "PDF"},
+                {"value": "md", "label": "Markdown (.md)"},
+            ],
+            group="Output",
+        ),
+        UiField(name="notes", label="Notes for the model", kind="text", required=False, group="Notes"),
     ],
     progress_verb="Transcribing",
 )
