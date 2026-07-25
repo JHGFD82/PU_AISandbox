@@ -20,6 +20,7 @@ from src.models import (
     get_monthly_limit,
     get_pricing_unit,
     get_vision_capable_models,
+    is_sampling_param_deprecated_error,
     load_model_catalog,
     model_has_fixed_parameters,
     model_supports_vision,
@@ -27,6 +28,7 @@ from src.models import (
     remove_model_from_catalog,
     resolve_model,
     save_model_catalog,
+    set_model_fixed_parameters,
 )
 
 # ---------------------------------------------------------------------------
@@ -893,4 +895,75 @@ class TestIsModelAccessError:
         from src.models.catalog import is_model_access_error
         msg = "INVALID TARGET NAME FOUND IN THE QUERY ROUTER"
         assert is_model_access_error(msg) is True
+
+
+# ---------------------------------------------------------------------------
+# set_model_fixed_parameters
+# ---------------------------------------------------------------------------
+
+class TestSetModelFixedParameters:
+
+    def test_marks_existing_model_and_returns_true(self, monkeypatch):
+        import copy
+        cat = copy.deepcopy(SAMPLE_CATALOG)
+        monkeypatch.setattr(catalog_module, "load_model_catalog", lambda: cat)
+        saved = {}
+        monkeypatch.setattr(catalog_module, "save_model_catalog", lambda c: saved.update(c))
+        result = set_model_fixed_parameters("gpt-4o")
+        assert result is True
+        assert saved["models"]["gpt-4o"]["fixed_parameters"] is True
+        # Existing fields (pricing, supports_vision) must survive untouched.
+        assert saved["models"]["gpt-4o"]["input"] == 2.75
+
+    def test_returns_false_when_model_absent(self, monkeypatch):
+        import copy
+        cat = copy.deepcopy(SAMPLE_CATALOG)
+        monkeypatch.setattr(catalog_module, "load_model_catalog", lambda: cat)
+        result = set_model_fixed_parameters("does-not-exist")
+        assert result is False
+
+    def test_returns_false_when_already_fixed_parameters(self, monkeypatch):
+        """gpt-5 in SAMPLE_CATALOG already has fixed_parameters: True — no
+        write should happen, and the caller can tell nothing changed."""
+        import copy
+        cat = copy.deepcopy(SAMPLE_CATALOG)
+        monkeypatch.setattr(catalog_module, "load_model_catalog", lambda: cat)
+        save_called = False
+
+        def fake_save(_c):
+            nonlocal save_called
+            save_called = True
+        monkeypatch.setattr(catalog_module, "save_model_catalog", fake_save)
+
+        result = set_model_fixed_parameters("gpt-5")
+        assert result is False
+        assert save_called is False
+
+
+# ---------------------------------------------------------------------------
+# is_sampling_param_deprecated_error
+# ---------------------------------------------------------------------------
+
+class TestIsSamplingParamDeprecatedError:
+
+    def test_returns_true_for_temperature_deprecated(self):
+        msg = "azure-ai error: `temperature` is deprecated for this model."
+        assert is_sampling_param_deprecated_error(msg) is True
+
+    def test_returns_true_for_top_p_deprecated(self):
+        msg = "azure-ai error: `top_p` is deprecated for this model."
+        assert is_sampling_param_deprecated_error(msg) is True
+
+    def test_case_insensitive_match(self):
+        msg = "AZURE-AI ERROR: `TEMPERATURE` IS DEPRECATED FOR THIS MODEL."
+        assert is_sampling_param_deprecated_error(msg) is True
+
+    def test_returns_false_for_unrelated_invalid_request(self):
+        msg = "Error code: 400 - {'type': 'invalid_request_error', 'message': 'bad request'}"
+        assert is_sampling_param_deprecated_error(msg) is False
+
+    def test_returns_false_when_deprecated_but_not_a_sampling_param(self):
+        """'deprecated for this model' alone (about some other field) shouldn't match."""
+        msg = "the `functions` field is deprecated for this model."
+        assert is_sampling_param_deprecated_error(msg) is False
 

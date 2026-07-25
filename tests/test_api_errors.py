@@ -14,6 +14,7 @@ from src.services.api_errors import (
     handle_api_errors,
     is_content_filter_error,
     is_transient_error,
+    raise_for_deprecated_sampling_params,
     raise_for_model_access_error,
 )
 
@@ -132,6 +133,55 @@ class TestRaiseForModelAccessError:
 
 
 # ---------------------------------------------------------------------------
+# raise_for_deprecated_sampling_params
+# ---------------------------------------------------------------------------
+
+class TestRaiseForDeprecatedSamplingParams:
+
+    def test_no_raise_when_not_deprecated_error(self):
+        """Should return silently when the error isn't this specific pattern."""
+        with patch("src.services.api_errors.is_sampling_param_deprecated_error", return_value=False):
+            # Must not raise
+            raise_for_deprecated_sampling_params(Exception("some error"), "gpt-4o")
+
+    def test_raises_value_error_and_mentions_temperature(self):
+        with patch("src.services.api_errors.is_sampling_param_deprecated_error", return_value=True), \
+             patch("src.services.api_errors.set_model_fixed_parameters", return_value=True):
+            with pytest.raises(ValueError, match="temperature/top-p"):
+                raise_for_deprecated_sampling_params(
+                    Exception("`temperature` is deprecated for this model."), "claude-fable-5",
+                )
+
+    def test_updated_note_included_when_catalog_updated(self):
+        with patch("src.services.api_errors.is_sampling_param_deprecated_error", return_value=True), \
+             patch("src.services.api_errors.set_model_fixed_parameters", return_value=True):
+            with pytest.raises(ValueError, match="marked as a fixed-parameter model"):
+                raise_for_deprecated_sampling_params(Exception("deprecated"), "claude-fable-5")
+
+    def test_no_updated_note_when_already_fixed_or_absent(self):
+        with patch("src.services.api_errors.is_sampling_param_deprecated_error", return_value=True), \
+             patch("src.services.api_errors.set_model_fixed_parameters", return_value=False):
+            with pytest.raises(ValueError) as exc_info:
+                raise_for_deprecated_sampling_params(Exception("deprecated"), "claude-fable-5")
+            assert "marked as a fixed-parameter model" not in str(exc_info.value)
+
+    def test_empty_model_name_skips_catalog_update(self):
+        with patch("src.services.api_errors.is_sampling_param_deprecated_error", return_value=True), \
+             patch("src.services.api_errors.set_model_fixed_parameters") as mock_set:
+            with pytest.raises(ValueError):
+                raise_for_deprecated_sampling_params(Exception("deprecated"), "")
+            mock_set.assert_not_called()
+
+    def test_chained_exception(self):
+        original = Exception("original cause")
+        with patch("src.services.api_errors.is_sampling_param_deprecated_error", return_value=True), \
+             patch("src.services.api_errors.set_model_fixed_parameters", return_value=False):
+            with pytest.raises(ValueError) as exc_info:
+                raise_for_deprecated_sampling_params(original, "m")
+            assert exc_info.value.__cause__ is original
+
+
+# ---------------------------------------------------------------------------
 # handle_api_errors
 # ---------------------------------------------------------------------------
 
@@ -171,6 +221,26 @@ class TestHandleApiErrors:
              patch("src.services.api_errors.remove_model_from_catalog", return_value=False):
             with pytest.raises(ValueError, match="not accessible"):
                 handle_api_errors(Exception("invalid target name found in the query router"), "bad-model")
+
+    def test_deprecated_sampling_params_delegates(self):
+        with self._no_access(), \
+             patch("src.services.api_errors.set_model_fixed_parameters", return_value=True):
+            with pytest.raises(ValueError, match="no longer accepts temperature/top-p"):
+                handle_api_errors(Exception("`temperature` is deprecated for this model."), "claude-fable-5")
+
+    def test_deprecated_sampling_params_takes_priority_over_invalid_request(self):
+        """The real-world PortKey error for this case is wrapped as
+        'invalid_request_error', so the specific check must run first or the
+        generic invalid-request branch would swallow it instead."""
+        with self._no_access(), \
+             patch("src.services.api_errors.set_model_fixed_parameters", return_value=True):
+            real_error = Exception(
+                "Error code: 400 - {'error': {'message': \"azure-ai error: `temperature` is "
+                "deprecated for this model.\", 'type': 'invalid_request_error', 'param': None, "
+                "'code': None}, 'provider': 'azure-ai'}"
+            )
+            with pytest.raises(ValueError, match="no longer accepts temperature/top-p"):
+                handle_api_errors(real_error, "claude-fable-5")
 
 
 # ---------------------------------------------------------------------------

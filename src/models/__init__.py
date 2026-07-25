@@ -19,6 +19,7 @@ from .catalog import (
     get_pricing_unit,
     get_vision_capable_models,
     is_model_access_error,
+    is_sampling_param_deprecated_error,
     load_model_catalog,
     model_has_fixed_parameters,
     model_omit_sampling_params,
@@ -26,6 +27,7 @@ from .catalog import (
     model_uses_max_completion_tokens,
     remove_model_from_catalog,
     save_model_catalog,
+    set_model_fixed_parameters,
 )
 from .output_options import OutputOptions
 from .pricing import (
@@ -57,6 +59,8 @@ __all__ = [
     # catalog (continued)
     "is_model_access_error",
     "remove_model_from_catalog",
+    "is_sampling_param_deprecated_error",
+    "set_model_fixed_parameters",
     # pricing
     "PORTKEY_PRICING_API_BASE",
     "add_model_to_catalog",

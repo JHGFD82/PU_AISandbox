@@ -4,7 +4,12 @@ import logging
 import os
 from enum import Enum
 
-from ..models import is_model_access_error, remove_model_from_catalog
+from ..models import (
+    is_model_access_error,
+    is_sampling_param_deprecated_error,
+    remove_model_from_catalog,
+    set_model_fixed_parameters,
+)
 
 
 def _log_raw_error_payload(error: Exception) -> None:
@@ -93,19 +98,44 @@ def raise_for_model_access_error(error: Exception, model: str) -> None:
     ) from error
 
 
+def raise_for_deprecated_sampling_params(error: Exception, model: str) -> None:
+    """Raise a user-friendly ValueError if *error* shows this model has dropped
+    support for temperature/top-p entirely.
+
+    Marks the model ``fixed_parameters: true`` in the catalog before raising,
+    so a retry (whether the user resends the message or a caller retries the
+    call) omits those parameters and succeeds. Does nothing if the error does
+    not match this pattern.
+    """
+    if not is_sampling_param_deprecated_error(str(error)):
+        return
+    updated = set_model_fixed_parameters(model) if model else False
+    updated_note = (
+        " It has been marked as a fixed-parameter model in the catalog, so "
+        "sending your message again should work now."
+        if updated else ""
+    )
+    logging.error(f"Model '{model}' rejected sampling parameters as deprecated: {error}")
+    raise ValueError(
+        f"Model '{model}' no longer accepts temperature/top-p adjustments — "
+        f"the gateway reported these as deprecated for this model.{updated_note}"
+    ) from error
+
+
 def handle_api_errors(error: Exception, model: str) -> None:
     """Raise a user-friendly exception for PortKey/OpenAI API errors.
 
-    Covers model-access denial, rate limits, invalid requests, and
-    authentication failures. Content-filter and context-length errors are
-    intentionally excluded — callers that need signal-based handling
-    should use classify_api_error() instead.
+    Covers model-access denial, deprecated sampling parameters, rate limits,
+    invalid requests, and authentication failures. Content-filter and
+    context-length errors are intentionally excluded — callers that need
+    signal-based handling should use classify_api_error() instead.
 
     If none of the known patterns match, this function returns without raising
     so the caller can decide how to handle the remaining error.
     """
     msg = str(error).lower()
     raise_for_model_access_error(error, model)
+    raise_for_deprecated_sampling_params(error, model)
     if "rate_limit" in msg:
         logging.error(f"Rate limit exceeded: {error}")
         raise Exception(f"Rate limit exceeded: {error}") from error

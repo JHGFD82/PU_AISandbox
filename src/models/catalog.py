@@ -395,3 +395,55 @@ def is_model_access_error(error_message: str) -> bool:
     in the Princeton AI Sandbox (PortKey router cannot find it).
     """
     return "invalid target name found in the query router" in error_message.lower()
+
+
+def set_model_fixed_parameters(model_name: str) -> bool:
+    """Mark a model's catalog entry as not accepting sampling parameters at all.
+
+    Used automatically when the AI gateway reports that a model has dropped
+    support for temperature/top-p entirely (some Azure AI deployments return
+    this instead of silently ignoring the parameter, or rejecting it the way
+    ``model_omit_sampling_params`` models do) — see
+    ``is_sampling_param_deprecated_error()``. Once set, every future request
+    for this model omits temperature, top-p, and the other sampling
+    parameters (see ``BaseService._build_completion_kwargs()``). Logs a
+    warning so the change is visible in the run log.
+
+    Args:
+        model_name: The exact key of the model to update, as it appears in
+                    ``model_catalog.json`` (e.g. ``'claude-fable-5'``).
+
+    Returns:
+        ``True`` if the model was found and updated, ``False`` if the model
+        was not present in the catalog, or was already marked
+        ``fixed_parameters: true`` (no changes are made in that case).
+    """
+    catalog = load_model_catalog()
+    entry = catalog["models"].get(model_name)
+    if entry is None or entry.get("fixed_parameters") is True:
+        return False
+    entry["fixed_parameters"] = True
+    save_model_catalog(catalog)
+    logging.warning(
+        f"Marked model '{model_name}' as fixed_parameters=true in the catalog "
+        "(gateway reported that sampling parameters are deprecated for it)."
+    )
+    return True
+
+
+def is_sampling_param_deprecated_error(error_message: str) -> bool:
+    """Return True if the error message indicates a model has dropped support
+    for temperature/top-p/etc. entirely, rather than merely rejecting an
+    out-of-range value.
+
+    Matches the Azure AI gateway's ``` `temperature` is deprecated for this
+    model.``` (and the equivalent for other sampling parameters) rather than
+    a generic invalid-request error, so this only fires for the specific
+    "this model no longer accepts this parameter at all" case.
+    """
+    msg = error_message.lower()
+    if "deprecated for this model" not in msg:
+        return False
+    return any(
+        param in msg for param in ("temperature", "top_p", "top-p", "frequency_penalty", "presence_penalty")
+    )
