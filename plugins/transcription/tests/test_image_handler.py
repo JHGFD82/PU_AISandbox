@@ -99,6 +99,43 @@ class TestProcessImageFolder:
         proc.process_image_folder(str(tmp_path), "English", output_file="out.txt")
         proc.file_output.save_translation_output.assert_called_once()
 
+    def test_on_progress_called_per_image_in_order(self, tmp_path, monkeypatch):
+        proc = _make_processor(monkeypatch)
+        for name in ("a.jpg", "b.jpg", "c.jpg"):
+            (tmp_path / name).write_bytes(b"fake")
+        proc.image_processor_service.process_image_ocr.return_value = "text"
+        calls: list = []
+        proc.process_image_folder(
+            str(tmp_path), "English",
+            on_progress=lambda done, total: calls.append((done, total)),
+        )
+        assert calls == [(1, 3), (2, 3), (3, 3)]
+
+    def test_on_progress_called_even_when_an_image_errors(self, tmp_path, monkeypatch):
+        proc = _make_processor(monkeypatch)
+        (tmp_path / "err.jpg").write_bytes(b"fake")
+        (tmp_path / "ok.jpg").write_bytes(b"fake")
+
+        def flaky(path, *a, **kw):
+            if "err" in path:
+                raise RuntimeError("boom")
+            return "text"
+
+        proc.image_processor_service.process_image_ocr = flaky
+        calls: list = []
+        proc.process_image_folder(
+            str(tmp_path), "English",
+            on_progress=lambda done, total: calls.append((done, total)),
+        )
+        assert calls == [(1, 2), (2, 2)]
+
+    def test_on_progress_none_by_default(self, tmp_path, monkeypatch):
+        proc = _make_processor(monkeypatch)
+        (tmp_path / "a.jpg").write_bytes(b"fake")
+        proc.image_processor_service.process_image_ocr.return_value = "text"
+        # Must not raise (i.e. must not try calling None()).
+        proc.process_image_folder(str(tmp_path), "English")
+
     def test_parallel_path_saves_output_file(self, tmp_path, monkeypatch):
         """Parallel workers > 1 with output_file set exercises the parallel output branch."""
         proc = _make_processor(monkeypatch)

@@ -113,8 +113,9 @@ _register(
 # when running from that repo's root directory.
 
 from src.cli import add_common_flags, add_notes_flags           # noqa: E402
-from src.config import parse_single_language_code, register_language  # noqa: E402
+from src.config import parse_single_language_code, register_language, LANGUAGE_MAP  # noqa: E402
 from src.errors import CLIError                                    # noqa: E402
+from src.runtime.ui_action import ProgressCallback, UiAction, UiField, UiJobResult  # noqa: E402
 
 # Register the language supported by this base plugin.
 register_language('en', 'English')
@@ -383,5 +384,109 @@ class TranscriptionPlugin:
             output_file_r = sandbox._resolve_output_path(args)
             _run_transcription_review(sandbox, text, language, output_file=output_file_r)
 
+    # ── Webui composer action (docs/webui-plugin-plan.md section 10) ───────────
+
+    def run_ui_action(
+        self,
+        fields: dict,
+        professor: str,
+        model: Optional[str],
+        on_progress: Optional[ProgressCallback],
+        output_dir: str,
+    ) -> UiJobResult:
+        """Run a webui-submitted "Transcribe an image" job outside the CLI's argparse path.
+
+        The v1 (core-subset) field set this expects in ``fields`` — see the
+        module-level ``ui_action`` declaration below for the matching
+        ``UiField`` list:
+
+        - ``target_language``: a short code (e.g. ``'en'``) matching a key
+          in ``LANGUAGE_MAP``, the same code typed on the command line.
+        - ``file_path``: absolute path to the image the webui has already
+          saved to disk — or, if it points at a directory, every image in
+          it is transcribed and combined, the same as passing a folder to
+          ``-i`` on the command line. (The v1 composer form only offers a
+          single-file upload widget — see docs/webui-plugin-plan.md section
+          10's open items — but this method itself already supports both,
+          since ``process_image_folder`` needed no separate work here.)
+        - ``file_name``: the original filename, used only to build a
+          readable output filename.
+        - ``notes``: optional free text, applied to both the system and
+          user prompts (the same effect as the CLI's ``-nb`` flag).
+
+        Args:
+            fields: The submitted form's values, keyed by ``UiField.name``.
+            professor: The professor whose API key/budget this job runs
+                       under.
+            model: The model explicitly requested by the webui's model
+                   picker, or ``None`` for this plugin's configured default.
+            on_progress: Forwarded to ``sandbox.process_image_folder`` when
+                         ``file_path`` is a folder; unused for a single
+                         image (nothing to report progress *between*).
+            output_dir: Where to write the one finished output file. Already
+                        created and writable.
+
+        Returns:
+            A ``UiJobResult`` pointing at the transcription text file this
+            job produced.
+
+        Raises:
+            CLIError: If a required field is missing, the language code
+                isn't recognized, or the underlying OCR call fails.
+        """
+        import os
+
+        from src.runtime.sandbox_processor import SandboxProcessor
+
+        code = (fields.get("target_language") or "").strip().lower()
+        if code not in LANGUAGE_MAP:
+            valid = ", ".join(sorted(LANGUAGE_MAP.keys()))
+            raise CLIError(f"Invalid target language '{fields.get('target_language')}'. Use one of: {valid}.")
+        target_language = LANGUAGE_MAP[code]
+
+        file_path = fields.get("file_path")
+        if not file_path:
+            raise CLIError("No file was attached to this transcribe job.")
+        file_name = fields.get("file_name") or os.path.basename(file_path)
+        notes = (fields.get("notes") or "").strip() or None
+
+        sandbox = SandboxProcessor(professor, model=model)
+        if notes:
+            sandbox.image_processor_service.system_note = notes
+            sandbox.image_processor_service.user_note = notes
+
+        base_name = os.path.splitext(file_name)[0] or "transcription"
+        output_filename = f"{base_name}_{target_language}.txt"
+        output_path = os.path.join(output_dir, output_filename)
+        os.makedirs(output_dir, exist_ok=True)
+
+        if os.path.isdir(file_path):
+            sandbox.process_image_folder(file_path, target_language, output_path, on_progress=on_progress)
+            summary = f"Transcribed the images in '{file_name}' to {target_language}."
+        else:
+            sandbox.process_image(file_path, target_language, output_path)
+            summary = f"Transcribed {file_name} to {target_language}."
+
+        if not os.path.exists(output_path):
+            raise CLIError("Transcription finished but no output file was produced.")
+
+        return UiJobResult(output_path=output_path, output_filename=output_filename, summary=summary)
+
 
 plugin = TranscriptionPlugin()
+
+# ── Webui composer action declaration (docs/webui-plugin-plan.md section 10) ──
+# v1 core-subset fields — transcription_review is deliberately left out of
+# the composer (see section 10): it consumes the *output* of a prior
+# transcription as text, which is a less natural composer action than
+# "process this document."
+ui_action = UiAction(
+    id="transcribe",
+    label="Transcribe an image (OCR)",
+    command="transcribe",
+    fields=[
+        UiField(name="target_language", label="Language in the image", kind="language"),
+        UiField(name="file", label="Image", kind="file"),
+        UiField(name="notes", label="Notes for the model", kind="text", required=False),
+    ],
+)

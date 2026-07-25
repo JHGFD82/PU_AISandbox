@@ -250,6 +250,7 @@ class TestChat:
             "role": "user", "content": "Hi there", "timestamp": conv["messages"][-2]["timestamp"],
             "model": None, "prompt_tokens": None, "completion_tokens": None, "cost": None,
             "attachments": [], "api_content": None,
+            "kind": "message", "job_id": None, "output_filename": None, "output_path": None,
         }
         assert conv["messages"][-1]["content"] == "Hello back!"
         assert conv["messages"][-1]["cost"] == 0.001
@@ -360,6 +361,7 @@ class TestChat:
             "role": "user", "content": "Hi", "timestamp": got.json()["messages"][-1]["timestamp"],
             "model": None, "prompt_tokens": None, "completion_tokens": None, "cost": None,
             "attachments": [], "api_content": None,
+            "kind": "message", "job_id": None, "output_filename": None, "output_path": None,
         }
 
     def test_attachment_becomes_message_attachment_and_api_content(self, unlocked_client, monkeypatch):
@@ -489,6 +491,277 @@ class TestUploadAttachment:
             files={"file": ("notes.txt", b"hi", "text/plain")},
         )
         assert resp.status_code == 400
+
+
+def _fake_plugin(action_id="translate", run_ui_action=None):
+    """A minimal stand-in for a plugin declaring ui_action + run_ui_action —
+    mirrors plugins/webui/tests/test_jobs.py's _FakePlugin, duplicated here
+    (rather than imported) since this module doesn't otherwise depend on
+    that test file."""
+    from src.runtime.ui_action import UiAction
+
+    class _Plugin:
+        def __init__(self):
+            self.ui_action = UiAction(id=action_id, label="Fake action", command=action_id)
+
+        def run_ui_action(self, fields, professor, model, on_progress, output_dir):
+            return run_ui_action(fields, professor, model, on_progress, output_dir)
+
+    return _Plugin()
+
+
+def _wait_for_job_done(client, conversation_id, professor, timeout=2.0):
+    import time
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        conv = client.get(
+            f"/api/conversations/{conversation_id}", params={"professor": professor}
+        ).json()
+        if conv["active_job_id"] is None:
+            return conv
+        time.sleep(0.01)
+    pytest.fail("Job did not finish within timeout.")
+
+
+class TestPluginActions:
+    def test_lists_actions_from_installed_plugins(self, unlocked_client, monkeypatch):
+        app_module = sys.modules["_pu_webui_app"]
+        fake = _fake_plugin(action_id="translate")
+        monkeypatch.setattr(app_module, "_get_plugins", lambda: {"translate": fake})
+
+        resp = unlocked_client.get("/api/plugin-actions")
+        assert resp.status_code == 200
+        actions = resp.json()["actions"]
+        assert [a["id"] for a in actions] == ["translate"]
+        assert actions[0]["label"] == "Fake action"
+
+    def test_empty_when_no_plugin_declares_one(self, unlocked_client, monkeypatch):
+        app_module = sys.modules["_pu_webui_app"]
+        monkeypatch.setattr(app_module, "_get_plugins", lambda: {})
+        resp = unlocked_client.get("/api/plugin-actions")
+        assert resp.json()["actions"] == []
+
+    def test_requires_unlock(self, client):
+        resp = client.get("/api/plugin-actions")
+        assert resp.status_code == 401
+
+
+def _fake_ui_job_result(output_dir):
+    from src.runtime.ui_action import UiJobResult
+    out = f"{output_dir}/out.txt"
+    with open(out, "w", encoding="utf-8") as f:
+        f.write("done")
+    return UiJobResult(output_path=out, output_filename="out.txt", summary="Done.")
+
+
+class TestStartJob:
+    def test_start_job_returns_running_status(self, unlocked_client, monkeypatch):
+        app_module = sys.modules["_pu_webui_app"]
+        # A real run_ui_action always returns a UiJobResult (never None) —
+        # matters here even though this test only checks the immediate
+        # response, since the background thread runs to completion inside
+        # this same process regardless of whether the test waits for it.
+        fake = _fake_plugin(
+            action_id="translate",
+            run_ui_action=lambda fields, professor, model, on_progress, output_dir: _fake_ui_job_result(output_dir),
+        )
+        monkeypatch.setattr(app_module, "_get_plugins", lambda: {"translate": fake})
+
+        create = unlocked_client.post("/api/conversations", json={"professor": "heller", "model": "gpt-4o"})
+        conv_id = create.json()["id"]
+
+        resp = unlocked_client.post(
+            "/api/jobs",
+            data={
+                "professor": "heller", "conversation_id": conv_id, "action_id": "translate",
+                "fields_json": json.dumps({"source_language": "ja", "target_language": "en"}),
+            },
+        )
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "running"
+        _wait_for_job_done(unlocked_client, conv_id, "heller")
+
+    def test_uploaded_file_saved_and_passed_as_file_path(self, unlocked_client, monkeypatch):
+        app_module = sys.modules["_pu_webui_app"]
+        received = {}
+
+        def run_ui_action(fields, professor, model, on_progress, output_dir):
+            received.update(fields)
+            from src.runtime.ui_action import UiJobResult
+            out = f"{output_dir}/out.txt"
+            with open(out, "w", encoding="utf-8") as f:
+                f.write("done")
+            return UiJobResult(output_path=out, output_filename="out.txt", summary="Done.")
+
+        fake = _fake_plugin(action_id="translate", run_ui_action=run_ui_action)
+        monkeypatch.setattr(app_module, "_get_plugins", lambda: {"translate": fake})
+
+        create = unlocked_client.post("/api/conversations", json={"professor": "heller", "model": "gpt-4o"})
+        conv_id = create.json()["id"]
+
+        resp = unlocked_client.post(
+            "/api/jobs",
+            data={
+                "professor": "heller", "conversation_id": conv_id, "action_id": "translate",
+                "fields_json": json.dumps({"source_language": "ja", "target_language": "en"}),
+            },
+            files={"file": ("doc.txt", b"some document text", "text/plain")},
+        )
+        assert resp.status_code == 200
+        _wait_for_job_done(unlocked_client, conv_id, "heller")
+        assert received["file_name"] == "doc.txt"
+        assert received["file_path"].endswith("doc.txt")
+        import os
+        assert os.path.exists(received["file_path"])
+
+    def test_unknown_action_returns_400(self, unlocked_client, monkeypatch):
+        app_module = sys.modules["_pu_webui_app"]
+        monkeypatch.setattr(app_module, "_get_plugins", lambda: {})
+        create = unlocked_client.post("/api/conversations", json={"professor": "heller", "model": "gpt-4o"})
+        conv_id = create.json()["id"]
+        resp = unlocked_client.post(
+            "/api/jobs",
+            data={"professor": "heller", "conversation_id": conv_id, "action_id": "translate", "fields_json": "{}"},
+        )
+        assert resp.status_code == 400
+
+    def test_missing_conversation_returns_404(self, unlocked_client, monkeypatch):
+        app_module = sys.modules["_pu_webui_app"]
+        fake = _fake_plugin(run_ui_action=lambda *a: None)
+        monkeypatch.setattr(app_module, "_get_plugins", lambda: {"translate": fake})
+        resp = unlocked_client.post(
+            "/api/jobs",
+            data={"professor": "heller", "conversation_id": "c_missing", "action_id": "translate", "fields_json": "{}"},
+        )
+        assert resp.status_code == 404
+
+    def test_conversation_already_busy_returns_409(self, unlocked_client, monkeypatch):
+        app_module = sys.modules["_pu_webui_app"]
+        conversation = sys.modules["_pu_webui_conversation"]
+        fake = _fake_plugin(run_ui_action=lambda *a: None)
+        monkeypatch.setattr(app_module, "_get_plugins", lambda: {"translate": fake})
+
+        create = unlocked_client.post("/api/conversations", json={"professor": "heller", "model": "gpt-4o"})
+        conv_id = create.json()["id"]
+        store = conversation.ConversationStore("heller", base_dir=conversation.CONVERSATIONS_DIR)
+        conv = store.load(conv_id)
+        conv.active_job_id = "job_existing"
+        store.save(conv)
+
+        resp = unlocked_client.post(
+            "/api/jobs",
+            data={"professor": "heller", "conversation_id": conv_id, "action_id": "translate", "fields_json": "{}"},
+        )
+        assert resp.status_code == 409
+
+    def test_invalid_fields_json_returns_400(self, unlocked_client, monkeypatch):
+        app_module = sys.modules["_pu_webui_app"]
+        fake = _fake_plugin(run_ui_action=lambda *a: None)
+        monkeypatch.setattr(app_module, "_get_plugins", lambda: {"translate": fake})
+        create = unlocked_client.post("/api/conversations", json={"professor": "heller", "model": "gpt-4o"})
+        conv_id = create.json()["id"]
+        resp = unlocked_client.post(
+            "/api/jobs",
+            data={
+                "professor": "heller", "conversation_id": conv_id, "action_id": "translate",
+                "fields_json": "not json",
+            },
+        )
+        assert resp.status_code == 400
+
+    def test_requires_unlock(self, client):
+        resp = client.post(
+            "/api/jobs",
+            data={"professor": "heller", "conversation_id": "c_1", "action_id": "translate", "fields_json": "{}"},
+        )
+        assert resp.status_code == 401
+
+
+class TestChatBlockedWhileJobRunning:
+    def test_chat_returns_409_when_conversation_has_active_job(self, unlocked_client):
+        conversation = sys.modules["_pu_webui_conversation"]
+        create = unlocked_client.post("/api/conversations", json={"professor": "heller", "model": "gpt-4o"})
+        conv_id = create.json()["id"]
+        store = conversation.ConversationStore("heller", base_dir=conversation.CONVERSATIONS_DIR)
+        conv = store.load(conv_id)
+        conv.active_job_id = "job_running"
+        store.save(conv)
+
+        resp = unlocked_client.post("/api/chat", json={
+            "professor": "heller", "conversation_id": conv_id, "message": "hi", "model": "gpt-4o",
+        })
+        assert resp.status_code == 409
+
+
+class TestJobOutputDownload:
+    def _run_job_to_completion(self, unlocked_client, monkeypatch):
+        app_module = sys.modules["_pu_webui_app"]
+
+        def run_ui_action(fields, professor, model, on_progress, output_dir):
+            from src.runtime.ui_action import UiJobResult
+            out = f"{output_dir}/translated.docx"
+            with open(out, "w", encoding="utf-8") as f:
+                f.write("translated content")
+            return UiJobResult(output_path=out, output_filename="translated.docx", summary="Translated it.")
+
+        fake = _fake_plugin(action_id="translate", run_ui_action=run_ui_action)
+        monkeypatch.setattr(app_module, "_get_plugins", lambda: {"translate": fake})
+
+        create = unlocked_client.post("/api/conversations", json={"professor": "heller", "model": "gpt-4o"})
+        conv_id = create.json()["id"]
+        unlocked_client.post(
+            "/api/jobs",
+            data={
+                "professor": "heller", "conversation_id": conv_id, "action_id": "translate",
+                "fields_json": json.dumps({"source_language": "ja", "target_language": "en"}),
+            },
+        )
+        conv = _wait_for_job_done(unlocked_client, conv_id, "heller")
+        job_id = next(m["job_id"] for m in conv["messages"] if m["kind"] == "job_result")
+        return conv_id, job_id
+
+    def test_downloads_the_finished_file(self, unlocked_client, monkeypatch):
+        conv_id, job_id = self._run_job_to_completion(unlocked_client, monkeypatch)
+        resp = unlocked_client.get(
+            f"/api/conversations/{conv_id}/job-outputs/{job_id}", params={"professor": "heller"}
+        )
+        assert resp.status_code == 200
+        assert resp.content == b"translated content"
+
+    def test_unknown_job_id_returns_404(self, unlocked_client, monkeypatch):
+        conv_id, _ = self._run_job_to_completion(unlocked_client, monkeypatch)
+        resp = unlocked_client.get(
+            f"/api/conversations/{conv_id}/job-outputs/job_bogus", params={"professor": "heller"}
+        )
+        assert resp.status_code == 404
+
+    def test_requires_unlock(self, client):
+        resp = client.get("/api/conversations/c_1/job-outputs/job_1", params={"professor": "heller"})
+        assert resp.status_code == 401
+
+
+class TestStartupSweep:
+    def test_create_app_clears_stale_active_job_id(self, tmp_path, monkeypatch):
+        app_module = sys.modules["_pu_webui_app"]
+        conversation = sys.modules["_pu_webui_conversation"]
+        auth = sys.modules["_pu_webui_auth"]
+        monkeypatch.setattr(app_module, "load_professor_config", lambda: {
+            "heller": {"name": "Heller", "key": "sk-heller", "backup_key": None, "safe_name": "heller"},
+        })
+        monkeypatch.setattr(conversation, "CONVERSATIONS_DIR", tmp_path / "conversations")
+        monkeypatch.setattr(app_module, "_auth_backend", auth.PassphraseBackend(passphrase_hash=""))
+
+        store = conversation.ConversationStore("heller")
+        conv = store.create(model="gpt-4o")
+        conv.active_job_id = "job_orphaned"
+        store.save(conv)
+
+        # create_app() itself runs the sweep, before any request is made.
+        app_module.create_app()
+
+        reloaded = store.load(conv.id)
+        assert reloaded.active_job_id is None
+        assert any(m.kind == "job_error" for m in reloaded.messages)
 
 
 class TestExportConversation:

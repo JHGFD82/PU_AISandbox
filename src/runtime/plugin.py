@@ -51,6 +51,31 @@ class ModePlugin(Protocol):
         with ``professor=None``; that plugin's ``run()`` method must handle
         ``professor`` being ``None`` itself (e.g. by prompting the user to
         pick one at runtime rather than assuming it was supplied up front).
+
+    Optional attribute + method pair (webui composer actions):
+        ``ui_action`` — a module-level ``UiAction`` instance (see
+        ``src/runtime/ui_action.py``) a plugin declares to appear as a
+        background-job trigger in the webui plugin's composer (e.g.
+        "Translate a document"). Absent by default — a plugin that doesn't
+        set this simply doesn't show up there; every existing plugin is
+        unaffected. See ``docs/webui-plugin-plan.md`` section 10.
+
+        ``run_ui_action(fields, professor, model, on_progress, output_dir)``
+        — required alongside ``ui_action`` (and only then): runs that
+        action outside the CLI's argparse path, given a plain ``dict`` of
+        the submitted form's field values (keyed by each declared
+        ``UiField.name``) instead of a parsed ``argparse.Namespace``.
+        ``output_dir`` is a directory the webui has already created and
+        guarantees is writable — the plugin's one output file must be
+        written somewhere under it (the webui, not the plugin, owns naming
+        and cleanup policy for that directory). Must return a
+        ``UiJobResult`` (``src/runtime/ui_action.py``) pointing at the file
+        actually written there. ``on_progress``, if not ``None``, should be
+        called with ``(completed_count, total_count)`` after each page or
+        image finishes, wherever the plugin's own execution methods already
+        accept an ``on_progress`` parameter for this purpose (e.g.
+        ``translate_document``'s — see the translation plugin for the
+        reference implementation).
     """
 
     commands: list[str]

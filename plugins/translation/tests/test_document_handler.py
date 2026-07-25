@@ -144,6 +144,44 @@ class TestProcessTextBasedFile:
                 OutputOptions(),
             )
 
+    def test_on_progress_threaded_to_translate_text_pages(self, tmp_path, monkeypatch):
+        # _process_text_based_file itself doesn't call on_progress directly —
+        # it wraps whatever it's given and hands the wrapper to
+        # translation_service.translate_text_pages(). Assert that wrapper
+        # was actually passed, then drive it by hand to confirm it reports
+        # (completed, total) against the mocked service the same way the
+        # real one would.
+        proc = _make_processor(monkeypatch)
+        monkeypatch.setattr(
+            "src.runtime.document_handler.TxtProcessor.process_txt_with_pages",
+            lambda f, target_page_size: ["one", "two", "three"],
+        )
+        f = tmp_path / "source.txt"
+        f.write_text("one\n\ntwo\n\nthree", encoding="utf-8")
+        proc.translation_service.translate_text_pages.return_value = ["a", "b", "c"]
+        calls: list = []
+        proc._process_text_based_file(
+            str(f), "txt", None, None, "English", "French",
+            OutputOptions(), on_progress=lambda done, total: calls.append((done, total)),
+        )
+        _, kwargs = proc.translation_service.translate_text_pages.call_args
+        wrapper = kwargs["on_progress"]
+        assert wrapper is not None
+        wrapper(1, 3)
+        wrapper(3, 3)
+        assert calls == [(1, 3), (3, 3)]
+
+    def test_on_progress_none_by_default(self, tmp_path, monkeypatch):
+        proc = _make_processor(monkeypatch)
+        f = tmp_path / "source.txt"
+        f.write_text("one", encoding="utf-8")
+        proc.translation_service.translate_text_pages.return_value = ["a"]
+        proc._process_text_based_file(
+            str(f), "txt", None, None, "English", "French", OutputOptions(),
+        )
+        _, kwargs = proc.translation_service.translate_text_pages.call_args
+        assert kwargs["on_progress"] is None
+
 
 # ---------------------------------------------------------------------------
 # process_image_translation
@@ -318,6 +356,37 @@ class TestTranslateDocumentSaveOutput:
         opts = OutputOptions(output_file=out_file)
         proc.translate_document(str(txt_file), "Chinese", "English", opts=opts)
         proc.file_output.save_translation_output.assert_called_once()
+
+    def test_on_progress_threaded_to_process_text_based_file(self, monkeypatch, tmp_path):
+        proc = _make_processor(monkeypatch)
+        txt_file = tmp_path / "doc.txt"
+        txt_file.write_text("Hello content", encoding="utf-8")
+
+        monkeypatch.setattr(
+            "src.runtime.sandbox_processor.SandboxProcessor._detect_and_validate_file",
+            lambda self, fp: "txt"
+        )
+        received = {}
+
+        def fake_process(self, *a, **kw):
+            received["on_progress"] = kw.get("on_progress")
+            return ["Translated text"], None
+
+        monkeypatch.setattr(
+            "src.runtime.sandbox_processor.SandboxProcessor._process_text_based_file",
+            fake_process,
+        )
+        calls: list = []
+        proc.translate_document(
+            str(txt_file), "Chinese", "English",
+            on_progress=lambda done, total: calls.append((done, total)),
+        )
+        assert received["on_progress"] is not None
+        # translate_document passes its on_progress straight through for the
+        # simple text-file branches (no offset/wrapping needed — that only
+        # happens for the PDF branch, which spans more than one page range).
+        received["on_progress"](2, 5)
+        assert calls == [(2, 5)]
 
 
 # ---------------------------------------------------------------------------
@@ -609,6 +678,55 @@ class TestProcessImageTranslationFolderEdgeCases:
         opts = OutputOptions(auto_save=True)
         proc.process_image_translation_folder(str(folder), "Japanese", "English", opts=opts, workers=1)
         proc.file_output.save_translation_output.assert_called_once()
+
+    def test_on_progress_called_per_image_in_order(self, tmp_path, monkeypatch):
+        proc = _make_processor(monkeypatch)
+        folder = tmp_path / "imgs"
+        folder.mkdir()
+        (folder / "a.jpg").write_bytes(b"fake")
+        (folder / "b.jpg").write_bytes(b"fake")
+        (folder / "c.jpg").write_bytes(b"fake")
+
+        proc.image_translation_service.process_image_translation = MagicMock(
+            return_value=("", "Translation")
+        )
+        calls: list = []
+        proc.process_image_translation_folder(
+            str(folder), "Japanese", "English", workers=1,
+            on_progress=lambda done, total: calls.append((done, total)),
+        )
+        assert calls == [(1, 3), (2, 3), (3, 3)]
+
+    def test_on_progress_called_even_when_an_image_errors(self, tmp_path, monkeypatch):
+        proc = _make_processor(monkeypatch)
+        folder = tmp_path / "imgs"
+        folder.mkdir()
+        (folder / "err.jpg").write_bytes(b"fake")
+        (folder / "ok.jpg").write_bytes(b"fake")
+
+        def flaky(path, src_lang, tgt_lang):
+            if "err" in path:
+                raise RuntimeError("boom")
+            return ("", "translation")
+
+        proc.image_translation_service.process_image_translation = flaky
+        calls: list = []
+        proc.process_image_translation_folder(
+            str(folder), "Japanese", "English", workers=1,
+            on_progress=lambda done, total: calls.append((done, total)),
+        )
+        assert calls == [(1, 2), (2, 2)]
+
+    def test_on_progress_none_by_default(self, tmp_path, monkeypatch):
+        proc = _make_processor(monkeypatch)
+        folder = tmp_path / "imgs"
+        folder.mkdir()
+        (folder / "a.jpg").write_bytes(b"fake")
+        proc.image_translation_service.process_image_translation = MagicMock(
+            return_value=("", "Translation")
+        )
+        # Must not raise (i.e. must not try calling None()).
+        proc.process_image_translation_folder(str(folder), "Japanese", "English", workers=1)
 
     def test_parallel_with_auto_save_calls_file_output(self, tmp_path, monkeypatch):
         """Parallel path with auto_save=True calls file_output.save_translation_output."""

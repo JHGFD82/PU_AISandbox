@@ -808,3 +808,303 @@ errored, all traced to one of the three causes above) — not yet
 re-confirmed with a clean run at time of writing.
 
 Each step is independently testable and shippable.
+
+---
+
+## 10. Plugin actions in the composer (replaces the generic attachment icon)
+
+Status (2026-07-25): **backend built and tested**; the composer's puzzle-
+piece button and the two-pane options/live-prompt-preview panel described
+below are **not yet built** — this pass was deliberately scoped to "the
+background job infrastructure first, to see how it affects the package as
+a whole" before touching the front end. What exists now, with no UI
+trigger yet, is exercised entirely through `pytest` (unit tests for every
+new piece, listed below) rather than through the browser.
+
+The generic "attach a document to chat" icon and its upload wiring were
+already **removed** from `chat.html` in an earlier pass, before this
+backend work started. Reasoning, unchanged: that icon extracted text from
+a file and stuffed it into the chat context (`attachments.py`, still
+present and unused, kept in case its text-extraction readers get reused
+here) — a reasonable idea for "let the model read a short reference
+document," but it had no connection to what `translate` and `transcribe`
+actually do, which is a full document-processing job (page by page,
+potentially minutes long, producing a formatted output file), not a chat
+turn. Keeping one icon that vaguely did "something with a file" with no
+visible options was worse than removing it and building the real thing.
+
+Built this pass:
+- `src/runtime/ui_action.py` (new) — `UiField`, `UiAction`, `UiJobResult`
+  dataclasses, plus a `ProgressCallback` type alias. `src/runtime/plugin.py`
+  documents the paired optional `ui_action`/`run_ui_action` attributes the
+  same way it already documents `requires_professor` — absent by default,
+  no existing plugin affected. Covered by `tests/test_ui_action.py`.
+- **`on_progress` threaded through the translation plugin's execution
+  path**, sequential (`workers == 1`) only, additive and optional
+  everywhere so the CLI path is completely unaffected: `translation_service._translate_page_sequence()`
+  (and `translate_document()`/`translate_text_pages()` above it) in
+  `plugins/translation/src/services/translation_service.py`, and
+  `_process_text_based_file()`/`translate_document()`/
+  `process_image_translation_folder()` in
+  `plugins/translation/src/runtime/document_handler.py` (the PDF branch
+  and the text-file branch each compute their own running offset/total so
+  progress is accurate even across more than one requested page range).
+  Covered by new tests in `plugins/translation/tests/test_translation_service.py`
+  (`TestTranslateTextPagesProgress`) and `test_document_handler.py`.
+- **Same for the transcription plugin's `process_image_folder()`**
+  (sequential path) in `plugins/transcription/src/runtime/image_handler.py`.
+  Covered by new tests in `plugins/transcription/tests/test_image_handler.py`.
+- **`translate`'s and `transcribe`'s `ui_action` + `run_ui_action`**,
+  declared in `plugins/translation/plugin.py` and
+  `plugins/transcription/plugin.py`. v1 field set, per your calls below:
+  `translate` — source/target language, file, a `scanned` checkbox, page
+  range, notes; `transcribe` — target language, file, notes.
+  `transcription_review` is deliberately left out (see below). Both
+  `run_ui_action` methods take a plain `fields` dict (not an
+  `argparse.Namespace`) and an `output_dir` they must write their one
+  output file into; `translate`'s also resolves an output extension
+  (`.docx` only for a `.docx` source, `.txt` otherwise) and applies notes
+  via the same `system_note`/`user_note` mechanism `-nb` already uses.
+  Covered by `plugins/translation/tests/test_translation_plugin_ui_action.py`
+  and `plugins/transcription/tests/test_transcription_plugin_ui_action.py`.
+- **`plugins/webui/src/jobs.py`** (new) — `Job`/`JobStore` (in-memory,
+  per your call), `find_plugin_for_action()`/`list_ui_actions()` (walk
+  the same command-to-plugin dict `load_plugins()` already builds for the
+  CLI), `start_job()` (validates, locks the conversation, launches a
+  background thread), and `sweep_stale_jobs()` (the startup-sweep half of
+  your in-memory-jobs call). Covered by `plugins/webui/tests/test_jobs.py`.
+- **`Conversation`/`Message` model extended** (`plugins/webui/src/conversation.py`):
+  `Conversation.active_job_id`; `Message.kind`
+  (`'message'`/`'job_progress'`/`'job_result'`/`'job_error'`), `job_id`,
+  `output_filename`, `output_path`. `api_messages()`/`display_messages()`
+  now skip anything but `kind == 'message'` — a job status ping isn't
+  dialogue for the model to reason over. Covered by new tests in
+  `plugins/webui/tests/test_conversation.py` (`TestJobFields`).
+- **`app.py` wiring**: `GET /api/plugin-actions` (lists every installed
+  plugin's declared action), `POST /api/jobs` (multipart — professor,
+  conversation id, action id, a JSON-encoded `fields_json` for the
+  non-file values, and an optional file part saved straight into that
+  job's own output directory before the job starts), `GET
+  /api/conversations/{id}/job-outputs/{job_id}` (download — looks the
+  file up server-side from the conversation's own `job_result` message
+  rather than trusting a client-supplied path), `POST /api/chat` now
+  returns `409` when the target conversation has an `active_job_id`, and
+  `create_app()` runs `jobs.sweep_stale_jobs()` once at startup. Covered
+  by new test classes in `plugins/webui/tests/test_app.py`
+  (`TestPluginActions`, `TestStartJob`, `TestChatBlockedWhileJobRunning`,
+  `TestJobOutputDownload`, `TestStartupSweep`).
+- **One real bug found and fixed along the way**:
+  `ConversationStore.save()` (`plugins/webui/src/conversation.py`) wasn't
+  atomic — a plain `write_text()` truncates the file before writing the
+  new content, so a `GET /api/conversations/{id}` landing in that window
+  (now a real scenario, with a background job saving progress on its own
+  thread while the browser polls) could read a partial, unparseable file.
+  Fixed by writing to a temp file in the same directory and `os.replace()`-ing
+  it into place, which is atomic on the same filesystem. Covered by a
+  regression test in `test_conversation.py`
+  (`test_save_is_atomic_no_reader_ever_sees_a_partial_file`) that
+  deliberately races a writer thread against a reader thread.
+- Full real `pytest` run (this environment had genuine network access and
+  all dependencies installable, unlike the sandbox limitation noted
+  earlier in this document) — 1469 passed, only one unrelated pre-existing
+  failure (`test_provider_model_not_in_catalog_auto_registers`, present
+  before this work started and untouched by it).
+
+Reasoning that came out of your answers to three open questions, recorded
+here since it shaped the shape of what got built:
+
+- **Whole-file export, not page-by-page** — turned out to need *no* new
+  assembly logic: `translate_document()` already builds the whole
+  translated document in memory and writes it once via
+  `file_output.save_translation_output()`. `on_progress` only had to
+  become a lightweight status ping, not a place to hang a per-page
+  download.
+- **In-memory jobs, no resume** — a webui restart mid-job loses that
+  job's thread and tracking entry together; `sweep_stale_jobs()` is what
+  keeps a conversation from being left locked forever because of that,
+  not an attempt to actually resume. The recovery story is manual: rerun
+  with the page-range field set to wherever it stopped, and combine the
+  output files yourself — which is why page range moved into `translate`'s
+  v1 field set instead of staying deferred.
+- **Two-pane options/live-prompt-preview panel** — not built this pass.
+  The design (§10, below, unchanged from before) still calls for reusing
+  each service's existing `build_prompts()` method (the same one
+  `--dry-run` already calls) behind a new, cheap preview endpoint, called
+  on every field change. Next step when front-end work resumes.
+
+The rest of this section is unchanged design narrative from before this
+pass — including why the generic attachment icon came out in the first
+place, the composer's planned two-pane panel, and the v1 field scope
+reasoning — kept as-is since it's still the accurate design, just not
+fully built yet.
+
+### The real thing: plugins declare composer actions, generically
+
+Rather than the webui hard-coding "there's a Translate button and a
+Transcribe button," any plugin can opt in to appearing in the composer by
+declaring an optional `ui_action` attribute — same spirit as the existing
+optional `requires_professor` attribute in `src/runtime/plugin.py` (§5):
+absent by default, so no existing plugin needs to change, and any plugin
+installed later (not just these two) picks up a composer entry for free
+just by declaring one.
+
+```python
+# src/runtime/ui_action.py (new)
+@dataclass
+class UiField:
+    name: str                 # "source_language"
+    label: str                 # "Source language"
+    kind: str                  # "language" | "file" | "checkbox" | "text"
+    required: bool = True
+
+@dataclass
+class UiAction:
+    id: str                    # "translate"
+    label: str                  # "Translate a document"
+    command: str                 # "translate" — routes to plugins[command].run()
+    fields: list[UiField]
+```
+
+`plugins/translation/plugin.py` and `plugins/transcription/plugin.py` each
+add a module-level `ui_action` built from their own `handles`/language
+registry — the webui never hard-codes language lists or per-plugin
+specifics, it just renders whatever field `kind`s come back.
+
+**v1 field scope (your call: "core subset, but the intent is to allow it
+all")** — deliberately mirrors only part of each command's real flag set,
+chosen as the smallest useful slice:
+- `translate`: source language, target language, file (or folder later),
+  a `scanned` checkbox, a free-text notes field.
+- `transcribe`: target language, file/folder, notes.
+- `transcription_review`: left out of v1 — it consumes the *output* of a
+  prior transcription as pasted/uploaded text, which is a less natural
+  composer action than "process this document."
+
+Every other flag this plan's §1–§9 material already covers for the CLI
+(`--preserve-media`, `--toc`, `--preserve-tables`, `--spread`, `--abstract`,
+page ranges, parallel `workers`, `--dry-run`) is a later addition to the
+same `UiField` list — additive, not a redesign, because the form is
+data-driven off whatever fields a plugin declares.
+
+### The composer button opens a two-pane action panel, not a small popover
+
+Where the paperclip used to be: a puzzle-piece icon. Clicking it calls
+`GET /api/plugin-actions` (walks the already-loaded plugin registry the
+same way `cli.py` does, collecting every plugin's declared `ui_action`)
+and shows a short list — "Translate a document," "Transcribe an image,"
+etc. Picking one opens a large modal (bigger than the settings modal —
+around 1100px/95vw), split like this:
+
+```
+┌───────────────┬─────────────────────────────────────┐
+│  Options       │  System prompt                       │
+│  (narrower,    │  (large, its own scrollbar)           │
+│  left column)  │                                       │
+│                ├─────────────────────────────────────┤
+│  [Run job]     │  User prompt                         │
+│                │  (large, its own scrollbar)           │
+└───────────────┴─────────────────────────────────────┘
+```
+
+This is your call, and it maps onto something that already exists rather
+than being invented from scratch: `--dry-run` doesn't print a prompt
+preview from nothing — it calls the same `build_prompts()` method on the
+plugin's own service (e.g. `sandbox.translation_service.build_prompts(
+source_language, target_language)`) that a real run uses, then prints the
+two returned strings instead of sending them anywhere. That call makes no
+API request and costs nothing, which is exactly what makes "re-run it on
+every keystroke" viable. A new endpoint,
+`POST /api/plugin-actions/{id}/preview`, takes the form's current field
+values (professor, languages, `scanned`, the notes field, and — once a
+file's been uploaded — its extracted first-page text) and returns
+`{"system_prompt": ..., "user_prompt": ...}`. The front end calls it on
+every field change, debounced (~300ms) for the notes textarea so typing
+doesn't fire a request per keystroke, and re-renders both panes. Before a
+file is uploaded, the preview uses the same placeholder text `--dry-run`
+already shows with no `-i` (e.g. `"[Japanese document text]"`); after
+upload, it swaps in the real extracted text, same as `-i` does today.
+Notes map onto the existing `-nb` ("note both") inline-note mechanism
+(`_apply_inline_notes` in `src/runtime/command_runner.py`) — v1 is one
+combined notes field; separate system/user notes (`-ns`/`-nu`) are a
+later addition to the same field list, not a redesign.
+
+**v1 field scope, revised** — page range (`-p`/`--page_nums`, already a
+real CLI flag, `validate_page_nums`) is now in the core set, not deferred,
+because it's the answer to the restart question below: `translate`
+source/target language, file, `scanned` checkbox, page range, notes.
+`transcribe`: target language, file, notes (no page range — an image
+folder is indexed by filename order, not page numbers).
+
+### Execution: an in-memory background job tied to the conversation it was started from
+
+Not streamed synchronously (too heavy for a multi-minute, many-page job),
+and not a separate "check back later" page — the job runs in the
+background, and lightweight progress pings ("page 3 of 12…") land in the
+*same conversation* while it runs, so there's visible proof of life. The
+actual deliverable is **one file, produced once, at the end** — your call,
+and it turns out to need no new assembly logic:
+`translate_document()`/`translation_service` already builds the whole
+translated document in memory and writes it in one shot via
+`file_output.save_translation_output()` — nothing about that changes. What
+was missing is only a way for a caller to *observe* progress as it happens
+rather than just reading print/log output:
+
+- `plugins/webui/src/jobs.py` (new): an **in-memory** `dict[str, Job]`
+  (job id → status/professor/conversation id/plugin command), your call —
+  process-lifetime only, the same tradeoff this plugin already makes for
+  the session-cookie secret (§3's `create_app()`). Each job runs on a
+  background thread (same reasoning as the existing chat-streaming
+  generator in `app.py`: the real work is blocking network calls, so a
+  thread is the right tool, not `asyncio`).
+- `translate_document()` gains an optional
+  `on_progress: Callable[[int, int], None] | None = None` parameter
+  (page index, total pages) threaded through to
+  `_process_text_based_file()` → `translation_service.translate_text_pages()`
+  (and the PDF branch, and `process_image_translation_folder()`'s
+  per-image loop) — additive and optional everywhere, so the CLI path
+  (`_execute_translate()`, which never passes it) is unaffected. The
+  webui's job runner is the only caller that ever passes one; it turns
+  each finished page into a status ping, not a downloadable artifact.
+- `Conversation` gains `active_job_id: Optional[str]`. While set,
+  `POST /api/chat` on that conversation is rejected (409) and the
+  composer's textarea is disabled with placeholder text along the lines
+  of *"A translate job is running in this conversation — start a new
+  conversation if you'd like to keep chatting while it finishes."*
+  (still needs a copy pass, not load-bearing for the design). The front
+  end polls `GET /api/conversations/{id}` every couple seconds while
+  `active_job_id` is set and appends whatever's new — a progress ping
+  message, or the final one carrying the finished file
+  (downloadable, same `FileResponse` pattern
+  `/api/conversations/{id}/export` already uses) — then clears the lock.
+
+### Restart behavior and interrupted jobs: your call — in-memory, no resume
+
+If the webui process itself restarts mid-job (crash, manual restart, a
+reboot), the job dict and its thread are simply gone — nothing resumes
+automatically. Two consequences this design accepts on purpose, per your
+answer:
+
+1. **Startup sweep, not silent amnesia.** Because `active_job_id` lives on
+   the conversation (on disk), a restarted server has to explicitly clear
+   any conversation left pointing at a job id that no longer exists in the
+   fresh, empty in-memory job dict — otherwise that conversation's
+   composer would stay locked forever with no job actually running to
+   unlock it. `create_app()` does this once at startup: any
+   `active_job_id` found on disk is cleared, and a short system-style
+   message ("Translate job did not finish — it was interrupted.") is
+   appended so the interruption is visible in the transcript, not just
+   silently undone.
+2. **No resume — the escape valve is the page-range field, not new
+   machinery.** Rather than building checkpointed state so a job could
+   pick back up from page 8, the person just re-opens the same action
+   panel, sets the page-range field to `8-12` (the same `-p`/`--page_nums`
+   flag the CLI already validates), runs it as a fresh job, and manually
+   combines the two output files themselves. This is why page range moved
+   into the v1 core field set above — it was a "later" flag until it
+   became the actual interrupted-job story, at which point it's load-bearing.
+
+### Open items before this is buildable end-to-end
+- Exact composer lock/placeholder copy (still a copy pass, not a design gap).
+- Folder input (a whole directory of images for `transcribe`) needs a
+  different file widget than the single-file `<input type=file>` — deferred
+  past v1's "one file" scope, same as before.

@@ -37,6 +37,7 @@ from .parallel_utils import tqdm_logging, update_pbar_postfix, cap_worker_count
 from .prompts import TranslationPromptSpec
 from ..output.file_output import FileOutputHandler
 from ..processors.pdf_processor import PDFProcessor, generate_process_text, detect_numbered_content
+from ..runtime.ui_action import ProgressCallback
 from ..tracking.token_tracker import TokenTracker
 from .constants import PAGE_DELAY_SECONDS, MAX_PARALLEL_WORKERS
 from ..settings import (
@@ -583,6 +584,8 @@ class TranslationService(BaseService):
         opts: OutputOptions,
         input_file_path: Optional[str],
         workers: int = 1,
+        on_progress: Optional[ProgressCallback] = None,
+        total_units: Optional[int] = None,
     ) -> List[str]:
         """Translate a whole document's pages, either one at a time or in parallel.
 
@@ -616,6 +619,19 @@ class TranslationService(BaseService):
                              if progressive saving wasn't requested.
             workers: How many pages to translate at the same time. ``1``
                      translates pages one after another instead.
+            on_progress: Called with ``(completed_count, total_count)`` after
+                         each page finishes, in page order. Only honored on
+                         the sequential (``workers == 1``) path below — the
+                         parallel path finishes pages out of order across
+                         threads, and "page 7 of 12 done" is a much less
+                         useful signal when it might arrive before page 3.
+                         Callers that need progress reporting from a webui
+                         background job (see ``docs/webui-plugin-plan.md``
+                         section 10) should keep ``workers`` at ``1``.
+            total_units: How many pages ``page_triples`` will yield, if
+                         known up front — filled in as the "total" half of
+                         ``on_progress``'s callback. Meaningless (and
+                         ignored) if ``on_progress`` is ``None``.
 
         Returns:
             The translated text for every page, in original page order.
@@ -637,6 +653,7 @@ class TranslationService(BaseService):
             document_text = []
             progressive_output_path: Optional[str] = None
             previous_translated = ""
+            completed_units = 0
 
             for i, page_text, previous_page in tqdm(page_triples, desc="Translating... ", ascii=True):
                 try:
@@ -679,6 +696,11 @@ class TranslationService(BaseService):
                             is_first_page=(i == first_index),
                         )
                     continue
+
+                finally:
+                    if on_progress is not None:
+                        completed_units += 1
+                        on_progress(completed_units, total_units if total_units is not None else completed_units)
 
             if opts.progressive_save and progressive_output_path:
                 print(f"\nProgressive translation saved to: {progressive_output_path}")
@@ -863,7 +885,9 @@ class TranslationService(BaseService):
                            source_language: str, target_language: str,
                            opts: OutputOptions = OutputOptions(),
                            input_file_path: Optional[str] = None,
-                           workers: int = 1) -> List[str]:
+                           workers: int = 1,
+                           on_progress: Optional[ProgressCallback] = None,
+                           total_units: Optional[int] = None) -> List[str]:
         """Translate every page of a PDF (or other page-based document) into the target language.
 
         Args:
@@ -888,6 +912,19 @@ class TranslationService(BaseService):
                              progressive saving wasn't requested.
             workers: How many pages to translate at the same time. ``1``
                      (the default) translates pages one after another.
+            on_progress: Called with ``(completed_count, total_count)`` after
+                         each page finishes (success or error), in page
+                         order. ``None`` (the default — what every CLI call
+                         passes) means no progress reporting; only the
+                         webui's background job runner passes one. Only
+                         honored when ``workers`` is ``1`` — see
+                         ``_translate_page_sequence``'s docstring for why
+                         the parallel path doesn't support this yet.
+            total_units: How many pages this call will translate, if known
+                         up front (the caller already computed this to build
+                         the page range) — used only to fill in the
+                         "total" half of ``on_progress``'s callback.
+                         ``None`` if unknown or if ``on_progress`` isn't set.
 
         Returns:
             The translated text for every requested page, in page order.
@@ -905,13 +942,16 @@ class TranslationService(BaseService):
             opts=opts,
             input_file_path=input_file_path,
             workers=workers,
+            on_progress=on_progress,
+            total_units=total_units,
         )
-    
+
     def translate_text_pages(self, text_pages: List[str], abstract_text: Optional[str],
                             source_language: str, target_language: str,
                             opts: OutputOptions = OutputOptions(),
                             input_file_path: Optional[str] = None,
-                            workers: int = 1) -> List[str]:
+                            workers: int = 1,
+                            on_progress: Optional[ProgressCallback] = None) -> List[str]:
         """Translate a list of already-extracted text pages (e.g. from a Word document).
 
         Used instead of ``translate_document`` for source formats that don't
@@ -931,6 +971,10 @@ class TranslationService(BaseService):
                              progressive saving wasn't requested.
             workers: How many pages to translate at the same time. ``1``
                      (the default) translates pages one after another.
+            on_progress: Called with ``(completed_count, total_count)`` after
+                         each page finishes (success or error), in page
+                         order. ``None`` (the default) means no progress
+                         reporting. Only honored when ``workers`` is ``1``.
 
         Returns:
             The translated text for every page, in page order.
@@ -947,4 +991,6 @@ class TranslationService(BaseService):
             opts=opts,
             input_file_path=input_file_path,
             workers=workers,
+            on_progress=on_progress,
+            total_units=len(text_pages),
         )

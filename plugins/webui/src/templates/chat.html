@@ -184,26 +184,16 @@
   .msg .meta { font-size: 0.72rem; opacity: 0.7; margin-top: 0.35rem; }
   .msg .meta.waiting { font-style: italic; }
 
-  /* Attachment chips: a small "📎 filename" pill. One flavor sits above the
-     composer for a file that's been uploaded and is waiting to be sent
-     (with a remove button); another, read-only flavor renders inside a
-     message bubble once that turn has actually been sent. */
+  /* Attachment chips: a small "📎 filename" read-only pill rendered inside a
+     message bubble for a turn that already has an attachment on it (from
+     conversation history, or produced by a future dedicated document
+     workflow) — see docs/webui-plugin-plan.md for why the general-purpose
+     chat composer no longer offers a way to add new ones. */
   .attachment-chip {
     display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.25rem 0.55rem;
     border-radius: 999px; font-size: 0.78rem; white-space: nowrap;
   }
   .attachment-chip svg { width: 12px; height: 12px; flex: none; }
-  #attachment-chip-row { padding: 0.5rem 1rem 0; }
-  #attachment-chip-row[hidden] { display: none; }
-  #attachment-chip-row .attachment-chip {
-    background: var(--hover-bg); border: 1px solid var(--border); color: var(--text);
-  }
-  #attachment-chip-row .attachment-chip button {
-    padding: 0; width: 15px; height: 15px; border-radius: 50%; border: none;
-    background: transparent; color: var(--text-muted); cursor: pointer; font-size: 0.85rem;
-    line-height: 1; display: flex; align-items: center; justify-content: center;
-  }
-  #attachment-chip-row .attachment-chip button:hover { background: var(--border); }
   .msg-attachment-chip { background: rgba(255, 255, 255, 0.25); color: inherit; margin-top: 0.4rem; }
   .msg.assistant .msg-attachment-chip { background: var(--hover-bg); }
 
@@ -334,22 +324,7 @@
       </button>
     </div>
     <div id="messages"><div class="empty">Select or start a conversation.</div></div>
-    <div id="attachment-chip-row" hidden>
-      <span class="attachment-chip" id="pending-attachment-chip">
-        <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M9.2 4.2L4.9 8.5a1.6 1.6 0 002.3 2.3l4.1-4.1a2.7 2.7 0 00-3.8-3.8L3.4 7a3.8 3.8 0 005.4 5.4L12.6 8.6"/>
-        </svg>
-        <span id="pending-attachment-name"></span>
-        <button type="button" id="pending-attachment-remove" aria-label="Remove attachment" title="Remove attachment">&times;</button>
-      </span>
-    </div>
     <div id="composer">
-      <button type="button" class="icon-btn neutral" id="attach-btn" title="Attach a document" aria-label="Attach a document">
-        <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M11.5 5.3L6.2 10.6a2.1 2.1 0 003 3l5.2-5.2a3.5 3.5 0 00-5-5L4.6 8.2a4.9 4.9 0 007 7l4.9-4.9"/>
-        </svg>
-      </button>
-      <input type="file" id="attach-input" hidden accept=".pdf,.docx,.txt,.xlsx,.xls,.json,.md">
       <textarea id="input" placeholder="Message..."></textarea>
       <button id="send-btn">Send</button>
     </div>
@@ -380,7 +355,7 @@
 <script>
 const state = {
   professor: null, conversationId: null, conversationModel: null, conversationHasMessages: false,
-  models: [], defaultModel: null, pendingAttachment: null,
+  models: [], defaultModel: null,
 };
 
 // ── Dark mode ────────────────────────────────────────────────────────────
@@ -538,44 +513,6 @@ document.getElementById("export-menu").addEventListener("click", (e) => {
   const url = `/api/conversations/${state.conversationId}/export`
     + `?professor=${encodeURIComponent(state.professor)}&format=${btn.dataset.format}`;
   window.open(url, "_blank");
-});
-
-// ── Attachments ──────────────────────────────────────────────────────────
-function showPendingAttachmentChip(filename) {
-  document.getElementById("pending-attachment-name").textContent = filename;
-  document.getElementById("attachment-chip-row").hidden = false;
-}
-function clearPendingAttachment() {
-  state.pendingAttachment = null;
-  document.getElementById("attachment-chip-row").hidden = true;
-  document.getElementById("attach-input").value = "";
-}
-document.getElementById("attach-btn").addEventListener("click", () => {
-  document.getElementById("attach-input").click();
-});
-document.getElementById("pending-attachment-remove").addEventListener("click", clearPendingAttachment);
-document.getElementById("attach-input").addEventListener("change", async () => {
-  const input = document.getElementById("attach-input");
-  const file = input.files && input.files[0];
-  if (!file) return;
-  const attachBtn = document.getElementById("attach-btn");
-  attachBtn.disabled = true;
-  showPendingAttachmentChip(`Reading ${file.name}…`);
-  try {
-    const form = new FormData();
-    form.append("professor", state.professor);
-    form.append("file", file);
-    const res = await fetch("/api/attachments", { method: "POST", body: form });
-    if (!res.ok) throw new Error((await res.json()).detail || "Upload failed.");
-    const doc = await res.json();
-    state.pendingAttachment = doc;
-    showPendingAttachmentChip(`${doc.filename} (${doc.char_count.toLocaleString()} characters)`);
-  } catch (e) {
-    alert("Couldn't attach that file: " + e.message);
-    clearPendingAttachment();
-  } finally {
-    attachBtn.disabled = false;
-  }
 });
 
 // ── Conversation list ────────────────────────────────────────────────────
@@ -760,7 +697,6 @@ function renderMessages(conv) {
 
 async function openConversation(id) {
   state.conversationId = id;
-  clearPendingAttachment();
   const conv = await api(`/api/conversations/${id}?professor=${encodeURIComponent(state.professor)}`);
   state.conversationModel = conv.model;
   state.conversationHasMessages = conv.messages.length > 0;
@@ -771,7 +707,6 @@ async function openConversation(id) {
 
 document.getElementById("new-conv").addEventListener("click", async () => {
   const model = document.getElementById("model-field").value || state.defaultModel;
-  clearPendingAttachment();
   const conv = await api("/api/conversations", {
     method: "POST",
     body: JSON.stringify({ professor: state.professor, model }),
@@ -783,17 +718,13 @@ document.getElementById("new-conv").addEventListener("click", async () => {
   await loadConversations();
 });
 
-function appendPendingMessage(text, attachment) {
+function appendPendingMessage(text) {
   const box = document.getElementById("messages");
   const empty = box.querySelector(".empty");
   if (empty) empty.remove();
   const div = document.createElement("div");
   div.className = "msg user";
   div.textContent = text;
-  if (attachment) {
-    if (text) div.appendChild(document.createElement("br"));
-    div.appendChild(attachmentChipElement(attachment.filename, attachment.char_count));
-  }
   const meta = document.createElement("div");
   meta.className = "meta waiting";
   meta.textContent = "waiting...";
@@ -805,8 +736,7 @@ function appendPendingMessage(text, attachment) {
 async function sendMessage() {
   const input = document.getElementById("input");
   const text = input.value.trim();
-  const attachment = state.pendingAttachment;
-  if (!text && !attachment) return;
+  if (!text) return;
 
   const chosenModel = document.getElementById("model-field").value || state.defaultModel;
   if (state.conversationHasMessages && state.conversationModel && chosenModel !== state.conversationModel) {
@@ -829,8 +759,7 @@ async function sendMessage() {
     await loadConversations();
   }
   input.value = "";
-  clearPendingAttachment();
-  appendPendingMessage(text, attachment);
+  appendPendingMessage(text);
   const sendBtn = document.getElementById("send-btn");
   sendBtn.disabled = true;
   const box = document.getElementById("messages");
@@ -841,7 +770,7 @@ async function sendMessage() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        professor: state.professor, conversation_id: state.conversationId, message: text, model, attachment,
+        professor: state.professor, conversation_id: state.conversationId, message: text, model,
       }),
     });
     if (!res.ok) { throw new Error(await res.text()); }

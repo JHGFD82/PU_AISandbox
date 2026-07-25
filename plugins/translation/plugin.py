@@ -187,6 +187,7 @@ from src.processors.json_processor import JsonProcessor           # noqa: E402
 from src.processors.markdown_processor import MarkdownProcessor   # noqa: E402
 from src.processors.pdf_processor import generate_process_text    # noqa: E402
 from src.processors.txt_processor import TxtProcessor             # noqa: E402
+from src.runtime.ui_action import ProgressCallback, UiAction, UiField, UiJobResult  # noqa: E402
 from src.services.constants import DEFAULT_PARALLEL_WORKERS       # noqa: E402
 from src.settings import DEFAULT_PAGE_SIZE                        # noqa: E402
 
@@ -701,5 +702,141 @@ class TranslationPlugin:
 
         _execute_translate(sandbox, args, source_language, target_language)
 
+    # ── Webui composer action (docs/webui-plugin-plan.md section 10) ───────────
+
+    def run_ui_action(
+        self,
+        fields: dict,
+        professor: str,
+        model: Optional[str],
+        on_progress: Optional[ProgressCallback],
+        output_dir: str,
+    ) -> UiJobResult:
+        """Run a webui-submitted "Translate a document" job outside the CLI's argparse path.
+
+        The v1 (core-subset) field set this expects in ``fields`` — see the
+        module-level ``ui_action`` declaration below for the matching
+        ``UiField`` list the webui composer renders:
+
+        - ``source_language`` / ``target_language``: short codes (e.g.
+          ``'ja'``, ``'en'``) matching a key in ``LANGUAGE_MAP``, not full
+          names — the same codes typed on the command line.
+        - ``file_path``: absolute path to the document the webui has
+          already saved to disk (the uploaded file itself, not a form
+          value the person typed).
+        - ``file_name``: the original filename, used only to build a
+          readable output filename.
+        - ``scanned``: optional, any of ``'true'``/``'1'``/``'on'``
+          (case-insensitive) enables ``--scanned``-equivalent behavior.
+        - ``page_nums``: optional page-range string (e.g. ``'8-12'``) —
+          this is deliberately in the v1 field set specifically as the
+          answer to an interrupted job: see docs/webui-plugin-plan.md
+          section 10's "no resume — the escape valve is the page-range
+          field."
+        - ``notes``: optional free text, applied to both the system and
+          user prompts (the same effect as the CLI's ``-nb``/note-both flag).
+
+        Args:
+            fields: The submitted form's values, keyed by ``UiField.name``.
+            professor: The professor whose API key/budget this job runs
+                       under.
+            model: The model explicitly requested by the webui's model
+                   picker, or ``None`` for this plugin's configured default.
+            on_progress: Forwarded straight through to
+                         ``sandbox.translate_document`` — see that method's
+                         docstring for exactly when it's called.
+            output_dir: Where to write the one finished output file. Already
+                        created and writable; this method must not write
+                        anywhere else.
+
+        Returns:
+            A ``UiJobResult`` pointing at the translated file this job
+            produced.
+
+        Raises:
+            CLIError: If a required field is missing, a language code isn't
+                recognized, or the underlying translation call fails.
+        """
+        import os
+
+        from src.runtime.sandbox_processor import SandboxProcessor
+
+        def _resolve_language(code: str, field_label: str) -> str:
+            normalized = (code or "").strip().lower()
+            if normalized not in LANGUAGE_MAP:
+                valid = ", ".join(sorted(LANGUAGE_MAP.keys()))
+                raise CLIError(f"Invalid {field_label} '{code}'. Use one of: {valid}.")
+            return LANGUAGE_MAP[normalized]
+
+        source_language = _resolve_language(fields.get("source_language", ""), "source language")
+        target_language = _resolve_language(fields.get("target_language", ""), "target language")
+
+        file_path = fields.get("file_path")
+        if not file_path:
+            raise CLIError("No file was attached to this translate job.")
+        file_name = fields.get("file_name") or os.path.basename(file_path)
+
+        scanned = str(fields.get("scanned", "")).strip().lower() in ("true", "1", "on", "yes")
+        page_nums = (fields.get("page_nums") or "").strip() or None
+        notes = (fields.get("notes") or "").strip() or None
+
+        sandbox = SandboxProcessor(professor, model=model)
+        if notes:
+            sandbox.translation_service.system_note = notes
+            sandbox.translation_service.user_note = notes
+            sandbox.image_translation_service.system_note = notes
+            sandbox.image_translation_service.user_note = notes
+
+        base_name = os.path.splitext(file_name)[0] or "document"
+        # Only a .docx source gets a formatted .docx output (matching
+        # _execute_translate's own output_is_docx gate for table-aware
+        # output) — everything else is a plain-text result, the same safe
+        # default the CLI falls back to without an explicit -o.
+        out_ext = ".docx" if file_name.lower().endswith(".docx") else ".txt"
+        output_filename = f"{base_name}_{source_language}_to_{target_language}{out_ext}"
+        output_path = os.path.join(output_dir, output_filename)
+        os.makedirs(output_dir, exist_ok=True)
+
+        sandbox.translate_document(
+            file_path,
+            source_language,
+            target_language,
+            page_nums=page_nums,
+            opts=OutputOptions(output_file=output_path),
+            scanned=scanned,
+            on_progress=on_progress,
+        )
+
+        if not os.path.exists(output_path):
+            raise CLIError("Translation finished but no output file was produced.")
+
+        return UiJobResult(
+            output_path=output_path,
+            output_filename=output_filename,
+            summary=f"Translated {file_name} from {source_language} to {target_language}.",
+        )
+
 
 plugin = TranslationPlugin()
+
+# ── Webui composer action declaration (docs/webui-plugin-plan.md section 10) ──
+# v1 core-subset fields — see run_ui_action's docstring above for exactly
+# what each one means and how it's read out of the submitted `fields` dict.
+# `page_nums` is deliberately in this v1 set (not deferred like other CLI
+# flags) because it's the answer to an interrupted job, not just a nicety.
+ui_action = UiAction(
+    id="translate",
+    label="Translate a document",
+    command="translate",
+    fields=[
+        UiField(name="source_language", label="Source language", kind="language"),
+        UiField(name="target_language", label="Target language", kind="language"),
+        UiField(name="file", label="Document", kind="file"),
+        UiField(name="scanned", label="Scanned PDF (render pages as images)", kind="checkbox", required=False),
+        UiField(
+            name="page_nums", label="Page range (e.g. 8-12 — leave blank for the whole document)",
+            kind="text", required=False,
+        ),
+        UiField(name="notes", label="Notes for the model", kind="text", required=False),
+    ],
+)

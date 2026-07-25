@@ -12,7 +12,9 @@ between installations today).
 from __future__ import annotations
 
 import json
+import os
 import secrets
+import threading
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -52,7 +54,7 @@ class Attachment:
 
 @dataclass
 class Message:
-    """One turn in a conversation.
+    """One turn in a conversation — or, for a plugin background job, one status update about it.
 
     Args:
         role: Either ``'user'`` or ``'assistant'``.
@@ -76,6 +78,25 @@ class Message:
                      stored in ``content`` for display. ``None`` means
                      "identical to content", which is true for every message
                      without an attachment.
+        kind: ``'message'`` (the default — an ordinary chat turn) or one of
+              three states a plugin background job passes through:
+              ``'job_progress'`` (a lightweight "page 3 of 12" status ping),
+              ``'job_result'`` (the job's one finished output file, ready to
+              download), or ``'job_error'`` (the job failed or was
+              interrupted). See docs/webui-plugin-plan.md section 10 — job
+              messages are deliberately excluded from ``api_messages()``
+              and ``display_messages()`` below, since they aren't real
+              dialogue for the model to reason over.
+        job_id: Which background job this message reports on. ``None`` for
+                an ordinary chat message.
+        output_filename: For a ``'job_result'`` message, the filename to
+                         show and offer for download. ``None`` otherwise.
+        output_path: For a ``'job_result'`` message, the absolute
+                     server-side path to the finished file. Never sent back
+                     to the browser as something to act on directly — the
+                     download endpoint looks this up server-side by
+                     ``job_id`` rather than trusting a client-supplied path.
+                     ``None`` otherwise.
     """
 
     role: str
@@ -87,6 +108,10 @@ class Message:
     cost: Optional[float] = None
     attachments: list[Attachment] = field(default_factory=list)
     api_content: Optional[str] = None
+    kind: str = "message"
+    job_id: Optional[str] = None
+    output_filename: Optional[str] = None
+    output_path: Optional[str] = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -104,6 +129,10 @@ class Message:
             cost=data.get("cost"),
             attachments=attachments,
             api_content=data.get("api_content"),
+            kind=data.get("kind", "message"),
+            job_id=data.get("job_id"),
+            output_filename=data.get("output_filename"),
+            output_path=data.get("output_path"),
         )
 
 
@@ -122,6 +151,12 @@ class Conversation:
                            conversation has grown past the model's context
                            window (see docs/webui-plugin-plan.md section 6).
                            ``None`` until compaction has happened at least once.
+        active_job_id: The id of a plugin background job currently running
+                       in this conversation (see docs/webui-plugin-plan.md
+                       section 10), or ``None`` if no job is running. While
+                       set, ``POST /api/chat`` on this conversation is
+                       rejected and the composer is shown locked — a
+                       conversation can only run one job at a time.
     """
 
     id: str
@@ -131,6 +166,7 @@ class Conversation:
     model: str
     messages: list[Message] = field(default_factory=list)
     compacted_summary: Optional[str] = None
+    active_job_id: Optional[str] = None
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
@@ -147,6 +183,7 @@ class Conversation:
             model=data["model"],
             messages=messages,
             compacted_summary=data.get("compacted_summary"),
+            active_job_id=data.get("active_job_id"),
         )
 
     def api_messages(self) -> list[dict[str, str]]:
@@ -157,10 +194,16 @@ class Conversation:
         extracted text reaches the model on every turn (see ``Message``'s
         docstring) without that text ever being shown in the visible chat
         transcript.
+
+        Skips any message whose ``kind`` isn't ``'message'`` — a job
+        progress ping, result, or error isn't dialogue the model actually
+        said or should treat as conversational context (see ``Message``'s
+        docstring).
         """
         return [
             {"role": m.role, "content": m.api_content if m.api_content is not None else m.content}
             for m in self.messages
+            if m.kind == "message"
         ]
 
     def display_messages(self) -> list[dict[str, str]]:
@@ -171,10 +214,13 @@ class Conversation:
         a short ``[Attached: filename]`` hint appended when there were
         attachments. Meant for local, non-billed-by-the-full-document uses
         like title generation, where knowing a document was attached matters
-        more than seeing every word of it.
+        more than seeing every word of it. Also skips non-``'message'``
+        entries, same as ``api_messages()``.
         """
         out: list[dict[str, str]] = []
         for m in self.messages:
+            if m.kind != "message":
+                continue
             content = m.content
             if m.attachments:
                 names = ", ".join(a.filename for a in m.attachments)
@@ -234,9 +280,25 @@ class ConversationStore:
         return Conversation.from_dict(json.loads(path.read_text()))
 
     def save(self, conversation: Conversation) -> None:
-        """Write *conversation* to disk, updating its updated_at timestamp first."""
+        """Write *conversation* to disk, updating its updated_at timestamp first.
+
+        Written atomically (to a temp file in the same directory, then
+        renamed into place) rather than with a direct ``write_text()``.
+        This matters now that a background job (``jobs.py``) can be saving
+        a conversation from its own thread — appending a progress message
+        — at the same moment the browser polls ``GET
+        /api/conversations/{id}`` and reads this same file: a plain
+        ``write_text()`` truncates the file before writing the new
+        content, so a read landing in that window sees a partial (often
+        empty) file and fails to parse as JSON. ``os.replace()`` is atomic
+        on the same filesystem — a reader always sees either the complete
+        old file or the complete new one, never a half-written one.
+        """
         conversation.updated_at = datetime.now().isoformat()
-        self._path(conversation.id).write_text(json.dumps(conversation.to_dict(), indent=2))
+        path = self._path(conversation.id)
+        tmp_path = path.with_suffix(f".{os.getpid()}.{threading.get_ident()}.tmp")
+        tmp_path.write_text(json.dumps(conversation.to_dict(), indent=2))
+        os.replace(tmp_path, path)
 
     def create(self, model: str, title: str = "New conversation") -> Conversation:
         """Create, save, and return a brand new empty conversation."""

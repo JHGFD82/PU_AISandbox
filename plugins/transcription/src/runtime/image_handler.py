@@ -11,6 +11,7 @@ from typing import Optional
 
 from ..console import print_section
 from ..errors import CLIError
+from ..runtime.ui_action import ProgressCallback
 from ..services.parallel_utils import cap_worker_count, collect_image_files, run_folder_parallel
 from ..settings import MAX_PARALLEL_WORKERS
 
@@ -86,6 +87,7 @@ class Mixin:
         spread: bool = False,
         passes: int = 1,
         workers: int = 1,
+        on_progress: Optional[ProgressCallback] = None,
     ) -> None:
         """Transcribe all image files in a folder and optionally save the combined output.
 
@@ -107,6 +109,14 @@ class Mixin:
             passes: Number of OCR passes per image. Defaults to ``1``.
             workers: Number of images to process in parallel. Defaults to
                      ``1`` (sequential). Capped at the system maximum.
+            on_progress: Called with ``(completed_count, total_count)`` after
+                         each image finishes. ``None`` (the default, and what
+                         every CLI call passes) means no progress reporting —
+                         only the webui's background job runner passes one
+                         (see docs/webui-plugin-plan.md section 10). Only
+                         honored on the sequential (``workers <= 1``) path,
+                         same restriction as the translation plugin's
+                         equivalent parameter.
 
         Raises:
             CLIError: If no image files are found in the folder.
@@ -135,6 +145,9 @@ class Mixin:
                     logger.error(f"Error processing '{filename}': {e}", exc_info=True)
                     print(f"  ERROR: {e}")
                     extracted_text = f"[Error processing {filename}: {e}]"
+                finally:
+                    if on_progress is not None:
+                        on_progress(idx, len(image_files))
 
                 print_section("Extracted Text", extracted_text)
                 combined_parts.append(f"=== {filename} ===\n{extracted_text}")

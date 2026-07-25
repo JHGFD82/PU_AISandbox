@@ -142,6 +142,82 @@ class TestConversationAttachmentRoundTrip:
         assert reloaded.api_messages()[0]["content"] == conv.api_messages()[0]["content"]
 
 
+class TestJobFields:
+    """Conversation.active_job_id + Message.kind/job_id/output_* —
+    docs/webui-plugin-plan.md section 10."""
+
+    def test_message_defaults_to_kind_message_with_no_job_fields(self):
+        m = Message(role="user", content="hi", timestamp="t")
+        assert m.kind == "message"
+        assert m.job_id is None
+        assert m.output_filename is None
+        assert m.output_path is None
+
+    def test_message_from_dict_tolerates_records_without_job_fields(self):
+        # Conversations saved before this feature existed have none of
+        # these keys at all.
+        data = {"role": "assistant", "content": "Hello!", "timestamp": "t"}
+        m = Message.from_dict(data)
+        assert m.kind == "message"
+        assert m.job_id is None
+
+    def test_conversation_defaults_to_no_active_job(self):
+        conv = Conversation(id="c_1", title="T", created_at="t", updated_at="t", model="gpt-4o")
+        assert conv.active_job_id is None
+
+    def test_active_job_id_round_trips(self):
+        conv = Conversation(
+            id="c_1", title="T", created_at="t", updated_at="t", model="gpt-4o",
+            active_job_id="job_abc123",
+        )
+        restored = Conversation.from_dict(conv.to_dict())
+        assert restored.active_job_id == "job_abc123"
+
+    def test_job_progress_message_round_trips(self):
+        conv = Conversation(id="c_1", title="T", created_at="t", updated_at="t", model="gpt-4o")
+        conv.messages.append(Message(
+            role="assistant", content="Page 3 of 12 translated...", timestamp="t",
+            kind="job_progress", job_id="job_abc123",
+        ))
+        restored = Conversation.from_dict(conv.to_dict())
+        assert restored.messages[0].kind == "job_progress"
+        assert restored.messages[0].job_id == "job_abc123"
+
+    def test_job_result_message_carries_output_fields(self):
+        conv = Conversation(id="c_1", title="T", created_at="t", updated_at="t", model="gpt-4o")
+        conv.messages.append(Message(
+            role="assistant", content="Translated report.docx to English.", timestamp="t",
+            kind="job_result", job_id="job_abc123",
+            output_filename="report_Japanese_to_English.docx",
+            output_path="/data/conversations/heller/_job_outputs/job_abc123/out.docx",
+        ))
+        restored = Conversation.from_dict(conv.to_dict())
+        assert restored.messages[0].output_filename == "report_Japanese_to_English.docx"
+        assert restored.messages[0].output_path.endswith("out.docx")
+
+    def test_api_messages_excludes_job_messages(self):
+        conv = Conversation(id="c_1", title="T", created_at="t", updated_at="t", model="gpt-4o")
+        conv.messages.append(Message(role="user", content="translate this", timestamp="t"))
+        conv.messages.append(Message(
+            role="assistant", content="Page 1 of 2...", timestamp="t",
+            kind="job_progress", job_id="job_1",
+        ))
+        conv.messages.append(Message(
+            role="assistant", content="Done.", timestamp="t",
+            kind="job_result", job_id="job_1", output_filename="out.docx", output_path="/tmp/out.docx",
+        ))
+        assert conv.api_messages() == [{"role": "user", "content": "translate this"}]
+
+    def test_display_messages_excludes_job_messages(self):
+        conv = Conversation(id="c_1", title="T", created_at="t", updated_at="t", model="gpt-4o")
+        conv.messages.append(Message(role="user", content="translate this", timestamp="t"))
+        conv.messages.append(Message(
+            role="assistant", content="Page 1 of 2...", timestamp="t",
+            kind="job_progress", job_id="job_1",
+        ))
+        assert conv.display_messages() == [{"role": "user", "content": "translate this"}]
+
+
 class TestConversationStore:
     @pytest.fixture
     def store(self, tmp_path):
@@ -200,3 +276,51 @@ class TestConversationStore:
         heller_store.create(model="gpt-4o", title="Heller's")
         assert smith_store.list_conversations() == []
         assert len(heller_store.list_conversations()) == 1
+
+    def test_save_never_leaves_a_stray_temp_file_behind(self, store, tmp_path):
+        conv = store.create(model="gpt-4o")
+        conv.messages.append(Message(role="user", content="hi", timestamp="t"))
+        store.save(conv)
+        leftovers = list((tmp_path / "heller").glob("*.tmp"))
+        assert leftovers == []
+
+    def test_save_is_atomic_no_reader_ever_sees_a_partial_file(self, store, tmp_path):
+        # Regression test for a real race hit while building the webui's
+        # background job runner (jobs.py): a background thread saving a
+        # conversation (each save rewrites the whole file) at the same
+        # moment a request thread is reading it used to be able to observe
+        # a truncated, unparseable file, because the old implementation
+        # wrote directly with write_text() (truncate-then-write, not
+        # atomic). Simulates that race directly by saving many times
+        # from one thread while reading many times from another,
+        # asserting every read that finds the file at all parses cleanly.
+        import threading as _threading
+
+        conv = store.create(model="gpt-4o")
+        errors: list[Exception] = []
+        stop = _threading.Event()
+
+        def writer():
+            for i in range(200):
+                conv.messages.append(Message(role="user", content=f"msg {i}", timestamp="t"))
+                store.save(conv)
+            stop.set()
+
+        def reader():
+            path = tmp_path / "heller" / f"{conv.id}.json"
+            while not stop.is_set():
+                if path.exists():
+                    try:
+                        import json
+                        json.loads(path.read_text())
+                    except (json.JSONDecodeError, OSError) as e:
+                        errors.append(e)
+
+        w = _threading.Thread(target=writer)
+        r = _threading.Thread(target=reader)
+        w.start()
+        r.start()
+        w.join()
+        r.join(timeout=1)
+
+        assert errors == []

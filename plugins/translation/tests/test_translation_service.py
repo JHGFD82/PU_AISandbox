@@ -1044,6 +1044,70 @@ class TestTranslateTextPagesExtended:
 
 
 # ---------------------------------------------------------------------------
+# TranslationService — on_progress callback (docs/webui-plugin-plan.md §10:
+# the webui's background job runner is the only real caller of this)
+# ---------------------------------------------------------------------------
+
+class TestTranslateTextPagesProgress:
+
+    def test_on_progress_called_once_per_page_in_order(self, monkeypatch):
+        import time as _time
+        svc = _make_svc(monkeypatch)
+        monkeypatch.setattr(svc, "generate_text", lambda *a, **kw: "translated")
+        monkeypatch.setattr(_time, "sleep", lambda x: None)
+        calls: list = []
+        svc.translate_text_pages(
+            ["p1", "p2", "p3"], None, "English", "Japanese",
+            on_progress=lambda done, total: calls.append((done, total)),
+        )
+        assert calls == [(1, 3), (2, 3), (3, 3)]
+
+    def test_on_progress_still_called_when_a_page_errors(self, monkeypatch):
+        import time as _time
+        svc = _make_svc(monkeypatch)
+
+        def flaky(*a, **kw):
+            # The 2nd page (i == 1, zero-based) fails; the loop must still
+            # report progress for it rather than silently skipping it.
+            if a[3] == 1:
+                raise RuntimeError("boom")
+            return "translated"
+
+        monkeypatch.setattr(svc, "generate_text", flaky)
+        monkeypatch.setattr(_time, "sleep", lambda x: None)
+        calls: list = []
+        result = svc.translate_text_pages(
+            ["p1", "p2", "p3"], None, "English", "Japanese",
+            on_progress=lambda done, total: calls.append((done, total)),
+        )
+        assert calls == [(1, 3), (2, 3), (3, 3)]
+        assert "Translation error" in result[1]
+
+    def test_default_none_means_no_progress_reporting(self, monkeypatch):
+        # Regression guard: every CLI call path passes nothing for
+        # on_progress, so this must be a true no-op, not a crash from
+        # calling None().
+        import time as _time
+        svc = _make_svc(monkeypatch)
+        monkeypatch.setattr(svc, "generate_text", lambda *a, **kw: "translated")
+        monkeypatch.setattr(_time, "sleep", lambda x: None)
+        result = svc.translate_text_pages(["p1"], None, "English", "Japanese")
+        assert result == ["translated"]
+
+    def test_workers_gt1_never_invokes_on_progress(self, monkeypatch):
+        # Documented restriction (see _translate_page_sequence's docstring):
+        # progress reporting is sequential-only.
+        svc = _make_svc(monkeypatch)
+        monkeypatch.setattr(svc, "_translate_pages_parallel", lambda all_triples, **kw: ["t"] * len(all_triples))
+        calls: list = []
+        svc.translate_text_pages(
+            ["p1", "p2"], None, "English", "Japanese", workers=2,
+            on_progress=lambda done, total: calls.append((done, total)),
+        )
+        assert calls == []
+
+
+# ---------------------------------------------------------------------------
 # TranslationService — translate_document (covers _make_pdf_triples + entry)
 # ---------------------------------------------------------------------------
 

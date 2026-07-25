@@ -27,6 +27,7 @@ from ..processors.json_processor import JsonProcessor
 from ..processors.markdown_processor import MarkdownProcessor
 from ..processors.pdf_media_extractor import PdfMediaExtractor
 from ..processors.txt_processor import TxtProcessor
+from ..runtime.ui_action import ProgressCallback
 from ..services.parallel_utils import cap_worker_count, collect_image_files, run_folder_parallel
 from ..settings import DEFAULT_PAGE_SIZE, MAX_PARALLEL_WORKERS
 
@@ -86,6 +87,7 @@ class Mixin:
         opts: OutputOptions,
         workers: int = 1,
         table_aware: bool = False,
+        on_progress: Optional[ProgressCallback] = None,
     ) -> Tuple[List[str], Optional[dict]]:
         """Extract text from a document, split it into pages, and translate the requested page range.
 
@@ -114,6 +116,12 @@ class Mixin:
             table_aware: When ``True`` and ``file_type`` is ``'docx'``, also
                          extracts table data separately so tables can be
                          reconstructed in the output DOCX file.
+            on_progress: Called with ``(completed_count, total_count)`` after
+                         each page finishes, counted across every page range
+                         requested (usually just one). ``None`` (the
+                         default) means no progress reporting. See
+                         ``translation_service._translate_page_sequence`` —
+                         only meaningful when ``workers`` is ``1``.
 
         Returns:
             A two-item tuple of ``(translated_pages, table_registry)``.
@@ -152,8 +160,18 @@ class Mixin:
         else:
             raise ValueError(f"Unsupported text file type: {file_type}")
 
+        page_ranges = _parse_page_ranges(page_nums)
+        # Known up front (unlike the PDF branch below, which only knows this
+        # once fitz has opened the file) so on_progress's "total" is
+        # accurate even across more than one requested range.
+        total_requested = sum(
+            (min(end, len(all_pages) - 1) if end is not None else len(all_pages) - 1) - start + 1
+            for start, end in page_ranges
+        )
+
         results: List[str] = []
-        for start_page, end_page in _parse_page_ranges(page_nums):
+        completed_so_far = 0
+        for start_page, end_page in page_ranges:
             if start_page >= len(all_pages):
                 raise CLIError(
                     f"Page {start_page + 1} does not exist. Document has {len(all_pages)} logical pages."
@@ -166,9 +184,19 @@ class Mixin:
                     f"(logical pages based on content length)"
                 )
             logger.info(f"Translating {len(segment)} page(s) from {source_language} to {target_language}")
+
+            segment_progress = None
+            if on_progress is not None:
+                _base = completed_so_far
+
+                def segment_progress(done: int, _total: int, _base=_base) -> None:
+                    on_progress(_base + done, total_requested)
+
             results.extend(self.translation_service.translate_text_pages(  # type: ignore[attr-defined]
-                segment, abstract_text, source_language, target_language, opts, file_path, workers=workers,
+                segment, abstract_text, source_language, target_language, opts, file_path,
+                workers=workers, on_progress=segment_progress,
             ))
+            completed_so_far += len(segment)
         return results, source_table_registry
 
     def translate_document(
@@ -182,6 +210,7 @@ class Mixin:
         workers: int = 1,
         spread: bool = False,
         scanned: bool = False,
+        on_progress: Optional[ProgressCallback] = None,
     ) -> None:
         """Translate a document file and optionally save the result.
 
@@ -214,6 +243,14 @@ class Mixin:
                      an image first and passes it through the OCR-and-translate
                      pipeline. Use this for PDFs that contain scanned images
                      rather than selectable text.
+            on_progress: Called with ``(completed_count, total_count)`` after
+                         each page or image finishes. ``None`` (the default,
+                         and what every CLI call passes) means no progress
+                         reporting — only the webui's background job runner
+                         passes one (see ``docs/webui-plugin-plan.md``
+                         section 10). Only meaningful when ``workers`` is
+                         ``1``; ignored by the single-image path (one image
+                         has nothing to report progress *between*).
         """
         file_path = os.path.abspath(file_path)
         file_type = self._detect_and_validate_file(file_path)  # type: ignore[attr-defined]
@@ -256,7 +293,7 @@ class Mixin:
                     doc.close()
                     self.process_image_translation_folder(
                         tmpdir, source_language, target_language, opts,
-                        workers=workers, spread=spread,
+                        workers=workers, spread=spread, on_progress=on_progress,
                     )
             except CLIError:
                 raise
@@ -288,7 +325,20 @@ class Mixin:
             if file_type == 'pdf':
                 with open(file_path, 'rb') as f:
                     all_pdf_pages = list(self.pdf_processor.process_pdf(f))  # type: ignore[attr-defined]
-                    for start_page, end_page in _parse_page_ranges(page_nums):
+                    pdf_ranges = _parse_page_ranges(page_nums)
+                    total_pdf_pages = sum(
+                        (min(end, len(all_pdf_pages) - 1) if end is not None else len(all_pdf_pages) - 1) - start + 1
+                        for start, end in pdf_ranges
+                    )
+                    pdf_completed_so_far = 0
+                    for start_page, end_page in pdf_ranges:
+                        range_progress = None
+                        if on_progress is not None:
+                            _pdf_base = pdf_completed_so_far
+
+                            def range_progress(done: int, _total: int, _base=_pdf_base) -> None:
+                                on_progress(_base + done, total_pdf_pages)
+
                         document_text.extend(self.translation_service.translate_document(  # type: ignore[attr-defined]
                             iter(all_pdf_pages),
                             abstract_text,
@@ -299,11 +349,15 @@ class Mixin:
                             opts,
                             file_path,
                             workers=workers,
+                            on_progress=range_progress,
                         ))
+                        actual_end = min(end_page, len(all_pdf_pages) - 1) if end_page is not None else len(all_pdf_pages) - 1
+                        pdf_completed_so_far += actual_end - start_page + 1
             elif file_type == 'txt':
                 document_text, _ = self._process_text_based_file(
                     file_path, 'txt', page_nums, abstract_text,
                     source_language, target_language, opts, workers=workers,
+                    on_progress=on_progress,
                 )
             elif file_type == 'docx':
                 output_is_docx = bool(
@@ -312,7 +366,7 @@ class Mixin:
                 document_text, source_table_registry = self._process_text_based_file(
                     file_path, 'docx', page_nums, abstract_text,
                     source_language, target_language, opts, workers=workers,
-                    table_aware=output_is_docx,
+                    table_aware=output_is_docx, on_progress=on_progress,
                 )
 
                 if source_table_registry:
@@ -329,6 +383,7 @@ class Mixin:
                 document_text, _ = self._process_text_based_file(
                     file_path, file_type, page_nums, abstract_text,
                     source_language, target_language, opts, workers=workers,
+                    on_progress=on_progress,
                 )
             else:
                 raise CLIError(f"Cannot translate file type '{file_type}'.")
@@ -496,6 +551,7 @@ class Mixin:
         opts: OutputOptions = OutputOptions(),
         workers: int = 1,
         spread: bool = False,
+        on_progress: Optional[ProgressCallback] = None,
     ) -> None:
         """Translate all image files in a folder and optionally save the combined output.
 
@@ -516,6 +572,12 @@ class Mixin:
             workers: Number of images to process in parallel. Defaults to
                      ``1`` (sequential). Capped at the system maximum.
             spread: When ``True``, treats each image as a double-page spread.
+            on_progress: Called with ``(completed_count, total_count)`` after
+                         each image finishes. ``None`` (the default) means no
+                         progress reporting. Only honored on the sequential
+                         (``workers <= 1``) path, for the same reason
+                         ``translation_service._translate_page_sequence``
+                         doesn't support it on its parallel path either.
 
         Raises:
             CLIError: If no image files are found in the folder.
@@ -544,6 +606,9 @@ class Mixin:
                     logger.error(f"Error processing '{filename}': {e}", exc_info=True)
                     print(f"  ERROR: {e}")
                     transcript, translation = "", f"[Error processing {filename}: {e}]"
+                finally:
+                    if on_progress is not None:
+                        on_progress(idx, len(image_files))
                 if not transcript and not translation:
                     blank_count += 1
                     combined_parts.append(f"=== {filename} ===\n")

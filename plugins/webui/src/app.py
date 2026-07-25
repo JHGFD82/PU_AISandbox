@@ -51,6 +51,8 @@ from pydantic import BaseModel
 from starlette.background import BackgroundTask
 from starlette.middleware.sessions import SessionMiddleware
 
+from dataclasses import asdict
+
 from src import settings_store
 from src.config import load_professor_config
 from src.models import (
@@ -67,6 +69,7 @@ from src.tracking.token_tracker import TokenTracker
 auth = sys.modules["_pu_webui_auth"]
 conversation = sys.modules["_pu_webui_conversation"]
 attachments = sys.modules["_pu_webui_attachments"]
+jobs = sys.modules["_pu_webui_jobs"]
 export = sys.modules["_pu_webui_export"]
 
 _TEMPLATES_DIR = Path(__file__).parent / "templates"
@@ -74,6 +77,31 @@ templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
 
 # One backend instance for the life of the process — see auth.get_configured_backend().
 _auth_backend = auth.get_configured_backend()
+
+# One JobStore for the life of the process, same lifetime reasoning as
+# _auth_backend above — see jobs.py's module docstring for why this is
+# deliberately in-memory only (docs/webui-plugin-plan.md section 10).
+_job_store = jobs.JobStore()
+
+# Plugins are loaded once, lazily, on first use rather than at import time —
+# this module is itself registered by plugins/webui/plugin.py *during* the
+# CLI's own top-level load_plugins() call (see this file's own module
+# docstring), so calling load_plugins() again here at import time would be
+# reentrant while that outer scan is still iterating the same directory.
+# Harmless (a plain read-only directory listing), but wasteful — deferring
+# to first actual use means it only ever runs once, well after the CLI's
+# own startup has fully finished.
+_plugins_cache: dict | None = None
+
+
+def _get_plugins() -> dict:
+    """Return the command-name-to-plugin mapping, loading it once and caching it."""
+    global _plugins_cache
+    if _plugins_cache is None:
+        from src.runtime import load_plugins
+        plugins_dir = Path(__file__).resolve().parent.parent.parent.parent / "plugins"
+        _plugins_cache = load_plugins(plugins_dir)
+    return _plugins_cache
 
 # Section order for the /settings page. On first run (no professors yet)
 # getting a professor added is the blocking step, with usage-source sharing
@@ -574,6 +602,99 @@ def create_app() -> FastAPI:
 
         return {"filename": doc.filename, "text": doc.text, "char_count": doc.char_count}
 
+    # ── Plugin composer actions (docs/webui-plugin-plan.md section 10) ────────
+    # Background jobs (translate/transcribe/...) triggered from a
+    # conversation's composer, distinct from the ordinary chat turn above —
+    # see jobs.py's module docstring for the full design.
+
+    @app.get("/api/plugin-actions")
+    async def api_plugin_actions(request: Request):
+        """List every installed plugin's declared composer action."""
+        _require_unlocked(request)
+        actions = jobs.list_ui_actions(_get_plugins())
+        return {"actions": [asdict(a) for a in actions]}
+
+    @app.post("/api/jobs")
+    async def api_start_job(
+        request: Request,
+        professor: str = Form(...),
+        conversation_id: str = Form(...),
+        action_id: str = Form(...),
+        model: str | None = Form(None),
+        fields_json: str = Form("{}"),
+        file: UploadFile | None = File(None),
+    ):
+        """Start a plugin background job (translate/transcribe/...) in one conversation.
+
+        The submitted form's non-file values arrive JSON-encoded in
+        ``fields_json`` — which fields exist is entirely plugin-defined
+        (see ``UiAction``/``UiField``), not a fixed set this route could
+        declare individual ``Form(...)`` parameters for. An uploaded file,
+        if this action needs one, arrives as an ordinary multipart file
+        part and is saved into this job's own output directory before
+        ``run_ui_action`` ever sees it — that directory is created here
+        (via a job id generated up front) specifically so the upload has
+        somewhere durable to live before the job even starts.
+        """
+        _require_unlocked(request)
+        professor = _validated_professor(professor)
+        try:
+            fields = json.loads(fields_json)
+        except json.JSONDecodeError as e:
+            raise HTTPException(400, f"Invalid fields_json: {e}") from e
+        if not isinstance(fields, dict):
+            raise HTTPException(400, "fields_json must decode to a JSON object.")
+
+        job_id = jobs.new_job_id()
+        if file is not None and file.filename:
+            output_dir = jobs.job_output_dir(professor, job_id)
+            upload_path = output_dir / file.filename
+            data = await file.read()
+            with open(upload_path, "wb") as f:
+                f.write(data)
+            fields["file_path"] = str(upload_path)
+            fields["file_name"] = file.filename
+
+        store = conversation.ConversationStore(professor)
+        try:
+            job = jobs.start_job(
+                plugins=_get_plugins(), action_id=action_id, fields=fields,
+                professor=professor, model=model, conversation_id=conversation_id,
+                conversation_store=store, job_store=_job_store, job_id=job_id,
+            )
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
+        except LookupError as e:
+            raise HTTPException(404, str(e)) from e
+        except RuntimeError as e:
+            raise HTTPException(409, str(e)) from e
+
+        return {"job_id": job.id, "status": job.status}
+
+    @app.get("/api/conversations/{conversation_id}/job-outputs/{job_id}")
+    async def api_download_job_output(
+        request: Request, conversation_id: str, job_id: str, professor: str
+    ):
+        """Download a finished job's one output file.
+
+        Looks the file up server-side from the conversation's own
+        ``job_result`` message rather than trusting a path from the
+        browser — see ``Message.output_path``'s docstring in
+        conversation.py.
+        """
+        _require_unlocked(request)
+        professor = _validated_professor(professor)
+        store = conversation.ConversationStore(professor)
+        conv = store.load(conversation_id)
+        if conv is None:
+            raise HTTPException(404, "Conversation not found.")
+        match = next(
+            (m for m in conv.messages if m.kind == "job_result" and m.job_id == job_id), None
+        )
+        if match is None or not match.output_path or not os.path.exists(match.output_path):
+            raise HTTPException(404, "Job output not found.")
+        return FileResponse(match.output_path, filename=match.output_filename)
+
     @app.post("/api/chat")
     async def api_chat(request: Request, body: ChatBody):
         """Stream one chat turn back to the browser as Server-Sent Events.
@@ -592,6 +713,12 @@ def create_app() -> FastAPI:
         conv = store.load(body.conversation_id)
         if conv is None:
             raise HTTPException(404, "Conversation not found.")
+        if conv.active_job_id:
+            raise HTTPException(
+                409,
+                "A background job is running in this conversation — start a new "
+                "conversation if you'd like to keep chatting while it finishes.",
+            )
         if body.model:
             conv.model = body.model
 
@@ -711,6 +838,16 @@ def create_app() -> FastAPI:
             # local single-user tool) — harmless to set regardless.
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
+
+    # Startup sweep (docs/webui-plugin-plan.md section 10): a fresh process
+    # always starts with an empty _job_store, so any conversation whose
+    # active_job_id is still set from before this process started is
+    # unambiguously orphaned — clear it now rather than leaving that
+    # conversation's composer locked forever with nothing actually running.
+    jobs.sweep_stale_jobs(
+        list(load_professor_config().keys()),
+        lambda professor: conversation.ConversationStore(professor),
+    )
 
     return app
 
