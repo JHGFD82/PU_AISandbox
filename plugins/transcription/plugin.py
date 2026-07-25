@@ -393,6 +393,7 @@ class TranscriptionPlugin:
         model: Optional[str],
         on_progress: Optional[ProgressCallback],
         output_dir: str,
+        on_page_text=None,
     ) -> UiJobResult:
         """Run a webui-submitted "Transcribe an image" job outside the CLI's argparse path.
 
@@ -430,6 +431,11 @@ class TranscriptionPlugin:
                          image (nothing to report progress *between*).
             output_dir: Where to write the one finished output file. Already
                         created and writable.
+            on_page_text: Accepted for a uniform call signature across
+                          every plugin's ``run_ui_action`` (jobs.py calls
+                          all of them the same way) but not yet used here —
+                          transcription doesn't currently stream per-image
+                          text the way translation streams per-page text.
 
         Returns:
             A ``UiJobResult`` pointing at the transcription text file this

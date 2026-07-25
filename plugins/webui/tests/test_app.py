@@ -279,7 +279,7 @@ class TestChat:
             "model": None, "prompt_tokens": None, "completion_tokens": None, "cost": None,
             "attachments": [], "api_content": None,
             "kind": "message", "job_id": None, "output_filename": None, "output_path": None,
-            "progress_done": None, "progress_total": None,
+            "progress_done": None, "progress_total": None, "page_number": None,
         }
         assert conv["messages"][-1]["content"] == "Hello back!"
         assert conv["messages"][-1]["cost"] == 0.001
@@ -421,7 +421,7 @@ class TestChat:
             "model": None, "prompt_tokens": None, "completion_tokens": None, "cost": None,
             "attachments": [], "api_content": None,
             "kind": "message", "job_id": None, "output_filename": None, "output_path": None,
-            "progress_done": None, "progress_total": None,
+            "progress_done": None, "progress_total": None, "page_number": None,
         }
 
     def test_attachment_becomes_message_attachment_and_api_content(self, unlocked_client, monkeypatch):
@@ -570,7 +570,7 @@ def _fake_plugin(action_id="translate", run_ui_action=None, preview_ui_action=No
         def __init__(self):
             self.ui_action = UiAction(id=action_id, label="Fake action", command=action_id)
 
-        def run_ui_action(self, fields, professor, model, on_progress, output_dir):
+        def run_ui_action(self, fields, professor, model, on_progress, output_dir, on_page_text=None):
             return run_ui_action(fields, professor, model, on_progress, output_dir)
 
     plugin = _Plugin()

@@ -179,6 +179,7 @@ class TestJobFields:
         assert m.output_path is None
         assert m.progress_done is None
         assert m.progress_total is None
+        assert m.page_number is None
 
     def test_message_from_dict_tolerates_records_without_job_fields(self):
         # Conversations saved before this feature existed have none of
@@ -231,6 +232,42 @@ class TestJobFields:
         assert m.progress_done is None
         assert m.progress_total is None
 
+    def test_job_page_message_round_trips_with_page_number(self):
+        # job_page messages carry a page's actual translated text (unlike
+        # job_progress, which only ever carries counts) — see the "no
+        # messages from each page" bug this was built to fix.
+        conv = Conversation(id="c_1", title="T", created_at="t", updated_at="t", model="gpt-4o")
+        conv.messages.append(Message(
+            role="assistant", content="Translated page text.", timestamp="t",
+            kind="job_page", job_id="job_abc123", page_number=3,
+        ))
+        restored = Conversation.from_dict(conv.to_dict())
+        assert restored.messages[0].kind == "job_page"
+        assert restored.messages[0].content == "Translated page text."
+        assert restored.messages[0].page_number == 3
+
+    def test_page_number_defaults_none_for_old_records(self):
+        data = {
+            "role": "assistant", "content": "Translated page text.", "timestamp": "t",
+            "kind": "job_page", "job_id": "job_abc123",
+        }
+        m = Message.from_dict(data)
+        assert m.page_number is None
+
+    def test_job_notice_message_round_trips(self):
+        # job_notice: a one-off aside about how the job will behave (e.g.
+        # no per-page preview above 1 worker) — no extra fields of its own,
+        # unlike job_page/job_progress/job_result, just role/content/kind/job_id.
+        conv = Conversation(id="c_1", title="T", created_at="t", updated_at="t", model="gpt-4o")
+        conv.messages.append(Message(
+            role="assistant",
+            content="Preview of the translation is turned off while running with more than one worker.",
+            timestamp="t", kind="job_notice", job_id="job_abc123",
+        ))
+        restored = Conversation.from_dict(conv.to_dict())
+        assert restored.messages[0].kind == "job_notice"
+        assert restored.messages[0].job_id == "job_abc123"
+
     def test_job_result_message_carries_output_fields(self):
         conv = Conversation(id="c_1", title="T", created_at="t", updated_at="t", model="gpt-4o")
         conv.messages.append(Message(
@@ -251,8 +288,16 @@ class TestJobFields:
             kind="job_progress", job_id="job_1",
         ))
         conv.messages.append(Message(
+            role="assistant", content="Translated page 1.", timestamp="t",
+            kind="job_page", job_id="job_1", page_number=1,
+        ))
+        conv.messages.append(Message(
             role="assistant", content="Done.", timestamp="t",
             kind="job_result", job_id="job_1", output_filename="out.docx", output_path="/tmp/out.docx",
+        ))
+        conv.messages.append(Message(
+            role="assistant", content="No preview with multiple workers.", timestamp="t",
+            kind="job_notice", job_id="job_1",
         ))
         assert conv.api_messages() == [{"role": "user", "content": "translate this"}]
 

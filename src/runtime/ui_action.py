@@ -34,6 +34,19 @@ from typing import Any, Callable, Optional
 # passes one; only the webui's background job runner does.
 ProgressCallback = Callable[[int, int], None]
 
+# Called with (page_number, translated_text) right after one page/unit's
+# translation finishes — a sibling to ProgressCallback, carrying the actual
+# text instead of just a count. Added specifically because ProgressCallback
+# structurally cannot carry this: it only ever passes two integers, so a
+# CLI run's per-page output (printed straight to the terminal — see
+# translation_service.generate_text's inline print()) had no path to reach
+# the webui's conversation at all. Same optional-everywhere convention as
+# ProgressCallback: every method that accepts one defaults it to None and
+# behaves exactly like it did before this existed when no callback is
+# passed. page_number is 1-indexed, matching the page numbers already used
+# in this project's error messages (e.g. "Translation error on page 7").
+PageTextCallback = Callable[[int, str], None]
+
 
 @dataclass
 class UiField:

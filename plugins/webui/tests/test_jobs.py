@@ -41,9 +41,28 @@ class _FakePlugin:
         self.calls = []
         self._run_ui_action = run_ui_action
 
-    def run_ui_action(self, fields, professor, model, on_progress, output_dir):
-        self.calls.append((fields, professor, model, on_progress, output_dir))
+    def run_ui_action(self, fields, professor, model, on_progress, output_dir, on_page_text=None):
+        # on_page_text is accepted (jobs.py always passes it as a keyword,
+        # matching the real translate/transcribe plugins' signatures) but
+        # not forwarded to self._run_ui_action below by default — every
+        # existing test's fake_run callable was written before this existed
+        # and takes exactly 5 params. Tests that specifically exercise
+        # on_page_text use _FakePluginWithPageText below instead.
+        self.calls.append((fields, professor, model, on_progress, output_dir, on_page_text))
         return self._run_ui_action(fields, professor, model, on_progress, output_dir)
+
+
+class _FakePluginWithPageText:
+    """Like _FakePlugin, but its run_ui_action actually calls on_page_text —
+    for tests exercising jobs.py's job_page message handling specifically."""
+
+    def __init__(self, action_id="translate", run_ui_action=None):
+        from src.runtime.ui_action import UiAction
+        self.ui_action = UiAction(id=action_id, label="Fake action", command=action_id)
+        self._run_ui_action = run_ui_action
+
+    def run_ui_action(self, fields, professor, model, on_progress, output_dir, on_page_text=None):
+        return self._run_ui_action(fields, professor, model, on_progress, output_dir, on_page_text)
 
 
 def _make_store(tmp_path, professor="heller"):
@@ -404,6 +423,132 @@ class TestStartJob:
         progress_msgs = [m for m in reloaded.messages if m.kind == "job_progress"]
         assert len(progress_msgs) == 3
         assert all(m.job_id == job.id for m in progress_msgs)
+
+    def test_on_page_text_appends_job_page_messages_with_content_and_page_number(self, tmp_path):
+        # Regression coverage for the "no messages from each page" report:
+        # a plugin that calls on_page_text should have each page's actual
+        # translated text show up in the conversation, not just a numeric
+        # progress ping.
+        store = _make_store(tmp_path)
+        conv = store.create(model="gpt-4o")
+        job_store = jobs.JobStore()
+
+        def fake_run(fields, professor, model, on_progress, output_dir, on_page_text):
+            from src.runtime.ui_action import UiJobResult
+            on_page_text(1, "Translated page one.")
+            on_page_text(2, "Translated page two.")
+            return UiJobResult(output_path=f"{output_dir}/out.txt", output_filename="out.txt", summary="Done.")
+
+        p = _FakePluginWithPageText(run_ui_action=fake_run)
+        job = jobs.start_job(
+            plugins={"translate": p}, action_id="translate", fields={}, professor="heller", model=None,
+            conversation_id=conv.id, conversation_store=store, job_store=job_store,
+        )
+        _wait_until(lambda: job_store.get(job.id).status != "running")
+
+        reloaded = store.load(conv.id)
+        page_msgs = [m for m in reloaded.messages if m.kind == "job_page"]
+        assert len(page_msgs) == 2
+        assert [m.content for m in page_msgs] == ["Translated page one.", "Translated page two."]
+        assert [m.page_number for m in page_msgs] == [1, 2]
+        assert all(m.job_id == job.id for m in page_msgs)
+
+    def test_on_page_text_is_passed_as_keyword_to_run_ui_action(self, tmp_path):
+        # jobs.py must call every plugin's run_ui_action the same way
+        # (on_page_text as a keyword), since translate/transcribe/any
+        # future plugin's signature is expected to accept it.
+        store = _make_store(tmp_path)
+        conv = store.create(model="gpt-4o")
+        job_store = jobs.JobStore()
+
+        def fake_run(fields, professor, model, on_progress, output_dir):
+            from src.runtime.ui_action import UiJobResult
+            return UiJobResult(output_path=f"{output_dir}/out.txt", output_filename="out.txt", summary="Done.")
+
+        p = _FakePlugin(run_ui_action=fake_run)
+        job = jobs.start_job(
+            plugins={"translate": p}, action_id="translate", fields={}, professor="heller", model=None,
+            conversation_id=conv.id, conversation_store=store, job_store=job_store,
+        )
+        _wait_until(lambda: job_store.get(job.id).status != "running")
+
+        assert len(p.calls) == 1
+        on_page_text_arg = p.calls[0][5]
+        assert callable(on_page_text_arg)
+
+    def test_workers_above_one_appends_job_notice_before_running(self, tmp_path):
+        # Per-page previews are silenced entirely once more than one worker
+        # is requested (translation_service._translate_page_sequence can't
+        # guarantee page order in that case) — the professor should still
+        # see why nothing is streaming in, via a one-off job_notice, rather
+        # than being left to wonder whether it's broken.
+        store = _make_store(tmp_path)
+        conv = store.create(model="gpt-4o")
+        job_store = jobs.JobStore()
+
+        def fake_run(fields, professor, model, on_progress, output_dir):
+            from src.runtime.ui_action import UiJobResult
+            return UiJobResult(output_path=f"{output_dir}/out.txt", output_filename="out.txt", summary="Done.")
+
+        p = _FakePlugin(run_ui_action=fake_run)
+        job = jobs.start_job(
+            plugins={"translate": p}, action_id="translate", fields={"workers": "4"},
+            professor="heller", model=None,
+            conversation_id=conv.id, conversation_store=store, job_store=job_store,
+        )
+        _wait_until(lambda: job_store.get(job.id).status != "running")
+
+        reloaded = store.load(conv.id)
+        notices = [m for m in reloaded.messages if m.kind == "job_notice"]
+        assert len(notices) == 1
+        assert "more than one worker" in notices[0].content
+        assert notices[0].job_id == job.id
+
+    def test_workers_one_or_absent_does_not_append_job_notice(self, tmp_path):
+        store = _make_store(tmp_path)
+        conv = store.create(model="gpt-4o")
+        job_store = jobs.JobStore()
+
+        def fake_run(fields, professor, model, on_progress, output_dir):
+            from src.runtime.ui_action import UiJobResult
+            return UiJobResult(output_path=f"{output_dir}/out.txt", output_filename="out.txt", summary="Done.")
+
+        for fields in ({}, {"workers": "1"}, {"workers": ""}):
+            p = _FakePlugin(run_ui_action=fake_run)
+            job = jobs.start_job(
+                plugins={"translate": p}, action_id="translate", fields=fields,
+                professor="heller", model=None,
+                conversation_id=conv.id, conversation_store=store, job_store=job_store,
+            )
+            _wait_until(lambda: job_store.get(job.id).status != "running")
+
+        reloaded = store.load(conv.id)
+        notices = [m for m in reloaded.messages if m.kind == "job_notice"]
+        assert notices == []
+
+    def test_workers_non_numeric_does_not_append_job_notice_or_raise(self, tmp_path):
+        # A malformed "workers" value is the plugin's own run_ui_action's
+        # job to reject (CLIError) — jobs.py's notice check must not itself
+        # raise on unparseable input, just skip the notice.
+        store = _make_store(tmp_path)
+        conv = store.create(model="gpt-4o")
+        job_store = jobs.JobStore()
+
+        def fake_run(fields, professor, model, on_progress, output_dir):
+            from src.runtime.ui_action import UiJobResult
+            return UiJobResult(output_path=f"{output_dir}/out.txt", output_filename="out.txt", summary="Done.")
+
+        p = _FakePlugin(run_ui_action=fake_run)
+        job = jobs.start_job(
+            plugins={"translate": p}, action_id="translate", fields={"workers": "not-a-number"},
+            professor="heller", model=None,
+            conversation_id=conv.id, conversation_store=store, job_store=job_store,
+        )
+        _wait_until(lambda: job_store.get(job.id).status != "running")
+
+        reloaded = store.load(conv.id)
+        assert [m for m in reloaded.messages if m.kind == "job_notice"] == []
+        assert job_store.get(job.id).status == "done"
 
     def test_progress_message_uses_plugin_progress_verb_correctly_spelled(self, tmp_path):
         # Regression guard for a real bug found via manual testing: the

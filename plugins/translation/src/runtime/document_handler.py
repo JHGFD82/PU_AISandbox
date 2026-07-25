@@ -27,7 +27,7 @@ from ..processors.json_processor import JsonProcessor
 from ..processors.markdown_processor import MarkdownProcessor
 from ..processors.pdf_media_extractor import PdfMediaExtractor
 from ..processors.txt_processor import TxtProcessor
-from ..runtime.ui_action import ProgressCallback
+from ..runtime.ui_action import PageTextCallback, ProgressCallback
 from ..services.parallel_utils import cap_worker_count, collect_image_files, run_folder_parallel
 from ..settings import DEFAULT_PAGE_SIZE, MAX_PARALLEL_WORKERS
 
@@ -88,6 +88,7 @@ class Mixin:
         workers: int = 1,
         table_aware: bool = False,
         on_progress: Optional[ProgressCallback] = None,
+        on_page_text: Optional[PageTextCallback] = None,
     ) -> Tuple[List[str], Optional[dict]]:
         """Extract text from a document, split it into pages, and translate the requested page range.
 
@@ -122,6 +123,12 @@ class Mixin:
                          default) means no progress reporting. See
                          ``translation_service._translate_page_sequence`` —
                          only meaningful when ``workers`` is ``1``.
+            on_page_text: Called with ``(page_number, translated_text)``
+                          right after each page finishes, with
+                          ``page_number`` counted the same
+                          across-every-range way as ``on_progress``'s
+                          count (a page range starting partway through the
+                          document doesn't restart page numbering at 1).
 
         Returns:
             A two-item tuple of ``(translated_pages, table_registry)``.
@@ -192,9 +199,16 @@ class Mixin:
                 def segment_progress(done: int, _total: int, _base=_base) -> None:
                     on_progress(_base + done, total_requested)
 
+            segment_page_text = None
+            if on_page_text is not None:
+                _text_base = completed_so_far
+
+                def segment_page_text(page_number: int, text: str, _text_base=_text_base) -> None:
+                    on_page_text(_text_base + page_number, text)
+
             results.extend(self.translation_service.translate_text_pages(  # type: ignore[attr-defined]
                 segment, abstract_text, source_language, target_language, opts, file_path,
-                workers=workers, on_progress=segment_progress,
+                workers=workers, on_progress=segment_progress, on_page_text=segment_page_text,
             ))
             completed_so_far += len(segment)
         return results, source_table_registry
@@ -211,6 +225,7 @@ class Mixin:
         spread: bool = False,
         scanned: bool = False,
         on_progress: Optional[ProgressCallback] = None,
+        on_page_text: Optional[PageTextCallback] = None,
     ) -> None:
         """Translate a document file and optionally save the result.
 
@@ -251,6 +266,18 @@ class Mixin:
                          section 10). Only meaningful when ``workers`` is
                          ``1``; ignored by the single-image path (one image
                          has nothing to report progress *between*).
+            on_page_text: Called with ``(page_number, translated_text)``
+                          right after each page finishes — a sibling to
+                          ``on_progress`` carrying the actual translated
+                          text instead of just a count, so a caller (the
+                          webui's background job runner) can show each
+                          page's translation as it completes rather than
+                          only a percentage. ``None`` (the default, and
+                          what every CLI call passes — the CLI already
+                          prints each page's text to the terminal via
+                          ``generate_text``'s inline ``print()``) means no
+                          such reporting. Same sequential-only restriction
+                          as ``on_progress``.
         """
         file_path = os.path.abspath(file_path)
         file_type = self._detect_and_validate_file(file_path)  # type: ignore[attr-defined]
@@ -294,6 +321,7 @@ class Mixin:
                     self.process_image_translation_folder(
                         tmpdir, source_language, target_language, opts,
                         workers=workers, spread=spread, on_progress=on_progress,
+                        on_page_text=on_page_text,
                     )
             except CLIError:
                 raise
@@ -339,6 +367,13 @@ class Mixin:
                             def range_progress(done: int, _total: int, _base=_pdf_base) -> None:
                                 on_progress(_base + done, total_pdf_pages)
 
+                        range_page_text = None
+                        if on_page_text is not None:
+                            _pdf_text_base = pdf_completed_so_far
+
+                            def range_page_text(page_number: int, text: str, _base=_pdf_text_base) -> None:
+                                on_page_text(_base + page_number, text)
+
                         document_text.extend(self.translation_service.translate_document(  # type: ignore[attr-defined]
                             iter(all_pdf_pages),
                             abstract_text,
@@ -350,6 +385,7 @@ class Mixin:
                             file_path,
                             workers=workers,
                             on_progress=range_progress,
+                            on_page_text=range_page_text,
                         ))
                         actual_end = min(end_page, len(all_pdf_pages) - 1) if end_page is not None else len(all_pdf_pages) - 1
                         pdf_completed_so_far += actual_end - start_page + 1
@@ -357,7 +393,7 @@ class Mixin:
                 document_text, _ = self._process_text_based_file(
                     file_path, 'txt', page_nums, abstract_text,
                     source_language, target_language, opts, workers=workers,
-                    on_progress=on_progress,
+                    on_progress=on_progress, on_page_text=on_page_text,
                 )
             elif file_type == 'docx':
                 output_is_docx = bool(
@@ -366,7 +402,7 @@ class Mixin:
                 document_text, source_table_registry = self._process_text_based_file(
                     file_path, 'docx', page_nums, abstract_text,
                     source_language, target_language, opts, workers=workers,
-                    table_aware=output_is_docx, on_progress=on_progress,
+                    table_aware=output_is_docx, on_progress=on_progress, on_page_text=on_page_text,
                 )
 
                 if source_table_registry:
@@ -383,7 +419,7 @@ class Mixin:
                 document_text, _ = self._process_text_based_file(
                     file_path, file_type, page_nums, abstract_text,
                     source_language, target_language, opts, workers=workers,
-                    on_progress=on_progress,
+                    on_progress=on_progress, on_page_text=on_page_text,
                 )
             else:
                 raise CLIError(f"Cannot translate file type '{file_type}'.")
@@ -552,6 +588,7 @@ class Mixin:
         workers: int = 1,
         spread: bool = False,
         on_progress: Optional[ProgressCallback] = None,
+        on_page_text: Optional[PageTextCallback] = None,
     ) -> None:
         """Translate all image files in a folder and optionally save the combined output.
 
@@ -578,6 +615,10 @@ class Mixin:
                          (``workers <= 1``) path, for the same reason
                          ``translation_service._translate_page_sequence``
                          doesn't support it on its parallel path either.
+            on_page_text: Called with ``(image_number, translated_text)``
+                          right after each image finishes — a sibling to
+                          ``on_progress`` carrying the actual text. Same
+                          sequential-only restriction.
 
         Raises:
             CLIError: If no image files are found in the folder.
@@ -617,6 +658,8 @@ class Mixin:
                     print_section("Transcript", transcript)
                 print_section("Translation", translation)
                 combined_parts.append(f"=== {filename} ===\n{translation}")
+                if on_page_text is not None:
+                    on_page_text(idx, translation)
             if blank_count:
                 unit_label = "page" if blank_count == 1 else "pages"
                 msg = (

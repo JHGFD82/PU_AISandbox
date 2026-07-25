@@ -207,6 +207,43 @@ class TestRunUiAction:
         _, kwargs = fake_sandbox.translate_document.call_args
         assert kwargs["on_progress"] is progress
 
+    def test_on_page_text_forwarded_to_translate_document(self, monkeypatch, plugin_module, tmp_path):
+        # Regression coverage for the "no messages from each page" report —
+        # confirms the webui's per-page callback actually reaches
+        # sandbox.translate_document, not just on_progress.
+        fake_sandbox = self._patch_sandbox(monkeypatch, translate_side_effect=self._write_output)
+        src_file = tmp_path / "upload.txt"
+        src_file.write_text("hello", encoding="utf-8")
+
+        def page_text(page_number, text):
+            pass
+
+        plugin_module.plugin.run_ui_action(
+            fields={
+                "source_language": "ja", "target_language": "en",
+                "file_path": str(src_file), "file_name": "upload.txt",
+            },
+            professor="fake", model=None, on_progress=None, output_dir=str(tmp_path / "out"),
+            on_page_text=page_text,
+        )
+        _, kwargs = fake_sandbox.translate_document.call_args
+        assert kwargs["on_page_text"] is page_text
+
+    def test_on_page_text_defaults_to_none(self, monkeypatch, plugin_module, tmp_path):
+        fake_sandbox = self._patch_sandbox(monkeypatch, translate_side_effect=self._write_output)
+        src_file = tmp_path / "upload.txt"
+        src_file.write_text("hello", encoding="utf-8")
+
+        plugin_module.plugin.run_ui_action(
+            fields={
+                "source_language": "ja", "target_language": "en",
+                "file_path": str(src_file), "file_name": "upload.txt",
+            },
+            professor="fake", model=None, on_progress=None, output_dir=str(tmp_path / "out"),
+        )
+        _, kwargs = fake_sandbox.translate_document.call_args
+        assert kwargs["on_page_text"] is None
+
     def test_notes_applied_to_both_prompts(self, monkeypatch, plugin_module, tmp_path):
         fake_sandbox = self._patch_sandbox(monkeypatch, translate_side_effect=self._write_output)
         src_file = tmp_path / "upload.txt"

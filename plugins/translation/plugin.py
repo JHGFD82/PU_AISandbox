@@ -215,7 +215,7 @@ from src.processors.markdown_processor import MarkdownProcessor   # noqa: E402
 from src.processors.pdf_processor import generate_process_text    # noqa: E402
 from src.processors.txt_processor import TxtProcessor             # noqa: E402
 from src.runtime.ui_action import (  # noqa: E402
-    ProgressCallback, UiAction, UiField, UiJobResult, UiPromptPreview,
+    PageTextCallback, ProgressCallback, UiAction, UiField, UiJobResult, UiPromptPreview,
     apply_extension_ui_hooks,
 )
 from src.services.constants import DEFAULT_PARALLEL_WORKERS       # noqa: E402
@@ -741,6 +741,7 @@ class TranslationPlugin:
         model: Optional[str],
         on_progress: Optional[ProgressCallback],
         output_dir: str,
+        on_page_text: Optional[PageTextCallback] = None,
     ) -> UiJobResult:
         """Run a webui-submitted "Translate a document" job outside the CLI's argparse path.
 
@@ -795,6 +796,12 @@ class TranslationPlugin:
             output_dir: Where to write the one finished output file. Already
                         created and writable; this method must not write
                         anywhere else.
+            on_page_text: Forwarded straight through to
+                          ``sandbox.translate_document`` — called with each
+                          page's translated text as soon as it's ready, so
+                          the webui can show a page-by-page live transcript
+                          instead of only a percentage. ``None`` (the
+                          default) means no such reporting.
 
         Returns:
             A ``UiJobResult`` pointing at the translated file this job
@@ -920,6 +927,7 @@ class TranslationPlugin:
             workers=workers,
             spread=spread,
             on_progress=on_progress,
+            on_page_text=on_page_text,
         )
 
         if not os.path.exists(output_path):

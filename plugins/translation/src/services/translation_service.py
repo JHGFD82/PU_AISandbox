@@ -37,7 +37,7 @@ from .parallel_utils import tqdm_logging, update_pbar_postfix, cap_worker_count
 from .prompts import TranslationPromptSpec
 from ..output.file_output import FileOutputHandler
 from ..processors.pdf_processor import PDFProcessor, generate_process_text, detect_numbered_content
-from ..runtime.ui_action import ProgressCallback
+from ..runtime.ui_action import PageTextCallback, ProgressCallback
 from ..tracking.token_tracker import TokenTracker
 from .constants import PAGE_DELAY_SECONDS, MAX_PARALLEL_WORKERS
 from ..settings import (
@@ -586,6 +586,7 @@ class TranslationService(BaseService):
         workers: int = 1,
         on_progress: Optional[ProgressCallback] = None,
         total_units: Optional[int] = None,
+        on_page_text: Optional[PageTextCallback] = None,
     ) -> List[str]:
         """Translate a whole document's pages, either one at a time or in parallel.
 
@@ -632,6 +633,18 @@ class TranslationService(BaseService):
                          known up front — filled in as the "total" half of
                          ``on_progress``'s callback. Meaningless (and
                          ignored) if ``on_progress`` is ``None``.
+            on_page_text: Called with ``(page_number, translated_text)``
+                          right after each page's translation succeeds — a
+                          sibling to ``on_progress`` carrying the actual
+                          text instead of just a count (see
+                          ``PageTextCallback``'s docstring for why these
+                          are separate callbacks). Same sequential-only
+                          restriction as ``on_progress``, and not called at
+                          all for a page that errors (the error message is
+                          still printed and appended to the returned text,
+                          same as before this existed — a webui job just
+                          won't get a live ping for that one page, only the
+                          final result once everything finishes).
 
         Returns:
             The translated text for every page, in original page order.
@@ -663,6 +676,9 @@ class TranslationService(BaseService):
                     )
                     document_text.append(translated_text)
                     previous_translated = translated_text
+
+                    if on_page_text is not None:
+                        on_page_text(i + 1, translated_text)
 
                     if i > first_index:
                         time.sleep(PAGE_DELAY_SECONDS)
@@ -887,7 +903,8 @@ class TranslationService(BaseService):
                            input_file_path: Optional[str] = None,
                            workers: int = 1,
                            on_progress: Optional[ProgressCallback] = None,
-                           total_units: Optional[int] = None) -> List[str]:
+                           total_units: Optional[int] = None,
+                           on_page_text: Optional[PageTextCallback] = None) -> List[str]:
         """Translate every page of a PDF (or other page-based document) into the target language.
 
         Args:
@@ -925,6 +942,9 @@ class TranslationService(BaseService):
                          the page range) — used only to fill in the
                          "total" half of ``on_progress``'s callback.
                          ``None`` if unknown or if ``on_progress`` isn't set.
+            on_page_text: Called with ``(page_number, translated_text)``
+                          right after each page finishes — see
+                          ``_translate_page_sequence``'s docstring.
 
         Returns:
             The translated text for every requested page, in page order.
@@ -944,6 +964,7 @@ class TranslationService(BaseService):
             workers=workers,
             on_progress=on_progress,
             total_units=total_units,
+            on_page_text=on_page_text,
         )
 
     def translate_text_pages(self, text_pages: List[str], abstract_text: Optional[str],
@@ -951,7 +972,8 @@ class TranslationService(BaseService):
                             opts: OutputOptions = OutputOptions(),
                             input_file_path: Optional[str] = None,
                             workers: int = 1,
-                            on_progress: Optional[ProgressCallback] = None) -> List[str]:
+                            on_progress: Optional[ProgressCallback] = None,
+                            on_page_text: Optional[PageTextCallback] = None) -> List[str]:
         """Translate a list of already-extracted text pages (e.g. from a Word document).
 
         Used instead of ``translate_document`` for source formats that don't
@@ -975,6 +997,9 @@ class TranslationService(BaseService):
                          each page finishes (success or error), in page
                          order. ``None`` (the default) means no progress
                          reporting. Only honored when ``workers`` is ``1``.
+            on_page_text: Called with ``(page_number, translated_text)``
+                          right after each page finishes — see
+                          ``_translate_page_sequence``'s docstring.
 
         Returns:
             The translated text for every page, in page order.
@@ -993,4 +1018,5 @@ class TranslationService(BaseService):
             workers=workers,
             on_progress=on_progress,
             total_units=len(text_pages),
+            on_page_text=on_page_text,
         )

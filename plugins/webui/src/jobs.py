@@ -292,6 +292,35 @@ def _run_job(
     # unlikely case getattr fails entirely, doesn't have one at all).
     progress_verb = getattr(getattr(plugin, "ui_action", None), "progress_verb", None) or "Processing"
 
+    # Per-page messages (on_page_text below) only ever arrive with a single
+    # worker — translate's own sequential-vs-parallel split can't guarantee
+    # page order once more than one worker is running, so it silences
+    # per-page callbacks entirely above 1 worker (see
+    # plugins/translation/src/services/translation_service.py). Tell the
+    # professor that up front, once, rather than leaving them wondering why
+    # no page text is showing up for a job they can see is still running.
+    # Not every plugin declares a "workers" field (transcription doesn't),
+    # so this is a no-op for anything that doesn't.
+    try:
+        workers_requested = int(str(fields.get("workers", "")).strip() or 1)
+    except ValueError:
+        workers_requested = 1
+    if workers_requested > 1:
+        conv = conversation_store.load(job.conversation_id)
+        if conv is not None:
+            conv.messages.append(conversation.Message(
+                role="assistant",
+                content=(
+                    "Preview of the translation is turned off while running with more than one "
+                    "worker. The progress bar below will still update normally, and the finished "
+                    "document will be here as soon as the job completes."
+                ),
+                timestamp=datetime.now().isoformat(),
+                kind="job_notice",
+                job_id=job.id,
+            ))
+            conversation_store.save(conv)
+
     def on_progress(done: int, total: int) -> None:
         conv = conversation_store.load(job.conversation_id)
         if conv is None:
@@ -308,10 +337,32 @@ def _run_job(
         ))
         conversation_store.save(conv)
 
+    def on_page_text(page_number: int, text: str) -> None:
+        # A plugin (currently just translate) that reports on_page_text
+        # sends this once per page as soon as its translation finishes —
+        # see plugins/translation/plugin.py's run_ui_action and
+        # PageTextCallback's docstring in src/runtime/ui_action.py for why
+        # this is a separate callback from on_progress rather than the same
+        # one carrying more data (on_progress only ever passes two ints).
+        conv = conversation_store.load(job.conversation_id)
+        if conv is None:
+            return
+        conv.messages.append(conversation.Message(
+            role="assistant",
+            content=text,
+            timestamp=datetime.now().isoformat(),
+            kind="job_page",
+            job_id=job.id,
+            page_number=page_number,
+        ))
+        conversation_store.save(conv)
+
     output_dir = job_output_dir(professor, job.id)
 
     try:
-        result = plugin.run_ui_action(fields, professor, model, on_progress, str(output_dir))
+        result = plugin.run_ui_action(
+            fields, professor, model, on_progress, str(output_dir), on_page_text=on_page_text,
+        )
     except Exception as e:
         logger.error("Job %s (%s) failed: %s", job.id, job.action_id, e, exc_info=True)
         job_store.set_status(job.id, "error", error=str(e))

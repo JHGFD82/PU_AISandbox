@@ -182,6 +182,64 @@ class TestProcessTextBasedFile:
         _, kwargs = proc.translation_service.translate_text_pages.call_args
         assert kwargs["on_progress"] is None
 
+    def test_on_page_text_threaded_to_translate_text_pages(self, tmp_path, monkeypatch):
+        proc = _make_processor(monkeypatch)
+        monkeypatch.setattr(
+            "src.runtime.document_handler.TxtProcessor.process_txt_with_pages",
+            lambda f, target_page_size: ["one", "two", "three"],
+        )
+        f = tmp_path / "source.txt"
+        f.write_text("one\n\ntwo\n\nthree", encoding="utf-8")
+        proc.translation_service.translate_text_pages.return_value = ["a", "b", "c"]
+        calls: list = []
+        proc._process_text_based_file(
+            str(f), "txt", None, None, "English", "French",
+            OutputOptions(), on_page_text=lambda page_number, text: calls.append((page_number, text)),
+        )
+        _, kwargs = proc.translation_service.translate_text_pages.call_args
+        wrapper = kwargs["on_page_text"]
+        assert wrapper is not None
+        wrapper(1, "translated one")
+        wrapper(2, "translated two")
+        assert calls == [(1, "translated one"), (2, "translated two")]
+
+    def test_on_page_text_offset_by_completed_pages_across_ranges(self, tmp_path, monkeypatch):
+        # A page-range request starting partway through the document (e.g.
+        # "6-10") must not restart page numbering at 1 for the second
+        # onward range — same offset-correction on_progress already gets.
+        proc = _make_processor(monkeypatch)
+        monkeypatch.setattr(
+            "src.runtime.document_handler.TxtProcessor.process_txt_with_pages",
+            lambda f, target_page_size: ["p" + str(i) for i in range(10)],
+        )
+        f = tmp_path / "source.txt"
+        f.write_text("content", encoding="utf-8")
+        proc.translation_service.translate_text_pages.return_value = ["x"]
+        calls: list = []
+        proc._process_text_based_file(
+            str(f), "txt", "1,6", None, "English", "French",
+            OutputOptions(), on_page_text=lambda page_number, text: calls.append((page_number, text)),
+        )
+        wrappers = [c.kwargs["on_page_text"] for c in proc.translation_service.translate_text_pages.call_args_list]
+        assert len(wrappers) == 2
+        wrappers[0](1, "first range page 1")
+        wrappers[1](1, "second range page 1")
+        # First range starts at page 1 (offset 0); second range ("6") is the
+        # 2nd requested page overall, so its own "page 1" reports as
+        # absolute page 2.
+        assert calls == [(1, "first range page 1"), (2, "second range page 1")]
+
+    def test_on_page_text_none_by_default(self, tmp_path, monkeypatch):
+        proc = _make_processor(monkeypatch)
+        f = tmp_path / "source.txt"
+        f.write_text("one", encoding="utf-8")
+        proc.translation_service.translate_text_pages.return_value = ["a"]
+        proc._process_text_based_file(
+            str(f), "txt", None, None, "English", "French", OutputOptions(),
+        )
+        _, kwargs = proc.translation_service.translate_text_pages.call_args
+        assert kwargs["on_page_text"] is None
+
 
 # ---------------------------------------------------------------------------
 # process_image_translation

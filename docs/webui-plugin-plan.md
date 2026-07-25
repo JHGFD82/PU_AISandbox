@@ -903,6 +903,74 @@ won't actually appear in the composer until `translation-ea`'s own
 `plugin.py` adds the few lines shown in the template guide — that's a
 follow-up in that other repo, not something finishable from here.
 
+**Third pass, same day: per-page messages while a translation job runs.**
+Report: "no messages from each page in the conversation while a
+translation is going on — is console printing swallowing it?" Root cause,
+confirmed by tracing the call chain: no, nothing was swallowed — the
+capability never existed. `ProgressCallback` is `Callable[[int, int], None]`,
+done/total counts only; the actual translated text for each page only ever
+reached a `print()` call (gated off in the webui path via
+`self._suppress_inline_print`) or a progressive-save file write. `jobs.py`'s
+`on_progress` closure had no way to receive text because the interface
+never carried any.
+
+Fix: a new sibling callback, `PageTextCallback = Callable[[int, str], None]`
+(`src/runtime/ui_action.py`), threaded alongside `on_progress` everywhere,
+optional and defaulting to `None` so the CLI path and every existing caller
+is unaffected — deliberately a new parameter rather than widening
+`ProgressCallback` itself, which would have forced changes to every
+existing 2-arg callback site (including CLI callers and test lambdas) for
+no reason. Threaded through the same sequential-only path as
+`on_progress`: `translation_service.py`'s `_translate_page_sequence()` (and
+`translate_document()`/`translate_text_pages()` above it),
+`document_handler.py`'s `_process_text_based_file()`/`translate_document()`/
+`process_image_translation_folder()` (each range/segment computes its own
+text-offset closure, mirroring the existing progress-offset ones, so page
+numbers stay correct across a multi-range request like `-p "1-5,10-15"`),
+`plugins/translation/plugin.py`'s `run_ui_action`, and `jobs.py`'s
+`_run_job()`, which now appends a new `job_page` message
+(`Message.kind == "job_page"`, `Message.page_number` set, 1-indexed) to the
+conversation every time a page finishes. `plugins/transcription/plugin.py`
+accepts `on_page_text` too (unused for now — transcription doesn't stream
+per-image text yet).
+
+Frontend (`chat.html`): `job_page` is the one job-message kind that renders
+as an ordinary-looking bubble with a small "Page N" label above the text,
+and — unlike `job_progress`/`job_result`/`job_error` — still gets the
+copy/export action row, since it's real translated content someone may
+want to reuse. `job_progress` is still fully suppressed from the
+transcript (shown only in the progress bar under the composer).
+
+Covered by new tests across `test_translation_service.py`
+(`TestTranslateTextPagesPageText`), `test_document_handler.py` (including
+the multi-range offset case), `test_translation_plugin_ui_action.py`,
+`test_jobs.py`, and `test_conversation.py`.
+
+**Follow-up, same day:** per-page streaming is sequential-only
+(`workers == 1`) — with `workers > 1`, `translation_service.py` takes the
+`_translate_pages_parallel` branch entirely, which never receives
+`on_progress`/`on_page_text` at all, since pages can finish out of order
+and there's no buffering to put them back in order before reporting them.
+This mirrors a restriction the progress bar already had; not new to this
+fix. Your call: rather than build out-of-order buffering (bigger, separate
+piece of work) or show possibly-confusing out-of-order page bubbles, leave
+the progress bar accurate (as it already was) and add one plain heads-up
+instead. `jobs.py`'s `_run_job()` now checks the submitted `workers` field
+before starting the job and, if greater than 1, appends a new `job_notice`
+message: "Preview of the translation is turned off while running with more
+than one worker. The progress bar below will still update normally, and
+the finished document will be here as soon as the job completes." A
+`job_notice` renders as a plain, subdued bubble (italic, muted, no
+copy/export row — it's an aside, not content) and is excluded from
+`api_messages()`/`display_messages()` like every other job-kind message.
+Not every plugin declares a `workers` field (transcription doesn't), so
+this is a no-op wherever it's absent.
+
+Full suite re-run clean after this pass: 1572 passed, 19 deselected
+(`-m "not live"`, network-dependent pricing tests), one pre-existing
+unrelated failure
+(`test_model_catalog.py::TestResolveModel::test_provider_model_not_in_catalog_auto_registers`).
+
 The generic "attach a document to chat" icon and its upload wiring were
 already **removed** from `chat.html` in an earlier pass, before this
 backend work started. Reasoning, unchanged: that icon extracted text from

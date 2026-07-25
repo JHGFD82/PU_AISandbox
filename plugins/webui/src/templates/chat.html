@@ -279,6 +279,18 @@
   .msg.job-result { border-color: var(--orange); }
   .msg.job-error { border-color: #d64545; }
   [data-theme="dark"] .msg.job-error { border-color: #ff6b6b; }
+  /* job_page: one page's translated text, streamed in as the job runs. */
+  .msg.job-page { border-color: var(--border); }
+  .job-page-label {
+    font-size: 0.75rem; font-weight: 600; color: var(--text-muted);
+    text-transform: uppercase; letter-spacing: 0.03em; margin-bottom: 0.3rem;
+  }
+  /* job_notice: a one-off aside about how the job will behave (e.g. "no
+     per-page preview with multiple workers") — deliberately subdued, not
+     styled like an error or a real reply. */
+  .msg.job-notice {
+    border-color: var(--border); font-style: italic; color: var(--text-muted);
+  }
   .job-download-link {
     display: inline-flex; align-items: center; gap: 0.3rem; margin-top: 0.5rem;
     padding: 0.35rem 0.7rem; border-radius: 6px; background: var(--orange); color: white;
@@ -1578,12 +1590,23 @@ function renderMessages(conv) {
     // empty or redundant transcript entry for each one.
     if (m.kind === "job_progress") return;
     const div = document.createElement("div");
-    // job_result/job_error still get their own bubble style and skip the
-    // copy/export row below; they're status pings, not dialogue someone
-    // would want to copy or export.
+    // job_result/job_error/job_notice still get their own bubble style and
+    // skip the copy/export row below; they're status pings or asides, not
+    // dialogue someone would want to copy or export. job_page is the
+    // exception: it carries one page's actual translated text, shown as
+    // it's produced (see the "no messages from each page" fix) — a
+    // professor may well want to copy or export a single page the same as
+    // any other reply.
     const isJobMessage = m.kind && m.kind !== "message";
+    const isJobPage = m.kind === "job_page";
     div.className = "msg " + m.role + (isJobMessage ? " " + m.kind.replace(/_/g, "-") : "");
-    div.textContent = m.content;
+    if (isJobPage && m.page_number != null) {
+      const pageLabel = document.createElement("div");
+      pageLabel.className = "job-page-label";
+      pageLabel.textContent = `Page ${m.page_number}`;
+      div.appendChild(pageLabel);
+    }
+    div.appendChild(document.createTextNode(m.content));
     (m.attachments || []).forEach(a => {
       if (m.content) div.appendChild(document.createElement("br"));
       div.appendChild(attachmentChipElement(a.filename, a.char_count));
@@ -1612,7 +1635,10 @@ function renderMessages(conv) {
       link.textContent = `Download ${m.output_filename || "result"}`;
       div.appendChild(link);
     }
-    if (!isJobMessage) div.appendChild(messageActionsElement(m));
+    // job_page carries real translated text a professor may want to copy
+    // or export, unlike job_progress/job_result/job_error which are status
+    // pings — so it's the one job kind that still gets the action row.
+    if (!isJobMessage || isJobPage) div.appendChild(messageActionsElement(m));
     box.appendChild(div);
   });
   box.scrollTop = box.scrollHeight;

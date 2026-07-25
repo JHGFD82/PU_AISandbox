@@ -79,17 +79,28 @@ class Message:
                      "identical to content", which is true for every message
                      without an attachment.
         kind: ``'message'`` (the default — an ordinary chat turn) or one of
-              three states a plugin background job passes through:
+              five states a plugin background job passes through:
               ``'job_progress'`` (a lightweight "page 3 of 12" status ping),
-              ``'job_result'`` (the job's one finished output file, ready to
-              download), or ``'job_error'`` (the job failed or was
-              interrupted). See docs/webui-plugin-plan.md section 10 — job
-              messages are deliberately excluded from ``api_messages()``
-              and ``display_messages()`` below, since they aren't real
-              dialogue for the model to reason over. The webui's own chat
-              transcript excludes ``'job_progress'`` too, rendering it in a
-              dedicated progress bar under the composer instead — see
-              ``progress_done``/``progress_total``.
+              ``'job_page'`` (one page/unit's actual translated text, shown
+              as it finishes — see ``page_number``), ``'job_notice'`` (a
+              one-off heads-up about how this job will behave, e.g. that
+              per-page previews are off because it's running with more than
+              one worker — informational, not an error), ``'job_result'``
+              (the job's one finished output file, ready to download), or
+              ``'job_error'`` (the job failed or was interrupted). See
+              docs/webui-plugin-plan.md section 10 — job messages are
+              deliberately excluded from ``api_messages()`` and
+              ``display_messages()`` below, since they aren't real dialogue
+              for the model to reason over. The webui's own chat transcript
+              excludes ``'job_progress'`` too, rendering it in a dedicated
+              progress bar under the composer instead — see
+              ``progress_done``/``progress_total``. ``'job_page'`` messages
+              *are* rendered as ordinary-looking bubbles (with a small page
+              label), since seeing each page's actual output as it's
+              produced is the point of them. ``'job_notice'`` also renders
+              as a plain bubble (styled as a subdued aside, not an error),
+              but without the copy/export row, since it's not content the
+              professor produced or would want to reuse.
         job_id: Which background job this message reports on. ``None`` for
                 an ordinary chat message.
         output_filename: For a ``'job_result'`` message, the filename to
@@ -109,6 +120,10 @@ class Message:
         progress_total: For a ``'job_progress'`` message, the total number
                         of units of work this job expects to do. ``None``
                         otherwise.
+        page_number: For a ``'job_page'`` message, which page/unit this is
+                     (1-indexed, matching the page numbers already used in
+                     error messages elsewhere in this project). ``None``
+                     otherwise.
     """
 
     role: str
@@ -126,6 +141,7 @@ class Message:
     output_path: Optional[str] = None
     progress_done: Optional[int] = None
     progress_total: Optional[int] = None
+    page_number: Optional[int] = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -149,6 +165,7 @@ class Message:
             output_path=data.get("output_path"),
             progress_done=data.get("progress_done"),
             progress_total=data.get("progress_total"),
+            page_number=data.get("page_number"),
         )
 
 
