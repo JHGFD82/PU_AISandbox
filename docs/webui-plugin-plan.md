@@ -1003,6 +1003,42 @@ unrecognized value.
 Full suite re-run clean: 1579 passed, 19 deselected, the same one
 pre-existing unrelated failure.
 
+**Fifth pass, same day: let the composer's file field accept a folder,**
+not just one file — asked right after the transcribe parity pass above,
+since ``transcribe -i some_folder/`` already processes every image inside
+it (``process_image_folder``), but the webui's file input only ever let a
+professor attach one file, and ``/api/jobs`` only ever accepted one
+multipart upload. Added ``UiField.allow_folder`` (default ``False``, so
+translate's own single-document field is unaffected) — when set, the
+composer's file `<input>` gets both `multiple` and `webkitdirectory`
+attributes: in Chrome/Edge (which support the latter) this becomes a real
+"choose a folder" picker; everywhere else `webkitdirectory` is silently
+ignored and it falls back to an ordinary multi-file picker, still strictly
+better than single-file-only. Set `allow_folder=True` on transcribe's
+`file` field only (translate's own document field stays single-file for
+now — a folder-of-page-images upload for translate's own `-i`-as-folder
+CLI path isn't wired into `run_ui_action` at all yet, a separate,
+not-yet-done piece of work, distinct from this).
+
+`plugins/webui/src/app.py`'s `/api/jobs` route now takes a `files: list[UploadFile]`
+form field (renamed from the old singular `file`) instead of one optional
+upload: exactly one file keeps the previous behavior (saved directly,
+`fields['file_path']` points at it); more than one file are all saved into
+one new `input/` subdirectory, and `fields['file_path']` points at *that
+directory* instead — exactly the shape `TranscriptionPlugin.run_ui_action`
+already expected from a CLI user's folder path, so no plugin-side change
+was needed there at all. `chat.html`'s `collectJobFieldValues()` now
+returns an array of files (usually length 1) instead of a single `File`;
+`restoreJobFieldValues()`/`startJobFromModal()` updated to match.
+
+Covered by new tests: `tests/test_ui_action.py` (`allow_folder` defaults
+false / can be enabled), `plugins/transcription/tests/test_transcription_plugin_ui_action.py`
+(file field has `allow_folder=True`), and `plugins/webui/tests/test_app.py`
+(single file unchanged, multiple files land in one folder with the right
+`file_name`/`file_path`, zero files leaves `fields` untouched). Full suite
+re-run clean: 1584 passed, 19 deselected, the same one pre-existing
+unrelated failure.
+
 The generic "attach a document to chat" icon and its upload wiring were
 already **removed** from `chat.html` in an earlier pass, before this
 backend work started. Reasoning, unchanged: that icon extracted text from

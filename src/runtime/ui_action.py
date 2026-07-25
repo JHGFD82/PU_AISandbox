@@ -59,8 +59,9 @@ class UiField:
                (e.g. ``'Source language'``).
         kind: What kind of control to render — ``'language'`` (a select
               populated from this project's language registry),
-              ``'file'`` (a single file upload), ``'checkbox'``, ``'text'``
-              (a single- or multi-line text field, e.g. notes or a
+              ``'file'`` (a file upload — a single file by default, or a
+              whole folder at once if ``allow_folder`` is set), ``'checkbox'``,
+              ``'text'`` (a single- or multi-line text field, e.g. notes or a
               page-range string like ``'8-12'``), or ``'select'`` (a
               dropdown populated from ``choices``, for a fixed set of
               options that isn't the language registry — e.g. output file
@@ -76,6 +77,19 @@ class UiField:
                ``'Performance'``). Purely cosmetic — lets a long field list
                read as organized sections instead of one dense block.
                ``None`` fields render with no heading at all.
+        allow_folder: For ``kind='file'`` only — when ``True``, the web UI
+                      lets the professor pick a whole folder (or several
+                      individual files) instead of exactly one file, the
+                      same way pointing the CLI's ``-i`` at a folder of
+                      images processes every image inside it in order. Every
+                      selected file is uploaded and saved into one job
+                      folder, whose path then arrives in ``run_ui_action``'s
+                      ``fields['file_path']`` — the same shape a plugin
+                      already gets from a CLI user passing a folder path
+                      directly. Ignored for every other kind, and ``False``
+                      by default so a single-document upload (e.g.
+                      translate's own document field) still only ever
+                      accepts one file.
     """
 
     name: str
@@ -84,6 +98,7 @@ class UiField:
     required: bool = True
     choices: Optional[list[dict]] = None
     group: Optional[str] = None
+    allow_folder: bool = False
 
 
 @dataclass

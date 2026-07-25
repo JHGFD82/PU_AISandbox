@@ -737,7 +737,7 @@ class TestPluginActionExtensionFields:
         assert resp.json() == {
             "fields": [{
                 "name": "kanbun", "label": "Use Kanbun conventions", "kind": "checkbox",
-                "required": False, "choices": None, "group": None,
+                "required": False, "choices": None, "group": None, "allow_folder": False,
             }]
         }
 
@@ -829,7 +829,7 @@ class TestStartJob:
                 "professor": "heller", "conversation_id": conv_id, "action_id": "translate",
                 "fields_json": json.dumps({"source_language": "ja", "target_language": "en"}),
             },
-            files={"file": ("doc.txt", b"some document text", "text/plain")},
+            files={"files": ("doc.txt", b"some document text", "text/plain")},
         )
         assert resp.status_code == 200
         _wait_for_job_done(unlocked_client, conv_id, "heller")
@@ -837,6 +837,78 @@ class TestStartJob:
         assert received["file_path"].endswith("doc.txt")
         import os
         assert os.path.exists(received["file_path"])
+
+    def test_multiple_uploaded_files_saved_into_one_folder(self, unlocked_client, monkeypatch):
+        # A professor picking several images (or a whole folder, on a
+        # browser that supports it) at once for an allow_folder field —
+        # see UiField.allow_folder's docstring. All uploads land in one
+        # directory, and file_path points at that directory the same way
+        # it would for a CLI user pointing -i at a folder directly.
+        app_module = sys.modules["_pu_webui_app"]
+        received = {}
+
+        def run_ui_action(fields, professor, model, on_progress, output_dir):
+            received.update(fields)
+            from src.runtime.ui_action import UiJobResult
+            out = f"{output_dir}/out.txt"
+            with open(out, "w", encoding="utf-8") as f:
+                f.write("done")
+            return UiJobResult(output_path=out, output_filename="out.txt", summary="Done.")
+
+        fake = _fake_plugin(action_id="transcribe", run_ui_action=run_ui_action)
+        monkeypatch.setattr(app_module, "_get_plugins", lambda: {"transcribe": fake})
+
+        create = unlocked_client.post("/api/conversations", json={"professor": "heller", "model": "gpt-4o"})
+        conv_id = create.json()["id"]
+
+        resp = unlocked_client.post(
+            "/api/jobs",
+            data={
+                "professor": "heller", "conversation_id": conv_id, "action_id": "transcribe",
+                "fields_json": json.dumps({"target_language": "en"}),
+            },
+            files=[
+                ("files", ("page1.jpg", b"fake image bytes 1", "image/jpeg")),
+                ("files", ("page2.jpg", b"fake image bytes 2", "image/jpeg")),
+            ],
+        )
+        assert resp.status_code == 200
+        _wait_for_job_done(unlocked_client, conv_id, "heller")
+
+        import os
+        assert received["file_name"] == "2 images"
+        assert os.path.isdir(received["file_path"])
+        assert sorted(os.listdir(received["file_path"])) == ["page1.jpg", "page2.jpg"]
+
+    def test_no_files_leaves_fields_untouched(self, unlocked_client, monkeypatch):
+        app_module = sys.modules["_pu_webui_app"]
+        received = {}
+
+        def run_ui_action(fields, professor, model, on_progress, output_dir):
+            received.update(fields)
+            from src.runtime.ui_action import UiJobResult
+            out = f"{output_dir}/out.txt"
+            with open(out, "w", encoding="utf-8") as f:
+                f.write("done")
+            return UiJobResult(output_path=out, output_filename="out.txt", summary="Done.")
+
+        fake = _fake_plugin(action_id="translate", run_ui_action=run_ui_action)
+        monkeypatch.setattr(app_module, "_get_plugins", lambda: {"translate": fake})
+
+        create = unlocked_client.post("/api/conversations", json={"professor": "heller", "model": "gpt-4o"})
+        conv_id = create.json()["id"]
+
+        resp = unlocked_client.post(
+            "/api/jobs",
+            data={
+                "professor": "heller", "conversation_id": conv_id, "action_id": "translate",
+                "fields_json": json.dumps({"source_language": "ja", "target_language": "en"}),
+            },
+        )
+        assert resp.status_code == 200
+        _wait_for_job_done(unlocked_client, conv_id, "heller")
+        assert "file_path" not in received
+        assert "file_name" not in received
 
     def test_unknown_action_returns_400(self, unlocked_client, monkeypatch):
         app_module = sys.modules["_pu_webui_app"]

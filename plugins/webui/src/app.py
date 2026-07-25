@@ -717,19 +717,31 @@ def create_app() -> FastAPI:
         action_id: str = Form(...),
         model: str | None = Form(None),
         fields_json: str = Form("{}"),
-        file: UploadFile | None = File(None),
+        files: list[UploadFile] = File(default_factory=list),
     ):
         """Start a plugin background job (translate/transcribe/...) in one conversation.
 
         The submitted form's non-file values arrive JSON-encoded in
         ``fields_json`` — which fields exist is entirely plugin-defined
         (see ``UiAction``/``UiField``), not a fixed set this route could
-        declare individual ``Form(...)`` parameters for. An uploaded file,
-        if this action needs one, arrives as an ordinary multipart file
-        part and is saved into this job's own output directory before
-        ``run_ui_action`` ever sees it — that directory is created here
-        (via a job id generated up front) specifically so the upload has
-        somewhere durable to live before the job even starts.
+        declare individual ``Form(...)`` parameters for. Any uploaded files,
+        if this action needs them, arrive as ordinary multipart file parts
+        under the shared ``files`` key and are saved into this job's own
+        output directory before ``run_ui_action`` ever sees them — that
+        directory is created here (via a job id generated up front)
+        specifically so the upload has somewhere durable to live before the
+        job even starts.
+
+        A single uploaded file is saved directly and ``fields['file_path']``
+        points straight at it, same as before ``allow_folder`` (see
+        ``UiField``'s docstring) existed. More than one file — a professor
+        picking several images, or a whole folder via a browser that
+        supports it — are saved together into one ``input/`` subdirectory,
+        and ``fields['file_path']`` points at *that directory* instead,
+        exactly the shape a plugin's ``run_ui_action`` already expects from
+        a CLI user pointing ``-i`` at a folder (e.g.
+        ``TranscriptionPlugin.run_ui_action``'s ``os.path.isdir(file_path)``
+        branch).
         """
         _require_unlocked(request)
         professor = _validated_professor(professor)
@@ -741,14 +753,27 @@ def create_app() -> FastAPI:
             raise HTTPException(400, "fields_json must decode to a JSON object.")
 
         job_id = jobs.new_job_id()
-        if file is not None and file.filename:
+        uploaded = [f for f in files if f.filename]
+        if len(uploaded) == 1:
             output_dir = jobs.job_output_dir(professor, job_id)
-            upload_path = output_dir / file.filename
-            data = await file.read()
+            upload_path = output_dir / uploaded[0].filename
+            data = await uploaded[0].read()
             with open(upload_path, "wb") as f:
                 f.write(data)
             fields["file_path"] = str(upload_path)
-            fields["file_name"] = file.filename
+            fields["file_name"] = uploaded[0].filename
+        elif len(uploaded) > 1:
+            output_dir = jobs.job_output_dir(professor, job_id)
+            upload_dir = output_dir / "input"
+            upload_dir.mkdir(parents=True, exist_ok=True)
+            saved_names = []
+            for f in uploaded:
+                data = await f.read()
+                with open(upload_dir / os.path.basename(f.filename), "wb") as out:
+                    out.write(data)
+                saved_names.append(f.filename)
+            fields["file_path"] = str(upload_dir)
+            fields["file_name"] = f"{len(saved_names)} images"
 
         store = conversation.ConversationStore(professor)
         try:

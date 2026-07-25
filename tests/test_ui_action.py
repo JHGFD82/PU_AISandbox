@@ -24,6 +24,16 @@ class TestUiField:
         f = UiField(name="notes", label="Notes", kind="text", required=False)
         assert f.required is False
 
+    def test_allow_folder_defaults_false(self):
+        # A single-document field (e.g. translate's own file field) must
+        # keep accepting exactly one file unless a plugin opts in.
+        f = UiField(name="file", label="Document", kind="file")
+        assert f.allow_folder is False
+
+    def test_allow_folder_can_be_enabled(self):
+        f = UiField(name="file", label="Image", kind="file", allow_folder=True)
+        assert f.allow_folder is True
+
 
 class TestUiAction:
     def test_fields_default_to_empty_list(self):

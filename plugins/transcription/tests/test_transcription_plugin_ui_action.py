@@ -38,6 +38,13 @@ class TestUiActionDeclaration:
         names = [f.name for f in plugin_module.ui_action.fields]
         assert names == ["target_language", "file", "output_format", "notes"]
 
+    def test_file_field_allows_a_folder_of_images(self, plugin_module):
+        # transcribe's CLI already accepts -i pointed at a folder of scans
+        # (process_image_folder) — the composer's file field must offer the
+        # same, not just a single image, per UiField.allow_folder's docstring.
+        field = next(f for f in plugin_module.ui_action.fields if f.name == "file")
+        assert field.allow_folder is True
+
     def test_output_format_offers_the_same_writers_as_the_cli_extension_switch(self, plugin_module):
         # -o result.docx / -o result.pdf / -o result.md / -o result.txt on
         # the CLI already picks the writer by extension (save_translation_output

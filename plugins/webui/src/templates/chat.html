@@ -1033,10 +1033,10 @@ function restoreJobFieldValues(actionId, fields) {
     if (field.kind === "checkbox") {
       if (field.name in saved.values) el.checked = !!saved.values[field.name];
     } else if (field.kind === "file") {
-      if (saved.file) {
+      if (saved.files && saved.files.length > 0) {
         try {
           const dt = new DataTransfer();
-          dt.items.add(saved.file);
+          saved.files.forEach(f => dt.items.add(f));
           el.files = dt.files;
         } catch (e) {
           // DataTransfer-based file restoration isn't supported in every
@@ -1132,6 +1132,15 @@ function buildJobFieldControl(field) {
     input = document.createElement("input");
     input.type = "file";
     input.id = jobFieldControlId(field.name);
+    if (field.allow_folder) {
+      // Lets a professor pick several images at once, or an entire folder
+      // in one go — mirrors pointing the CLI's -i at a folder of scans.
+      // webkitdirectory is ignored (not an error) by browsers that don't
+      // support it, which just falls back to plain multi-file selection —
+      // still strictly more useful than the single-file-only default.
+      input.multiple = true;
+      input.webkitdirectory = true;
+    }
   } else {
     input = document.createElement("textarea");
     input.id = jobFieldControlId(field.name);
@@ -1148,25 +1157,28 @@ function scheduleJobPreview() {
   jobPreviewDebounce = setTimeout(refreshJobPreview, 300);
 }
 
-// Everything except the file itself — a file's bytes aren't needed to
-// preview the prompt text (the preview always substitutes placeholder
-// document text, same as the CLI's own --dry-run), so it's kept separate
-// from the JSON-encoded field values sent to the preview endpoint.
+// Everything except the file(s) themselves — a file's bytes aren't needed
+// to preview the prompt text (the preview always substitutes placeholder
+// document text, same as the CLI's own --dry-run), so they're kept
+// separate from the JSON-encoded field values sent to the preview
+// endpoint. files is always an array (usually length 1) so a single
+// "file" field's control can hold either one document or, for a field
+// with allow_folder, every image in a folder someone just picked.
 function collectJobFieldValues(fields) {
   const values = {};
-  let file = null;
+  let files = [];
   (fields || []).forEach(field => {
     const el = document.getElementById(jobFieldControlId(field.name));
     if (!el) return;
     if (field.kind === "checkbox") {
       values[field.name] = el.checked;
     } else if (field.kind === "file") {
-      file = el.files && el.files[0] ? el.files[0] : null;
+      files = el.files ? Array.from(el.files) : [];
     } else {
       values[field.name] = el.value;
     }
   });
-  return { values, file };
+  return { values, files };
 }
 
 async function refreshJobPreview() {
@@ -1212,10 +1224,10 @@ async function startJobFromModal() {
   errorEl.textContent = "";
 
   const fields = state.activeActionFields || action.fields;
-  const { values, file } = collectJobFieldValues(fields);
+  const { values, files } = collectJobFieldValues(fields);
   const fileField = fields.find(f => f.kind === "file");
-  if (fileField && fileField.required && !file) {
-    errorEl.textContent = "Please choose a file.";
+  if (fileField && fileField.required && files.length === 0) {
+    errorEl.textContent = fileField.allow_folder ? "Please choose a file or folder." : "Please choose a file.";
     return;
   }
   const missing = fields.filter(
@@ -1246,7 +1258,7 @@ async function startJobFromModal() {
     formData.append("action_id", action.id);
     if (model) formData.append("model", model);
     formData.append("fields_json", JSON.stringify(values));
-    if (file) formData.append("file", file);
+    files.forEach(f => formData.append("files", f));
 
     const resp = await fetch("/api/jobs", { method: "POST", body: formData });
     if (!resp.ok) { throw new Error(await resp.text()); }

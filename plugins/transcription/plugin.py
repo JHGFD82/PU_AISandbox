@@ -406,10 +406,11 @@ class TranscriptionPlugin:
         - ``file_path``: absolute path to the image the webui has already
           saved to disk — or, if it points at a directory, every image in
           it is transcribed and combined, the same as passing a folder to
-          ``-i`` on the command line. (The v1 composer form only offers a
-          single-file upload widget — see docs/webui-plugin-plan.md section
-          10's open items — but this method itself already supports both,
-          since ``process_image_folder`` needed no separate work here.)
+          ``-i`` on the command line. The composer's file field
+          (``allow_folder=True``) lets a professor pick several images or a
+          whole folder at once; ``plugins/webui/src/app.py``'s job-start
+          route is what saves multiple uploads into one directory and sets
+          this to that directory's path.
         - ``file_name``: the original filename, used only to build a
           readable output filename.
         - ``output_format``: optional, one of ``'txt'`` (default),
@@ -588,7 +589,10 @@ ui_action = UiAction(
     command="transcribe",
     fields=[
         UiField(name="target_language", label="Language in the image", kind="language", group="Document"),
-        UiField(name="file", label="Image", kind="file", group="Document"),
+        UiField(
+            name="file", label="Image (or select multiple images / a whole folder of scans)",
+            kind="file", group="Document", allow_folder=True,
+        ),
         UiField(
             name="output_format", label="Output format", kind="select", required=False,
             choices=[
