@@ -271,3 +271,75 @@ class TestCollectImageFiles:
         names = [os.path.basename(p) for p in result]
         assert names == ["page_1.jpg", "page_2.jpg", "page_10.jpg"]
 
+
+# ===========================================================================
+# src/services/parallel_utils.py — run_folder_parallel's on_progress callback
+# (regression coverage for the "progress bar frozen with workers > 1" bug:
+# this function previously had no callback mechanism at all — only a local
+# console tqdm bar, invisible to a caller running it on a background
+# thread, like the webui's job runner does. Every plugin's own parallel
+# path — transcription's process_image_folder, translation's
+# process_image_translation_folder and _translate_pages_parallel — funnels
+# through here or mirrors this exact pattern.)
+# ===========================================================================
+
+from src.services.parallel_utils import run_folder_parallel
+
+
+class TestRunFolderParallelOnProgress:
+
+    def _usage_data(self):
+        return {"total_usage": {"total_tokens": 0, "total_cost": 0.0}}
+
+    def test_called_once_per_item_reaching_the_full_total(self):
+        files = ["a.jpg", "b.jpg", "c.jpg", "d.jpg"]
+        calls: list = []
+        run_folder_parallel(
+            files,
+            worker_fn=lambda i, path: (i, path, "ok"),
+            make_error_result=lambda fname, e: (fname, "error"),
+            usage_data=self._usage_data(),
+            actual_workers=2,
+            desc="Testing",
+            on_progress=lambda done, total: calls.append((done, total)),
+        )
+        # Threads can finish in any order, so only the count and final call
+        # are guaranteed, not which file happened to finish when.
+        assert len(calls) == 4
+        assert all(total == 4 for _done, total in calls)
+        assert sorted(done for done, _total in calls) == [1, 2, 3, 4]
+        assert calls[-1] == (4, 4)
+
+    def test_called_even_when_a_worker_raises(self):
+        files = ["ok.jpg", "err.jpg"]
+
+        def worker(i, path):
+            if "err" in path:
+                raise RuntimeError("boom")
+            return i, path, "ok"
+
+        calls: list = []
+        run_folder_parallel(
+            files,
+            worker_fn=worker,
+            make_error_result=lambda fname, e: (fname, "error"),
+            usage_data=self._usage_data(),
+            actual_workers=2,
+            desc="Testing",
+            on_progress=lambda done, total: calls.append((done, total)),
+        )
+        assert len(calls) == 2
+        assert calls[-1] == (2, 2)
+
+    def test_default_none_means_no_progress_reporting(self):
+        # Must not raise (i.e. must not try calling None()).
+        results = run_folder_parallel(
+            ["a.jpg"],
+            worker_fn=lambda i, path: (i, path, "ok"),
+            make_error_result=lambda fname, e: (fname, "error"),
+            usage_data=self._usage_data(),
+            actual_workers=1,
+            desc="Testing",
+        )
+        assert len(results) == 1
+

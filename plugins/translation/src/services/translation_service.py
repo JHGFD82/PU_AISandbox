@@ -458,6 +458,7 @@ class TranslationService(BaseService):
         unit_label: str,
         workers: int,
         opts: OutputOptions,
+        on_progress: Optional[ProgressCallback] = None,
     ) -> List[str]:
         """Translate every page of a document at the same time using multiple worker threads.
 
@@ -488,6 +489,19 @@ class TranslationService(BaseService):
                   whether progressive saving was requested, which isn't
                   supported in parallel mode and is disabled with a warning
                   if so.
+            on_progress: Called with ``(completed_count, total_count)`` after
+                         each page finishes, in *completion* order (which may
+                         differ from page order — a plain count is safe to
+                         report regardless of which page just finished,
+                         unlike streaming a specific page's text). ``None``
+                         (the default, and what every CLI call passes) means
+                         no progress reporting — only the webui's background
+                         job runner passes one. Previously silently
+                         unsupported on this parallel path (only the local
+                         console ``tqdm`` bar reported anything, invisible to
+                         a caller running this in a background thread) — see
+                         docs/webui-plugin-plan.md section 10's "progress bar
+                         frozen with workers > 1" fix.
 
         Returns:
             The translated text for every page, in original page order
@@ -526,6 +540,7 @@ class TranslationService(BaseService):
 
         try:
             futures: Dict = {}
+            completed = 0
             with ThreadPoolExecutor(max_workers=actual_workers) as executor:
                 for idx, page_text, previous_page in all_triples:
                     future = executor.submit(_translate_one, idx, page_text, previous_page)
@@ -556,6 +571,9 @@ class TranslationService(BaseService):
                                     logging.debug(f"Could not write error temp file for {unit_label} {idx + 1}")
                             update_pbar_postfix(pbar, self.token_tracker.usage_data, baseline_tokens, baseline_cost)
                             pbar.update(1)
+                            completed += 1
+                            if on_progress is not None:
+                                on_progress(completed, n_pages)
 
             # Assemble results in original page order
             document_text: list[str] = []
@@ -621,14 +639,15 @@ class TranslationService(BaseService):
             workers: How many pages to translate at the same time. ``1``
                      translates pages one after another instead.
             on_progress: Called with ``(completed_count, total_count)`` after
-                         each page finishes, in page order. Only honored on
-                         the sequential (``workers == 1``) path below — the
-                         parallel path finishes pages out of order across
-                         threads, and "page 7 of 12 done" is a much less
-                         useful signal when it might arrive before page 3.
-                         Callers that need progress reporting from a webui
-                         background job (see ``docs/webui-plugin-plan.md``
-                         section 10) should keep ``workers`` at ``1``.
+                         each page finishes. Honored on *both* paths below —
+                         sequential (in page order) and parallel (in
+                         completion order, forwarded to
+                         ``_translate_pages_parallel``'s own ``on_progress``).
+                         A plain count is a meaningful signal regardless of
+                         which page just finished, unlike streaming a
+                         specific page's text (see ``on_page_text`` below),
+                         so there's no reason to withhold it just because
+                         ``workers > 1``.
             total_units: How many pages ``page_triples`` will yield, if
                          known up front — filled in as the "total" half of
                          ``on_progress``'s callback. Meaningless (and
@@ -660,6 +679,7 @@ class TranslationService(BaseService):
                 unit_label=unit_label,
                 workers=workers,
                 opts=opts,
+                on_progress=on_progress,
             )
         else:
             # --- sequential path ---

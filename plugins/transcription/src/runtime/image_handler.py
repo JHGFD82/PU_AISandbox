@@ -111,13 +111,17 @@ class Mixin:
             workers: Number of images to process in parallel. Defaults to
                      ``1`` (sequential). Capped at the system maximum.
             on_progress: Called with ``(completed_count, total_count)`` after
-                         each image finishes. ``None`` (the default, and what
-                         every CLI call passes) means no progress reporting —
-                         only the webui's background job runner passes one
-                         (see docs/webui-plugin-plan.md section 10). Only
-                         honored on the sequential (``workers <= 1``) path,
-                         same restriction as the translation plugin's
-                         equivalent parameter.
+                         each image finishes, on *either* path — sequential
+                         or parallel. ``None`` (the default, and what every
+                         CLI call passes) means no progress reporting — only
+                         the webui's background job runner passes one (see
+                         docs/webui-plugin-plan.md section 10). Unlike
+                         ``on_page_text`` below, a plain count is safe to
+                         report the moment *any* image finishes, regardless
+                         of completion order, so this works the same on the
+                         parallel (``workers > 1``) path too — reported via
+                         ``run_folder_parallel``'s own ``on_progress``
+                         (``src/services/parallel_utils.py``) there.
             on_page_text: Called with ``(image_number, extracted_text)`` right
                           after each image finishes — a sibling to
                           ``on_progress`` carrying the actual transcribed text
@@ -130,8 +134,12 @@ class Mixin:
                           watching the conversation sees every image
                           accounted for, not a silent gap. ``None`` (the
                           default, and what every CLI call passes) means no
-                          such reporting. Same sequential-only restriction as
-                          ``on_progress``.
+                          such reporting. Only honored on the sequential
+                          (``workers <= 1``) path — unlike ``on_progress``,
+                          streaming a specific image's *text* in the wrong
+                          order would be actively confusing (page 3's text
+                          appearing before page 1's), not just a cosmetic
+                          gap, so this one restriction stays.
 
         Raises:
             CLIError: If no image files are found in the folder.
@@ -199,6 +207,7 @@ class Mixin:
             self.token_tracker.usage_data,  # type: ignore[attr-defined]
             actual_workers,
             desc=f"Transcribing ({actual_workers} workers)... ",
+            on_progress=on_progress,
         )
 
         # Print and assemble in sorted-filename (original) order

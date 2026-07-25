@@ -1353,7 +1353,16 @@ function startJobPolling(conversationId) {
       if (!conv.active_job_id) {
         stopJobPolling();
         setComposerLocked(false);
-        await loadConversations();
+        // A finished job's cost/token spend already lives in the
+        // conversation (rendered above via renderMessages), but the
+        // sidebar's spend totals (#spend-month/#spend-alltime/etc., see
+        // loadUsage()) are a separate figure fetched from /api/usage — they
+        // don't update on their own just because the conversation changed,
+        // the same way the ordinary chat-send "done" handler already
+        // refreshes both together (see the SSE "done" branch below).
+        // Without this, a job's cost wouldn't show up in the sidebar until
+        // the next full page reload.
+        await Promise.all([loadConversations(), loadUsage()]);
       }
     } catch (e) {
       stopJobPolling();

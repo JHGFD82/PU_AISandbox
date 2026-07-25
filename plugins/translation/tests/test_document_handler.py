@@ -507,6 +507,33 @@ class TestProcessImageTranslationFolderParallel:
         out = capsys.readouterr().out
         assert "worker failed" in out or "Error" in out
 
+    def test_on_progress_called_on_the_real_parallel_path(self, monkeypatch, tmp_path):
+        # Regression coverage for the "progress bar frozen with workers > 1"
+        # bug: on_progress previously wasn't forwarded to run_folder_parallel
+        # at all, so a webui translate job run with more than one worker
+        # never produced a single progress update.
+        proc = _make_processor(monkeypatch)
+        folder = tmp_path / "imgs_progress"
+        folder.mkdir()
+        for name in ("a.jpg", "b.jpg", "c.jpg"):
+            (folder / name).write_bytes(b"fake")
+
+        proc.image_translation_service.process_image_translation = MagicMock(
+            return_value=("transcript", "translation")
+        )
+        proc.image_translation_service._get_model = MagicMock(return_value="gpt-4o")
+        proc.image_translation_service._suppress_inline_print = False
+
+        calls: list = []
+        proc.process_image_translation_folder(
+            str(folder), "Chinese", "English", OutputOptions(), workers=2,
+            on_progress=lambda done, total: calls.append((done, total)),
+        )
+        assert len(calls) == 3
+        assert all(total == 3 for _done, total in calls)
+        assert sorted(done for done, _total in calls) == [1, 2, 3]
+        assert calls[-1] == (3, 3)
+
 
 # ---------------------------------------------------------------------------
 # Additional branch-coverage tests

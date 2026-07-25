@@ -437,9 +437,10 @@ class TranscriptionPlugin:
         - ``workers``: optional whole number of parallel OCR workers when
           transcribing a folder of images, same as the CLI's own
           ``-w``/``--workers``. Ignored for a single image (nothing to
-          parallelize). Defaults to ``1`` (sequential, with live
-          progress/page-text reporting — see ``on_progress``/``on_page_text``
-          below).
+          parallelize). The progress bar updates correctly at any worker
+          count; only the per-image live text preview (``on_page_text``
+          below) is sequential-only — see ``on_progress``/``on_page_text``
+          below.
         - ``temperature`` / ``top_p`` / ``max_tokens``: optional sampling
           overrides, same as the CLI's ``-t``/``-T``/``-M`` flags. The web
           UI only shows these controls for models that accept them (see
@@ -455,6 +456,8 @@ class TranscriptionPlugin:
             on_progress: Forwarded to ``sandbox.process_image_folder`` when
                          ``file_path`` is a folder; unused for a single
                          image (nothing to report progress *between*).
+                         Works at any worker count — see
+                         ``process_image_folder``'s own docstring.
             output_dir: Where to write the one finished output file. Already
                         created and writable.
             on_page_text: Forwarded to ``sandbox.process_image_folder`` when
@@ -631,7 +634,7 @@ ui_action = UiAction(
             group="Output",
         ),
         UiField(
-            name="workers", label="Parallel workers (1 = sequential with live progress)",
+            name="workers", label="Parallel workers (1 = also shows each image's text as it's transcribed)",
             kind="text", required=False, group="Performance",
         ),
         UiField(name="notes", label="Notes for the model", kind="text", required=False, group="Notes"),

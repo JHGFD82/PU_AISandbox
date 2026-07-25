@@ -1077,7 +1077,7 @@ ui_action = UiAction(
             kind="text", required=False, group="Output",
         ),
         UiField(
-            name="workers", label="Parallel workers (1 = sequential with live progress)",
+            name="workers", label="Parallel workers (1 = also shows each page's text as it's translated)",
             kind="text", required=False, group="Performance",
         ),
         UiField(name="notes", label="Notes for the model", kind="text", required=False, group="Notes"),

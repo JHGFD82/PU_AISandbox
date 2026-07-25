@@ -1109,6 +1109,71 @@ defaults to 1, invalid/negative `workers` raise `CLIError`). Full suite
 re-run clean: 1598 passed, 19 deselected, the same one pre-existing
 unrelated failure.
 
+**Seventh pass, same day: two bugs found by manual testing with real
+`workers=4` jobs.**
+
+*Bug: the progress bar was frozen the entire time a workers>1 job ran.*
+Root cause: `on_progress` was never actually wired into any parallel
+path at all — only a local console `tqdm` bar reported anything, which
+is invisible to a caller running the job on a background thread (the
+webui always does). This was true in `src/services/parallel_utils.py`'s
+`run_folder_parallel` (used by both `transcription/image_handler.py`'s
+`process_image_folder` and `translation/document_handler.py`'s
+`process_image_translation_folder`), and independently true in
+`translation_service.py`'s own `_translate_pages_parallel` (a separate
+`ThreadPoolExecutor` loop, not routed through `run_folder_parallel`).
+`jobs.py`'s own `job_notice` message ("the progress bar will still
+update normally") had been asserting this worked without it ever having
+been verified — a real gap between the previous session's design intent
+("the progress bar should reflect the full process accurately since we
+pull that off easily enough in the CLI") and what was actually built.
+
+Fixed by adding an `on_progress` parameter to `run_folder_parallel`
+itself (called right after each `pbar.update(1)`, in completion order —
+a plain count is safe to report regardless of *which* item just
+finished, unlike streaming a specific page's *text*, which is why
+`on_page_text` correctly stays sequential-only and was left alone) and
+forwarding it from both of its callers, plus adding the equivalent
+`on_progress` call to `_translate_pages_parallel`'s own loop and
+threading it through from `_translate_page_sequence`. Every docstring
+that previously claimed "`on_progress` only works when `workers == 1`"
+was corrected — that restriction only ever applied to `on_page_text`.
+Both `workers` `UiField` labels (translate's and transcribe's) were
+reworded from "1 = sequential with live progress" to "1 = also shows
+each page's/image's text as it's translated/transcribed," since the
+progress bar itself no longer depends on `workers == 1`.
+
+Covered by new tests: `tests/test_utils_coverage.py`
+(`TestRunFolderParallelOnProgress` — real `ThreadPoolExecutor` run, not
+mocked, asserting the callback fires once per item reaching the full
+total, and still fires when a worker raises), a new
+`TestTranslatePagesParallelOnProgress` class in
+`test_translation_service.py` (same real-call approach), and one new
+test each in `test_image_handler.py` and `test_document_handler.py`
+exercising the real parallel path end to end. The previous
+`test_workers_gt1_never_invokes_on_progress` test (which only ever
+verified `_translate_page_sequence` itself doesn't call `on_progress`
+directly, `_translate_pages_parallel` being mocked out in that test) was
+kept but renamed and re-commented for accuracy, plus a new test
+confirming `on_progress` is actually forwarded as a kwarg into the real
+parallel method.
+
+*Bug: the sidebar's spend total didn't refresh after a job finished,*
+requiring a manual page reload. Root cause:
+`startJobPolling()`'s completion branch (`chat.html`) called
+`loadConversations()` but never `loadUsage()` — the two are separate
+fetches (conversation list/messages vs. `/api/usage`'s
+month/all-time/budget/by-model totals shown in the sidebar), and the
+ordinary chat-send "done" handler already correctly calls both
+together; the job-poll completion branch just never got the same
+treatment. Fixed with a one-line addition:
+`await Promise.all([loadConversations(), loadUsage()])`.
+
+Full suite re-run clean after this pass: 1607 passed, 19 deselected, the
+same one pre-existing unrelated failure. (No automated frontend test
+harness exists for `chat.html`'s JS beyond `node --check` syntax
+validation — verified clean.)
+
 The generic "attach a document to chat" icon and its upload wiring were
 already **removed** from `chat.html` in an earlier pass, before this
 backend work started. Reasoning, unchanged: that icon extracted text from

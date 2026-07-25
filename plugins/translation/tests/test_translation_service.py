@@ -1094,9 +1094,12 @@ class TestTranslateTextPagesProgress:
         result = svc.translate_text_pages(["p1"], None, "English", "Japanese")
         assert result == ["translated"]
 
-    def test_workers_gt1_never_invokes_on_progress(self, monkeypatch):
-        # Documented restriction (see _translate_page_sequence's docstring):
-        # progress reporting is sequential-only.
+    def test_workers_gt1_dispatch_does_not_call_on_progress_itself(self, monkeypatch):
+        # _translate_page_sequence's own workers>1 branch just hands off to
+        # _translate_pages_parallel (stubbed out here) — it must not call
+        # on_progress directly itself; that's _translate_pages_parallel's
+        # job (see the real-call test below, and its own on_progress tests
+        # in TestTranslatePagesParallelOnProgress).
         svc = _make_svc(monkeypatch)
         monkeypatch.setattr(svc, "_translate_pages_parallel", lambda all_triples, **kw: ["t"] * len(all_triples))
         calls: list = []
@@ -1105,6 +1108,84 @@ class TestTranslateTextPagesProgress:
             on_progress=lambda done, total: calls.append((done, total)),
         )
         assert calls == []
+
+    def test_workers_gt1_forwards_on_progress_to_translate_pages_parallel(self, monkeypatch):
+        # Regression guard for the "progress bar frozen with workers > 1"
+        # fix: _translate_page_sequence must pass its own on_progress
+        # through to _translate_pages_parallel rather than silently
+        # dropping it — see TestTranslatePagesParallelOnProgress below for
+        # coverage that _translate_pages_parallel itself actually calls it.
+        svc = _make_svc(monkeypatch)
+        received = {}
+
+        def fake_parallel(all_triples, **kw):
+            received.update(kw)
+            return ["t"] * len(all_triples)
+
+        monkeypatch.setattr(svc, "_translate_pages_parallel", fake_parallel)
+        on_progress = lambda done, total: None
+        svc.translate_text_pages(
+            ["p1", "p2"], None, "English", "Japanese", workers=2, on_progress=on_progress,
+        )
+        assert received["on_progress"] is on_progress
+
+
+# ---------------------------------------------------------------------------
+# TranslationService — on_progress genuinely fires on the REAL parallel path
+# (regression coverage for the "progress bar frozen with workers > 1" bug:
+# _translate_pages_parallel previously had no on_progress parameter at all,
+# so a webui job run with more than one worker never produced a single
+# job_progress message, even though jobs.py's own job_notice message
+# claimed the progress bar would "still update normally").
+# ---------------------------------------------------------------------------
+
+class TestTranslatePagesParallelOnProgress:
+
+    def _make_parallel_svc(self, monkeypatch):
+        svc = _make_svc(monkeypatch)
+        monkeypatch.setattr(svc, "_get_model", lambda: "gpt-4o")
+        monkeypatch.setattr(svc, "generate_text", lambda *a, **kw: "translated")
+        return svc
+
+    def test_on_progress_called_once_per_page_reaching_the_full_total(self, monkeypatch):
+        svc = self._make_parallel_svc(monkeypatch)
+        calls: list = []
+        result = svc.translate_text_pages(
+            ["p1", "p2", "p3", "p4"], None, "English", "Japanese", workers=2,
+            on_progress=lambda done, total: calls.append((done, total)),
+        )
+        assert len(result) == 4
+        # Parallel workers can finish in any order, so only the *count* and
+        # final call are guaranteed — not which page happened to finish
+        # when. Every call must report the same total, and cumulative
+        # "done" counts must be exactly 1..4 with no gaps or repeats.
+        assert len(calls) == 4
+        assert all(total == 4 for _done, total in calls)
+        assert sorted(done for done, _total in calls) == [1, 2, 3, 4]
+        assert calls[-1] == (4, 4)
+
+    def test_on_progress_still_called_when_a_page_errors(self, monkeypatch):
+        svc = self._make_parallel_svc(monkeypatch)
+
+        def flaky(*a, **kw):
+            if a[3] == 1:
+                raise RuntimeError("boom")
+            return "translated"
+
+        monkeypatch.setattr(svc, "generate_text", flaky)
+        calls: list = []
+        svc.translate_text_pages(
+            ["p1", "p2", "p3"], None, "English", "Japanese", workers=2,
+            on_progress=lambda done, total: calls.append((done, total)),
+        )
+        assert len(calls) == 3
+        assert calls[-1] == (3, 3)
+
+    def test_default_none_means_no_progress_reporting(self, monkeypatch):
+        svc = self._make_parallel_svc(monkeypatch)
+        # Must not raise (i.e. must not try calling None()).
+        result = svc.translate_text_pages(["p1", "p2"], None, "English", "Japanese", workers=2)
+        assert len(result) == 2
 
 
 # ---------------------------------------------------------------------------

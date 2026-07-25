@@ -77,6 +77,7 @@ def run_folder_parallel(
     usage_data: Dict[str, Any],
     actual_workers: int,
     desc: str,
+    on_progress: "Callable[[int, int], None] | None" = None,
 ) -> Dict[int, Tuple]:
     """Run *worker_fn* over *image_files* in parallel with a tqdm progress bar.
 
@@ -88,11 +89,43 @@ def run_folder_parallel(
     should return a ``(filename, *fallback_payload)`` tuple that matches the
     shape of a successful payload (minus the leading index).
 
-    Returns a ``dict[index → (filename, *payload)]``.
+    Args:
+        image_files: Absolute paths to every file to process, in the order
+                     results should eventually be reassembled (workers may
+                     finish in any order — only the returned dict's keys
+                     preserve the original position).
+        worker_fn: Called as ``worker_fn(index, file_path)`` on a worker
+                   thread for each file.
+        make_error_result: Called as ``make_error_result(filename, exc)``
+                           when a worker raises, to build a fallback result
+                           in the same shape a successful call would return.
+        usage_data: The running token/cost totals dict (``TokenTracker.usage_data``),
+                    read here only to show a live cost/token readout in the
+                    console progress bar's postfix — never written to.
+        actual_workers: How many threads to run at once (already capped by
+                        ``cap_worker_count``).
+        desc: The label shown next to the console ``tqdm`` progress bar.
+        on_progress: Called with ``(completed_count, total_count)`` after
+                     each file finishes, in *completion* order (which may
+                     differ from *image_files*'s order — unlike per-item
+                     text streaming, a plain count is safe to report as
+                     soon as any item finishes, regardless of which one).
+                     ``None`` (the default, and what every CLI call passes)
+                     means no such reporting — only the webui's background
+                     job runner passes one. This was previously silently
+                     unsupported here: the only progress signal was the
+                     local console ``tqdm`` bar below, invisible to a caller
+                     running this in a background thread (see
+                     docs/webui-plugin-plan.md section 10's "progress bar
+                     frozen with workers > 1" fix).
+
+    Returns:
+        A ``dict[index → (filename, *payload)]``.
     """
     results: Dict[int, Tuple] = {}
     baseline_tokens = usage_data["total_usage"].get("total_tokens", 0)
     baseline_cost = usage_data["total_usage"].get("total_cost", 0.0)
+    completed = 0
 
     with tqdm_logging():
         with ThreadPoolExecutor(max_workers=actual_workers) as executor:
@@ -112,6 +145,9 @@ def run_folder_parallel(
                         results[orig_idx] = make_error_result(filename, e)
                     update_pbar_postfix(pbar, usage_data, baseline_tokens, baseline_cost)
                     pbar.update(1)
+                    completed += 1
+                    if on_progress is not None:
+                        on_progress(completed, len(image_files))
     return results
 
 

@@ -119,16 +119,18 @@ class Mixin:
                          reconstructed in the output DOCX file.
             on_progress: Called with ``(completed_count, total_count)`` after
                          each page finishes, counted across every page range
-                         requested (usually just one). ``None`` (the
-                         default) means no progress reporting. See
-                         ``translation_service._translate_page_sequence`` —
-                         only meaningful when ``workers`` is ``1``.
+                         requested (usually just one), on either the
+                         sequential or parallel path — see
+                         ``translation_service._translate_page_sequence``.
+                         ``None`` (the default) means no progress reporting.
             on_page_text: Called with ``(page_number, translated_text)``
                           right after each page finishes, with
                           ``page_number`` counted the same
                           across-every-range way as ``on_progress``'s
                           count (a page range starting partway through the
                           document doesn't restart page numbering at 1).
+                          Only meaningful when ``workers`` is ``1`` — see
+                          ``_translate_page_sequence``'s docstring for why.
 
         Returns:
             A two-item tuple of ``(translated_pages, table_registry)``.
@@ -259,13 +261,13 @@ class Mixin:
                      pipeline. Use this for PDFs that contain scanned images
                      rather than selectable text.
             on_progress: Called with ``(completed_count, total_count)`` after
-                         each page or image finishes. ``None`` (the default,
+                         each page or image finishes, on either the
+                         sequential or parallel path. ``None`` (the default,
                          and what every CLI call passes) means no progress
                          reporting — only the webui's background job runner
                          passes one (see ``docs/webui-plugin-plan.md``
-                         section 10). Only meaningful when ``workers`` is
-                         ``1``; ignored by the single-image path (one image
-                         has nothing to report progress *between*).
+                         section 10). Ignored by the single-image path (one
+                         image has nothing to report progress *between*).
             on_page_text: Called with ``(page_number, translated_text)``
                           right after each page finishes — a sibling to
                           ``on_progress`` carrying the actual translated
@@ -276,8 +278,10 @@ class Mixin:
                           what every CLI call passes — the CLI already
                           prints each page's text to the terminal via
                           ``generate_text``'s inline ``print()``) means no
-                          such reporting. Same sequential-only restriction
-                          as ``on_progress``.
+                          such reporting. Only meaningful when ``workers``
+                          is ``1`` — unlike ``on_progress``, streaming a
+                          specific page's text out of completion order
+                          would be actively confusing.
         """
         file_path = os.path.abspath(file_path)
         file_type = self._detect_and_validate_file(file_path)  # type: ignore[attr-defined]
@@ -610,15 +614,24 @@ class Mixin:
                      ``1`` (sequential). Capped at the system maximum.
             spread: When ``True``, treats each image as a double-page spread.
             on_progress: Called with ``(completed_count, total_count)`` after
-                         each image finishes. ``None`` (the default) means no
-                         progress reporting. Only honored on the sequential
-                         (``workers <= 1``) path, for the same reason
-                         ``translation_service._translate_page_sequence``
-                         doesn't support it on its parallel path either.
+                         each image finishes, on *either* path — sequential
+                         or parallel (reported via ``run_folder_parallel``'s
+                         own ``on_progress`` on the parallel path — see
+                         ``src/services/parallel_utils.py``). ``None`` (the
+                         default) means no progress reporting. Unlike
+                         ``on_page_text`` below, a plain count is safe to
+                         report the moment any image finishes regardless of
+                         completion order.
             on_page_text: Called with ``(image_number, translated_text)``
                           right after each image finishes — a sibling to
-                          ``on_progress`` carrying the actual text. Same
-                          sequential-only restriction.
+                          ``on_progress`` carrying the actual text. Only
+                          honored on the sequential (``workers <= 1``) path —
+                          unlike ``on_progress``, showing a specific image's
+                          text out of order would be actively confusing, not
+                          just a cosmetic gap, so this restriction stays,
+                          for the same reason
+                          ``translation_service._translate_page_sequence``'s
+                          own ``on_page_text`` does.
 
         Raises:
             CLIError: If no image files are found in the folder.
@@ -697,6 +710,7 @@ class Mixin:
             self.token_tracker.usage_data,  # type: ignore[attr-defined]
             actual_workers,
             desc=f"Translating ({actual_workers} workers)... ",
+            on_progress=on_progress,
         )
 
         # Print and assemble in sorted-filename (original) order

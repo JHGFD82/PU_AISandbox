@@ -262,6 +262,28 @@ class TestProcessImageFolderParallel:
         i10 = saved_text.index("=== page_10.jpg ===")
         assert i1 < i2 < i10
 
+    def test_on_progress_called_on_the_real_parallel_path(self, monkeypatch, tmp_path):
+        # Regression coverage for the "progress bar frozen with workers > 1"
+        # bug: on_progress previously wasn't forwarded to run_folder_parallel
+        # at all, so a webui transcribe job run with more than one worker
+        # never produced a single progress update.
+        proc = _make_processor(monkeypatch)
+        folder = tmp_path / "ocr_imgs_progress"
+        folder.mkdir()
+        for name in ("a.jpg", "b.jpg", "c.jpg"):
+            (folder / name).write_bytes(b"fake")
+        proc.image_processor_service.process_image_ocr = MagicMock(return_value="text")
+
+        calls: list = []
+        proc.process_image_folder(
+            str(folder), "English", workers=2,
+            on_progress=lambda done, total: calls.append((done, total)),
+        )
+        assert len(calls) == 3
+        assert all(total == 3 for _done, total in calls)
+        assert sorted(done for done, _total in calls) == [1, 2, 3]
+        assert calls[-1] == (3, 3)
+
 
 class TestProcessImageFolderSequentialException:
     """Sequential process_image_folder catches exception from process_image_ocr."""
