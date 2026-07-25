@@ -12,6 +12,7 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from plugins.webui.src.conversation import (  # noqa: E402
+    Attachment,
     Conversation,
     ConversationStore,
     Message,
@@ -52,6 +53,93 @@ class TestConversationRoundTrip:
             {"role": "user", "content": "hi"},
             {"role": "assistant", "content": "hello"},
         ]
+
+
+class TestAttachment:
+    def test_round_trips_through_dict(self):
+        a = Attachment(filename="paper.pdf", char_count=1234)
+        assert Attachment(**a.to_dict()) == a
+
+
+class TestMessageAttachments:
+    def test_message_without_attachment_has_empty_defaults(self):
+        m = Message(role="user", content="Hi", timestamp="t")
+        assert m.attachments == []
+        assert m.api_content is None
+
+    def test_message_from_dict_reconstructs_attachments(self):
+        data = {
+            "role": "user",
+            "content": "What does this say?",
+            "timestamp": "t",
+            "attachments": [{"filename": "notes.txt", "char_count": 42}],
+            "api_content": "[document text]\n\nWhat does this say?",
+        }
+        m = Message.from_dict(data)
+        assert m.attachments == [Attachment(filename="notes.txt", char_count=42)]
+        assert m.api_content == "[document text]\n\nWhat does this say?"
+
+    def test_message_from_dict_tolerates_records_without_new_fields(self):
+        # Conversations saved before this feature existed have no
+        # "attachments"/"api_content" keys at all.
+        data = {"role": "assistant", "content": "Hello!", "timestamp": "t"}
+        m = Message.from_dict(data)
+        assert m.attachments == []
+        assert m.api_content is None
+
+
+class TestConversationAttachmentRoundTrip:
+    def _conv_with_attachment(self):
+        conv = Conversation(
+            id="c_test", title="Test", created_at="t", updated_at="t", model="gpt-4o",
+        )
+        conv.messages.append(Message(
+            role="user", content="What does this document say?", timestamp="t",
+            attachments=[Attachment(filename="report.docx", char_count=500)],
+            api_content="[The professor attached a document...]\n\nWhat does this document say?",
+        ))
+        conv.messages.append(Message(
+            role="assistant", content="It summarizes quarterly results.", timestamp="t",
+            model="gpt-4o", prompt_tokens=100, completion_tokens=20, cost=0.01,
+        ))
+        return conv
+
+    def test_to_dict_from_dict_round_trip(self):
+        conv = self._conv_with_attachment()
+        rebuilt = Conversation.from_dict(conv.to_dict())
+        assert rebuilt.messages[0].attachments == conv.messages[0].attachments
+        assert rebuilt.messages[0].api_content == conv.messages[0].api_content
+        assert rebuilt.messages[1].attachments == []
+
+    def test_api_messages_uses_api_content_when_present(self):
+        conv = self._conv_with_attachment()
+        api_msgs = conv.api_messages()
+        assert api_msgs[0]["content"] == "[The professor attached a document...]\n\nWhat does this document say?"
+        assert api_msgs[1]["content"] == "It summarizes quarterly results."
+
+    def test_display_messages_never_substitutes_api_content(self):
+        conv = self._conv_with_attachment()
+        display_msgs = conv.display_messages()
+        assert display_msgs[0]["content"] == "What does this document say?\n[Attached: report.docx]"
+        assert display_msgs[1]["content"] == "It summarizes quarterly results."
+
+    def test_display_messages_attachment_only_message_shows_just_the_hint(self):
+        conv = Conversation(id="c_test2", title="Test", created_at="t", updated_at="t", model="gpt-4o")
+        conv.messages.append(Message(
+            role="user", content="", timestamp="t",
+            attachments=[Attachment(filename="data.xlsx", char_count=800)],
+            api_content="[document text]",
+        ))
+        assert conv.display_messages()[0]["content"] == "[Attached: data.xlsx]"
+
+    def test_persisted_json_round_trips_via_store(self, tmp_path):
+        store = ConversationStore("heller", base_dir=tmp_path)
+        conv = self._conv_with_attachment()
+        store.save(conv)
+        reloaded = store.load(conv.id)
+        assert reloaded is not None
+        assert reloaded.messages[0].attachments[0].filename == "report.docx"
+        assert reloaded.api_messages()[0]["content"] == conv.api_messages()[0]["content"]
 
 
 class TestConversationStore:

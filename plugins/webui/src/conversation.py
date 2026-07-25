@@ -29,12 +29,37 @@ def new_conversation_id() -> str:
 
 
 @dataclass
+class Attachment:
+    """A document attached to a message, for display purposes only.
+
+    The document's extracted text itself lives in that message's
+    ``api_content`` (what actually gets sent to the model), not here — this
+    is just enough to show a small "📎 filename" chip in the conversation
+    without the full extracted text cluttering the visible chat history.
+
+    Args:
+        filename: The original filename the professor uploaded.
+        char_count: How many characters of text were extracted from it,
+                    shown as a size hint next to the filename.
+    """
+
+    filename: str
+    char_count: int
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
 class Message:
     """One turn in a conversation.
 
     Args:
         role: Either ``'user'`` or ``'assistant'``.
-        content: The message text.
+        content: The message text as shown in the chat transcript. For a
+                 message with attachments, this is just what the professor
+                 typed — the attached document's text is not included here,
+                 so the visible transcript stays readable.
         timestamp: When this message was sent, as an ISO-8601 string.
         model: Which model produced this message. ``None`` for user messages.
         prompt_tokens: Tokens the model read to produce this reply. ``None``
@@ -42,6 +67,15 @@ class Message:
         completion_tokens: Tokens the model generated for this reply.
                             ``None`` for user messages.
         cost: What this turn cost, in dollars. ``None`` for user messages.
+        attachments: Documents attached to this message, shown as small
+                     chips in the UI. Empty for messages with no attachments.
+        api_content: The text actually sent to the model for this turn, if
+                     different from ``content`` — e.g. a user message with an
+                     attachment sends the document's extracted text along
+                     with the typed question, but only the typed question is
+                     stored in ``content`` for display. ``None`` means
+                     "identical to content", which is true for every message
+                     without an attachment.
     """
 
     role: str
@@ -51,9 +85,26 @@ class Message:
     prompt_tokens: Optional[int] = None
     completion_tokens: Optional[int] = None
     cost: Optional[float] = None
+    attachments: list[Attachment] = field(default_factory=list)
+    api_content: Optional[str] = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "Message":
+        attachments = [Attachment(**a) for a in data.get("attachments", [])]
+        return cls(
+            role=data["role"],
+            content=data["content"],
+            timestamp=data["timestamp"],
+            model=data.get("model"),
+            prompt_tokens=data.get("prompt_tokens"),
+            completion_tokens=data.get("completion_tokens"),
+            cost=data.get("cost"),
+            attachments=attachments,
+            api_content=data.get("api_content"),
+        )
 
 
 @dataclass
@@ -87,7 +138,7 @@ class Conversation:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Conversation":
-        messages = [Message(**m) for m in data.get("messages", [])]
+        messages = [Message.from_dict(m) for m in data.get("messages", [])]
         return cls(
             id=data["id"],
             title=data["title"],
@@ -99,8 +150,38 @@ class Conversation:
         )
 
     def api_messages(self) -> list[dict[str, str]]:
-        """Return this conversation's messages in the plain {role, content} shape the AI API expects."""
-        return [{"role": m.role, "content": m.content} for m in self.messages]
+        """Return this conversation's messages in the plain {role, content} shape the AI API expects.
+
+        Uses each message's ``api_content`` in place of its displayed
+        ``content`` when one is set — this is how an attached document's
+        extracted text reaches the model on every turn (see ``Message``'s
+        docstring) without that text ever being shown in the visible chat
+        transcript.
+        """
+        return [
+            {"role": m.role, "content": m.api_content if m.api_content is not None else m.content}
+            for m in self.messages
+        ]
+
+    def display_messages(self) -> list[dict[str, str]]:
+        """Return messages in the same {role, content} shape as api_messages(), but using only what's shown in the transcript.
+
+        Unlike ``api_messages()``, this never substitutes in an attachment's
+        full extracted text — it uses each message's plain ``content``, with
+        a short ``[Attached: filename]`` hint appended when there were
+        attachments. Meant for local, non-billed-by-the-full-document uses
+        like title generation, where knowing a document was attached matters
+        more than seeing every word of it.
+        """
+        out: list[dict[str, str]] = []
+        for m in self.messages:
+            content = m.content
+            if m.attachments:
+                names = ", ".join(a.filename for a in m.attachments)
+                hint = f"[Attached: {names}]"
+                content = f"{content}\n{hint}" if content else hint
+            out.append({"role": m.role, "content": content})
+        return out
 
 
 class ConversationStore:

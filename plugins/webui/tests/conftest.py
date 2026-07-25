@@ -37,6 +37,8 @@ def _register(module_name: str, rel_path: str) -> None:
 _register("pu_plugin.webui.settings", "src/settings.py")
 _register("_pu_webui_auth", "src/auth.py")
 _register("_pu_webui_conversation", "src/conversation.py")
+_register("_pu_webui_attachments", "src/attachments.py")
+_register("_pu_webui_export", "src/export.py")
 _register("src.services.chat_service", "src/services/chat_service.py")
 _register("_pu_webui_app", "src/app.py")
 

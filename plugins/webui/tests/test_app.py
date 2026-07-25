@@ -249,6 +249,7 @@ class TestChat:
         assert conv["messages"][-2] == {
             "role": "user", "content": "Hi there", "timestamp": conv["messages"][-2]["timestamp"],
             "model": None, "prompt_tokens": None, "completion_tokens": None, "cost": None,
+            "attachments": [], "api_content": None,
         }
         assert conv["messages"][-1]["content"] == "Hello back!"
         assert conv["messages"][-1]["cost"] == 0.001
@@ -358,7 +359,177 @@ class TestChat:
         assert got.json()["messages"][-1] == {
             "role": "user", "content": "Hi", "timestamp": got.json()["messages"][-1]["timestamp"],
             "model": None, "prompt_tokens": None, "completion_tokens": None, "cost": None,
+            "attachments": [], "api_content": None,
         }
+
+    def test_attachment_becomes_message_attachment_and_api_content(self, unlocked_client, monkeypatch):
+        """An attachment sent with a chat turn shows up as a chip (attachments)
+        on the saved message, while the actual document text only reaches the
+        model via api_content — never the displayed content."""
+        create = unlocked_client.post("/api/conversations", json={"professor": "heller", "model": "gpt-4o"})
+        conv_id = create.json()["id"]
+
+        fake_sandbox = MagicMock()
+        fake_sandbox.chat_service.stream_message.return_value = iter([
+            {
+                "type": "done", "content": "Here's a summary.", "model": "gpt-4o",
+                "prompt_tokens": 50, "completion_tokens": 10, "cost": 0.002,
+            },
+        ])
+        fake_sandbox.chat_service.generate_title.return_value = "Report Summary"
+        monkeypatch.setattr(
+            "src.runtime.sandbox_processor.SandboxProcessor",
+            lambda *a, **kw: fake_sandbox,
+        )
+
+        resp = unlocked_client.post("/api/chat", json={
+            "professor": "heller", "conversation_id": conv_id,
+            "message": "Summarize this", "model": "gpt-4o",
+            "attachment": {"filename": "report.pdf", "text": "Q3 revenue rose 12%.", "char_count": 20},
+        })
+        events = _parse_sse(resp.text)
+        conv = [e for e in events if e["type"] == "done"][0]["conversation"]
+        user_msg = conv["messages"][-2]
+        assert user_msg["content"] == "Summarize this"
+        assert user_msg["attachments"] == [{"filename": "report.pdf", "char_count": 20}]
+        assert "Q3 revenue rose 12%." not in user_msg["content"]
+
+        # The model itself must have received the document text — check what
+        # was actually passed to stream_message().
+        sent_messages = fake_sandbox.chat_service.stream_message.call_args[0][0]
+        assert "Q3 revenue rose 12%." in sent_messages[-1]["content"]
+        assert "Summarize this" in sent_messages[-1]["content"]
+
+        # Title generation must NOT have received the full document text —
+        # only display_messages()'s filename hint (see generate_title()'s
+        # docstring on why: no reason to bill a long document just to name
+        # the chat).
+        # generate_title() is called after the assistant's reply has already
+        # been appended, so the user's turn (with the attachment hint) is
+        # the second-to-last message, not the last.
+        title_messages = fake_sandbox.chat_service.generate_title.call_args[0][0]
+        assert not any("Q3 revenue rose 12%." in m["content"] for m in title_messages)
+        assert "report.pdf" in title_messages[-2]["content"]
+
+    def test_attachment_only_message_with_blank_text_is_allowed(self, unlocked_client, monkeypatch):
+        create = unlocked_client.post("/api/conversations", json={"professor": "heller", "model": "gpt-4o"})
+        conv_id = create.json()["id"]
+
+        fake_sandbox = MagicMock()
+        fake_sandbox.chat_service.stream_message.return_value = iter([
+            {
+                "type": "done", "content": "Sure, here's what it says.", "model": "gpt-4o",
+                "prompt_tokens": 30, "completion_tokens": 8, "cost": 0.001,
+            },
+        ])
+        fake_sandbox.chat_service.generate_title.return_value = None
+        monkeypatch.setattr(
+            "src.runtime.sandbox_processor.SandboxProcessor",
+            lambda *a, **kw: fake_sandbox,
+        )
+
+        resp = unlocked_client.post("/api/chat", json={
+            "professor": "heller", "conversation_id": conv_id, "message": "", "model": "gpt-4o",
+            "attachment": {"filename": "notes.txt", "text": "Some notes.", "char_count": 11},
+        })
+        events = _parse_sse(resp.text)
+        conv = [e for e in events if e["type"] == "done"][0]["conversation"]
+        assert conv["messages"][-2]["content"] == ""
+        assert conv["messages"][-2]["attachments"][0]["filename"] == "notes.txt"
+        # Falls back to the attachment's filename when there's no typed text
+        # to use as a title source.
+        assert conv["title"] == "notes.txt"
+
+
+class TestUploadAttachment:
+    def test_uploads_and_extracts_text(self, unlocked_client):
+        resp = unlocked_client.post(
+            "/api/attachments",
+            data={"professor": "heller"},
+            files={"file": ("notes.txt", b"Hello from an uploaded file.", "text/plain")},
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["filename"] == "notes.txt"
+        assert "Hello from an uploaded file." in body["text"]
+        assert body["char_count"] == len(body["text"])
+
+    def test_unsupported_file_type_returns_400(self, unlocked_client):
+        resp = unlocked_client.post(
+            "/api/attachments",
+            data={"professor": "heller"},
+            files={"file": ("virus.exe", b"whatever", "application/octet-stream")},
+        )
+        assert resp.status_code == 400
+        assert "supported file type" in resp.json()["detail"]
+
+    def test_oversized_attachment_returns_400(self, unlocked_client, monkeypatch):
+        attachments = sys.modules["_pu_webui_attachments"]
+        monkeypatch.setattr(attachments, "MAX_ATTACHMENT_CHARS", 5)
+        resp = unlocked_client.post(
+            "/api/attachments",
+            data={"professor": "heller"},
+            files={"file": ("notes.txt", b"This is definitely longer than five characters.", "text/plain")},
+        )
+        assert resp.status_code == 400
+        assert "too long to attach" in resp.json()["detail"]
+
+    def test_requires_unlock(self, client):
+        resp = client.post(
+            "/api/attachments",
+            data={"professor": "heller"},
+            files={"file": ("notes.txt", b"hi", "text/plain")},
+        )
+        assert resp.status_code == 401
+
+    def test_unknown_professor_rejected(self, unlocked_client):
+        resp = unlocked_client.post(
+            "/api/attachments",
+            data={"professor": "nobody"},
+            files={"file": ("notes.txt", b"hi", "text/plain")},
+        )
+        assert resp.status_code == 400
+
+
+class TestExportConversation:
+    @pytest.fixture
+    def conv_id(self, unlocked_client):
+        create = unlocked_client.post("/api/conversations", json={"professor": "heller", "model": "gpt-4o"})
+        return create.json()["id"]
+
+    @pytest.mark.parametrize(("fmt", "content_type"), [
+        ("docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
+        ("pdf", "application/pdf"),
+        ("md", "text/markdown"),
+    ])
+    def test_exports_each_supported_format(self, unlocked_client, conv_id, fmt, content_type):
+        resp = unlocked_client.get(
+            f"/api/conversations/{conv_id}/export",
+            params={"professor": "heller", "format": fmt},
+        )
+        assert resp.status_code == 200
+        assert resp.headers["content-type"].startswith(content_type)
+        assert len(resp.content) > 0
+
+    def test_missing_conversation_404s(self, unlocked_client):
+        resp = unlocked_client.get(
+            "/api/conversations/c_missing/export",
+            params={"professor": "heller", "format": "docx"},
+        )
+        assert resp.status_code == 404
+
+    def test_unsupported_format_400s(self, unlocked_client, conv_id):
+        resp = unlocked_client.get(
+            f"/api/conversations/{conv_id}/export",
+            params={"professor": "heller", "format": "exe"},
+        )
+        assert resp.status_code == 400
+
+    def test_requires_unlock(self, client):
+        resp = client.get(
+            "/api/conversations/c_1/export", params={"professor": "heller", "format": "docx"}
+        )
+        assert resp.status_code == 401
 
 
 # ---------------------------------------------------------------------------

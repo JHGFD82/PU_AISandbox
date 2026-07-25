@@ -30,15 +30,25 @@ exists on disk and that's what lets ``SandboxProcessor`` find it.
 from __future__ import annotations
 
 import json
+import os
 import secrets
+import shutil
 import sys
+import tempfile
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi.responses import (
+    FileResponse,
+    HTMLResponse,
+    JSONResponse,
+    RedirectResponse,
+    StreamingResponse,
+)
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
+from starlette.background import BackgroundTask
 from starlette.middleware.sessions import SessionMiddleware
 
 from src import settings_store
@@ -56,6 +66,8 @@ from src.tracking.token_tracker import TokenTracker
 
 auth = sys.modules["_pu_webui_auth"]
 conversation = sys.modules["_pu_webui_conversation"]
+attachments = sys.modules["_pu_webui_attachments"]
+export = sys.modules["_pu_webui_export"]
 
 _TEMPLATES_DIR = Path(__file__).parent / "templates"
 templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
@@ -82,11 +94,20 @@ class NewConversationBody(BaseModel):
     model: str | None = None
 
 
+class ChatAttachmentBody(BaseModel):
+    """A previously extracted document, as returned by POST /api/attachments and sent back on the next chat turn."""
+
+    filename: str
+    text: str
+    char_count: int
+
+
 class ChatBody(BaseModel):
     professor: str
     conversation_id: str
     message: str
     model: str | None = None
+    attachment: ChatAttachmentBody | None = None
 
 
 class RenameConversationBody(BaseModel):
@@ -487,6 +508,72 @@ def create_app() -> FastAPI:
         store.save(conv)
         return conv.to_dict()
 
+    @app.get("/api/conversations/{conversation_id}/export")
+    async def api_export_conversation(
+        request: Request, conversation_id: str, professor: str, format: str = "docx"
+    ):
+        """Download a conversation as a formatted transcript (Word, PDF, or Markdown)."""
+        _require_unlocked(request)
+        professor = _validated_professor(professor)
+        store = conversation.ConversationStore(professor)
+        conv = store.load(conversation_id)
+        if conv is None:
+            raise HTTPException(404, "Conversation not found.")
+        if format not in export.FORMATS:
+            supported = ", ".join(sorted(export.FORMATS))
+            raise HTTPException(400, f"Unsupported export format '{format}'. Supported: {supported}.")
+
+        content_type, ext = export.FORMATS[format]
+        safe_title = "".join(c if c.isalnum() or c in " -_" else "_" for c in conv.title).strip()
+        safe_title = safe_title or "conversation"
+        tmp_dir = tempfile.mkdtemp(prefix="pu_webui_export_")
+        output_path = os.path.join(tmp_dir, f"{safe_title}.{ext}")
+        try:
+            export.export_conversation(conv, format, output_path)
+        except Exception:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+            raise
+        # The temp directory is only safe to remove once the file has
+        # actually finished streaming to the browser — FileResponse's
+        # background task runs after the response body is fully sent, not
+        # before, unlike a plain try/finally around the return.
+        return FileResponse(
+            output_path,
+            media_type=content_type,
+            filename=f"{safe_title}.{ext}",
+            background=BackgroundTask(shutil.rmtree, tmp_dir, ignore_errors=True),
+        )
+
+    @app.post("/api/attachments")
+    async def api_upload_attachment(
+        request: Request, professor: str = Form(...), file: UploadFile = File(...)
+    ):
+        """Extract text from an uploaded document so it can be attached to a chat turn.
+
+        The AI gateway this project uses has no native file-upload support
+        (see attachments.py's module docstring), so the browser uploads the
+        file here first; the extracted text this returns is what the
+        front end then sends along with the next /api/chat call, not the
+        original file.
+        """
+        _require_unlocked(request)
+        _validated_professor(professor)
+        if not file.filename:
+            raise HTTPException(400, "No filename was provided with the upload.")
+
+        data = await file.read()
+        fd, tmp_path = tempfile.mkstemp(prefix="pu_webui_upload_")
+        try:
+            with os.fdopen(fd, "wb") as f:
+                f.write(data)
+            doc = attachments.extract_text(tmp_path, file.filename)
+        except attachments.AttachmentError as e:
+            raise HTTPException(400, str(e)) from e
+        finally:
+            os.unlink(tmp_path)
+
+        return {"filename": doc.filename, "text": doc.text, "char_count": doc.char_count}
+
     @app.post("/api/chat")
     async def api_chat(request: Request, body: ChatBody):
         """Stream one chat turn back to the browser as Server-Sent Events.
@@ -507,14 +594,45 @@ def create_app() -> FastAPI:
             raise HTTPException(404, "Conversation not found.")
         if body.model:
             conv.model = body.model
+
+        # An attached document's text rides along in api_content (what the
+        # model actually reads) rather than content (what the transcript
+        # shows) — see Message's docstring in conversation.py. The typed
+        # message can be blank (attach a document and just hit send).
+        msg_attachments: list = []
+        api_content: str | None = None
+        if body.attachment:
+            msg_attachments = [
+                conversation.Attachment(
+                    filename=body.attachment.filename, char_count=body.attachment.char_count
+                )
+            ]
+            doc_block = (
+                f"[The professor attached a document named '{body.attachment.filename}'. "
+                "Its extracted text follows, then their message below it.]\n\n"
+                f"--- {body.attachment.filename} ---\n{body.attachment.text}\n"
+                f"--- end of {body.attachment.filename} ---"
+            )
+            api_content = f"{doc_block}\n\n{body.message}" if body.message.strip() else doc_block
+
         conv.messages.append(
-            conversation.Message(role="user", content=body.message, timestamp=datetime.now().isoformat())
+            conversation.Message(
+                role="user",
+                content=body.message,
+                timestamp=datetime.now().isoformat(),
+                attachments=msg_attachments,
+                api_content=api_content,
+            )
         )
         # Saved immediately, before the model has replied at all — unlike
         # the old one-shot version, a page refresh (or a failed call below)
         # no longer loses the message that was actually sent.
         store.save(conv)
-        title_source = body.message
+        # Falls back to the attached filename when the professor attached a
+        # document without typing anything alongside it, so a title-
+        # generation failure still produces something more useful than an
+        # empty string (see the "New conversation" fallback below).
+        title_source = body.message.strip() or (body.attachment.filename if body.attachment else "")
 
         def event_stream():
             # A plain (non-async) generator, deliberately — everything in
@@ -575,8 +693,11 @@ def create_app() -> FastAPI:
                 # deliberately a separate, cheap call rather than the
                 # conversation's own possibly-expensive model) — only fall
                 # back to the literal opening words if that call itself
-                # failed for any reason.
-                generated_title = sandbox.chat_service.generate_title(conv.api_messages())
+                # failed for any reason. Uses display_messages() rather than
+                # api_messages() so an attached document's full extracted
+                # text isn't resent (and billed) just to name the chat —
+                # a filename hint is enough context for a title.
+                generated_title = sandbox.chat_service.generate_title(conv.display_messages())
                 conv.title = generated_title or title_source.strip()[:60] or conv.title
             store.save(conv)
 

@@ -36,7 +36,8 @@
     transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease;
   }
   body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 0; height: 100vh;
-         display: grid; grid-template-columns: 240px 1fr 280px; background: var(--bg); color: var(--text);
+         display: grid; grid-template-columns: 240px 1fr 280px; grid-template-rows: auto 1fr;
+         background: var(--bg); color: var(--text);
          transition: background-color 0.2s ease, color 0.2s ease, grid-template-columns 0.25s ease; }
   /* grid-template-columns defines a fixed 3-track layout regardless of which
      children are actually visible — hiding #spend with display:none alone
@@ -45,7 +46,18 @@
      yanking it out with display:none) is what makes #main visibly slide
      over into the reclaimed space instead of just snapping. */
   body.spend-hidden { grid-template-columns: 240px 1fr 0px; }
-  #sidebar, #spend { background: var(--panel-bg); border-right: 1px solid var(--border); padding: 1rem; overflow-y: auto; }
+  #page-title-bar {
+    grid-column: 1 / -1; grid-row: 1; display: flex; align-items: center;
+    padding: 0.55rem 1rem; background: var(--panel-bg); border-bottom: 1px solid var(--border);
+    font-weight: 600; font-size: 0.92rem; letter-spacing: 0.01em;
+  }
+  #sidebar, #spend { grid-row: 2; background: var(--panel-bg); border-right: 1px solid var(--border); padding: 1rem; overflow-y: auto; }
+  #sidebar { display: flex; flex-direction: column; }
+  #conv-list { flex: 1; overflow-y: auto; min-height: 0; }
+  .sidebar-footer {
+    flex: none; display: flex; gap: 0.4rem; margin-top: 0.75rem; padding-top: 0.75rem;
+    border-top: 1px solid var(--border);
+  }
   #spend {
     border-right: none; border-left: 1px solid var(--border); overflow: hidden;
     transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease,
@@ -111,6 +123,10 @@
   .icon-btn:hover { background: var(--hover-bg); }
   .icon-btn.neutral { color: var(--text-muted); }
   .icon-btn svg { width: 18px; height: 18px; display: block; }
+  .sidebar-footer .icon-btn { width: 36px; height: 36px; }
+  .sidebar-footer .icon-btn svg { width: 17px; height: 17px; }
+  .export-wrap { position: relative; }
+  .export-wrap .conv-menu { top: calc(100% + 4px); right: 0; min-width: 150px; }
   /* Sun/moon crossfade with a little rotation instead of an instant swap.
      The icon shown is the mode you'll SWITCH TO, not the current one — sun
      while dark mode is active (click for light), moon while light mode is
@@ -127,7 +143,7 @@
   .panel-fill { transition: fill 0.2s ease; }
   .icon-btn.collapsed .panel-fill { fill: none; }
 
-  #main { display: flex; flex-direction: column; height: 100vh; }
+  #main { grid-row: 2; display: flex; flex-direction: column; min-height: 0; }
   #topbar { display: flex; align-items: center; gap: 0.5rem; padding: 0.6rem 1rem; border-bottom: 1px solid var(--border); background: var(--panel-bg); }
   .model-picker { flex: 1; display: flex; gap: 0.4rem; min-width: 0; }
 
@@ -167,8 +183,33 @@
   .msg.assistant { background: var(--panel-bg); border: 1px solid var(--border); }
   .msg .meta { font-size: 0.72rem; opacity: 0.7; margin-top: 0.35rem; }
   .msg .meta.waiting { font-style: italic; }
-  #composer { display: flex; gap: 0.5rem; padding: 1rem; border-top: 1px solid var(--border); background: var(--panel-bg); }
+
+  /* Attachment chips: a small "📎 filename" pill. One flavor sits above the
+     composer for a file that's been uploaded and is waiting to be sent
+     (with a remove button); another, read-only flavor renders inside a
+     message bubble once that turn has actually been sent. */
+  .attachment-chip {
+    display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.25rem 0.55rem;
+    border-radius: 999px; font-size: 0.78rem; white-space: nowrap;
+  }
+  .attachment-chip svg { width: 12px; height: 12px; flex: none; }
+  #attachment-chip-row { padding: 0.5rem 1rem 0; }
+  #attachment-chip-row[hidden] { display: none; }
+  #attachment-chip-row .attachment-chip {
+    background: var(--hover-bg); border: 1px solid var(--border); color: var(--text);
+  }
+  #attachment-chip-row .attachment-chip button {
+    padding: 0; width: 15px; height: 15px; border-radius: 50%; border: none;
+    background: transparent; color: var(--text-muted); cursor: pointer; font-size: 0.85rem;
+    line-height: 1; display: flex; align-items: center; justify-content: center;
+  }
+  #attachment-chip-row .attachment-chip button:hover { background: var(--border); }
+  .msg-attachment-chip { background: rgba(255, 255, 255, 0.25); color: inherit; margin-top: 0.4rem; }
+  .msg.assistant .msg-attachment-chip { background: var(--hover-bg); }
+
+  #composer { display: flex; align-items: flex-end; gap: 0.5rem; padding: 1rem; border-top: 1px solid var(--border); background: var(--panel-bg); }
   #composer textarea { flex: 1; resize: none; height: 2.6rem; }
+  #composer .icon-btn { flex: none; }
   .spend-figure { font-size: 1.6rem; font-weight: 600; }
   .spend-label { font-size: 0.78rem; color: var(--text-muted); }
   .spend-row { display: flex; justify-content: space-between; font-size: 0.85rem; padding: 0.2rem 0; }
@@ -201,6 +242,7 @@
 </style>
 </head>
 <body>
+  <div id="page-title-bar">Princeton University AI Sandbox Chat UI</div>
   <div id="sidebar">
     <h2>Professor</h2>
     <select id="professor-select"></select>
@@ -213,9 +255,28 @@
     </div>
     <div id="conv-list"></div>
 
-    <h2>Session</h2>
-    <button class="secondary" id="settings-btn" style="width:100%; margin-bottom:0.4rem">Settings</button>
-    <button class="secondary" id="lock-btn" style="width:100%">Lock</button>
+    <div class="sidebar-footer">
+      <button class="icon-btn neutral" id="settings-btn" title="Settings" aria-label="Settings">
+        <svg viewBox="0 0 20 20" fill="currentColor">
+          <rect x="9.1" y="0.6" width="1.8" height="3" rx="0.5"/>
+          <rect x="9.1" y="0.6" width="1.8" height="3" rx="0.5" transform="rotate(45 10 10)"/>
+          <rect x="9.1" y="0.6" width="1.8" height="3" rx="0.5" transform="rotate(90 10 10)"/>
+          <rect x="9.1" y="0.6" width="1.8" height="3" rx="0.5" transform="rotate(135 10 10)"/>
+          <rect x="9.1" y="0.6" width="1.8" height="3" rx="0.5" transform="rotate(180 10 10)"/>
+          <rect x="9.1" y="0.6" width="1.8" height="3" rx="0.5" transform="rotate(225 10 10)"/>
+          <rect x="9.1" y="0.6" width="1.8" height="3" rx="0.5" transform="rotate(270 10 10)"/>
+          <rect x="9.1" y="0.6" width="1.8" height="3" rx="0.5" transform="rotate(315 10 10)"/>
+          <path fill-rule="evenodd" clip-rule="evenodd"
+                d="M10 15.6a5.6 5.6 0 100-11.2 5.6 5.6 0 000 11.2zm0-3a2.6 2.6 0 100-5.2 2.6 2.6 0 000 5.2z"/>
+        </svg>
+      </button>
+      <button class="icon-btn neutral" id="lock-btn" title="Lock" aria-label="Lock">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="4.5" y="9" width="11" height="8" rx="1.8"/>
+          <path d="M7 9V6.5a3 3 0 016 0V9"/>
+        </svg>
+      </button>
+    </div>
   </div>
 
   <div id="main">
@@ -241,6 +302,19 @@
           </div>
         </div>
       </div>
+      <div class="export-wrap" id="export-wrap">
+        <button class="icon-btn" id="export-btn" title="Export conversation" aria-label="Export conversation">
+          <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M9 2.2v8.3M9 10.5l-3-3M9 10.5l3-3"/>
+            <path d="M3 12.2v2a1.3 1.3 0 001.3 1.3h9.4A1.3 1.3 0 0015 14.2v-2"/>
+          </svg>
+        </button>
+        <div class="conv-menu" id="export-menu" hidden>
+          <button type="button" class="conv-menu-option" data-format="docx">Word (.docx)</button>
+          <button type="button" class="conv-menu-option" data-format="pdf">PDF</button>
+          <button type="button" class="conv-menu-option" data-format="md">Markdown (.md)</button>
+        </div>
+      </div>
       <button class="icon-btn" id="theme-toggle-btn" title="Switch to dark mode" aria-label="Toggle dark mode">
         <span class="icon-stack">
           <svg class="icon-sun" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
@@ -260,7 +334,22 @@
       </button>
     </div>
     <div id="messages"><div class="empty">Select or start a conversation.</div></div>
+    <div id="attachment-chip-row" hidden>
+      <span class="attachment-chip" id="pending-attachment-chip">
+        <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M9.2 4.2L4.9 8.5a1.6 1.6 0 002.3 2.3l4.1-4.1a2.7 2.7 0 00-3.8-3.8L3.4 7a3.8 3.8 0 005.4 5.4L12.6 8.6"/>
+        </svg>
+        <span id="pending-attachment-name"></span>
+        <button type="button" id="pending-attachment-remove" aria-label="Remove attachment" title="Remove attachment">&times;</button>
+      </span>
+    </div>
     <div id="composer">
+      <button type="button" class="icon-btn neutral" id="attach-btn" title="Attach a document" aria-label="Attach a document">
+        <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M11.5 5.3L6.2 10.6a2.1 2.1 0 003 3l5.2-5.2a3.5 3.5 0 00-5-5L4.6 8.2a4.9 4.9 0 007 7l4.9-4.9"/>
+        </svg>
+      </button>
+      <input type="file" id="attach-input" hidden accept=".pdf,.docx,.txt,.xlsx,.xls,.json,.md">
       <textarea id="input" placeholder="Message..."></textarea>
       <button id="send-btn">Send</button>
     </div>
@@ -291,7 +380,7 @@
 <script>
 const state = {
   professor: null, conversationId: null, conversationModel: null, conversationHasMessages: false,
-  models: [], defaultModel: null,
+  models: [], defaultModel: null, pendingAttachment: null,
 };
 
 // ── Dark mode ────────────────────────────────────────────────────────────
@@ -430,7 +519,63 @@ document.getElementById("model-add-input").addEventListener("keydown", (e) => {
 document.addEventListener("click", (e) => {
   if (!document.getElementById("model-combobox").contains(e.target)) closeModelList();
   if (!document.getElementById("model-add").contains(e.target)) closeModelAddPopover();
+  if (!document.getElementById("export-wrap").contains(e.target)) closeExportMenu();
   closeConvMenu();
+});
+
+// ── Export ───────────────────────────────────────────────────────────────
+function closeExportMenu() { document.getElementById("export-menu").hidden = true; }
+document.getElementById("export-btn").addEventListener("click", (e) => {
+  e.stopPropagation();
+  if (!state.conversationId) return;
+  const menu = document.getElementById("export-menu");
+  menu.hidden = !menu.hidden;
+});
+document.getElementById("export-menu").addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-format]");
+  if (!btn) return;
+  closeExportMenu();
+  const url = `/api/conversations/${state.conversationId}/export`
+    + `?professor=${encodeURIComponent(state.professor)}&format=${btn.dataset.format}`;
+  window.open(url, "_blank");
+});
+
+// ── Attachments ──────────────────────────────────────────────────────────
+function showPendingAttachmentChip(filename) {
+  document.getElementById("pending-attachment-name").textContent = filename;
+  document.getElementById("attachment-chip-row").hidden = false;
+}
+function clearPendingAttachment() {
+  state.pendingAttachment = null;
+  document.getElementById("attachment-chip-row").hidden = true;
+  document.getElementById("attach-input").value = "";
+}
+document.getElementById("attach-btn").addEventListener("click", () => {
+  document.getElementById("attach-input").click();
+});
+document.getElementById("pending-attachment-remove").addEventListener("click", clearPendingAttachment);
+document.getElementById("attach-input").addEventListener("change", async () => {
+  const input = document.getElementById("attach-input");
+  const file = input.files && input.files[0];
+  if (!file) return;
+  const attachBtn = document.getElementById("attach-btn");
+  attachBtn.disabled = true;
+  showPendingAttachmentChip(`Reading ${file.name}…`);
+  try {
+    const form = new FormData();
+    form.append("professor", state.professor);
+    form.append("file", file);
+    const res = await fetch("/api/attachments", { method: "POST", body: form });
+    if (!res.ok) throw new Error((await res.json()).detail || "Upload failed.");
+    const doc = await res.json();
+    state.pendingAttachment = doc;
+    showPendingAttachmentChip(`${doc.filename} (${doc.char_count.toLocaleString()} characters)`);
+  } catch (e) {
+    alert("Couldn't attach that file: " + e.message);
+    clearPendingAttachment();
+  } finally {
+    attachBtn.disabled = false;
+  }
 });
 
 // ── Conversation list ────────────────────────────────────────────────────
@@ -579,6 +724,17 @@ async function loadUsage() {
   });
 }
 
+function attachmentChipElement(filename, charCount) {
+  const chip = document.createElement("span");
+  chip.className = "attachment-chip msg-attachment-chip";
+  chip.innerHTML = '<svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" ' +
+    'stroke-linecap="round" stroke-linejoin="round"><path d="M9.2 4.2L4.9 8.5a1.6 1.6 0 002.3 2.3l4.1-4.1a2.7 2.7 0 00-3.8-3.8L3.4 7a3.8 3.8 0 005.4 5.4L12.6 8.6"/></svg>';
+  const label = document.createElement("span");
+  label.textContent = charCount != null ? `${filename} (${charCount.toLocaleString()} characters)` : filename;
+  chip.appendChild(label);
+  return chip;
+}
+
 function renderMessages(conv) {
   const box = document.getElementById("messages");
   if (!conv) { box.innerHTML = '<div class="empty">Select or start a conversation.</div>'; return; }
@@ -587,6 +743,10 @@ function renderMessages(conv) {
     const div = document.createElement("div");
     div.className = "msg " + m.role;
     div.textContent = m.content;
+    (m.attachments || []).forEach(a => {
+      if (m.content) div.appendChild(document.createElement("br"));
+      div.appendChild(attachmentChipElement(a.filename, a.char_count));
+    });
     if (m.role === "assistant" && m.cost != null) {
       const meta = document.createElement("div");
       meta.className = "meta";
@@ -600,6 +760,7 @@ function renderMessages(conv) {
 
 async function openConversation(id) {
   state.conversationId = id;
+  clearPendingAttachment();
   const conv = await api(`/api/conversations/${id}?professor=${encodeURIComponent(state.professor)}`);
   state.conversationModel = conv.model;
   state.conversationHasMessages = conv.messages.length > 0;
@@ -610,6 +771,7 @@ async function openConversation(id) {
 
 document.getElementById("new-conv").addEventListener("click", async () => {
   const model = document.getElementById("model-field").value || state.defaultModel;
+  clearPendingAttachment();
   const conv = await api("/api/conversations", {
     method: "POST",
     body: JSON.stringify({ professor: state.professor, model }),
@@ -621,13 +783,17 @@ document.getElementById("new-conv").addEventListener("click", async () => {
   await loadConversations();
 });
 
-function appendPendingMessage(text) {
+function appendPendingMessage(text, attachment) {
   const box = document.getElementById("messages");
   const empty = box.querySelector(".empty");
   if (empty) empty.remove();
   const div = document.createElement("div");
   div.className = "msg user";
   div.textContent = text;
+  if (attachment) {
+    if (text) div.appendChild(document.createElement("br"));
+    div.appendChild(attachmentChipElement(attachment.filename, attachment.char_count));
+  }
   const meta = document.createElement("div");
   meta.className = "meta waiting";
   meta.textContent = "waiting...";
@@ -639,7 +805,8 @@ function appendPendingMessage(text) {
 async function sendMessage() {
   const input = document.getElementById("input");
   const text = input.value.trim();
-  if (!text) return;
+  const attachment = state.pendingAttachment;
+  if (!text && !attachment) return;
 
   const chosenModel = document.getElementById("model-field").value || state.defaultModel;
   if (state.conversationHasMessages && state.conversationModel && chosenModel !== state.conversationModel) {
@@ -662,7 +829,8 @@ async function sendMessage() {
     await loadConversations();
   }
   input.value = "";
-  appendPendingMessage(text);
+  clearPendingAttachment();
+  appendPendingMessage(text, attachment);
   const sendBtn = document.getElementById("send-btn");
   sendBtn.disabled = true;
   const box = document.getElementById("messages");
@@ -672,7 +840,9 @@ async function sendMessage() {
     const res = await fetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ professor: state.professor, conversation_id: state.conversationId, message: text, model }),
+      body: JSON.stringify({
+        professor: state.professor, conversation_id: state.conversationId, message: text, model, attachment,
+      }),
     });
     if (!res.ok) { throw new Error(await res.text()); }
 
