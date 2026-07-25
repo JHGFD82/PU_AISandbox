@@ -496,15 +496,29 @@ def create_app() -> FastAPI:
         store.save(conv)
         title_source = body.message
 
-        async def event_stream():
-            # Imported here, not at module level. SandboxProcessor's class
-            # statement discovers every installed plugin's registered mixins
-            # from sys.modules the first time this module is imported —
-            # safe only once load_plugins() has finished registering every
-            # plugin, which is guaranteed by the time a request is being
-            # handled, but NOT while this file itself is first executed
-            # during plugin loading (see the module docstring above and
-            # plugins/prompt/plugin.py for the same pattern).
+        def event_stream():
+            # A plain (non-async) generator, deliberately — everything in
+            # this body is a blocking synchronous call (SandboxProcessor's
+            # network requests to the AI gateway), and there's no real
+            # awaiting to be done. Starlette's StreamingResponse detects
+            # that this isn't an async generator and runs it in a background
+            # thread via iterate_in_threadpool() instead of driving it
+            # directly on the event loop. That distinction actually matters
+            # here: an async generator with a blocking body never yields
+            # control back to the loop between chunks, so the transport's
+            # writes just pile up and all flush at once when the generator
+            # finally finishes — which is exactly the "whole reply arrives
+            # in one burst instead of streaming" bug this was.
+            #
+            # SandboxProcessor is imported here, not at module level, for an
+            # unrelated reason: its class statement discovers every
+            # installed plugin's registered mixins from sys.modules the
+            # first time this module is imported — safe only once
+            # load_plugins() has finished registering every plugin, which is
+            # guaranteed by the time a request is being handled, but NOT
+            # while this file itself is first executed during plugin loading
+            # (see the module docstring above and plugins/prompt/plugin.py
+            # for the same pattern).
             from src.runtime.sandbox_processor import SandboxProcessor
 
             final: dict | None = None
@@ -542,7 +556,12 @@ def create_app() -> FastAPI:
             yield f"data: {json.dumps({'type': 'done', 'conversation': conv.to_dict()})}\n\n"
 
         return StreamingResponse(
-            event_stream(), media_type="text/event-stream", headers={"Cache-Control": "no-cache"}
+            event_stream(),
+            media_type="text/event-stream",
+            # X-Accel-Buffering only matters if this ever runs behind nginx
+            # or another buffering reverse proxy (it doesn't today, as a
+            # local single-user tool) — harmless to set regardless.
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
 
     return app
