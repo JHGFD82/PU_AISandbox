@@ -261,3 +261,55 @@ class TestRun:
         primary.run.assert_called_once_with(
             args, "myprof", "gpt-4o", 0.5, 0.9, 1000
         )
+
+
+# ---------------------------------------------------------------------------
+# Webui composer action passthrough (__getattr__)
+# ---------------------------------------------------------------------------
+# Regression coverage for a real bug: whenever a language-extension plugin
+# (e.g. translation-ea) is installed, load_plugins() wraps the base
+# translate/transcribe plugin in a DispatchPlugin — so jobs.py's
+# getattr(p, "ui_action", None) and hasattr(p, "run_ui_action") checks were
+# seeing the DispatchPlugin, not the base plugin that actually declares
+# these, and silently found nothing. Caught via manual end-to-end testing
+# against this project's own installation (which has translation-ea and
+# transcription-ea installed), not by any of the plugin-local unit tests.
+
+class TestUiActionPassthrough:
+
+    def test_ui_action_proxied_from_primary(self):
+        dp, primary = _make_dispatcher(["en"])
+        sentinel = object()
+        primary.ui_action = sentinel
+        assert dp.ui_action is sentinel
+
+    def test_run_ui_action_proxied_and_callable(self):
+        dp, primary = _make_dispatcher(["en"])
+        primary.run_ui_action.return_value = "result"
+        result = dp.run_ui_action({"a": 1}, "prof", "gpt-4o", None, "/tmp/out")
+        assert result == "result"
+        primary.run_ui_action.assert_called_once_with({"a": 1}, "prof", "gpt-4o", None, "/tmp/out")
+
+    def test_preview_ui_action_proxied_and_callable(self):
+        dp, primary = _make_dispatcher(["en"])
+        primary.preview_ui_action.return_value = "preview"
+        result = dp.preview_ui_action({"a": 1}, "prof", "gpt-4o")
+        assert result == "preview"
+
+    def test_hasattr_false_when_primary_has_none_of_it(self):
+        # spec= limits the mock's attribute surface to exactly this list —
+        # unlike a bare MagicMock(), which would auto-create ui_action/
+        # run_ui_action/preview_ui_action on any access and mask this bug.
+        primary = MagicMock(spec=["handles", "commands", "run", "register_subparsers"])
+        primary.handles = ["en"]
+        primary.commands = ["translate"]
+        dp = DispatchPlugin("translate", primary)
+
+        assert getattr(dp, "ui_action", None) is None
+        assert not hasattr(dp, "run_ui_action")
+        assert not hasattr(dp, "preview_ui_action")
+
+    def test_unrelated_unknown_attribute_still_raises(self):
+        dp, _primary = _make_dispatcher(["en"])
+        with pytest.raises(AttributeError):
+            dp.something_totally_unrelated

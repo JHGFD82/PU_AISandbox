@@ -493,11 +493,17 @@ class TestUploadAttachment:
         assert resp.status_code == 400
 
 
-def _fake_plugin(action_id="translate", run_ui_action=None):
+def _fake_plugin(action_id="translate", run_ui_action=None, preview_ui_action=None):
     """A minimal stand-in for a plugin declaring ui_action + run_ui_action —
     mirrors plugins/webui/tests/test_jobs.py's _FakePlugin, duplicated here
     (rather than imported) since this module doesn't otherwise depend on
-    that test file."""
+    that test file.
+
+    ``preview_ui_action`` is only attached as a real method when a callable
+    is passed in — matching the optional, ``hasattr``-checked contract
+    described in src/runtime/plugin.py, so a test can also exercise the
+    "this plugin doesn't implement a preview" path.
+    """
     from src.runtime.ui_action import UiAction
 
     class _Plugin:
@@ -507,7 +513,10 @@ def _fake_plugin(action_id="translate", run_ui_action=None):
         def run_ui_action(self, fields, professor, model, on_progress, output_dir):
             return run_ui_action(fields, professor, model, on_progress, output_dir)
 
-    return _Plugin()
+    plugin = _Plugin()
+    if preview_ui_action is not None:
+        plugin.preview_ui_action = lambda fields, professor, model: preview_ui_action(fields, professor, model)
+    return plugin
 
 
 def _wait_for_job_done(client, conversation_id, professor, timeout=2.0):
@@ -543,6 +552,95 @@ class TestPluginActions:
 
     def test_requires_unlock(self, client):
         resp = client.get("/api/plugin-actions")
+        assert resp.status_code == 401
+
+
+class TestLanguages:
+    def test_lists_registered_languages(self, unlocked_client):
+        # Real plugins (translation, transcription) register real languages
+        # at import time, so this doesn't need a fake — English at least
+        # must be present since plugins/translation/plugin.py registers it
+        # unconditionally.
+        resp = unlocked_client.get("/api/languages")
+        assert resp.status_code == 200
+        languages = resp.json()["languages"]
+        assert {"code": "en", "name": "English"} in languages
+        # Sorted by display name, not by code.
+        names = [lang["name"] for lang in languages]
+        assert names == sorted(names)
+
+    def test_requires_unlock(self, client):
+        resp = client.get("/api/languages")
+        assert resp.status_code == 401
+
+
+class TestPluginActionPreview:
+    def test_returns_preview_from_plugin(self, unlocked_client, monkeypatch):
+        app_module = sys.modules["_pu_webui_app"]
+        from src.runtime.ui_action import UiPromptPreview
+
+        fake = _fake_plugin(
+            action_id="translate",
+            preview_ui_action=lambda fields, professor, model: UiPromptPreview(
+                system_prompt=f"System for {fields.get('target_language')}",
+                user_prompt="User prompt text",
+                model=model or "default-model",
+            ),
+        )
+        monkeypatch.setattr(app_module, "_get_plugins", lambda: {"translate": fake})
+
+        resp = unlocked_client.post(
+            "/api/plugin-actions/translate/preview",
+            json={"professor": "heller", "model": "gpt-4o", "fields": {"target_language": "en"}},
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["available"] is True
+        assert body["system_prompt"] == "System for en"
+        assert body["user_prompt"] == "User prompt text"
+        assert body["model"] == "gpt-4o"
+
+    def test_unavailable_when_plugin_has_no_preview_method(self, unlocked_client, monkeypatch):
+        app_module = sys.modules["_pu_webui_app"]
+        fake = _fake_plugin(action_id="translate")  # no preview_ui_action attached
+        monkeypatch.setattr(app_module, "_get_plugins", lambda: {"translate": fake})
+
+        resp = unlocked_client.post(
+            "/api/plugin-actions/translate/preview",
+            json={"professor": "heller", "fields": {}},
+        )
+        assert resp.status_code == 200
+        assert resp.json() == {"available": False}
+
+    def test_unknown_action_id_404s(self, unlocked_client, monkeypatch):
+        app_module = sys.modules["_pu_webui_app"]
+        monkeypatch.setattr(app_module, "_get_plugins", lambda: {})
+        resp = unlocked_client.post(
+            "/api/plugin-actions/nope/preview",
+            json={"professor": "heller", "fields": {}},
+        )
+        assert resp.status_code == 404
+
+    def test_preview_exception_reported_as_unavailable_not_500(self, unlocked_client, monkeypatch):
+        app_module = sys.modules["_pu_webui_app"]
+
+        def _boom(fields, professor, model):
+            raise ValueError("bad field value")
+
+        fake = _fake_plugin(action_id="translate", preview_ui_action=_boom)
+        monkeypatch.setattr(app_module, "_get_plugins", lambda: {"translate": fake})
+
+        resp = unlocked_client.post(
+            "/api/plugin-actions/translate/preview",
+            json={"professor": "heller", "fields": {}},
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["available"] is False
+        assert "bad field value" in body["error"]
+
+    def test_requires_unlock(self, client):
+        resp = client.post("/api/plugin-actions/translate/preview", json={"professor": "heller", "fields": {}})
         assert resp.status_code == 401
 
 

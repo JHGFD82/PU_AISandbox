@@ -76,6 +76,20 @@ class ModePlugin(Protocol):
         accept an ``on_progress`` parameter for this purpose (e.g.
         ``translate_document``'s — see the translation plugin for the
         reference implementation).
+
+        ``preview_ui_action(fields, professor, model)`` — fully optional,
+        independent of the pair above (a plugin can decide not to bother
+        with a live preview even if it declares ``ui_action``). Returns a
+        ``UiPromptPreview`` (``src/runtime/ui_action.py``) built from
+        whatever the composer's form currently holds — called after every
+        change to a field, so it must be cheap, must never make a real API
+        call, and must tolerate incomplete/blank fields gracefully (e.g. a
+        language field that hasn't been chosen yet) rather than raising.
+        This is ``--dry-run`` made interactive — see
+        ``docs/webui-plugin-plan.md`` section 10's two-pane preview panel,
+        and the translation/transcription plugins for reference
+        implementations built on their existing ``build_prompts()``
+        methods.
     """
 
     commands: list[str]

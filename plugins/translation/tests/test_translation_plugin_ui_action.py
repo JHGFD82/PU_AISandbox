@@ -66,6 +66,15 @@ class TestUiActionDeclaration:
         assert kinds["page_nums"] == "text"
         assert kinds["notes"] == "text"
 
+    def test_ui_action_is_reachable_from_the_plugin_instance(self, plugin_module):
+        # jobs.py's find_plugin_for_action()/list_ui_actions() call
+        # getattr(p, "ui_action", None) on the *instance* load_plugins()
+        # returns (plugins.values()), never on this module directly — a
+        # bare module-level `ui_action` with nothing pointing to it from
+        # `plugin` would be invisible to the real app even though this
+        # module's own tests (like the ones above) can still see it.
+        assert plugin_module.plugin.ui_action is plugin_module.ui_action
+
 
 class TestRunUiAction:
 
@@ -210,3 +219,73 @@ class TestRunUiAction:
                 },
                 professor="fake", model=None, on_progress=None, output_dir=str(tmp_path / "out"),
             )
+
+
+class TestPreviewUiAction:
+    """The composer's live two-pane prompt preview — see UiPromptPreview's
+    docstring in src/runtime/ui_action.py. Unlike run_ui_action, this must
+    never raise on incomplete input, since it's called after every
+    keystroke, potentially before a language or file has been chosen."""
+
+    def _patch_sandbox(self, monkeypatch):
+        fake_sandbox = MagicMock()
+        fake_sandbox.translation_service = MagicMock()
+        fake_sandbox.translation_service.build_prompts.return_value = ("SYS", "USR")
+        fake_sandbox.translation_service._get_model.return_value = "resolved-model"
+        fake_sandbox.image_translation_service = MagicMock()
+        fake_sandbox.image_translation_service.build_prompts.return_value = ("IMG-SYS", "IMG-USR")
+        fake_sandbox.image_translation_service._get_model.return_value = "resolved-vision-model"
+        monkeypatch.setattr(
+            "src.runtime.sandbox_processor.SandboxProcessor",
+            MagicMock(return_value=fake_sandbox),
+        )
+        return fake_sandbox
+
+    def test_returns_text_prompts_by_default(self, monkeypatch, plugin_module):
+        self._patch_sandbox(monkeypatch)
+        preview = plugin_module.plugin.preview_ui_action(
+            fields={"source_language": "ja", "target_language": "en"},
+            professor="fake", model=None,
+        )
+        assert preview.system_prompt == "SYS"
+        assert preview.user_prompt == "USR"
+        assert preview.model == "resolved-model"
+        assert preview.note is None
+
+    def test_scanned_checkbox_uses_image_service(self, monkeypatch, plugin_module):
+        self._patch_sandbox(monkeypatch)
+        preview = plugin_module.plugin.preview_ui_action(
+            fields={"source_language": "ja", "target_language": "en", "scanned": "true"},
+            professor="fake", model=None,
+        )
+        assert preview.system_prompt == "IMG-SYS"
+        assert preview.model == "resolved-vision-model"
+        assert preview.note is not None
+
+    def test_missing_languages_do_not_raise(self, monkeypatch, plugin_module):
+        # No source_language/target_language at all yet — the very first
+        # call, right after the composer panel opens.
+        self._patch_sandbox(monkeypatch)
+        preview = plugin_module.plugin.preview_ui_action(fields={}, professor="fake", model=None)
+        assert preview.system_prompt == "SYS"
+
+    def test_invalid_language_code_falls_back_to_placeholder_not_error(self, monkeypatch, plugin_module):
+        self._patch_sandbox(monkeypatch)
+        preview = plugin_module.plugin.preview_ui_action(
+            fields={"source_language": "not-a-real-code"}, professor="fake", model=None,
+        )
+        assert preview.system_prompt == "SYS"
+
+    def test_notes_applied_to_both_services(self, monkeypatch, plugin_module):
+        fake_sandbox = self._patch_sandbox(monkeypatch)
+        plugin_module.plugin.preview_ui_action(
+            fields={"notes": "Keep names transliterated."}, professor="fake", model=None,
+        )
+        assert fake_sandbox.translation_service.system_note == "Keep names transliterated."
+        assert fake_sandbox.image_translation_service.user_note == "Keep names transliterated."
+
+    def test_model_passed_through_to_sandbox(self, monkeypatch, plugin_module):
+        sandbox_cls = MagicMock(return_value=self._patch_sandbox(monkeypatch))
+        monkeypatch.setattr("src.runtime.sandbox_processor.SandboxProcessor", sandbox_cls)
+        plugin_module.plugin.preview_ui_action(fields={}, professor="fake", model="gpt-4o")
+        sandbox_cls.assert_called_once_with("fake", model="gpt-4o")

@@ -813,13 +813,11 @@ Each step is independently testable and shippable.
 
 ## 10. Plugin actions in the composer (replaces the generic attachment icon)
 
-Status (2026-07-25): **backend built and tested**; the composer's puzzle-
-piece button and the two-pane options/live-prompt-preview panel described
-below are **not yet built** — this pass was deliberately scoped to "the
-background job infrastructure first, to see how it affects the package as
-a whole" before touching the front end. What exists now, with no UI
-trigger yet, is exercised entirely through `pytest` (unit tests for every
-new piece, listed below) rather than through the browser.
+Status (2026-07-25): **built end-to-end** — backend, the composer's
+puzzle-piece button, the action picker, and the two-pane live prompt
+preview panel are all in place and wired together. (Earlier the same day,
+this status line said "backend built and tested, front end not yet
+built" — that was true for a few hours, until the front-end pass below.)
 
 The generic "attach a document to chat" icon and its upload wiring were
 already **removed** from `chat.html` in an earlier pass, before this
@@ -910,6 +908,74 @@ Built this pass:
   failure (`test_provider_model_not_in_catalog_auto_registers`, present
   before this work started and untouched by it).
 
+Built in the front-end pass (same day, after the backend above):
+- **`src/runtime/ui_action.py`**: new `UiPromptPreview` dataclass
+  (`system_prompt`, `user_prompt`, `model`, optional `note`) — the
+  `--dry-run` idea made interactive. `src/runtime/plugin.py` documents the
+  matching optional `preview_ui_action(fields, professor, model)` method,
+  independent of the `ui_action`/`run_ui_action` pair (a plugin can decline
+  a live preview even if it declares an action).
+- **`preview_ui_action()` implemented for both `translate` and
+  `transcribe`**, reusing each service's existing `build_prompts()` —
+  exactly the reuse this design always called for. Deliberately lenient
+  where `run_ui_action` is strict: called after every keystroke, so a
+  blank/invalid language field falls back to a placeholder name instead of
+  raising. Covered by `TestPreviewUiAction` in each plugin's
+  `test_..._plugin_ui_action.py`.
+- **`app.py`**: `GET /api/languages` (the registered `LANGUAGE_MAP`, for
+  populating a `language`-kind `UiField` as a dropdown) and `POST
+  /api/plugin-actions/{action_id}/preview` (calls `preview_ui_action`,
+  returns `{"available": false}` — never a 500 — when a plugin doesn't
+  implement it or raises). Covered by `TestLanguages` and
+  `TestPluginActionPreview` in `test_app.py`.
+- **`chat.html`**: the puzzle-piece button in the composer opens an action
+  picker (from `GET /api/plugin-actions`); picking an action opens the
+  two-pane job modal — options on the left (built generically off each
+  `UiField.kind`: `language`→`<select>`, `file`→file input, `checkbox`,
+  `text`→`<textarea>`), a live preview on the right (system prompt above,
+  user prompt below, each independently scrolling), debounced 300ms after
+  any field change. Starting a job posts to `/api/jobs`, then locks the
+  composer (read-only, with the advisory placeholder text you asked for)
+  and polls the conversation every 2s, rendering `job_progress`/
+  `job_result` (with a download link)/`job_error` messages with their own
+  bubble styling as they arrive, until `active_job_id` clears.
+- **Three real bugs found by manually driving the actual `TestClient`
+  end-to-end** (not caught by any unit test, since each one only exercised
+  one layer in isolation) — the reason this pass included a manual
+  smoke-test step before calling it done, not just a green `pytest` run:
+  1. `ui_action` was assigned as a bare **module-level** variable in
+     `plugins/translation/plugin.py` and `plugins/transcription/plugin.py`
+     (`ui_action = UiAction(...)`), never attached to the `plugin` instance
+     that `load_plugins()` actually returns. `jobs.py`'s
+     `getattr(p, "ui_action", None)` reads it off that instance, so in a
+     real run the composer's action list was always empty — every
+     plugin-local test passed because they all read `plugin_module.ui_action`
+     (the module) directly. Fixed with `plugin.ui_action = ui_action` at
+     the bottom of both files; regression test added
+     (`test_ui_action_is_reachable_from_the_plugin_instance`) plus a new
+     integration test in `test_jobs.py` that loads the *real*
+     `plugins/` directory the way `app.py` does.
+  2. Once (1) was fixed, the action still didn't appear **in this specific
+     installation**, because `translation-ea`/`transcription-ea` are
+     installed here: `load_plugins()` wraps `translate`/`transcribe` in a
+     `DispatchPlugin`, which had no `ui_action`/`run_ui_action`/
+     `preview_ui_action` of its own at all. Fixed by giving
+     `DispatchPlugin` a `__getattr__` that proxies exactly those three
+     names to its primary (base) plugin — an extension plugin doesn't get
+     its own separate composer entry; the base plugin's action already
+     covers every language `register_language()` added globally. Covered
+     by a new `TestUiActionPassthrough` class in `tests/test_dispatch_plugin.py`.
+  3. With (1) and (2) both fixed, `GET /api/plugin-actions` listed
+     `"transcribe"` **twice** — `transcribe` and `transcription_review`
+     get wrapped in *two different* `DispatchPlugin` instances that both
+     proxy to the same underlying action, and `list_ui_actions()` deduped
+     by the wrapper object's identity rather than the action's. Fixed by
+     deduping on `id(action)` instead of `id(p)`. Regression test added in
+     both `test_jobs.py`'s `TestListUiActions` and the real-plugin
+     integration test from (1).
+- Full `pytest` run after all three fixes: 1461 passed, the same one
+  pre-existing unrelated failure as before this work started.
+
 Reasoning that came out of your answers to three open questions, recorded
 here since it shaped the shape of what got built:
 
@@ -926,17 +992,16 @@ here since it shaped the shape of what got built:
   with the page-range field set to wherever it stopped, and combine the
   output files yourself — which is why page range moved into `translate`'s
   v1 field set instead of staying deferred.
-- **Two-pane options/live-prompt-preview panel** — not built this pass.
-  The design (§10, below, unchanged from before) still calls for reusing
-  each service's existing `build_prompts()` method (the same one
-  `--dry-run` already calls) behind a new, cheap preview endpoint, called
-  on every field change. Next step when front-end work resumes.
+- **Two-pane options/live-prompt-preview panel** — built in the front-end
+  pass above, exactly as designed: reusing each service's existing
+  `build_prompts()` method (the same one `--dry-run` already calls) behind
+  a new, cheap `preview_ui_action`/`POST .../preview` endpoint, called on
+  every field change.
 
-The rest of this section is unchanged design narrative from before this
+The rest of this section is unchanged design narrative from before either
 pass — including why the generic attachment icon came out in the first
-place, the composer's planned two-pane panel, and the v1 field scope
-reasoning — kept as-is since it's still the accurate design, just not
-fully built yet.
+place and the v1 field scope reasoning — kept as-is since it's still the
+accurate design, and is now also the accurate *implementation*.
 
 ### The real thing: plugins declare composer actions, generically
 

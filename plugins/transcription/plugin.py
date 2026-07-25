@@ -115,7 +115,7 @@ _register(
 from src.cli import add_common_flags, add_notes_flags           # noqa: E402
 from src.config import parse_single_language_code, register_language, LANGUAGE_MAP  # noqa: E402
 from src.errors import CLIError                                    # noqa: E402
-from src.runtime.ui_action import ProgressCallback, UiAction, UiField, UiJobResult  # noqa: E402
+from src.runtime.ui_action import ProgressCallback, UiAction, UiField, UiJobResult, UiPromptPreview  # noqa: E402
 
 # Register the language supported by this base plugin.
 register_language('en', 'English')
@@ -472,6 +472,53 @@ class TranscriptionPlugin:
 
         return UiJobResult(output_path=output_path, output_filename=output_filename, summary=summary)
 
+    def preview_ui_action(
+        self,
+        fields: dict,
+        professor: str,
+        model: Optional[str],
+    ) -> UiPromptPreview:
+        """Build the live system/user prompt preview for the webui's two-pane composer panel.
+
+        Called after every change to the composer's form, so this is
+        deliberately lenient rather than raising ``CLIError`` the way
+        ``run_ui_action`` does: an unresolved language falls back to a
+        placeholder name. No image is read here (there is no page/document
+        text to substitute a placeholder for — transcription's prompt is
+        built from the target language alone; the actual image content is
+        attached at real-run time, not during preview).
+
+        Args:
+            fields: Whatever the submitted form currently holds, keyed by
+                    ``UiField.name`` — any of them may be missing or blank.
+            professor: The professor whose model catalog/pricing to resolve
+                       the model name against.
+            model: The model explicitly selected in the webui, or ``None``
+                   for this plugin's configured default.
+
+        Returns:
+            A ``UiPromptPreview`` with the system prompt, user prompt, and
+            resolved model name that would be used.
+        """
+        from src.runtime.sandbox_processor import SandboxProcessor
+
+        code = (fields.get("target_language") or "").strip().lower()
+        target_language = LANGUAGE_MAP.get(code, "the selected language")
+        notes = (fields.get("notes") or "").strip() or None
+
+        sandbox = SandboxProcessor(professor, model=model)
+        if notes:
+            sandbox.image_processor_service.system_note = notes
+            sandbox.image_processor_service.user_note = notes
+
+        sys_p, usr_p = sandbox.image_processor_service.build_prompts(target_language)
+        return UiPromptPreview(
+            system_prompt=sys_p,
+            user_prompt=usr_p,
+            model=sandbox.image_processor_service._get_model(),
+            note="Image content would be base64-encoded and attached to the user message",
+        )
+
 
 plugin = TranscriptionPlugin()
 
@@ -490,3 +537,8 @@ ui_action = UiAction(
         UiField(name="notes", label="Notes for the model", kind="text", required=False),
     ],
 )
+
+# See the matching comment in plugins/translation/plugin.py: jobs.py looks
+# for ui_action on the plugin *instance*, not this module, so it must be
+# attached here or it's invisible to the real app.
+plugin.ui_action = ui_action

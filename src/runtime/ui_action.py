@@ -25,7 +25,7 @@ required Protocol member.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Callable
+from typing import Callable, Optional
 
 # Called with (completed_count, total_count) after each unit of work (a
 # page, an image) finishes, in completion order. Every method in this
@@ -84,6 +84,37 @@ class UiAction:
     label: str
     command: str
     fields: list[UiField] = field(default_factory=list)
+
+
+@dataclass
+class UiPromptPreview:
+    """What a plugin's optional ``preview_ui_action`` returns for the composer's live prompt preview.
+
+    See ``docs/webui-plugin-plan.md`` section 10's two-pane preview panel —
+    this is the ``--dry-run`` idea made interactive: as the professor fills
+    in the composer's form, the webui calls ``preview_ui_action`` after
+    every change and shows the result in a live-updating system/user prompt
+    pane, without ever making a real API call.
+
+    Args:
+        system_prompt: The system prompt that would be sent, built from
+                        whatever the form currently holds (placeholder text
+                        standing in for real document content, since no
+                        file has necessarily even been chosen yet).
+        user_prompt: The user prompt that would be sent, same caveat.
+        model: The resolved model name this preview was built against
+               (e.g. what a blank model field falls back to).
+        note: An optional one-line caveat to show above the preview (e.g.
+              ``'Image content would be base64-encoded and attached to the
+              user message'`` — mirrors the same note the CLI's own
+              ``--dry-run`` shows for image-based actions). ``None`` if
+              there's nothing extra to say.
+    """
+
+    system_prompt: str
+    user_prompt: str
+    model: str
+    note: Optional[str] = None
 
 
 @dataclass

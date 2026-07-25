@@ -96,6 +96,53 @@ class DispatchPlugin:
                 self.source_registry[token] = plugin
         self._secondary.append(plugin)
 
+    # ── Webui composer action passthrough ───────────────────────────────────
+    # Only the primary (base) plugin's ui_action/run_ui_action/
+    # preview_ui_action are ever exposed here — a language-extension plugin
+    # (e.g. an EA translation plugin) doesn't get a separate composer entry
+    # of its own. The base plugin's action already covers every language
+    # registered globally via register_language() (including ones an
+    # extension plugin added), since the CLI-level language-specific flags
+    # a real translate/transcribe invocation might apply simply aren't part
+    # of the composer's v1 field set — see docs/webui-plugin-plan.md
+    # section 10.
+
+    _PROXIED_UI_ATTRS = ("ui_action", "run_ui_action", "preview_ui_action")
+
+    def __getattr__(self, name: str):
+        """Forward a small allowlist of optional attributes to the primary plugin.
+
+        Only reached when normal attribute lookup on this object fails —
+        Python calls ``__getattr__`` as the last resort, so this never
+        interferes with ``commands``, ``run``, ``source_registry``, etc.,
+        which are real attributes set in ``__init__``/defined above and
+        found normally. Restricted to a small allowlist (rather than
+        forwarding anything unrecognized) so a genuine typo'd attribute
+        access still raises ``AttributeError`` instead of silently reaching
+        into the wrong plugin's namespace.
+
+        Without this, ``jobs.py``'s ``getattr(p, "ui_action", None)`` and
+        ``hasattr(p, "run_ui_action")`` checks (``p`` being whatever
+        ``load_plugins()`` returns — a ``DispatchPlugin`` whenever an
+        extension plugin like ``translation-ea`` is installed) would always
+        see ``None``/``False``, even though the primary plugin declares
+        both — silently hiding the composer action in exactly the
+        installations that have a language extension plugin added.
+
+        Raises:
+            AttributeError: If *name* isn't in the allowlist, or if the
+                primary plugin doesn't have it either (e.g. it declares
+                ``ui_action`` but has no ``preview_ui_action``) — propagated
+                from the primary's own lookup, which is what lets
+                ``hasattr()``/``getattr(..., default)`` correctly report
+                "not available" rather than raising for the wrong reason.
+        """
+        if name in DispatchPlugin._PROXIED_UI_ATTRS:
+            return getattr(self._primary, name)
+        raise AttributeError(
+            f"'{type(self).__name__}' object has no attribute '{name}'"
+        )
+
     # ── Parser building ────────────────────────────────────────────────────────
 
     def register_subparsers(

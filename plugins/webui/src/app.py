@@ -614,6 +614,55 @@ def create_app() -> FastAPI:
         actions = jobs.list_ui_actions(_get_plugins())
         return {"actions": [asdict(a) for a in actions]}
 
+    @app.get("/api/languages")
+    async def api_languages(request: Request):
+        """List every registered language, for populating a 'language'-kind UiField as a dropdown.
+
+        Plugins call ``register_language()`` at import time (see
+        ``docs/plugin-authoring-guide.md``), so loading the plugin registry
+        at least once (``_get_plugins()``, cached after the first call) is
+        what guarantees ``LANGUAGE_MAP`` is fully populated before this
+        reads it.
+        """
+        _require_unlocked(request)
+        _get_plugins()
+        from src.config import LANGUAGE_MAP
+        languages = [{"code": code, "name": name} for code, name in LANGUAGE_MAP.items()]
+        languages.sort(key=lambda lang: lang["name"])
+        return {"languages": languages}
+
+    @app.post("/api/plugin-actions/{action_id}/preview")
+    async def api_plugin_action_preview(request: Request, action_id: str):
+        """Build the live system/user prompt preview for one composer action's form.
+
+        Called by the two-pane preview panel after every change to the
+        form — see ``UiPromptPreview``'s docstring
+        (``src/runtime/ui_action.py``) for the full design. Returns
+        ``{"available": False}`` rather than an error if the action's
+        plugin doesn't implement ``preview_ui_action`` at all, so the panel
+        can show "no live preview for this action" instead of a broken
+        request.
+        """
+        _require_unlocked(request)
+        body = await request.json()
+        professor = _validated_professor(body.get("professor"))
+        model = body.get("model") or None
+        fields = body.get("fields") or {}
+        if not isinstance(fields, dict):
+            raise HTTPException(400, "fields must be a JSON object.")
+
+        plugin = jobs.find_plugin_for_action(_get_plugins(), action_id)
+        if plugin is None:
+            raise HTTPException(404, f"No installed plugin offers the '{action_id}' action.")
+        if not hasattr(plugin, "preview_ui_action"):
+            return {"available": False}
+
+        try:
+            preview = plugin.preview_ui_action(fields, professor, model)
+        except Exception as e:
+            return {"available": False, "error": str(e)}
+        return {"available": True, **asdict(preview)}
+
     @app.post("/api/jobs")
     async def api_start_job(
         request: Request,

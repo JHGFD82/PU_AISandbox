@@ -15,7 +15,7 @@ from .dispatch_plugin import DispatchPlugin
 from .info_commands import handle_info_commands
 from .plugin import ModePlugin
 from .plugin_loader import load_plugins
-from .ui_action import ProgressCallback, UiAction, UiField, UiJobResult
+from .ui_action import ProgressCallback, UiAction, UiField, UiJobResult, UiPromptPreview
 
 __all__ = [
     "DispatchPlugin",
@@ -26,4 +26,5 @@ __all__ = [
     "UiAction",
     "UiField",
     "UiJobResult",
+    "UiPromptPreview",
 ]

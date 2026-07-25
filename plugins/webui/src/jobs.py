@@ -171,19 +171,29 @@ def list_ui_actions(plugins: dict) -> list[Any]:
                  returns.
 
     Returns:
-        One ``UiAction`` per plugin that declares one, in no particular
-        order. A plugin registered under more than one command (unlikely
-        for a ui_action-declaring plugin today) is only counted once.
+        One ``UiAction`` per *distinct declared action*, in no particular
+        order.
+
+    Note:
+        Deduplicates by the resolved ``UiAction`` object's own identity, not
+        by the plugin object's — a plugin registered under more than one
+        command (e.g. the transcription plugin owns both ``transcribe``
+        and ``transcription_review``) can be wrapped in a *different*
+        ``DispatchPlugin`` instance per command whenever a language
+        extension plugin is installed (see ``dispatch_plugin.py``'s
+        ``__getattr__``), so ``plugins.values()`` can yield two distinct
+        wrapper objects that both proxy to the very same ``ui_action``.
+        Deduping by wrapper identity would miss that and list the same
+        action twice; deduping by the action itself doesn't.
     """
     seen: set[int] = set()
     actions = []
     for p in plugins.values():
-        if id(p) in seen:
-            continue
-        seen.add(id(p))
         action = getattr(p, "ui_action", None)
-        if action is not None:
-            actions.append(action)
+        if action is None or id(action) in seen:
+            continue
+        seen.add(id(action))
+        actions.append(action)
     return actions
 
 

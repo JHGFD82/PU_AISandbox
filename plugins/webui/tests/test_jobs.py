@@ -49,6 +49,48 @@ def _make_store(tmp_path, professor="heller"):
     return conversation.ConversationStore(professor, base_dir=tmp_path)
 
 
+class TestRealInstalledPluginsExposeUiActions:
+    """Regression test for a real bug caught by manual end-to-end testing:
+    translation/plugin.py and transcription/plugin.py originally declared
+    ``ui_action`` as a bare module-level variable, never attached to the
+    ``plugin`` instance that ``load_plugins()`` actually returns. Every
+    other test exercising this (including ``_FakePlugin`` above, and each
+    plugin's own ``test_..._plugin_ui_action.py``) sets or reads
+    ``ui_action`` as an *instance* attribute or reads the module directly —
+    neither shape would have caught a plugin that only ever set the module-
+    level name. This loads the real ``plugins/`` directory the same way
+    ``plugins/webui/src/app.py``'s ``_get_plugins()`` does, so a future
+    regression of this exact kind fails here instead of only showing up as
+    an empty action list in a running server."""
+
+    def _load_real_plugins(self):
+        from pathlib import Path
+
+        from src.runtime import load_plugins
+
+        # plugins/webui/tests/test_jobs.py -> plugins/ is two parents up.
+        plugins_dir = Path(__file__).resolve().parents[2]
+        return load_plugins(plugins_dir)
+
+    def test_translate_and_transcribe_actions_are_discoverable(self):
+        plugins = self._load_real_plugins()
+        action_ids = [a.id for a in jobs.list_ui_actions(plugins)]
+        assert "translate" in action_ids
+        assert "transcribe" in action_ids
+        # Regression: transcribe/transcription_review can be wrapped in two
+        # different DispatchPlugin instances (if an EA extension plugin is
+        # installed) that both proxy to the same underlying ui_action —
+        # list_ui_actions() must dedupe by the action itself, not by
+        # whichever wrapper object happened to expose it.
+        assert action_ids.count("transcribe") == 1
+        assert action_ids.count("translate") == 1
+
+    def test_find_plugin_for_action_resolves_real_plugins(self):
+        plugins = self._load_real_plugins()
+        assert jobs.find_plugin_for_action(plugins, "translate") is not None
+        assert jobs.find_plugin_for_action(plugins, "transcribe") is not None
+
+
 class TestJobStore:
     def test_add_and_get(self):
         store = jobs.JobStore()
@@ -111,6 +153,30 @@ class TestListUiActions:
         class _Plain:
             pass
         assert jobs.list_ui_actions({"usage": _Plain()}) == []
+
+    def test_same_action_via_two_different_wrapper_objects_is_not_duplicated(self):
+        # Mirrors the real installation shape once a language extension
+        # plugin is present: a plugin owning two commands (e.g.
+        # transcribe/transcription_review) gets wrapped in a *separate*
+        # DispatchPlugin instance per command, each proxying to the same
+        # underlying ui_action (src/runtime/dispatch_plugin.py's
+        # __getattr__). Two distinct wrapper objects exposing the identical
+        # UiAction object must still only be listed once.
+        shared = _FakePlugin(action_id="transcribe")
+
+        class _Wrapper:
+            def __init__(self, primary):
+                self._primary = primary
+
+            def __getattr__(self, name):
+                return getattr(self._primary, name)
+
+        actions = jobs.list_ui_actions({
+            "transcribe": _Wrapper(shared),
+            "transcription_review": _Wrapper(shared),
+        })
+        assert len(actions) == 1
+        assert actions[0].id == "transcribe"
 
 
 class TestJobOutputDir:

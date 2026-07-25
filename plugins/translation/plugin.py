@@ -187,7 +187,7 @@ from src.processors.json_processor import JsonProcessor           # noqa: E402
 from src.processors.markdown_processor import MarkdownProcessor   # noqa: E402
 from src.processors.pdf_processor import generate_process_text    # noqa: E402
 from src.processors.txt_processor import TxtProcessor             # noqa: E402
-from src.runtime.ui_action import ProgressCallback, UiAction, UiField, UiJobResult  # noqa: E402
+from src.runtime.ui_action import ProgressCallback, UiAction, UiField, UiJobResult, UiPromptPreview  # noqa: E402
 from src.services.constants import DEFAULT_PARALLEL_WORKERS       # noqa: E402
 from src.settings import DEFAULT_PAGE_SIZE                        # noqa: E402
 
@@ -816,6 +816,67 @@ class TranslationPlugin:
             summary=f"Translated {file_name} from {source_language} to {target_language}.",
         )
 
+    def preview_ui_action(
+        self,
+        fields: dict,
+        professor: str,
+        model: Optional[str],
+    ) -> UiPromptPreview:
+        """Build the live system/user prompt preview for the webui's two-pane composer panel.
+
+        Called after every change to the composer's form — including
+        before a file has been chosen or a language picked — so this is
+        deliberately lenient rather than raising ``CLIError`` the way
+        ``run_ui_action`` does: an unresolved language falls back to a
+        placeholder name, and the document's actual text is always a
+        placeholder (no file is read here, matching the CLI's own
+        ``--dry-run`` behavior). See ``UiPromptPreview``'s docstring in
+        ``src/runtime/ui_action.py`` for what the return value means.
+
+        Args:
+            fields: Whatever the submitted form currently holds, keyed by
+                    ``UiField.name`` — any of them may be missing or blank.
+            professor: The professor whose model catalog/pricing to resolve
+                       the model name against.
+            model: The model explicitly selected in the webui, or ``None``
+                   for this plugin's configured default.
+
+        Returns:
+            A ``UiPromptPreview`` with the system prompt, user prompt, and
+            resolved model name that would be used.
+        """
+        from src.runtime.sandbox_processor import SandboxProcessor
+
+        def _lang_name(code: object) -> str:
+            normalized = str(code or "").strip().lower()
+            return LANGUAGE_MAP.get(normalized, "the selected language")
+
+        source_language = _lang_name(fields.get("source_language"))
+        target_language = _lang_name(fields.get("target_language"))
+        scanned = str(fields.get("scanned", "")).strip().lower() in ("true", "1", "on", "yes")
+        notes = (fields.get("notes") or "").strip() or None
+
+        sandbox = SandboxProcessor(professor, model=model)
+        if notes:
+            sandbox.translation_service.system_note = notes
+            sandbox.translation_service.user_note = notes
+            sandbox.image_translation_service.system_note = notes
+            sandbox.image_translation_service.user_note = notes
+
+        if scanned:
+            svc = sandbox.image_translation_service
+            sys_p, usr_p = svc.build_prompts(source_language, target_language)
+            note = "Image content would be base64-encoded and attached to the user message"
+        else:
+            svc = sandbox.translation_service
+            placeholder = generate_process_text("", f"[{source_language} document text]", "")
+            sys_p, usr_p = svc.build_prompts(placeholder, source_language, target_language)
+            note = None
+
+        return UiPromptPreview(
+            system_prompt=sys_p, user_prompt=usr_p, model=svc._get_model(), note=note,
+        )
+
 
 plugin = TranslationPlugin()
 
@@ -840,3 +901,13 @@ ui_action = UiAction(
         UiField(name="notes", label="Notes for the model", kind="text", required=False),
     ],
 )
+
+# jobs.py's find_plugin_for_action()/list_ui_actions() look for ui_action on
+# the *plugin instance* (getattr(p, "ui_action", None), where p is one of
+# load_plugins()'s returned objects — the instance, never this module) —
+# matching how run_ui_action is already a bound method on that same
+# instance. A bare module-level `ui_action` variable, with nothing pointing
+# from the instance to it, would be invisible to that lookup in the real
+# app (only this file's own tests, which import the module directly and
+# read `plugin_module.ui_action`, would ever see it).
+plugin.ui_action = ui_action
