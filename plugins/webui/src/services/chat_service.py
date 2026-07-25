@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Optional
 
-from src.models import get_model_system_role
+from src.models import DEFAULT_FALLBACK_MODEL, get_available_models, get_model_system_role
 from src.services.api_errors import handle_api_errors
 from src.services.base_service import BaseService
 from src.settings import PROMPT_MAX_TOKENS, PROMPT_TEMPERATURE, PROMPT_TOP_P
@@ -232,3 +232,54 @@ class ChatService(BaseService):
             "completion_tokens": completion_tokens,
             "cost": cost,
         }
+
+    def generate_title(self, messages: list[dict[str, Any]]) -> Optional[str]:
+        """Ask a small, inexpensive model to write a short, descriptive title for a conversation.
+
+        Used right after a conversation's first exchange, instead of just
+        taking the literal opening words of the user's first message (the
+        previous behavior) — a title picked from the opening sentence often
+        reads oddly once the conversation moves past it, the same reason
+        most chat products generate one instead.
+
+        Deliberately hardcoded to the catalog's cheap fallback model rather
+        than whatever (possibly expensive) model the conversation itself is
+        using — writing a five-word title doesn't need a frontier model, and
+        professors are billed per token for every call this service makes.
+
+        Args:
+            messages: The conversation so far, in the same ``{'role',
+                      'content'}`` shape ``send_message()``/``stream_message()``
+                      take — typically just the first user message and the
+                      assistant's reply to it.
+
+        Returns:
+            A short title string, or ``None`` if anything about the call
+            failed (API error, empty response, etc.). Callers should treat
+            ``None`` as "fall back to your own default title," not as a
+            fatal error — a working conversation matters far more than a
+            clever title for it.
+        """
+        model = DEFAULT_FALLBACK_MODEL if DEFAULT_FALLBACK_MODEL in get_available_models() else self._get_model()
+        excerpt = "\n\n".join(f"{m['role']}: {m['content']}" for m in messages[:4])
+        prompt = (
+            "Write a short, descriptive title for the conversation below — four to eight words, "
+            "title case, no quotation marks, no trailing punctuation. Respond with only the title "
+            "and nothing else.\n\n" + excerpt
+        )
+        try:
+            response = self._create_completion(
+                model=model,
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=20,
+            )
+        except Exception as e:
+            logging.warning(f"Title generation failed, falling back to a truncated title: {e}")
+            return None
+
+        self._record_response_usage(response, model)
+        content = self._extract_response_content(response)
+        if not content:
+            return None
+        title = content.strip().strip('"').strip("'").strip()
+        return title[:80] or None

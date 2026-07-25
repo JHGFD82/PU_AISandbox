@@ -89,6 +89,11 @@ class ChatBody(BaseModel):
     model: str | None = None
 
 
+class RenameConversationBody(BaseModel):
+    professor: str
+    title: str
+
+
 class AddProfessorBody(BaseModel):
     name: str
     key: str
@@ -467,6 +472,21 @@ def create_app() -> FastAPI:
             raise HTTPException(404, "Conversation not found.")
         return {"deleted": True}
 
+    @app.patch("/api/conversations/{conversation_id}")
+    async def api_rename_conversation(request: Request, conversation_id: str, body: RenameConversationBody):
+        _require_unlocked(request)
+        professor = _validated_professor(body.professor)
+        store = conversation.ConversationStore(professor)
+        conv = store.load(conversation_id)
+        if conv is None:
+            raise HTTPException(404, "Conversation not found.")
+        title = body.title.strip()
+        if not title:
+            raise HTTPException(400, "Title cannot be blank.")
+        conv.title = title[:80]
+        store.save(conv)
+        return conv.to_dict()
+
     @app.post("/api/chat")
     async def api_chat(request: Request, body: ChatBody):
         """Stream one chat turn back to the browser as Server-Sent Events.
@@ -550,7 +570,14 @@ def create_app() -> FastAPI:
                 cost=final["cost"],
             ))
             if conv.title == "New conversation" and len(conv.messages) >= 2:
-                conv.title = title_source.strip()[:60] or conv.title
+                # Ask the model for a real title first (see
+                # ChatService.generate_title()'s docstring for why this is
+                # deliberately a separate, cheap call rather than the
+                # conversation's own possibly-expensive model) — only fall
+                # back to the literal opening words if that call itself
+                # failed for any reason.
+                generated_title = sandbox.chat_service.generate_title(conv.api_messages())
+                conv.title = generated_title or title_source.strip()[:60] or conv.title
             store.save(conv)
 
             yield f"data: {json.dumps({'type': 'done', 'conversation': conv.to_dict()})}\n\n"

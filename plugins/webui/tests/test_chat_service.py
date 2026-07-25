@@ -226,6 +226,80 @@ class TestStreamMessage:
             list(svc.stream_message(history))
         assert captured == history
 
+
+class TestGenerateTitle:
+    def test_returns_generated_title(self, svc, monkeypatch):
+        monkeypatch.setattr("src.services.chat_service.get_available_models", lambda: ["gpt-4o-mini", "gpt-4o"])
+        with patch.object(svc, "_create_completion", return_value=_FakeResponse("Trip Planning For Kyoto")):
+            title = svc.generate_title([{"role": "user", "content": "Help me plan a trip to Kyoto"}])
+        assert title == "Trip Planning For Kyoto"
+
+    def test_uses_cheap_fallback_model_when_available(self, svc, monkeypatch):
+        """Title generation should not use the conversation's (possibly
+        expensive) model — see generate_title()'s docstring."""
+        monkeypatch.setattr("src.services.chat_service.get_available_models", lambda: ["gpt-4o-mini", "gpt-4o"])
+        captured = {}
+
+        def fake_create(model, messages, max_tokens, **kw):
+            captured["model"] = model
+            captured["max_tokens"] = max_tokens
+            return _FakeResponse("A Title")
+
+        with patch.object(svc, "_create_completion", side_effect=fake_create):
+            svc.generate_title([{"role": "user", "content": "hi"}])
+        assert captured["model"] == "gpt-4o-mini"
+        assert captured["max_tokens"] == 20
+
+    def test_falls_back_to_resolved_model_when_fallback_unavailable(self, svc, monkeypatch):
+        monkeypatch.setattr("src.services.chat_service.get_available_models", lambda: ["some-other-model"])
+        captured = {}
+
+        def fake_create(model, messages, max_tokens, **kw):
+            captured["model"] = model
+            return _FakeResponse("A Title")
+
+        with patch.object(svc, "_create_completion", side_effect=fake_create):
+            svc.generate_title([{"role": "user", "content": "hi"}])
+        assert captured["model"] == "gpt-4o"  # from the autouse patch_model fixture's resolve_model stub
+
+    def test_strips_quotes_and_whitespace(self, svc, monkeypatch):
+        monkeypatch.setattr("src.services.chat_service.get_available_models", lambda: ["gpt-4o-mini"])
+        with patch.object(svc, "_create_completion", return_value=_FakeResponse('  "Kyoto Trip Planning"  ')):
+            title = svc.generate_title([{"role": "user", "content": "hi"}])
+        assert title == "Kyoto Trip Planning"
+
+    def test_returns_none_on_api_failure(self, svc, monkeypatch):
+        monkeypatch.setattr("src.services.chat_service.get_available_models", lambda: ["gpt-4o-mini"])
+        with patch.object(svc, "_create_completion", side_effect=Exception("boom")):
+            title = svc.generate_title([{"role": "user", "content": "hi"}])
+        assert title is None
+
+    def test_returns_none_on_empty_content(self, svc, monkeypatch):
+        monkeypatch.setattr("src.services.chat_service.get_available_models", lambda: ["gpt-4o-mini"])
+        with patch.object(svc, "_create_completion", return_value=_FakeResponse(content=None)):
+            title = svc.generate_title([{"role": "user", "content": "hi"}])
+        assert title is None
+
+    def test_records_usage(self, svc, monkeypatch):
+        monkeypatch.setattr("src.services.chat_service.get_available_models", lambda: ["gpt-4o-mini"])
+        with patch.object(svc, "_create_completion", return_value=_FakeResponse("A Title")):
+            svc.generate_title([{"role": "user", "content": "hi"}])
+        svc.token_tracker.record_usage.assert_called_once()
+
+    def test_only_uses_first_few_messages(self, svc, monkeypatch):
+        monkeypatch.setattr("src.services.chat_service.get_available_models", lambda: ["gpt-4o-mini"])
+        captured = {}
+
+        def fake_create(model, messages, max_tokens, **kw):
+            captured["prompt"] = messages[0]["content"]
+            return _FakeResponse("A Title")
+
+        history = [{"role": "user", "content": f"msg{i}"} for i in range(10)]
+        with patch.object(svc, "_create_completion", side_effect=fake_create):
+            svc.generate_title(history)
+        assert "msg4" not in captured["prompt"]
+        assert "msg0" in captured["prompt"]
+
     def test_model_access_error_removes_model_and_raises_clean_message(self, svc, monkeypatch):
         """The 'invalid target name found in the query router' error PortKey
         returns when a model's license/access has been revoked should trigger

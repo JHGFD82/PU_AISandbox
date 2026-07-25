@@ -159,6 +159,47 @@ class TestConversations:
         assert smith_list.json()["conversations"] == []
 
 
+class TestRenameConversation:
+    def test_renames_conversation(self, unlocked_client):
+        create = unlocked_client.post("/api/conversations", json={"professor": "heller", "model": "gpt-4o"})
+        conv_id = create.json()["id"]
+
+        resp = unlocked_client.patch(f"/api/conversations/{conv_id}", json={
+            "professor": "heller", "title": "My Custom Title",
+        })
+        assert resp.status_code == 200
+        assert resp.json()["title"] == "My Custom Title"
+
+        got = unlocked_client.get(f"/api/conversations/{conv_id}", params={"professor": "heller"})
+        assert got.json()["title"] == "My Custom Title"
+
+    def test_rename_missing_conversation_404s(self, unlocked_client):
+        resp = unlocked_client.patch("/api/conversations/c_missing", json={
+            "professor": "heller", "title": "Anything",
+        })
+        assert resp.status_code == 404
+
+    def test_blank_title_rejected(self, unlocked_client):
+        create = unlocked_client.post("/api/conversations", json={"professor": "heller", "model": "gpt-4o"})
+        conv_id = create.json()["id"]
+        resp = unlocked_client.patch(f"/api/conversations/{conv_id}", json={
+            "professor": "heller", "title": "   ",
+        })
+        assert resp.status_code == 400
+
+    def test_title_is_trimmed_and_truncated(self, unlocked_client):
+        create = unlocked_client.post("/api/conversations", json={"professor": "heller", "model": "gpt-4o"})
+        conv_id = create.json()["id"]
+        resp = unlocked_client.patch(f"/api/conversations/{conv_id}", json={
+            "professor": "heller", "title": "  " + ("x" * 100) + "  ",
+        })
+        assert resp.json()["title"] == "x" * 80
+
+    def test_rename_requires_unlock(self, client):
+        resp = client.patch("/api/conversations/c_anything", json={"professor": "heller", "title": "x"})
+        assert resp.status_code == 401
+
+
 def _parse_sse(text: str) -> list[dict]:
     """Turn a raw "data: {...}\\n\\n" SSE response body into a list of parsed event dicts."""
     events = []
@@ -183,6 +224,11 @@ class TestChat:
                 "prompt_tokens": 5, "completion_tokens": 7, "cost": 0.001,
             },
         ])
+        # No title-generation call configured -> falls back to the literal
+        # opening words, same as generate_title() failing for a real reason.
+        # See test_first_turn_uses_generated_title_when_available for the
+        # AI-generated-title path.
+        fake_sandbox.chat_service.generate_title.return_value = None
         monkeypatch.setattr(
             "src.runtime.sandbox_processor.SandboxProcessor",
             lambda *a, **kw: fake_sandbox,
@@ -207,6 +253,66 @@ class TestChat:
         assert conv["messages"][-1]["content"] == "Hello back!"
         assert conv["messages"][-1]["cost"] == 0.001
         assert conv["title"] == "Hi there"
+
+    def test_first_turn_uses_generated_title_when_available(self, unlocked_client, monkeypatch):
+        create = unlocked_client.post("/api/conversations", json={"professor": "heller", "model": "gpt-4o"})
+        conv_id = create.json()["id"]
+
+        fake_sandbox = MagicMock()
+        fake_sandbox.chat_service.stream_message.return_value = iter([
+            {
+                "type": "done", "content": "Sure, here's a plan.", "model": "gpt-4o",
+                "prompt_tokens": 5, "completion_tokens": 7, "cost": 0.001,
+            },
+        ])
+        fake_sandbox.chat_service.generate_title.return_value = "Weekend Trip Planning"
+        monkeypatch.setattr(
+            "src.runtime.sandbox_processor.SandboxProcessor",
+            lambda *a, **kw: fake_sandbox,
+        )
+
+        resp = unlocked_client.post("/api/chat", json={
+            "professor": "heller", "conversation_id": conv_id,
+            "message": "Help me plan a weekend trip", "model": "gpt-4o",
+        })
+        events = _parse_sse(resp.text)
+        conv = [e for e in events if e["type"] == "done"][0]["conversation"]
+        assert conv["title"] == "Weekend Trip Planning"
+
+    def test_later_turn_does_not_regenerate_title(self, unlocked_client, monkeypatch):
+        """Only the first exchange should trigger title generation — once a
+        conversation has a real title (from either the AI or the fallback),
+        later turns must not silently overwrite it."""
+        create = unlocked_client.post("/api/conversations", json={"professor": "heller", "model": "gpt-4o"})
+        conv_id = create.json()["id"]
+
+        fake_sandbox = MagicMock()
+        # side_effect (not return_value) so each call gets its own fresh
+        # iterator — a shared return_value would be exhausted by the first
+        # /api/chat call, leaving the second call's stream_message() loop
+        # with nothing left to iterate.
+        fake_sandbox.chat_service.stream_message.side_effect = lambda *a, **kw: iter([
+            {
+                "type": "done", "content": "ok", "model": "gpt-4o",
+                "prompt_tokens": 1, "completion_tokens": 1, "cost": 0.0001,
+            },
+        ])
+        fake_sandbox.chat_service.generate_title.return_value = "First Title"
+        monkeypatch.setattr(
+            "src.runtime.sandbox_processor.SandboxProcessor",
+            lambda *a, **kw: fake_sandbox,
+        )
+
+        unlocked_client.post("/api/chat", json={
+            "professor": "heller", "conversation_id": conv_id, "message": "first", "model": "gpt-4o",
+        })
+        fake_sandbox.chat_service.generate_title.return_value = "Should Not Be Used"
+        resp = unlocked_client.post("/api/chat", json={
+            "professor": "heller", "conversation_id": conv_id, "message": "second", "model": "gpt-4o",
+        })
+        events = _parse_sse(resp.text)
+        conv = [e for e in events if e["type"] == "done"][0]["conversation"]
+        assert conv["title"] == "First Title"
 
     def test_chat_on_missing_conversation_404s(self, unlocked_client):
         resp = unlocked_client.post("/api/chat", json={
