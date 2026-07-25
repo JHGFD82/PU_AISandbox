@@ -207,6 +207,58 @@ def get(section: str, key: str, default=None):
 
 ---
 
+## Optional: Web UI Composer Entry
+
+The `webui` plugin's chat composer can offer your command as a one-click background job — a button next to the message box that pops open a small form and runs the job without the professor touching a terminal. This is entirely optional and doesn't change anything about your plugin's CLI behavior; declare it only if your command is the kind of page-by-page, form-driven job this suits (`translate` and `transcribe` are the two worked examples).
+
+Like `requires_professor`, this is undeclared by default and discovered with `getattr(plugin, "ui_action", None)` — there's no registration step, and skipping it leaves your plugin exactly as it is today: CLI-only.
+
+Two things to add to `plugin.py`:
+
+```python
+from src.runtime.ui_action import UiAction, UiField
+
+ui_action = UiAction(
+    id="mycommand",
+    label="Do the thing",       # shown in the composer's action picker
+    command="mycommand",         # informational only — the webui calls run_ui_action()
+                                  # directly, never your argparse run()
+    fields=[
+        UiField(name="target_language", label="Target language", kind="language"),
+        UiField(name="file", label="Document", kind="file"),
+        UiField(name="notes", label="Notes", kind="text", required=False),
+    ],
+)
+```
+
+```python
+class MyPlugin:
+    ...
+    def run_ui_action(self, fields, professor, model, on_progress=None, output_dir=None):
+        """Run this action as a webui background job instead of a CLI invocation.
+
+        Args:
+            fields: The submitted form values, keyed by each UiField's ``name``.
+            on_progress: Optional ``Callable[[int, int], None]`` — call it with
+                         (completed, total) as each unit of work finishes, so the
+                         composer can show live progress. Only meaningful for
+                         sequential (single-worker) execution; leave unused
+                         otherwise.
+            output_dir: Where to write the job's output file.
+
+        Returns:
+            A ``UiJobResult(output_path, output_filename, summary)`` describing
+            the one finished file this job produced — see
+            ``src/runtime/ui_action.py`` for the full field docs.
+        """
+        ...
+        return UiJobResult(output_path=..., output_filename=..., summary=...)
+```
+
+See `plugins/translation/plugin.py` and `plugins/transcription/plugin.py` for complete examples, and `docs/webui-plugin-plan.md` section 10 for the full composer design (execution model, job locking, whole-file export).
+
+---
+
 ## Testing
 
 Place tests in `plugins/myplugin/tests/`. The root `pytest.ini` auto-discovers them. Use the `_use_template_catalog` fixture from the core `conftest.py` to avoid touching the real `model_catalog.json`:
@@ -233,6 +285,7 @@ def use_template_catalog(_use_template_catalog):
 - [ ] Service module injected into `sys.modules` at import time (see "Adding a Service")
 - [ ] Languages registered via `register_language()` at module level
 - [ ] Tests in `plugins/myplugin/tests/`
+- [ ] (Optional) `ui_action` + `run_ui_action()` declared if this command should appear in the webui composer — see "Optional: Web UI Composer Entry" above
 
 **Standalone plugins** (new independent command):
 - [ ] `register_subparsers()` implemented
