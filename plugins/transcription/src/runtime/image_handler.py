@@ -11,7 +11,7 @@ from typing import Optional
 
 from ..console import print_section
 from ..errors import CLIError
-from ..runtime.ui_action import ProgressCallback
+from ..runtime.ui_action import PageTextCallback, ProgressCallback
 from ..services.parallel_utils import cap_worker_count, collect_image_files, run_folder_parallel
 from ..settings import MAX_PARALLEL_WORKERS
 
@@ -88,6 +88,7 @@ class Mixin:
         passes: int = 1,
         workers: int = 1,
         on_progress: Optional[ProgressCallback] = None,
+        on_page_text: Optional[PageTextCallback] = None,
     ) -> None:
         """Transcribe all image files in a folder and optionally save the combined output.
 
@@ -117,6 +118,20 @@ class Mixin:
                          honored on the sequential (``workers <= 1``) path,
                          same restriction as the translation plugin's
                          equivalent parameter.
+            on_page_text: Called with ``(image_number, extracted_text)`` right
+                          after each image finishes — a sibling to
+                          ``on_progress`` carrying the actual transcribed text
+                          instead of just a count, mirroring
+                          ``process_image_translation_folder``'s equivalent
+                          parameter in the translation plugin. Called even
+                          when an image's own transcription raised an error
+                          (with that image's error placeholder text), same as
+                          the translation plugin's version — so a professor
+                          watching the conversation sees every image
+                          accounted for, not a silent gap. ``None`` (the
+                          default, and what every CLI call passes) means no
+                          such reporting. Same sequential-only restriction as
+                          ``on_progress``.
 
         Raises:
             CLIError: If no image files are found in the folder.
@@ -151,6 +166,8 @@ class Mixin:
 
                 print_section("Extracted Text", extracted_text)
                 combined_parts.append(f"=== {filename} ===\n{extracted_text}")
+                if on_page_text is not None:
+                    on_page_text(idx, extracted_text)
 
             if output_file:
                 self.file_output.save_translation_output(  # type: ignore[attr-defined]

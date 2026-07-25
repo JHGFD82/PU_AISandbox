@@ -136,6 +136,76 @@ class TestProcessImageFolder:
         # Must not raise (i.e. must not try calling None()).
         proc.process_image_folder(str(tmp_path), "English")
 
+    def test_on_page_text_called_per_image_in_order_with_content(self, tmp_path, monkeypatch):
+        # Regression coverage mirroring the translation plugin's
+        # on_page_text fix — a professor should see each image's actual
+        # transcribed text as it's produced, not just a numeric progress
+        # ping. See process_image_translation_folder's equivalent
+        # parameter in the translation plugin for the mirrored behavior.
+        proc = _make_processor(monkeypatch)
+        (tmp_path / "a.jpg").write_bytes(b"fake")
+        (tmp_path / "b.jpg").write_bytes(b"fake")
+
+        def ocr(path, *a, **kw):
+            return "text from a" if "a.jpg" in path else "text from b"
+
+        proc.image_processor_service.process_image_ocr = ocr
+        calls: list = []
+        proc.process_image_folder(
+            str(tmp_path), "English",
+            on_page_text=lambda idx, text: calls.append((idx, text)),
+        )
+        assert calls == [(1, "text from a"), (2, "text from b")]
+
+    def test_on_page_text_called_even_when_an_image_errors(self, tmp_path, monkeypatch):
+        # Same as on_progress: an image's own error placeholder text is
+        # still reported, so a professor watching the conversation sees
+        # every image accounted for rather than a silent gap.
+        proc = _make_processor(monkeypatch)
+        (tmp_path / "err.jpg").write_bytes(b"fake")
+        (tmp_path / "ok.jpg").write_bytes(b"fake")
+
+        def flaky(path, *a, **kw):
+            if "err" in path:
+                raise RuntimeError("boom")
+            return "text"
+
+        proc.image_processor_service.process_image_ocr = flaky
+        calls: list = []
+        proc.process_image_folder(
+            str(tmp_path), "English",
+            on_page_text=lambda idx, text: calls.append((idx, text)),
+        )
+        assert calls[0][0] == 1
+        assert "Error processing" in calls[0][1]
+        assert calls[1] == (2, "text")
+
+    def test_on_page_text_none_by_default(self, tmp_path, monkeypatch):
+        proc = _make_processor(monkeypatch)
+        (tmp_path / "a.jpg").write_bytes(b"fake")
+        proc.image_processor_service.process_image_ocr.return_value = "text"
+        # Must not raise (i.e. must not try calling None()).
+        proc.process_image_folder(str(tmp_path), "English")
+
+    def test_on_page_text_not_called_on_parallel_path(self, tmp_path, monkeypatch):
+        # Same sequential-only restriction as on_progress — page order
+        # can't be guaranteed once more than one worker is running.
+        proc = _make_processor(monkeypatch)
+        img = tmp_path / "scan.jpg"
+        img.write_bytes(b"fake")
+        monkeypatch.setattr(
+            "src.runtime.image_handler.run_folder_parallel",
+            lambda *a, **k: {0: ("scan.jpg", "OCR result")},
+        )
+        monkeypatch.setattr("src.runtime.image_handler.cap_worker_count", lambda *a, **k: 2)
+        proc.image_processor_service._get_model.return_value = "gpt-4o"
+        calls: list = []
+        proc.process_image_folder(
+            str(tmp_path), "English", workers=2,
+            on_page_text=lambda idx, text: calls.append((idx, text)),
+        )
+        assert calls == []
+
     def test_parallel_path_saves_output_file(self, tmp_path, monkeypatch):
         """Parallel workers > 1 with output_file set exercises the parallel output branch."""
         proc = _make_processor(monkeypatch)

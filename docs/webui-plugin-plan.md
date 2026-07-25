@@ -1039,6 +1039,76 @@ false / can be enabled), `plugins/transcription/tests/test_transcription_plugin_
 re-run clean: 1584 passed, 19 deselected, the same one pre-existing
 unrelated failure.
 
+**Sixth pass, same day: workers + PageTextCallback for transcribe, matching
+translate's own.** Added a `workers` `UiField` (Performance group) to
+transcribe's composer and threaded it through `run_ui_action` into
+`sandbox.process_image_folder(..., workers=...)` — the underlying
+parameter already existed there (only `transcription-ea` ever set it via
+its own CLI flag; see below), so this is purely composer + `run_ui_action`
+wiring. Added `PageTextCallback` support to
+`plugins/transcription/src/runtime/image_handler.py`'s
+`process_image_folder` (sequential path only, same restriction as
+`on_progress`), mirroring `process_image_translation_folder`'s existing
+behavior in the translation plugin exactly: called once per image, even
+for an image whose own OCR call raised (with that image's error
+placeholder text), so a professor watching the conversation sees every
+image accounted for rather than a silent gap. `jobs.py`'s `on_page_text`
+closure and the `job_notice` "preview disabled above 1 worker" message
+were already plugin-agnostic (they just read the submitted `fields`), so
+both now fire correctly for a multi-worker transcribe job with zero
+jobs.py changes needed beyond rewording the notice message itself — it
+previously said "the translation" by name, which would have been wrong
+for a transcribe job; reworded to "each item"/"the finished result" so
+it reads correctly for either plugin.
+
+**Resolved, same day:** asked whether to add a bare `-w`/`--workers` CLI
+flag to the base `transcribe` command too (translate already has one;
+transcribe didn't) given `transcription-ea`'s `register_command_flags()`
+already registered its own `-w`/`--workers` directly on the shared
+`transcribe` parser — adding the same flag to the base plugin would make
+`argparse` see the same option string twice the moment both plugins are
+installed together, crashing CLI startup (`ArgumentError: argument
+-w/--workers: conflicting option string(s)`). Translate never hit this
+because `translation-ea`'s own `register_command_flags()` never touches
+`workers` — the base translate plugin already owned it. Your call: "the
+workers had no business being in transcription-ea," with explicit
+permission to edit that separate repo and commit there directly (both
+normally out of scope — see CLAUDE.md's "reference only" convention for
+the `-ea` repos, and the usual "don't run git commit" rule).
+
+Added `-w`/`--workers` to the base plugin's `register_subparsers()` (same
+style as translate's: `type=int, default=DEFAULT_PARALLEL_WORKERS`) and
+threaded it through `run()`'s `transcribe` branch into
+`process_image_folder(..., workers=workers)`. Then, in
+`plugins/transcription-ea` (a separate repo, cloned at
+`plugins/transcription-ea/`): removed its now-redundant `-w`/`--workers`
+registration from `register_command_flags()` only — left its standalone
+fallback `register_subparsers()` (used only when the base plugin isn't
+installed at all) unchanged, since that fallback already duplicates every
+other base-plugin flag (`-i`, common flags, notes flags) for that
+unsupported-but-handled scenario, not just extension-specific ones.
+Updated that repo's module/class docstrings to explain the new split, and
+committed there directly (`fix(cli): remove redundant -w/--workers, now
+owned by the base plugin`) per your explicit go-ahead. Its own 30-test
+suite re-run clean, including the one test that loads both plugins
+together via the real `load_plugins()`/`create_argument_parser()` path —
+exactly the scenario that would have raised the conflict directly.
+
+`plugins/transcription/tests/test_transcription_cli.py` updated to match:
+removed the old "workers is an extension-only flag, must not exist on the
+base plugin" assertions, added coverage that `-w`/`--workers` now parses
+correctly (long/short flag, default value, rejects non-numeric input) on
+the base plugin alone.
+
+Covered by new tests: `plugins/transcription/tests/test_image_handler.py`
+(`on_page_text` order/content, called-even-on-error mirroring
+`on_progress`'s existing test, `None`-by-default, not called on the
+parallel path) and `plugins/transcription/tests/test_transcription_plugin_ui_action.py`
+(`workers`/`on_page_text` forwarded to `process_image_folder`, `workers`
+defaults to 1, invalid/negative `workers` raise `CLIError`). Full suite
+re-run clean: 1598 passed, 19 deselected, the same one pre-existing
+unrelated failure.
+
 The generic "attach a document to chat" icon and its upload wiring were
 already **removed** from `chat.html` in an earlier pass, before this
 backend work started. Reasoning, unchanged: that icon extracted text from

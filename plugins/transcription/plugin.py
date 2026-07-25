@@ -115,7 +115,8 @@ _register(
 from src.cli import add_common_flags, add_notes_flags           # noqa: E402
 from src.config import parse_single_language_code, register_language, LANGUAGE_MAP  # noqa: E402
 from src.errors import CLIError                                    # noqa: E402
-from src.runtime.ui_action import ProgressCallback, UiAction, UiField, UiJobResult, UiPromptPreview  # noqa: E402
+from src.runtime.ui_action import PageTextCallback, ProgressCallback, UiAction, UiField, UiJobResult, UiPromptPreview  # noqa: E402
+from src.services.constants import DEFAULT_PARALLEL_WORKERS        # noqa: E402
 
 # Register the language supported by this base plugin.
 register_language('en', 'English')
@@ -220,6 +221,17 @@ class TranscriptionPlugin:
                 type=str,
                 required=False,
                 help="Input image file path, or a folder of images to process in order",
+            )
+            tr.add_argument(
+                "-w", "--workers",
+                dest="workers",
+                type=int,
+                default=DEFAULT_PARALLEL_WORKERS,
+                metavar="N",
+                help=(
+                    "Number of parallel OCR workers when transcribing a folder of images "
+                    "(default: %(default)s). Ignored for a single image."
+                ),
             )
             add_common_flags(tr)
             add_notes_flags(tr)
@@ -332,7 +344,8 @@ class TranscriptionPlugin:
             output_file = sandbox._resolve_output_path(args)
 
             if os.path.isdir(input_path):
-                sandbox.process_image_folder(input_path, target_language, output_file)
+                workers = getattr(args, 'workers', 1)
+                sandbox.process_image_folder(input_path, target_language, output_file, workers=workers)
             else:
                 file_type = sandbox._detect_and_validate_file(input_path)
                 if file_type != 'image':
@@ -393,7 +406,7 @@ class TranscriptionPlugin:
         model: Optional[str],
         on_progress: Optional[ProgressCallback],
         output_dir: str,
-        on_page_text=None,
+        on_page_text: Optional[PageTextCallback] = None,
     ) -> UiJobResult:
         """Run a webui-submitted "Transcribe an image" job outside the CLI's argparse path.
 
@@ -421,6 +434,12 @@ class TranscriptionPlugin:
           into a filename).
         - ``notes``: optional free text, applied to both the system and
           user prompts (the same effect as the CLI's ``-nb`` flag).
+        - ``workers``: optional whole number of parallel OCR workers when
+          transcribing a folder of images, same as the CLI's own
+          ``-w``/``--workers``. Ignored for a single image (nothing to
+          parallelize). Defaults to ``1`` (sequential, with live
+          progress/page-text reporting — see ``on_progress``/``on_page_text``
+          below).
         - ``temperature`` / ``top_p`` / ``max_tokens``: optional sampling
           overrides, same as the CLI's ``-t``/``-T``/``-M`` flags. The web
           UI only shows these controls for models that accept them (see
@@ -438,11 +457,13 @@ class TranscriptionPlugin:
                          image (nothing to report progress *between*).
             output_dir: Where to write the one finished output file. Already
                         created and writable.
-            on_page_text: Accepted for a uniform call signature across
-                          every plugin's ``run_ui_action`` (jobs.py calls
-                          all of them the same way) but not yet used here —
-                          transcription doesn't currently stream per-image
-                          text the way translation streams per-page text.
+            on_page_text: Forwarded to ``sandbox.process_image_folder`` when
+                          ``file_path`` is a folder — called with each
+                          image's transcribed text as soon as it's ready, so
+                          the webui can show a per-image live transcript
+                          instead of only a percentage. Unused for a single
+                          image, same as ``on_progress``. ``None`` (the
+                          default) means no such reporting.
 
         Returns:
             A ``UiJobResult`` pointing at the transcription text file this
@@ -486,6 +507,9 @@ class TranscriptionPlugin:
             except ValueError:
                 raise CLIError(f"Invalid {field_label} '{raw}' — must be a whole number.") from None
 
+        workers = _to_int(fields.get("workers"), "number of parallel workers") or 1
+        if workers < 1:
+            raise CLIError("Number of parallel workers must be at least 1.")
         temperature = _to_float(fields.get("temperature"), "temperature")
         top_p = _to_float(fields.get("top_p"), "top-p")
         max_tokens = _to_int(fields.get("max_tokens"), "max tokens")
@@ -511,7 +535,10 @@ class TranscriptionPlugin:
         os.makedirs(output_dir, exist_ok=True)
 
         if os.path.isdir(file_path):
-            sandbox.process_image_folder(file_path, target_language, output_path, on_progress=on_progress)
+            sandbox.process_image_folder(
+                file_path, target_language, output_path,
+                workers=workers, on_progress=on_progress, on_page_text=on_page_text,
+            )
             summary = f"Transcribed the images in '{file_name}' to {target_language}."
         else:
             sandbox.process_image(file_path, target_language, output_path)
@@ -602,6 +629,10 @@ ui_action = UiAction(
                 {"value": "md", "label": "Markdown (.md)"},
             ],
             group="Output",
+        ),
+        UiField(
+            name="workers", label="Parallel workers (1 = sequential with live progress)",
+            kind="text", required=False, group="Performance",
         ),
         UiField(name="notes", label="Notes for the model", kind="text", required=False, group="Notes"),
     ],

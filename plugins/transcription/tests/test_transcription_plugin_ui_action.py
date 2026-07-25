@@ -36,7 +36,7 @@ class TestUiActionDeclaration:
 
     def test_declares_expected_fields_in_order(self, plugin_module):
         names = [f.name for f in plugin_module.ui_action.fields]
-        assert names == ["target_language", "file", "output_format", "notes"]
+        assert names == ["target_language", "file", "output_format", "workers", "notes"]
 
     def test_file_field_allows_a_folder_of_images(self, plugin_module):
         # transcribe's CLI already accepts -i pointed at a folder of scans
@@ -191,6 +191,102 @@ class TestRunUiAction:
         _, kwargs = fake_sandbox.process_image_folder.call_args
         assert kwargs["on_progress"] is progress
         assert os.path.exists(result.output_path)
+
+    def test_on_page_text_forwarded_to_process_image_folder(self, monkeypatch, plugin_module, tmp_path):
+        # Regression coverage mirroring the translation plugin's page-by-page
+        # streaming fix: a folder-of-images transcribe job must forward
+        # on_page_text the same way it already forwards on_progress.
+        fake_sandbox = self._patch_sandbox(monkeypatch, process_folder_side_effect=self._write_output_file)
+        folder = tmp_path / "scans"
+        folder.mkdir()
+        (folder / "a.jpg").write_bytes(b"fake")
+
+        def page_text(idx, text):
+            pass
+
+        plugin_module.plugin.run_ui_action(
+            fields={"target_language": "en", "file_path": str(folder), "file_name": "scans"},
+            professor="fake", model=None, on_progress=None, output_dir=str(tmp_path / "job_output"),
+            on_page_text=page_text,
+        )
+        _, kwargs = fake_sandbox.process_image_folder.call_args
+        assert kwargs["on_page_text"] is page_text
+
+    def test_on_page_text_defaults_to_none(self, monkeypatch, plugin_module, tmp_path):
+        fake_sandbox = self._patch_sandbox(monkeypatch, process_folder_side_effect=self._write_output_file)
+        folder = tmp_path / "scans"
+        folder.mkdir()
+        (folder / "a.jpg").write_bytes(b"fake")
+
+        plugin_module.plugin.run_ui_action(
+            fields={"target_language": "en", "file_path": str(folder), "file_name": "scans"},
+            professor="fake", model=None, on_progress=None, output_dir=str(tmp_path / "job_output"),
+        )
+        _, kwargs = fake_sandbox.process_image_folder.call_args
+        assert kwargs["on_page_text"] is None
+
+    def test_workers_forwarded_to_process_image_folder(self, monkeypatch, plugin_module, tmp_path):
+        fake_sandbox = self._patch_sandbox(monkeypatch, process_folder_side_effect=self._write_output_file)
+        folder = tmp_path / "scans"
+        folder.mkdir()
+        (folder / "a.jpg").write_bytes(b"fake")
+
+        plugin_module.plugin.run_ui_action(
+            fields={
+                "target_language": "en", "file_path": str(folder), "file_name": "scans",
+                "workers": "4",
+            },
+            professor="fake", model=None, on_progress=None, output_dir=str(tmp_path / "job_output"),
+        )
+        _, kwargs = fake_sandbox.process_image_folder.call_args
+        assert kwargs["workers"] == 4
+
+    def test_workers_defaults_to_one_when_omitted(self, monkeypatch, plugin_module, tmp_path):
+        fake_sandbox = self._patch_sandbox(monkeypatch, process_folder_side_effect=self._write_output_file)
+        folder = tmp_path / "scans"
+        folder.mkdir()
+        (folder / "a.jpg").write_bytes(b"fake")
+
+        plugin_module.plugin.run_ui_action(
+            fields={"target_language": "en", "file_path": str(folder), "file_name": "scans"},
+            professor="fake", model=None, on_progress=None, output_dir=str(tmp_path / "job_output"),
+        )
+        _, kwargs = fake_sandbox.process_image_folder.call_args
+        assert kwargs["workers"] == 1
+
+    def test_invalid_workers_raises_cli_error(self, monkeypatch, plugin_module, tmp_path):
+        self._patch_sandbox(monkeypatch, process_folder_side_effect=self._write_output_file)
+        folder = tmp_path / "scans"
+        folder.mkdir()
+        (folder / "a.jpg").write_bytes(b"fake")
+        with pytest.raises(CLIError, match="whole number"):
+            plugin_module.plugin.run_ui_action(
+                fields={
+                    "target_language": "en", "file_path": str(folder), "file_name": "scans",
+                    "workers": "a lot",
+                },
+                professor="fake", model=None, on_progress=None, output_dir=str(tmp_path / "job_output"),
+            )
+
+    def test_workers_below_one_raises_cli_error(self, monkeypatch, plugin_module, tmp_path):
+        # Note: "0" specifically isn't reachable here — `_to_int(...) or 1`
+        # coalesces a falsy 0 to 1 before the < 1 check ever runs, the same
+        # existing quirk translate's own equivalent code has (see its
+        # test_invalid_workers_raises_cli_error, which likewise only covers
+        # a non-numeric value, not "0"). A negative number is the one input
+        # that actually reaches the "at least 1" check.
+        self._patch_sandbox(monkeypatch, process_folder_side_effect=self._write_output_file)
+        folder = tmp_path / "scans"
+        folder.mkdir()
+        (folder / "a.jpg").write_bytes(b"fake")
+        with pytest.raises(CLIError, match="at least 1"):
+            plugin_module.plugin.run_ui_action(
+                fields={
+                    "target_language": "en", "file_path": str(folder), "file_name": "scans",
+                    "workers": "-2",
+                },
+                professor="fake", model=None, on_progress=None, output_dir=str(tmp_path / "job_output"),
+            )
 
     def test_notes_applied_to_both_prompts(self, monkeypatch, plugin_module, tmp_path):
         fake_sandbox = self._patch_sandbox(monkeypatch, process_image_side_effect=self._write_output_file)

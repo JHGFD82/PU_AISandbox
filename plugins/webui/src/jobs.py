@@ -292,15 +292,17 @@ def _run_job(
     # unlikely case getattr fails entirely, doesn't have one at all).
     progress_verb = getattr(getattr(plugin, "ui_action", None), "progress_verb", None) or "Processing"
 
-    # Per-page messages (on_page_text below) only ever arrive with a single
-    # worker — translate's own sequential-vs-parallel split can't guarantee
-    # page order once more than one worker is running, so it silences
-    # per-page callbacks entirely above 1 worker (see
-    # plugins/translation/src/services/translation_service.py). Tell the
-    # professor that up front, once, rather than leaving them wondering why
-    # no page text is showing up for a job they can see is still running.
-    # Not every plugin declares a "workers" field (transcription doesn't),
-    # so this is a no-op for anything that doesn't.
+    # Per-page/per-image messages (on_page_text below) only ever arrive with
+    # a single worker — both translate's and transcribe's sequential-vs-
+    # parallel split can't guarantee completion order once more than one
+    # worker is running, so each silences its own per-item callback entirely
+    # above 1 worker (see translation_service.py and image_handler.py). Tell
+    # the professor that up front, once, rather than leaving them wondering
+    # why nothing is streaming in for a job they can see is still running.
+    # This check is plugin-agnostic (just reads the submitted "workers"
+    # field, if any) so it applies to any current or future action that
+    # declares one — not every plugin does (transcription's transcription_review
+    # doesn't, for instance), which is a no-op here.
     try:
         workers_requested = int(str(fields.get("workers", "")).strip() or 1)
     except ValueError:
@@ -311,9 +313,9 @@ def _run_job(
             conv.messages.append(conversation.Message(
                 role="assistant",
                 content=(
-                    "Preview of the translation is turned off while running with more than one "
+                    "Live preview of each item is turned off while running with more than one "
                     "worker. The progress bar below will still update normally, and the finished "
-                    "document will be here as soon as the job completes."
+                    "result will be here as soon as the job completes."
                 ),
                 timestamp=datetime.now().isoformat(),
                 kind="job_notice",

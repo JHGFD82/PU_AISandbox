@@ -3,8 +3,10 @@ Tests for the base transcription plugin CLI flag parsing and validation logic.
 
 This plugin registers English only.  Tests verify:
   - transcribe and transcription_review commands work with 'en'
-    - extension-only flags (--kanbun, --kanbun-main, --spread, --vertical,
-    --passes, --preserve-tables, --workers) are NOT present on the base plugin
+  - -w/--workers is a base flag (parallel OCR over a folder of images —
+    not East-Asia-specific, so it lives here rather than in an extension)
+  - extension-only flags (--kanbun, --kanbun-main, --spread, --vertical,
+    --passes, --preserve-tables) are NOT present on the base plugin
   - Language codes outside 'en' are rejected
 """
 
@@ -60,6 +62,34 @@ class TestTranscribeFlagDefaults:
         args = parser.parse_args(["heller", "transcribe", "en", "-i", "img.png"])
         assert args.input_file == "img.png"
 
+    def test_workers_defaults_to_default_parallel_workers(self, parser):
+        from src.services.constants import DEFAULT_PARALLEL_WORKERS
+        args = parser.parse_args(["heller", "transcribe", "en"])
+        assert args.workers == DEFAULT_PARALLEL_WORKERS
+
+
+# ---------------------------------------------------------------------------
+# transcribe — -w/--workers is a base flag (not East-Asia-specific)
+# ---------------------------------------------------------------------------
+
+class TestTranscribeWorkersFlag:
+
+    @pytest.fixture
+    def parser(self):
+        return _make_parser()
+
+    def test_long_flag(self, parser):
+        args = parser.parse_args(["heller", "transcribe", "en", "-i", "img.png", "--workers", "4"])
+        assert args.workers == 4
+
+    def test_short_flag(self, parser):
+        args = parser.parse_args(["heller", "transcribe", "en", "-i", "img.png", "-w", "4"])
+        assert args.workers == 4
+
+    def test_non_numeric_value_rejected(self, parser):
+        with pytest.raises(SystemExit):
+            parser.parse_args(["heller", "transcribe", "en", "-i", "img.png", "--workers", "many"])
+
 
 # ---------------------------------------------------------------------------
 # transcribe — extension flags are absent
@@ -94,10 +124,6 @@ class TestTranscribeNoExtensionFlags:
     def test_preserve_tables_flag_not_recognised(self, parser):
         with pytest.raises(SystemExit):
             parser.parse_args(["heller", "transcribe", "en", "-i", "img.png", "--preserve-tables"])
-
-    def test_workers_flag_not_recognised(self, parser):
-        with pytest.raises(SystemExit):
-            parser.parse_args(["heller", "transcribe", "en", "-i", "img.png", "--workers", "4"])
 
 
 # ---------------------------------------------------------------------------
@@ -200,9 +226,15 @@ class TestFlagIsolation:
 
     def test_ea_flags_not_present_on_transcribe(self, parser):
         args = parser.parse_args(["heller", "transcribe", "en", "-i", "img.png"])
-        for flag in ("vertical", "spread", "kanbun", "kanbun_main", "passes",
-                     "preserve_tables", "workers"):
+        for flag in ("vertical", "spread", "kanbun", "kanbun_main", "passes", "preserve_tables"):
             assert not hasattr(args, flag), f"Extension flag '{flag}' should not exist on base transcribe args"
+
+    def test_workers_is_present_on_transcribe_as_a_base_flag(self, parser):
+        # Unlike the other extension-only flags above, workers is NOT
+        # East-Asia-specific — it belongs on the base plugin (mirroring
+        # translate's own -w/--workers), so it must exist here.
+        args = parser.parse_args(["heller", "transcribe", "en", "-i", "img.png"])
+        assert hasattr(args, "workers")
 
     def test_ea_flags_not_present_on_review(self, parser):
         args = parser.parse_args(["heller", "transcription_review", "en", "-i", "text.txt"])
