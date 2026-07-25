@@ -30,6 +30,12 @@
   * { box-sizing: border-box; }
   body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 0; height: 100vh;
          display: grid; grid-template-columns: 240px 1fr 280px; background: var(--bg); color: var(--text); }
+  /* grid-template-columns defines a fixed 3-track layout regardless of which
+     children are actually visible — hiding #spend with display:none alone
+     leaves its 280px track reserved and empty instead of handing that
+     space to #main. Dropping the third track when collapsed is what
+     actually lets the middle column expand. */
+  body.spend-hidden { grid-template-columns: 240px 1fr; }
   #sidebar, #spend { background: var(--panel-bg); border-right: 1px solid var(--border); padding: 1rem; overflow-y: auto; }
   #spend { border-right: none; border-left: 1px solid var(--border); transition: margin-right 0.15s; }
   #spend.hidden { display: none; }
@@ -51,9 +57,10 @@
   button:disabled { opacity: 0.5; cursor: default; }
 
   .plus-btn {
-    width: 24px; height: 24px; padding: 0; border-radius: 50%; flex: none;
-    font-size: 1rem; line-height: 1; display: inline-flex; align-items: center; justify-content: center;
+    width: 22px; height: 22px; padding: 0; border-radius: 6px; flex: none;
+    display: inline-flex; align-items: center; justify-content: center;
   }
+  .plus-btn svg { width: 12px; height: 12px; display: block; }
 
   .icon-btn {
     display: inline-flex; align-items: center; justify-content: center;
@@ -63,9 +70,12 @@
   .icon-btn:hover { background: var(--hover-bg); }
   .icon-btn.neutral { color: var(--text-muted); }
   .icon-btn svg { width: 18px; height: 18px; display: block; }
-  .icon-btn .icon-moon { display: none; }
-  [data-theme="dark"] .icon-btn .icon-sun { display: none; }
-  [data-theme="dark"] .icon-btn .icon-moon { display: block; }
+  /* The icon shown is the mode you'll SWITCH TO, not the current one — sun
+     while dark mode is active (click for light), moon while light mode is
+     active (click for dark). */
+  .icon-btn .icon-sun { display: none; }
+  [data-theme="dark"] .icon-btn .icon-sun { display: block; }
+  [data-theme="dark"] .icon-btn .icon-moon { display: none; }
   .icon-btn.collapsed .panel-fill { fill: none; }
 
   #main { display: flex; flex-direction: column; height: 100vh; }
@@ -73,7 +83,7 @@
   .model-picker { flex: 1; display: flex; gap: 0.4rem; min-width: 0; }
 
   .combobox { position: relative; flex: 1; min-width: 0; }
-  .combobox input.model-field { padding-right: 1.9rem; }
+  .combobox input.model-field { padding-right: 1.9rem; cursor: pointer; }
   .combobox-toggle {
     position: absolute; right: 0.35rem; top: 50%; transform: translateY(-50%);
     width: 22px; height: 22px; padding: 0; background: transparent; border: none; color: var(--text-muted);
@@ -94,6 +104,11 @@
     background: var(--panel-bg); border: 1px solid var(--border); border-radius: 8px;
     box-shadow: 0 6px 18px var(--shadow); z-index: 20; padding: 0.5rem;
   }
+  /* Without this, [hidden] and the rule above both have equal specificity
+     and this stylesheet's own "display: flex" (loaded after the browser's
+     built-in [hidden] rule) would win, leaving the popover visible even
+     when its hidden attribute is set. */
+  .model-add-popover[hidden] { display: none; }
   .model-add-popover input { padding: 0.4rem; font-size: 0.82rem; }
   .model-add-popover button { padding: 0.4rem 0.6rem; font-size: 0.8rem; flex: none; }
 
@@ -118,7 +133,9 @@
 
     <div class="section-header">
       <h2>Conversations</h2>
-      <button id="new-conv" class="plus-btn" title="New conversation" aria-label="New conversation">+</button>
+      <button id="new-conv" class="plus-btn" title="New conversation" aria-label="New conversation">
+        <svg viewBox="0 0 14 14"><path d="M7 1v12M1 7h12" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+      </button>
     </div>
     <div id="conv-list"></div>
 
@@ -131,7 +148,7 @@
     <div id="topbar">
       <div class="model-picker">
         <div class="combobox" id="model-combobox">
-          <input class="model-field" id="model-field" type="text"
+          <input class="model-field" id="model-field" type="text" readonly
                  placeholder="Model (e.g. gpt-4o, anthropic/claude-fable-5)" autocomplete="off">
           <button type="button" class="combobox-toggle" id="model-toggle-btn" aria-label="Show model list" title="Show model list">
             <svg viewBox="0 0 10 6" width="10" height="6">
@@ -141,7 +158,9 @@
           <div class="combobox-list" id="model-list" hidden></div>
         </div>
         <div class="model-add" id="model-add">
-          <button type="button" class="icon-btn neutral" id="model-add-btn" title="Use a custom model" aria-label="Use a custom model">+</button>
+          <button type="button" class="icon-btn neutral" id="model-add-btn" title="Use a custom model" aria-label="Use a custom model">
+            <svg viewBox="0 0 14 14"><path d="M7 1v12M1 7h12" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+          </button>
           <div class="model-add-popover" id="model-add-popover" hidden>
             <input type="text" id="model-add-input" placeholder="e.g. openai/gpt-4o" autocomplete="off">
             <button type="button" id="model-add-confirm">Use</button>
@@ -239,10 +258,12 @@ async function loadProfessors() {
 // A hand-rolled combobox instead of <input list="..."> + <datalist>: the
 // datalist popup is rendered entirely by the OS/browser chrome, not by our
 // CSS, so it doesn't pick up this page's theme at all (that's what made it
-// look like a stray light-mode box in dark mode). This version is just a
-// plain text input (still freely editable — typing an exact model name,
-// including "provider/model" auto-register syntax, works exactly as
-// before) plus a custom-styled dropdown list we fully control.
+// look like a stray light-mode box in dark mode). The field itself is
+// read-only — clicking it (or the chevron) always shows the full list of
+// known models rather than dropping into text-entry mode. Typing a model
+// name that isn't in the list goes through the separate "+" popover
+// instead, so there's exactly one way to pick a known model and one way to
+// enter a custom one, instead of one field trying to do both.
 async function loadModels() {
   const data = await api("/api/models?professor=" + encodeURIComponent(state.professor));
   state.models = data.models;
@@ -267,24 +288,26 @@ function renderModelList() {
   });
 }
 
-function filterModelList() {
-  const query = document.getElementById("model-field").value.toLowerCase();
-  document.querySelectorAll("#model-list .combobox-option").forEach(opt => {
-    opt.style.display = opt.textContent.toLowerCase().includes(query) ? "" : "none";
-  });
+function openModelList() {
+  // Always the full list — this field is read-only, so there's no typed
+  // query to narrow it by. Resetting visibility here also undoes any stale
+  // filtering from a since-removed search-as-you-type version of this.
+  document.querySelectorAll("#model-list .combobox-option").forEach(opt => { opt.style.display = ""; });
+  document.getElementById("model-list").hidden = false;
 }
-
-function openModelList() { document.getElementById("model-list").hidden = false; }
 function closeModelList() { document.getElementById("model-list").hidden = true; }
+function toggleModelList() {
+  const list = document.getElementById("model-list");
+  if (list.hidden) openModelList(); else closeModelList();
+}
 
 document.getElementById("model-toggle-btn").addEventListener("click", (e) => {
   e.stopPropagation();
-  const list = document.getElementById("model-list");
-  if (list.hidden) { filterModelList(); openModelList(); } else { closeModelList(); }
+  toggleModelList();
 });
-document.getElementById("model-field").addEventListener("input", () => {
-  filterModelList();
-  openModelList();
+document.getElementById("model-field").addEventListener("click", (e) => {
+  e.stopPropagation();
+  toggleModelList();
 });
 document.getElementById("model-field").addEventListener("keydown", (e) => {
   if (e.key === "Escape") closeModelList();
@@ -514,6 +537,7 @@ document.getElementById("spend-toggle-btn").addEventListener("click", () => {
   const panel = document.getElementById("spend");
   const btn = document.getElementById("spend-toggle-btn");
   const hidden = panel.classList.toggle("hidden");
+  document.body.classList.toggle("spend-hidden", hidden);
   btn.classList.toggle("collapsed", hidden);
   btn.title = hidden ? "Show spend panel" : "Hide spend panel";
 });
