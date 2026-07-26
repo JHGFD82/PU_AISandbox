@@ -1427,3 +1427,35 @@ class TestSettingsSources:
     def test_remove_unknown_source_404s(self, unlocked_client, settings_env):
         resp = unlocked_client.delete("/api/settings/sources", params={"label": "Nobody"})
         assert resp.status_code == 404
+
+
+class TestConversationIdTraversalOverHttp:
+    """The two routes that take a conversation id from a request *body* are
+    the ones with no incidental protection from URL path matching — see the
+    store-level tests in test_conversation.py for the underlying guard."""
+
+    def test_chat_rejects_a_traversal_id(self, unlocked_client, tmp_path):
+        victim = tmp_path / "victim.json"
+        victim.write_text('{"id": "victim", "title": "SECRET", "created_at": "t", '
+                          '"updated_at": "t", "model": "gpt-4o", "messages": []}')
+        resp = unlocked_client.post("/api/chat", json={
+            "professor": "heller",
+            "conversation_id": f"../../{victim.stem}",
+            "message": "Hi",
+            "model": "gpt-4o",
+        })
+        assert resp.status_code == 404
+        assert victim.exists()
+
+    def test_start_job_rejects_a_traversal_id(self, unlocked_client, tmp_path):
+        victim = tmp_path / "victim2.json"
+        victim.write_text('{"id": "victim2", "title": "SECRET", "created_at": "t", '
+                          '"updated_at": "t", "model": "gpt-4o", "messages": []}')
+        resp = unlocked_client.post("/api/jobs", data={
+            "professor": "heller",
+            "conversation_id": f"../../{victim.stem}",
+            "action_id": "translate",
+            "fields_json": "{}",
+        })
+        assert resp.status_code in (400, 404)
+        assert victim.exists()
