@@ -959,6 +959,28 @@ class TokenTracker:
 
         return combined.to_dict()
 
+    def _archive_path_for(self, month: str) -> Path:
+        """Return the archive file for *month*, wherever this tracker keeps its archives.
+
+        Where archives live depends on how this professor's usage is being
+        recorded: normally under this installation's own ``data/archives/``,
+        but in shared-write mode inside the shared folder instead. Everything
+        that reads an archive goes through here, so no caller has to remember
+        the distinction — forgetting it produced reports that said
+        ``No archive found for 2026-05.  Available: 2026-05``, having looked
+        for the file in one place and listed the other.
+
+        Args:
+            month: The month to locate, as ``YYYY-MM`` (e.g. ``'2026-05'``).
+
+        Returns:
+            The path the archive for that month would have, whether or not
+            it exists yet.
+        """
+        if self.source_mode == "shared-write":
+            return _shared_archive_path(self._shared_source, self.professor, month)
+        return get_archive_path(self.professor, month)
+
     def list_archived_months(self) -> list[str]:
         """Return a sorted list of month strings that have been archived."""
         if self.source_mode == "shared-write":
@@ -998,7 +1020,13 @@ class TokenTracker:
 
         # ── Archived month report ──────────────────────────────────
         if month and month != current_month:
-            archive_path = get_archive_path(self.professor, month)
+            # _archive_path_for(), not get_archive_path(): in shared-write
+            # mode the archives live in the shared folder, and looking in the
+            # local one produced the contradictory "No archive found for
+            # 2026-05.  Available: 2026-05" — the "Available" list below is
+            # built by list_archived_months(), which always looked in the
+            # right place.
+            archive_path = self._archive_path_for(month)
             if not archive_path.exists():
                 archived = self.list_archived_months()
                 hint = f"  Available: {', '.join(archived)}" if archived else "  No archives found."

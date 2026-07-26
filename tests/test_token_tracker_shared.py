@@ -440,3 +440,38 @@ class TestRolloverPreservesUnreadableEvents:
         assert archive.exists()
         assert json.loads(archive.read_text())["total_usage"]["call_count"] == 1
         assert not d.exists()
+
+
+class TestArchivedMonthReportInSharedMode:
+    """print_usage_report must look for archives where they actually are.
+
+    It used to use the local archive path unconditionally while the
+    "Available months" hint beside it used the shared one, producing the
+    self-contradicting `No archive found for 2020-01.  Available: 2020-01`.
+    """
+
+    def _archived_month(self, tmp_path, month="2020-01"):
+        archive_dir = tmp_path / "shared" / "archives" / "smith"
+        archive_dir.mkdir(parents=True)
+        (archive_dir / f"{month}.json").write_text(json.dumps({
+            "month": month,
+            "total_usage": UsageStats(
+                total_tokens=150, total_input_tokens=100, total_output_tokens=50,
+                total_cost=0.3, call_count=1,
+            ).to_dict(),
+            "model_usage": {}, "daily_usage": {}, "session_history": [],
+        }))
+
+    def test_archive_path_branches_on_source_mode(self, shared_source, tmp_path):
+        t = _make_shared_tracker(shared_source)
+        path = t._archive_path_for("2020-01")
+        assert path == tmp_path / "shared" / "archives" / "smith" / "2020-01.json"
+
+    def test_report_finds_the_archive_it_lists_as_available(self, shared_source, tmp_path, capsys):
+        self._archived_month(tmp_path)
+        t = _make_shared_tracker(shared_source)
+        assert t.list_archived_months() == ["2020-01"]
+
+        t.print_usage_report(month="2020-01")
+        out = capsys.readouterr().out
+        assert "No archive found" not in out
