@@ -1,0 +1,322 @@
+# =============================================================================
+#  PU AI Sandbox — annotated plugin template
+# =============================================================================
+#
+#  Copy this file to start a new plugin:
+#
+#      mkdir -p plugins/myplugin
+#      cp plugin.py.template plugins/myplugin/plugin.py
+#      python main.py --help          # your command should now appear
+#
+#  Everything below is commented in full. Delete whatever you don't need —
+#  a working plugin can be about thirty lines. For a complete, working
+#  example rather than a skeleton, read `plugins/prompt/plugin.py`, which is
+#  a real plugin written to be read as a reference.
+#
+#  ---------------------------------------------------------------------------
+#  What a plugin is
+#  ---------------------------------------------------------------------------
+#
+#  A plugin adds a command to the sandbox — `translate`, `transcribe`,
+#  `prompt` are all plugins. The main program knows nothing about any of
+#  them: at startup it looks in `plugins/`, loads every `plugin.py` it
+#  finds, and asks each one what commands it provides.
+#
+#  This is deliberate, and it is the single most important thing to
+#  understand about this codebase. **Adding a plugin never requires editing
+#  anything in `src/`.** If you find yourself needing to change core code to
+#  make your plugin work, something has gone wrong — please open an issue
+#  rather than working around it, because that's a gap in the plugin
+#  contract and other people will hit it too.
+#
+#  ---------------------------------------------------------------------------
+#  The contract
+#  ---------------------------------------------------------------------------
+#
+#  Your `plugin.py` must define a module-level object named `plugin`. There
+#  is no base class to inherit from — the loader just checks that your
+#  object has the right attributes ("structural typing"). See
+#  `src/runtime/plugin.py` for the formal description.
+#
+#  There are two shapes a plugin can take. Most plugins are the first.
+#
+#  1. STANDALONE — owns a command outright. Needs:
+#         commands             list of command names
+#         register_subparsers  add your flags to the command line
+#         run                  do the work
+#
+#  2. EXTENSION — adds languages or options to a command another plugin
+#     already owns (this is how the East Asian language packs extend
+#     `translate` and `transcribe`). Needs:
+#         commands                list of command names, same as the base plugin's
+#         handles                 which language codes YOU are responsible for
+#         register_command_flags  add extra flags to the existing command
+#         run                     do the work for your languages
+#
+#     When two plugins claim the same command and both declare `handles`,
+#     the loader merges them automatically (see
+#     `src/runtime/dispatch_plugin.py`) and routes each request to whichever
+#     plugin owns that language. Neither plugin needs to know the other
+#     exists.
+#
+#  This template shows the standalone form.
+# =============================================================================
+
+from __future__ import annotations
+
+import argparse
+import importlib.util
+import logging
+import sys
+from pathlib import Path
+from typing import Optional
+
+_PLUGIN_DIR = Path(__file__).parent
+
+
+# =============================================================================
+#  Registering your own files  (delete this section if your plugin is one file)
+# =============================================================================
+#
+#  Your plugin lives in `plugins/myplugin/`, but any *service* it owns — the
+#  class that actually talks to the AI model — needs to be reachable under a
+#  `src.services.*` name, because that's where `SandboxProcessor` looks when
+#  a plugin asks for a service.
+#
+#  `_register()` below loads one of your files and files it under the name
+#  core will look for. This is what lets `SandboxProcessor` find your
+#  service without core containing a single line about your plugin.
+#
+#  The naming rule: registering `src.services.myplugin_service` means
+#  `sandbox.myplugin_service` will find the class `MyPluginService` inside
+#  it, created on first use. Underscores become capitals: `foo_bar_service`
+#  → `FooBarService`.
+#
+#  Two other things use the same mechanism:
+#
+#    * ORCHESTRATION METHODS — if your command needs a multi-step method on
+#      the sandbox itself (like `translate_document`), register a module
+#      under `src.runtime.<name>` that exports a class named exactly `Mixin`.
+#      `SandboxProcessor` picks up every such `Mixin` at import time.
+#
+#    * SETTINGS — register `pu_plugin.<yourname>.settings` and any constants
+#      in it become importable as `from src.settings import YOUR_CONSTANT`.
+#      Put defaults in `plugins/myplugin/settings.toml`.
+#
+#  IMPORTANT: register at import time — at the bottom of this section, not
+#  inside `run()`. Core inspects what's been registered while it is being
+#  imported, and anything registered later is missed.
+
+def _register(module_name: str, rel_path: str, override: bool = False) -> None:
+    """Make one of this plugin's files importable under the name core expects.
+
+    Args:
+        module_name: The name to register under (e.g.
+                     ``'src.services.myplugin_service'``).
+        rel_path: Where the file really is, relative to this plugin's own
+                  directory (e.g. ``'src/services/myplugin_service.py'``).
+        override: Normally ``False``: if another plugin already registered
+                  this name, leave theirs alone. Pass ``True`` only if your
+                  plugin is deliberately *replacing* another's module — an
+                  extension language pack that must supply its own prompts,
+                  for instance. Two plugins that both register the same name
+                  without expecting to will silently get whichever loaded
+                  first, so prefer a name that includes your plugin's name.
+    """
+    if module_name in sys.modules and not override:
+        return
+    path = _PLUGIN_DIR / rel_path
+    if not path.exists():
+        return
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    if spec and spec.loader:
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules[module_name] = mod
+        spec.loader.exec_module(mod)  # type: ignore[union-attr]
+    # Also hang the module off its parent package, so that attribute-style
+    # access (and pytest's monkeypatch) resolves it correctly.
+    parts = module_name.rsplit(".", 1)
+    if len(parts) == 2:
+        parent = sys.modules.get(parts[0])
+        if parent is not None:
+            setattr(parent, parts[1], sys.modules[module_name])
+
+
+# Register your own modules here, at import time:
+# _register("src.services.myplugin_service", "src/services/myplugin_service.py")
+# _register("pu_plugin.myplugin.settings",   "src/settings.py")
+
+
+# =============================================================================
+#  Imports from the main program
+# =============================================================================
+#  These work because the repository root is always on the import path.
+#  They come after _register() above, which is why they carry `noqa: E402`
+#  (a note telling the linter this ordering is deliberate).
+
+from src.cli import add_common_flags   # -o, -m, -t, -T, -M, --dry-run  # noqa: E402
+from src.errors import CLIError        # noqa: E402
+
+logger = logging.getLogger(__name__)
+
+
+class MyPlugin:
+    """One-line description of what your command does.
+
+    Write this for a colleague in your own department, not for a
+    programmer — this docstring is the first thing someone reads when
+    working out whether your plugin does what they need.
+    """
+
+    # ── Which commands this plugin owns ──────────────────────────────────────
+    commands: list[str] = ["mycommand"]
+
+    # ── Optional: commands that don't belong to one professor ────────────────
+    #  By default every command takes a professor name as its first argument,
+    #  because it spends that professor's API budget. Set this to False only
+    #  if yours genuinely doesn't (the `webui` plugin does, because which
+    #  professor is active is chosen later, in the browser).
+    #
+    # requires_professor: bool = False
+
+    def register_subparsers(self, subparsers: argparse._SubParsersAction) -> None:
+        """Add this plugin's command and flags to the command line.
+
+        Called once at startup, before anything runs. ``subparsers`` is the
+        shared registry that collects every plugin's commands into a single
+        ``--help`` listing.
+
+        Args:
+            subparsers: The shared command registry, passed in by the CLI.
+        """
+        p = subparsers.add_parser(
+            "mycommand",
+            help="Short help text — this appears in `python main.py --help`",
+        )
+        p.add_argument(
+            "input_file",
+            type=str,
+            help="Describe what the user should put here, with an example",
+        )
+        # Adds the flags every command shares, so yours behaves like the rest.
+        add_common_flags(p)
+
+    def run(
+        self,
+        args: argparse.Namespace,
+        professor: str,
+        model: Optional[str],
+        temperature: Optional[float],
+        top_p: Optional[float],
+        max_tokens: Optional[int],
+    ) -> None:
+        """Do the work. Called when someone runs your command.
+
+        Args:
+            args: The parsed command-line flags for this run.
+            professor: Whose API key and budget this run uses (e.g. ``'heller'``).
+            model: A model named on the command line, or ``None`` for your default.
+            temperature: Requested sampling temperature (how varied the
+                         wording is), or ``None`` for the default.
+            top_p: Requested nucleus-sampling value (another way of
+                   controlling variety), or ``None`` for the default.
+            max_tokens: Requested cap on response length, or ``None``.
+
+        Raises:
+            CLIError: For anything the *user* needs to fix — a missing file,
+                      a bad option. The message is shown as plain text and
+                      the program exits; raise this rather than letting a
+                      raw error reach them as a wall of red text.
+        """
+        # Imported here, not at the top of the file. SandboxProcessor works
+        # out which plugins provide which capabilities at the moment it is
+        # first imported, and that must not happen until every plugin has
+        # finished loading. Importing it inside run() guarantees that.
+        from src.runtime.sandbox_processor import SandboxProcessor
+
+        input_path = Path(args.input_file)
+        if not input_path.exists():
+            raise CLIError(
+                f"Could not find the file '{input_path}'.\n"
+                "Check the spelling, or give the full path to it."
+            )
+
+        # SandboxProcessor resolves the professor's API key, sets up token
+        # and cost tracking, wires up any alternate AI endpoint, and creates
+        # your service the first time you ask for it.
+        sandbox = SandboxProcessor(
+            professor,
+            model=model,
+            temperature=temperature,
+            top_p=top_p,
+            max_tokens=max_tokens,
+        )
+
+        # `sandbox.myplugin_service` finds MyPluginService in the module you
+        # registered above, and creates it on first use.
+        #
+        # result = sandbox.myplugin_service.do_the_thing(input_path.read_text())
+        # print(result)
+
+        logger.info("mycommand finished for %s", professor)
+
+
+# =============================================================================
+#  The object the loader looks for. This line is required.
+# =============================================================================
+
+plugin = MyPlugin()
+
+
+# =============================================================================
+#  Optional: a button in the web interface
+# =============================================================================
+#
+#  Declaring a `ui_action` makes your command available in the web
+#  interface's message box as a form, so a professor can run it without a
+#  terminal. Entirely optional, and it changes nothing about how your
+#  command behaves on the command line.
+#
+#  Suited to commands that chew through a document page by page and produce
+#  one output file. See `plugins/translation/plugin.py` for a full example,
+#  and the "Optional: Web UI Composer Entry" section of
+#  docs/plugin-authoring-guide.md for the details.
+#
+# from src.runtime.ui_action import UiAction, UiField, UiJobResult
+#
+# ui_action = UiAction(
+#     id="mycommand",
+#     label="Do the thing",
+#     command="mycommand",
+#     progress_verb="Doing",          # shown as "Doing... 3 of 12 done."
+#     fields=[
+#         UiField(name="file", kind="file", label="Document"),
+#     ],
+# )
+# plugin.ui_action = ui_action
+#
+# def run_ui_action(fields, professor, model, on_progress, output_dir, on_page_text=None):
+#     """Run as a background job from the web interface instead of the terminal."""
+#     ...
+#     return UiJobResult(summary="Done: 12 pages", output_filename="out.docx", output_path="...")
+#
+# plugin.run_ui_action = run_ui_action
+
+
+# =============================================================================
+#  Before you open a pull request
+# =============================================================================
+#
+#  * Does `python main.py --help` list your command?
+#  * Does `python main.py <professor> mycommand --dry-run` work without
+#    spending anything?
+#  * Did you avoid editing anything in `src/`? (If you couldn't, say so in
+#    the pull request — that's useful information, not a failing.)
+#  * Do your docstrings explain things to a colleague in your field rather
+#    than to a programmer? See the "Documentation & docstring standard"
+#    section of CLAUDE.md.
+#  * Add tests under `plugins/myplugin/tests/` and add that path to
+#    `pytest.ini`'s `testpaths`.
+#
+#  Full walkthrough: docs/plugin-authoring-guide.md
+# =============================================================================
