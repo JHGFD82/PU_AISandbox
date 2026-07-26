@@ -55,6 +55,9 @@ class DispatchPlugin:
         source_registry: A dictionary mapping each source-language token
                          (e.g. ``'jp'`` for Japanese) to the plugin that
                          handles it.
+        handles: Every source-language token owned by any plugin merged so
+                 far. See the property below for why a dispatcher needs to
+                 report this the same way a real plugin does.
     """
 
     def __init__(self, command: str, primary: "ModePlugin") -> None:
@@ -74,6 +77,30 @@ class DispatchPlugin:
         self.source_registry: dict[str, "ModePlugin"] = {
             token: primary for token in getattr(primary, "handles", [])
         }
+
+    @property
+    def handles(self) -> list[str]:
+        """Return every source-language token any merged plugin owns.
+
+        A dispatcher has to answer this question the same way an ordinary
+        plugin does, because the plugin loader uses "do both sides declare
+        ``handles``?" to decide whether two plugins claiming one command can
+        be merged or are a genuine conflict.
+
+        Without this, only the *first* two plugins for a command could ever
+        merge: once a dispatcher had replaced them, a third plugin claiming
+        the same command would find a dispatcher with no ``handles`` of its
+        own, fail that check, and be skipped with a "command already
+        registered by another plugin" warning — which points at the wrong
+        cause and is misleading to whoever wrote that third plugin. With this
+        property, a third (and fourth, and so on) language extension merges
+        in exactly like the second.
+
+        Returns:
+            The source-language tokens owned so far (e.g.
+            ``['en', 'jp', 'ko']``), in the order they were registered.
+        """
+        return list(self.source_registry)
 
     def _absorb(self, plugin: "ModePlugin", plugin_name: str) -> None:
         """Add another plugin's owned tokens into this dispatcher.

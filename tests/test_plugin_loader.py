@@ -205,10 +205,16 @@ class TestDispatchMerging:
         # first plugin wins
         assert "translate" in result
 
-    def test_three_plugins_with_handles_third_warns(self, tmp_path, caplog):
-        """Two plugins with handles merge into a DispatchPlugin.  A third plugin
-        with handles is not absorbed (DispatchPlugin has no 'handles' attribute)
-        and emits a conflict warning instead."""
+    def test_three_plugins_with_handles_all_merge(self, tmp_path, caplog):
+        """A third plugin declaring handles merges into the existing DispatchPlugin.
+
+        This used to fail: the dispatcher exposed no 'handles' of its own, so
+        the loader's "do both sides declare handles?" check said no, and the
+        third plugin was dropped with a misleading "already registered"
+        warning.  DispatchPlugin.handles now reports every token owned so
+        far, so a third (or fourth) language extension merges exactly like
+        the second did.
+        """
         import logging
         for name, handles in [("alpha", ["en"]), ("beta", ["jp"]), ("gamma", ["zh"])]:
             _write_plugin(tmp_path, name, f"""
@@ -223,11 +229,14 @@ class TestDispatchMerging:
         with caplog.at_level(logging.WARNING, logger="src.runtime.plugin_loader"):
             result = load_plugins(tmp_path)
         from src.runtime.dispatch_plugin import DispatchPlugin
-        assert isinstance(result["translate"], DispatchPlugin)
-        assert "en" in result["translate"].source_registry
-        assert "jp" in result["translate"].source_registry
-        # gamma was already-registered, so it warns rather than absorbs
-        assert "already registered" in caplog.text
+        dispatcher = result["translate"]
+        assert isinstance(dispatcher, DispatchPlugin)
+        assert "en" in dispatcher.source_registry
+        assert "jp" in dispatcher.source_registry
+        assert "zh" in dispatcher.source_registry
+        assert set(dispatcher.handles) == {"en", "jp", "zh"}
+        # No plugin was dropped, so nothing should have complained.
+        assert "already registered" not in caplog.text
 
 
 # ---------------------------------------------------------------------------
