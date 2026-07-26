@@ -22,14 +22,25 @@ DEFAULT_FALLBACK_MODEL = "gpt-4o-mini"
 # translation where each worker would otherwise call load_model_catalog() for
 # every API call.
 #
-# The cache is keyed on both the resolved file path and its mtime so that:
+# The cache is keyed on the resolved file path plus a "has this file changed?"
+# stamp, so that:
 #   a) test fixtures that redirect get_model_catalog_path() to a tmp file get
 #      a fresh read automatically.
 #   b) any writer (including test helpers that bypass save_model_catalog) that
-#      modifies the file on disk invalidates the cache via the changed mtime.
+#      modifies the file on disk invalidates the cache.
+#
+# The stamp is (modification time in nanoseconds, size in bytes), not the plain
+# whole-second-ish mtime this used to use. Two writes to the same file in quick
+# succession can land in the same mtime tick — some filesystems only record the
+# time to the nearest second, and even high-resolution ones can report the same
+# float for two writes microseconds apart. When that happened, the file had
+# changed but the stamp hadn't, so this kept serving the previous contents:
+# a professor who hand-edited model_catalog.json while the web interface was
+# running would be told their newly added model doesn't exist. Nanosecond
+# precision plus the file size makes an unnoticed change far less likely.
 _catalog_cache: Optional[Dict[str, Any]] = None
 _catalog_cache_path: Optional[Path] = None
-_catalog_cache_mtime: Optional[float] = None
+_catalog_cache_stamp: Optional[tuple[int, int]] = None
 
 
 def get_model_catalog_path() -> Path:
@@ -38,14 +49,39 @@ def get_model_catalog_path() -> Path:
     return Path(__file__).parent.parent / MODEL_CATALOG_FILE
 
 
+def _file_change_stamp(path: Path) -> Optional[tuple[int, int]]:
+    """Return a small value that changes whenever *path*'s contents change.
+
+    Used to decide whether the cached catalog is still current. The value is
+    the file's last-modified time (in nanoseconds) paired with its size in
+    bytes; comparing it against the previously recorded value answers "has
+    this file been rewritten since we last read it?" without re-reading and
+    re-parsing the whole file.
+
+    Args:
+        path: The file to inspect.
+
+    Returns:
+        A ``(modified_time_ns, size_in_bytes)`` pair, or ``None`` if the file
+        can't be inspected at all (most often because it doesn't exist yet).
+    """
+    try:
+        stat = os.stat(path)
+    except OSError:
+        return None
+    return (stat.st_mtime_ns, stat.st_size)
+
+
 def load_model_catalog() -> Dict[str, Any]:
     """Read the model catalog file and return its contents.
 
     To avoid re-opening the file on every API call during a long translation
     job, the result is kept in memory after the first read and reused for the
-    rest of the session (caching). The cache is automatically discarded if the
-    file on disk has been modified since the last read, so edits to
-    ``model_catalog.json`` always take effect on the next call.
+    rest of the session (caching). The remembered copy is discarded and the
+    file re-read whenever its modification time or size has changed since the
+    last read, so hand-edits to ``model_catalog.json`` take effect on the next
+    call — including while a long-running process such as the web interface is
+    already up.
 
     Returns:
         A dictionary with two top-level keys: ``'config'`` (global settings
@@ -58,18 +94,15 @@ def load_model_catalog() -> Dict[str, Any]:
         ValueError: If the file contains invalid JSON or is missing required
             sections.
     """
-    global _catalog_cache, _catalog_cache_path, _catalog_cache_mtime
+    global _catalog_cache, _catalog_cache_path, _catalog_cache_stamp
 
     catalog_file = get_model_catalog_path()
-    try:
-        current_mtime: Optional[float] = os.path.getmtime(catalog_file)
-    except OSError:
-        current_mtime = None
+    current_stamp = _file_change_stamp(catalog_file)
 
     if (
         _catalog_cache is not None
         and _catalog_cache_path == catalog_file
-        and _catalog_cache_mtime == current_mtime
+        and _catalog_cache_stamp == current_stamp
     ):
         return _catalog_cache
 
@@ -110,9 +143,14 @@ def load_model_catalog() -> Dict[str, Any]:
         logging.error(error_msg)
         raise ValueError(error_msg)
 
+    # Deliberately records the stamp taken *before* the file was read, not a
+    # fresh one. If the file changed while we were reading it, the stamp we
+    # store is already out of date, so the next call re-reads — one wasted
+    # read, which is the harmless direction. Re-stamping here would instead
+    # pair the new stamp with possibly-older contents and cache them.
     _catalog_cache = config
     _catalog_cache_path = catalog_file
-    _catalog_cache_mtime = current_mtime
+    _catalog_cache_stamp = current_stamp
     return config
 
 
