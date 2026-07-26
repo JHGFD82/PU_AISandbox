@@ -40,7 +40,9 @@ class TestMarkdownProcessor:
 
     def test_missing_file_raises_exception(self, tmp_path):
         missing = str(tmp_path / "nonexistent.md")
-        with pytest.raises(Exception):
+        # The code under test raises a bare Exception today. Narrow this to
+        # CLIError once processors stop doing that (§5.5 of the code review).
+        with pytest.raises(Exception):  # noqa: B017 — see note below
             MarkdownProcessor.process_markdown_with_pages(missing)
 
     def test_large_file_splits_into_pages(self, tmp_path):

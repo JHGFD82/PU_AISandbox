@@ -126,7 +126,7 @@ def load_model_catalog() -> Dict[str, Any]:
     except json.JSONDecodeError as e:
         error_msg = f"Invalid JSON in model catalog file {catalog_file}: {e}"
         logging.error(error_msg)
-        raise ValueError(error_msg)
+        raise ValueError(error_msg) from e
 
     if "config" not in config:
         error_msg = f"Model catalog file {catalog_file} missing required 'config' section."

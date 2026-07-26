@@ -5,10 +5,8 @@ import zlib
 from io import BytesIO
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 from src.processors.pdf_media_extractor import PdfMediaExtractor
-from src.models.embedded_media import EmbeddedMedia
 
 
 # ---------------------------------------------------------------------------
@@ -80,7 +78,6 @@ class TestExtractImageException:
     def test_extract_image_exception_is_skipped(self):
         """When doc.extract_image() raises, that xref is silently skipped."""
         import fitz
-        import sys, types
 
         # Build a real PDF with one image first, then intercept extract_image
         doc = fitz.open()
@@ -171,7 +168,6 @@ class TestPixelDimensionFallback:
     def test_image_without_bbox_uses_pixel_dimensions(self):
         """When no bbox is found, width/height fall back to pixel-based EMU estimate."""
         import fitz
-        import sys, types
 
         doc = fitz.open()
         page = doc.new_page(width=595, height=842)

@@ -6,7 +6,6 @@ Tests for small utility modules:
 """
 
 import logging
-import pytest
 from unittest.mock import MagicMock, patch
 
 
@@ -83,7 +82,7 @@ class TestTqdmLogging:
 
     def test_handler_swapped_inside_context(self):
         root = logging.getLogger()
-        original_count = len(root.handlers)
+        len(root.handlers)
         with tqdm_logging():
             # Inside the context, exactly one handler (the tqdm one) should be active
             assert len(root.handlers) == 1
@@ -97,7 +96,6 @@ class TestTqdmLogging:
     def test_handler_emit_calls_handleError_on_tqdm_write_failure(self):
         """When tqdm.write raises, _TqdmLoggingHandler.emit should call handleError."""
         from src.services.parallel_utils import _TqdmLoggingHandler
-        from unittest.mock import patch, MagicMock as _MM
         handler = _TqdmLoggingHandler()
         record = logging.LogRecord("test", logging.INFO, "", 0, "msg", (), None)
         handle_error_calls = []

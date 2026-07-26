@@ -520,7 +520,7 @@ class TestStartJob:
                 professor="heller", model=None,
                 conversation_id=conv.id, conversation_store=store, job_store=job_store,
             )
-            _wait_until(lambda: job_store.get(job.id).status != "running")
+            _wait_until(lambda job=job: job_store.get(job.id).status != "running")
 
         reloaded = store.load(conv.id)
         notices = [m for m in reloaded.messages if m.kind == "job_notice"]

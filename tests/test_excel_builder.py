@@ -1,6 +1,5 @@
 """Tests for ExcelBuilder (save_to_excel)."""
 
-import json
 from pathlib import Path
 
 import pytest
@@ -92,7 +91,6 @@ class TestSaveToExcel:
         out = str(tmp_path / "err.xlsx")
         with pytest.MonkeyPatch.context() as mp:
             import openpyxl as _opx
-            original_save = _opx.Workbook.save
 
             def bad_save(self, filename):
                 raise OSError("disk full")

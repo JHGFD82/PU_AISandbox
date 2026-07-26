@@ -1,14 +1,9 @@
 """Tests for src/runtime/command_runner.py — _CommandMixin methods."""
 
 import argparse
-import sys
-from typing import Optional
-from unittest.mock import patch
 
-import pytest
 
 from src.runtime.command_runner import _CommandMixin
-from src.errors import CLIError
 
 
 # ---------------------------------------------------------------------------

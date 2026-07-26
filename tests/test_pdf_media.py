@@ -10,15 +10,13 @@ import struct
 import zlib
 from io import BytesIO
 from pathlib import Path
-from typing import List
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import patch
 
 import pytest
 
 from src.output.file_output import FileOutputHandler
 from src.processors.pdf_media_extractor import PdfMediaExtractor
 from src.models.embedded_media import EmbeddedMedia
-from src.errors import CLIError
 
 _PLUGINS_DIR = Path(__file__).parent.parent / "plugins"
 
@@ -84,11 +82,8 @@ class TestSaveToPdfWithTableRegistry:
         registry = {"[TABLE_1]": [["Header A", "Header B"], ["Cell 1", "Cell 2"]]}
         content = "Intro\n\n[TABLE_1]\n\nConclusion"
 
-        captured_flowables = []
 
-        from reportlab.platypus import Table as RLTable
 
-        original_save_to_pdf = FileOutputHandler.save_to_pdf
 
         # We just verify it runs without error and produces a real PDF file.
         FileOutputHandler.save_to_pdf(content, out, table_registry=registry, label="Translation")
@@ -289,7 +284,7 @@ class TestSaveToDocxPageMarkerInsertion:
             position_fraction=0.5, page_number=1,
         )]
         FileOutputHandler.save_to_docx(content, out, media=media, label="Translation")
-        texts = self._para_texts(out)
+        self._para_texts(out)
         # Image paragraph has no text; locate it by finding the empty-run para
         from docx import Document
         doc = Document(out)

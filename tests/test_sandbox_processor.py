@@ -95,7 +95,6 @@ class TestSandboxProcessorInit:
             raising=False,
         )
         # Patch load_api_config inside the sandbox_processor module namespace
-        import src.runtime.sandbox_processor as _sp_mod
         import src.services.api_config as _cfg_mod
         original_load = _cfg_mod.load_api_config
 

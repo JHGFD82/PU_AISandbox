@@ -9,7 +9,6 @@ Tests for cli.main() and setup_logging() (no API calls):
   - main() with unknown command → CLIError → sys.exit(1)
 """
 
-import sys
 from argparse import Namespace
 from unittest.mock import MagicMock, patch
 

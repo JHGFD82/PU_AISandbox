@@ -8,8 +8,7 @@ Covers:
 """
 
 import logging
-from typing import Any
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -240,7 +239,7 @@ class TestRecordResponseUsage:
             def __iter__(self):
                 return iter([])
 
-        stream = _FakeStream()
+        _FakeStream()
         # Make it look like an ABCIterator instance
         with patch("src.services.base_service.ABCIterator", Iterator):
             with pytest.raises(AssertionError):

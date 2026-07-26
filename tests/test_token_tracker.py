@@ -1045,7 +1045,6 @@ class TestPrintUsageReport:
         assert "2026-02-27" in out
 
     def test_archived_month_missing_prints_not_found(self, tmp_path, capsys):
-        import json
         data_file = str(tmp_path / "token_usage_testprof.json")
         t = TokenTracker("testprof", data_file=data_file, monthly_limit=250.0)
 

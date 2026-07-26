@@ -1,7 +1,7 @@
 """Coverage tests for src/runtime/document_handler.py — uncovered branches."""
 
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 from src.errors import CLIError
 from src.models import OutputOptions

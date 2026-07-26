@@ -143,6 +143,8 @@ class TestSendPrompt:
         exc = Exception("rate_limit")
         with patch.object(svc, "_create_completion", side_effect=exc), \
              patch("src.services.prompt_service.handle_api_errors") as mock_handle:
-            with pytest.raises(Exception):
+            # The code under test raises a bare Exception today. Narrow this to
+            # CLIError once processors stop doing that (§5.5 of the code review).
+            with pytest.raises(Exception):  # noqa: B017 — see note below
                 svc.send_prompt("q")
         mock_handle.assert_called_once_with(exc, "gpt-4o")

@@ -8,15 +8,21 @@ ready for translation.
 
 import logging
 from typing import List
-from abc import ABC
 
 
-class BaseTextProcessor(ABC):
+class BaseTextProcessor:
     """Foundation for processors that extract text from document files.
 
     Provides ``split_text_into_pages`` and ``parse_text_into_paragraphs`` —
     the two shared steps that every text-based processor needs before handing
     content to the translation service.
+
+    Not an abstract base class, despite the name: it declares nothing that a
+    subclass is obliged to implement, and both of its methods are usable
+    directly off the class (the tests do exactly that). It was previously
+    marked ``ABC``, which implied "you can't use this on its own" — untrue,
+    since Python only enforces that when there are abstract methods to leave
+    unimplemented.
     """
     
     @staticmethod

@@ -43,5 +43,5 @@ class TxtProcessor(BaseTextProcessor):
                 
         except Exception as e:
             logging.error(f"Error processing text file: {e}")
-            raise Exception(f"Failed to process text file: {e}")
+            raise Exception(f"Failed to process text file: {e}") from e
     

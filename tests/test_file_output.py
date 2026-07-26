@@ -11,11 +11,9 @@ Tests for file output utilities:
 """
 
 import logging
-from datetime import datetime
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 from src.output.file_output import FileOutputHandler, generate_output_filename
 
@@ -731,7 +729,6 @@ class TestPdfBuilderInlineMarkdownAndParagraphError:
     def test_paragraph_error_in_pdf_builder_logs_warning(self, tmp_path, caplog):
         """Patching reportlab.platypus.Table to raise during table rendering
         triggers the table-error except branch in pdf_builder (lines 118-119)."""
-        from reportlab.platypus import Table as RealTable
 
         def bad_table(*args, **kwargs):
             raise Exception("table render error")

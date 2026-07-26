@@ -1123,7 +1123,8 @@ class TestTranslateTextPagesProgress:
             return ["t"] * len(all_triples)
 
         monkeypatch.setattr(svc, "_translate_pages_parallel", fake_parallel)
-        on_progress = lambda done, total: None
+        def on_progress(done, total):
+            return None
         svc.translate_text_pages(
             ["p1", "p2"], None, "English", "Japanese", workers=2, on_progress=on_progress,
         )
@@ -1444,7 +1445,10 @@ class TestProcessImageTranslationBlankShortCircuit:
             finish_reason = "stop"
 
         class _Resp:
-            id = "r"; model = "gpt-4o"; usage = _Usage(); choices = [_Choice()]
+            id = "r"
+            model = "gpt-4o"
+            usage = _Usage()
+            choices = [_Choice()]
 
         monkeypatch.setattr(svc, "_create_completion", lambda *a, **kw: _Resp())
         transcript, translation = svc.process_image_translation("content.png", "Japanese", "English")

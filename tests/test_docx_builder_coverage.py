@@ -1,9 +1,6 @@
 """Coverage tests for src/output/docx_builder.py — uncovered branches."""
 
 import logging
-import pytest
-from io import BytesIO
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from src.models.embedded_media import EmbeddedMedia
@@ -63,7 +60,7 @@ class TestSaveToDocxImportErrorFallback:
             raise RuntimeError("disk full")
 
         # Patch Document() to raise
-        with patch("src.output.docx_builder.save_to_docx") as mock_fn:
+        with patch("src.output.docx_builder.save_to_docx"):
             # Instead, test _fallback_to_text directly
             pass
 
@@ -89,7 +86,7 @@ class TestSaveToDocxNoParagraphsFallback:
         out = tmp_path / "empty.docx"
         # Empty string produces no paragraphs
         save_to_docx("", str(out), label="Translation")
-        fallback = tmp_path / "empty.txt"
+        tmp_path / "empty.txt"
         # Either the docx was saved (contains a default empty para) or fallback was used.
         # Either path should not crash — this test just validates no exception.
 
@@ -111,7 +108,8 @@ class TestSaveToDocxImageInsertion:
 
     def test_valid_png_is_inserted_without_error(self, tmp_path):
         """A minimal PNG can be inserted via save_to_docx (happy path)."""
-        import struct, zlib
+        import struct
+        import zlib
         # Build a 1×1 red PNG
         def make_minimal_png():
             def chunk(tag, data):

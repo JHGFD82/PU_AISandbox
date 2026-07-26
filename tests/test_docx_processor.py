@@ -1,10 +1,8 @@
 """Tests for src/processors/docx_processor.py — uncovered methods."""
 
-import logging
 from io import BytesIO
 from typing import List
 
-import pytest
 
 from src.processors.docx_processor import DocxProcessor
 from src.models.doc_block import ParagraphBlock, TableBlock

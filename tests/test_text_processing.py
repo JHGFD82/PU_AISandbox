@@ -6,7 +6,6 @@ Tests for BaseTextProcessor static methods:
 These are pure functions with no I/O or network dependencies.
 """
 
-import pytest
 
 from src.processors.base_text_processor import BaseTextProcessor
 

@@ -312,4 +312,6 @@ class TestUiActionPassthrough:
     def test_unrelated_unknown_attribute_still_raises(self):
         dp, _primary = _make_dispatcher(["en"])
         with pytest.raises(AttributeError):
-            dp.something_totally_unrelated
+            # Assigned rather than left bare so it reads as a deliberate
+            # lookup (which must fail), not a stray line.
+            _ = dp.something_totally_unrelated

@@ -65,7 +65,7 @@ class DocxProcessor(BaseTextProcessor):
             raise ImportError(
                 "python-docx is required to process Word documents. "
                 "Install it with: pip install python-docx"
-            )
+            ) from None
     
     @staticmethod
     def process_docx_with_pages(file_obj: BinaryIO, target_page_size: int = DEFAULT_PAGE_SIZE) -> List[str]:
@@ -106,7 +106,7 @@ class DocxProcessor(BaseTextProcessor):
                 
         except Exception as e:
             logging.error(f"Error processing Word document: {e}")
-            raise Exception(f"Failed to process Word document: {e}")
+            raise Exception(f"Failed to process Word document: {e}") from e
 
     @staticmethod
     def extract_blocks(file_obj: BinaryIO) -> "List[Union[ParagraphBlock, TableBlock]]":

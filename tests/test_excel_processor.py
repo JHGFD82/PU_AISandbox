@@ -1,9 +1,6 @@
 """Tests for ExcelProcessor."""
 
-import io
-import os
-import tempfile
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -105,5 +102,7 @@ class TestExcelProcessor:
     def test_invalid_file_raises_exception(self, tmp_path):
         bad_file = tmp_path / "not_excel.xlsx"
         bad_file.write_bytes(b"not a real xlsx file")
-        with pytest.raises(Exception):
+        # The code under test raises a bare Exception today. Narrow this to
+        # CLIError once processors stop doing that (§5.5 of the code review).
+        with pytest.raises(Exception):  # noqa: B017 — see note below
             ExcelProcessor.process_excel_with_pages(str(bad_file))

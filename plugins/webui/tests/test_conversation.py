@@ -362,7 +362,7 @@ class TestConversationStore:
 
     def test_corrupted_file_skipped_in_listing(self, store, tmp_path):
         (tmp_path / "heller" / "c_broken.json").write_text("{not valid json")
-        conv = store.create(model="gpt-4o", title="Good one")
+        store.create(model="gpt-4o", title="Good one")
         listed = store.list_conversations()
         assert [c["title"] for c in listed] == ["Good one"]
 

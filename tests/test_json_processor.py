@@ -1,7 +1,6 @@
 """Tests for JsonProcessor."""
 
 import json
-import os
 
 import pytest
 
@@ -12,22 +11,22 @@ class TestFlattenValue:
 
     def test_flat_dict(self):
         lines = _flatten_value({"a": 1, "b": "hello"})
-        assert any("a: 1" in l for l in lines)
-        assert any("b: hello" in l for l in lines)
+        assert any("a: 1" in line for line in lines)
+        assert any("b: hello" in line for line in lines)
 
     def test_nested_dict(self):
         lines = _flatten_value({"outer": {"inner": "value"}})
-        assert any("outer" in l for l in lines)
-        assert any("inner: value" in l for l in lines)
+        assert any("outer" in line for line in lines)
+        assert any("inner: value" in line for line in lines)
 
     def test_list_of_primitives(self):
         lines = _flatten_value([10, 20, 30])
-        assert any("[0]: 10" in l for l in lines)
+        assert any("[0]: 10" in line for line in lines)
 
     def test_list_of_dicts(self):
         lines = _flatten_value([{"x": 1}])
-        assert any("[0]" in l for l in lines)
-        assert any("x: 1" in l for l in lines)
+        assert any("[0]" in line for line in lines)
+        assert any("x: 1" in line for line in lines)
 
     def test_primitive_value(self):
         lines = _flatten_value("hello")

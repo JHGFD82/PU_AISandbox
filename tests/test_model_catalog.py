@@ -8,7 +8,6 @@ from unittest.mock import patch
 
 import src.models.catalog as catalog_module
 import src.models.pricing as pricing_module
-import src.models.resolver as resolver_module
 from src.models import (
     DEFAULT_FALLBACK_MODEL,
     get_available_models,
@@ -491,7 +490,6 @@ class TestLoadModelCatalogMissingFileError:
 # ---------------------------------------------------------------------------
 
 from src.models import add_model_to_catalog  # noqa: E402
-from src.models.pricing import _fetch_model_pricing  # noqa: E402
 
 
 def _make_fake_fetch(input_price=2.5, output_price=10.0, supports_vision=None):
@@ -636,7 +634,6 @@ class TestSaveModelCatalogExceptionPath:
             return fd, path
 
         # Make os.replace fail after the temp file is written
-        original_replace = os.replace
 
         def bad_replace(src, dst):
             raise OSError("simulated replace failure")
@@ -653,7 +650,6 @@ class TestSaveModelCatalogExceptionPath:
     ):
         """If both os.replace and os.unlink fail, the OSError from unlink is
         suppressed and the original replace failure is re-raised."""
-        import tempfile as _tempfile
 
         output_file = tmp_path / "model_catalog.json"
         monkeypatch.setattr(catalog_module, "get_model_catalog_path", lambda: output_file)
@@ -675,7 +671,6 @@ class TestSaveModelCatalogExceptionPath:
 # _fetch_model_pricing — zero-price raises RuntimeError (pricing.py line 46)
 # ---------------------------------------------------------------------------
 
-import io
 
 
 class TestFetchModelPricing:

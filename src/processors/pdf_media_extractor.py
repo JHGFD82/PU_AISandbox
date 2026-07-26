@@ -75,7 +75,7 @@ class PdfMediaExtractor:
             raise ImportError(
                 "PyMuPDF is required for PDF media extraction. "
                 "Install it with: pip install pymupdf"
-            )
+            ) from None
 
         from ..models.embedded_media import EmbeddedMedia
 

@@ -1,11 +1,8 @@
 """Tests for src/runtime/plugin_loader.py — load_plugins and _load_one."""
 
-import sys
 import textwrap
 from pathlib import Path
-from unittest.mock import MagicMock
 
-import pytest
 
 from src.runtime.plugin_loader import load_plugins
 

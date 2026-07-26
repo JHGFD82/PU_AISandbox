@@ -1,6 +1,5 @@
 """Coverage tests for src/output/_output_utils.py."""
 
-import pytest
 
 from src.output._output_utils import (
     _parse_md_table_block,

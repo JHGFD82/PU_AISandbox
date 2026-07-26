@@ -9,19 +9,14 @@ Covers:
   - FileOutputHandler.save_translation_output() media forwarding
 """
 
-import argparse
-import io
 import struct
 import zlib
 from io import BytesIO
 from pathlib import Path
-from typing import List
 from unittest.mock import patch
 
-import pytest
 
 from src.models.embedded_media import EmbeddedMedia
-from src.models.output_options import OutputOptions
 
 _PLUGINS_DIR = Path(__file__).parent.parent / "plugins"
 
@@ -171,7 +166,7 @@ class TestDocxProcessorTableExtraction:
 
     def test_table_cells_tab_separated(self):
         from src.processors.docx_processor import DocxProcessor
-        buf = self._make_docx_with_table(rows=1, cols=3)
+        self._make_docx_with_table(rows=1, cols=3)
         # Overwrite cells so we know exact content
         from docx import Document
         buf2 = BytesIO()
@@ -297,7 +292,7 @@ class TestSaveTranslationOutputMediaForwarding:
                 label="Translation",
             )
         mock_docx.assert_called_once()
-        _, kwargs = mock_docx.call_args[0], mock_docx.call_args[1]
+        _, _kwargs = mock_docx.call_args[0], mock_docx.call_args[1]
         assert mock_docx.call_args[1].get("media") == media or mock_docx.call_args[0][4] == media
 
     def test_no_media_forwarded_when_none(self, tmp_path):

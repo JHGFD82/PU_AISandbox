@@ -2,7 +2,7 @@
 
 import logging
 from pathlib import Path
-from typing import List, Optional
+from typing import List
 
 from ._output_utils import _emit_message, _parse_md_table_block, save_to_text_file
 
@@ -36,7 +36,7 @@ def save_to_excel(
         from openpyxl.styles import Font
     except ImportError:
         _emit_message(
-            f"Warning: openpyxl not installed — saving as .txt instead of .xlsx",
+            "Warning: openpyxl not installed — saving as .txt instead of .xlsx",
             level=logging.WARNING,
         )
         text_path = str(Path(output_path).with_suffix(".txt"))
