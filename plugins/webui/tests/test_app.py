@@ -384,12 +384,18 @@ class TestChat:
     def test_chat_service_failure_emits_error_event(self, unlocked_client, monkeypatch):
         """Once streaming has begun the HTTP status can't change, so a failure
         partway through the model call surfaces as an in-band SSE error event
-        instead of an HTTP error status (unlike the old one-shot /api/chat)."""
+        instead of an HTTP error status (unlike the old one-shot /api/chat).
+
+        An unexpected error's own text is deliberately *not* forwarded: it's
+        written for whoever maintains the installation and can quote internal
+        details back to the browser. The professor gets a plain message and a
+        reference code instead.
+        """
         create = unlocked_client.post("/api/conversations", json={"professor": "heller", "model": "gpt-4o"})
         conv_id = create.json()["id"]
 
         def _boom(*a, **kw):
-            raise RuntimeError("upstream API error")
+            raise RuntimeError("upstream API error at /etc/secret/path")
         monkeypatch.setattr("src.runtime.sandbox_processor.SandboxProcessor", _boom)
 
         resp = unlocked_client.post("/api/chat", json={
@@ -399,7 +405,31 @@ class TestChat:
         events = _parse_sse(resp.text)
         assert len(events) == 1
         assert events[0]["type"] == "error"
-        assert "upstream API error" in events[0]["message"]
+        message = events[0]["message"]
+        assert "upstream API error" not in message
+        assert "/etc/secret/path" not in message
+        # A reference code the professor can quote to whoever helps them.
+        assert re.search(r"reference [0-9a-f]{8}", message)
+
+    def test_chat_user_facing_error_is_shown_verbatim(self, unlocked_client, monkeypatch):
+        """A CLIError is wording meant for the person using the tool (e.g. a
+        rate limit or a model they can't access), so it reaches the browser
+        unchanged rather than being replaced by the generic message."""
+        from src.errors import CLIError
+
+        create = unlocked_client.post("/api/conversations", json={"professor": "heller", "model": "gpt-4o"})
+        conv_id = create.json()["id"]
+
+        def _boom(*a, **kw):
+            raise CLIError("Rate limit exceeded: please wait a moment and try again.")
+        monkeypatch.setattr("src.runtime.sandbox_processor.SandboxProcessor", _boom)
+
+        resp = unlocked_client.post("/api/chat", json={
+            "professor": "heller", "conversation_id": conv_id, "message": "Hi", "model": "gpt-4o",
+        })
+        events = _parse_sse(resp.text)
+        assert events[0]["type"] == "error"
+        assert events[0]["message"] == "Rate limit exceeded: please wait a moment and try again."
 
     def test_user_message_is_saved_even_if_the_model_call_fails(self, unlocked_client, monkeypatch):
         """The user's message is persisted before the model is called at all,

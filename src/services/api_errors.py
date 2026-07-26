@@ -4,6 +4,7 @@ import logging
 import os
 from enum import Enum
 
+from ..errors import CLIError
 from ..models import (
     is_model_access_error,
     is_sampling_param_deprecated_error,
@@ -80,18 +81,24 @@ def is_transient_error(error: Exception) -> bool:
 
 
 def raise_for_model_access_error(error: Exception, model: str) -> None:
-    """Raise a user-friendly ValueError if *error* is a model-access denial.
+    """Raise a user-friendly CLIError if *error* is a model-access denial.
 
     Removes the model from the catalog before raising so subsequent calls
     will not attempt to use it again. Does nothing if the error is not a
     model-access denial.
+
+    Raises:
+        CLIError: If this was a model-access denial. ``CLIError`` (rather
+                  than a general-purpose error type) marks the message as one
+                  written for the person using the tool, so both the CLI and
+                  the web interface know they can show it as-is.
     """
     if not is_model_access_error(str(error)):
         return
     removed = remove_model_from_catalog(model) if model else False
     removed_note = " It has been removed from the catalog." if removed else ""
     logging.error(f"Model access denied for {model!r}: {error}")
-    raise ValueError(
+    raise CLIError(
         f"Model '{model}' is not accessible in the Princeton AI Sandbox — "
         f"you do not have access to this model.{removed_note} "
         "Please use a different model or contact your sandbox administrator."
@@ -99,13 +106,17 @@ def raise_for_model_access_error(error: Exception, model: str) -> None:
 
 
 def raise_for_deprecated_sampling_params(error: Exception, model: str) -> None:
-    """Raise a user-friendly ValueError if *error* shows this model has dropped
+    """Raise a user-friendly CLIError if *error* shows this model has dropped
     support for temperature/top-p entirely.
 
     Marks the model ``fixed_parameters: true`` in the catalog before raising,
     so a retry (whether the user resends the message or a caller retries the
     call) omits those parameters and succeeds. Does nothing if the error does
     not match this pattern.
+
+    Raises:
+        CLIError: If this was a deprecated-sampling-parameter rejection. See
+                  ``raise_for_model_access_error()`` for why this error type.
     """
     if not is_sampling_param_deprecated_error(str(error)):
         return
@@ -116,7 +127,7 @@ def raise_for_deprecated_sampling_params(error: Exception, model: str) -> None:
         if updated else ""
     )
     logging.error(f"Model '{model}' rejected sampling parameters as deprecated: {error}")
-    raise ValueError(
+    raise CLIError(
         f"Model '{model}' no longer accepts temperature/top-p adjustments — "
         f"the gateway reported these as deprecated for this model.{updated_note}"
     ) from error
@@ -136,15 +147,23 @@ def handle_api_errors(error: Exception, model: str) -> None:
     msg = str(error).lower()
     raise_for_model_access_error(error, model)
     raise_for_deprecated_sampling_params(error, model)
+    # These are raised as CLIError, not a bare Exception, because each one is
+    # a message meant for the person who ran the command — they describe
+    # something the user can act on (wait and retry, fix a setting, renew a
+    # key) rather than a fault in this program. That distinction is what lets
+    # the rest of the application show these directly while keeping genuinely
+    # internal failures out of the user's face: the CLI prints a CLIError as
+    # a plain message instead of a traceback, and the web interface shows it
+    # in the chat window instead of a generic "something went wrong".
     if "rate_limit" in msg:
         logging.error(f"Rate limit exceeded: {error}")
-        raise Exception(f"Rate limit exceeded: {error}") from error
+        raise CLIError(f"Rate limit exceeded: {error}") from error
     if "invalid_request" in msg:
         logging.error(f"Invalid request: {error}")
-        raise Exception(f"Invalid request: {error}") from error
+        raise CLIError(f"Invalid request: {error}") from error
     if "authentication" in msg or "unauthorized" in msg:
         logging.error(f"Authentication error: {error}")
-        raise Exception(f"Authentication error: {error}") from error
+        raise CLIError(f"Authentication error: {error}") from error
 
 
 def classify_api_error(error: Exception, model: str) -> APISignal:
@@ -166,5 +185,10 @@ def classify_api_error(error: Exception, model: str) -> APISignal:
     if is_content_filter_error(error):
         logging.error(f"Content filter triggered: {error}")
         return APISignal.CONTENT_FILTER
+    # Deliberately a plain Exception, not CLIError: nothing above recognised
+    # this error, so there's no message here worth putting in front of a user
+    # — just the raw text the gateway sent back. Leaving it un-marked is what
+    # keeps it out of the browser (see the chat route in the webui plugin),
+    # while the full detail still reaches the log above.
     logging.error(f"API call failed with {type(error).__name__}: {error}")
     raise Exception(f"API call failed with {type(error).__name__}: {error}") from error

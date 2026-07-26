@@ -30,11 +30,13 @@ exists on disk and that's what lets ``SandboxProcessor`` find it.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import secrets
 import shutil
 import sys
 import tempfile
+import uuid
 from datetime import datetime
 from pathlib import Path
 
@@ -55,6 +57,7 @@ from dataclasses import asdict
 
 from src import settings_store
 from src.config import load_professor_config
+from src.errors import CLIError
 from src.models import (
     DEFAULT_FALLBACK_MODEL,
     get_available_models,
@@ -281,6 +284,51 @@ def _require_unlocked(request: Request) -> None:
     """Raise a 401 error unless this browser session has already unlocked the app."""
     if not request.session.get("unlocked"):
         raise HTTPException(401, "Not unlocked.")
+
+
+def _chat_error_message(error: Exception) -> str:
+    """Turn an exception from a chat turn into something safe to show in the browser.
+
+    Two kinds of thing can go wrong during a chat turn, and they deserve
+    different treatment:
+
+    * Problems the professor can do something about — the model isn't
+      available to them, the rate limit was hit, the API key was rejected.
+      These are raised as ``CLIError`` precisely because their wording is
+      meant to be read by the person using the tool (see
+      ``src/services/api_errors.py``), so they're shown as-is.
+
+    * Everything else: a bug, a broken configuration file, an unexpected
+      response shape. The raw text of these is written for whoever maintains
+      the installation, not for a professor, and it can quote back internal
+      details such as file paths or the metadata a provider attached to its
+      error. Those get a short, plain reply instead.
+
+    Either way the full error and its traceback are written to the server log
+    — which previously wasn't happening at all, so a failed chat turn left no
+    trace anywhere for whoever had to explain it afterwards. Unrecognised
+    errors are given a short reference code that appears both in the log line
+    and in the browser message, so a professor can quote it and the person
+    helping them can find the exact traceback.
+
+    Args:
+        error: Whatever the chat turn raised.
+
+    Returns:
+        The message to send to the browser.
+    """
+    if isinstance(error, CLIError):
+        logging.warning("Chat turn failed with a user-facing error: %s", error)
+        return str(error)
+
+    reference = uuid.uuid4().hex[:8]
+    logging.exception("Chat turn failed unexpectedly [ref %s]", reference)
+    return (
+        "Something went wrong on the server while answering — this is a fault in "
+        "the sandbox, not something you did. Please try again. If it keeps "
+        f"happening, quote reference {reference} to whoever looks after this "
+        "installation; it will let them find the details in the server log."
+    )
 
 
 def create_app() -> FastAPI:
@@ -931,7 +979,7 @@ def create_app() -> FastAPI:
                     else:
                         final = event
             except Exception as e:
-                yield f"data: {json.dumps({'type': 'error', 'message': f'Chat request failed: {e}'})}\n\n"
+                yield f"data: {json.dumps({'type': 'error', 'message': _chat_error_message(e)})}\n\n"
                 return
 
             if final is None:
