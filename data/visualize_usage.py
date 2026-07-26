@@ -10,11 +10,9 @@ Usage:
 """
 
 import json
-import os
 import re
 import sys
 import webbrowser
-import tempfile
 from pathlib import Path
 from datetime import datetime
 from collections import defaultdict
@@ -26,7 +24,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from src.tracking.token_tracker import get_configured_data_roots, load_usage_tree  # noqa: E402
 
 DATA_DIR = Path(__file__).parent
-ARCHIVES_DIR = DATA_DIR / "archives"
 
 # Professors excluded from all reports (test/dev accounts)
 EXCLUDED_PROFESSORS = {"testprof", "warntest"}
@@ -98,9 +95,30 @@ def compute_summary(all_data: dict) -> dict:
         "total_tokens": total_tokens,
         "total_calls": total_calls,
         "professors": sorted(all_data.keys()),
-        "month_span": f"{get_all_months(all_data)[0]} → {get_all_months(all_data)[-1]}"
-                      if all_data else "—",
+        # Guarded on the month list itself, not on all_data. A professor can
+        # be present with no months recorded at all (an empty usage file, or
+        # one saved without a month), which makes all_data truthy while
+        # leaving nothing to index — previously an IndexError that took the
+        # whole report down rather than just showing a dash.
+        "month_span": _format_month_span(get_all_months(all_data)),
     }
+
+
+def _format_month_span(months: list) -> str:
+    """Describe the range of months covered, e.g. '2026-01 → 2026-07'.
+
+    Args:
+        months: Every month with recorded usage, sorted oldest first.
+
+    Returns:
+        A dash if there are no months at all, the single month if there's
+        only one, or ``'first → last'``.
+    """
+    if not months:
+        return "—"
+    if len(months) == 1:
+        return months[0]
+    return f"{months[0]} → {months[-1]}"
 
 
 # --- Chart data builders ------------------------------------------------------
