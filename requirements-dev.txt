@@ -1,0 +1,26 @@
+# Tools for working *on* the sandbox, as opposed to running it.
+#
+# You don't need any of this to use the sandbox — requirements.txt covers
+# that. Install these only if you're changing the code:
+#
+#     pip install -r requirements-dev.txt
+#
+# Then, before opening a pull request:
+#
+#     ruff check .      # should report nothing; see pyproject.toml
+#     pyright           # optional type checking; see pyrightconfig.json
+#     pytest -m "not live"
+#
+# The versions are pinned deliberately. Ruff's built-in defaults change
+# between releases, so an unpinned install means two people running
+# `ruff check .` on the same code get different answers — which is exactly
+# the confusion pyproject.toml exists to prevent.
+
+ruff==0.16.0
+pyright==1.1.390
+
+# Used by FastAPI's TestClient, which the web UI tests rely on. It currently
+# arrives indirectly as a dependency of `openai`, so the suite happens to
+# work without it being named anywhere — listed here so that stays true if
+# openai ever drops it.
+httpx

@@ -1,0 +1,67 @@
+# Project configuration for PU AI Sandbox.
+#
+# This file exists mainly to pin what `ruff check .` actually checks. Without
+# it, Ruff falls back to whatever its built-in defaults happen to be in the
+# version you have installed — so two people running the documented command
+# got different answers, and a newcomer running it for the first time could
+# be shown around a thousand complaints about code they hadn't touched.
+#
+# The rule of thumb: `ruff check .` should report nothing on a clean checkout.
+# If it reports something, it's about a change you just made.
+
+[project]
+name = "pu-ai-sandbox"
+version = "0.1.0"
+description = "A modular AI toolkit for Princeton University faculty."
+# tomllib (used to read the settings files) arrived in the standard library
+# in Python 3.11. See main.py, which checks this at startup and explains it
+# in plain language rather than failing with an import error.
+requires-python = ">=3.11"
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+extend-exclude = [".venv", "example_docs", "Presentation", "fonts"]
+
+[tool.ruff.lint]
+# Deliberately a short list. These are the rules that catch genuine mistakes:
+#   E4/E7/E9  import, statement and syntax errors
+#   F         undefined names, unused imports and variables (pyflakes)
+#   B         likely bugs — mutable default arguments, loop-variable capture,
+#             swallowed exception context (flake8-bugbear)
+#
+# Deliberately NOT enabled: UP (rewrite `Optional[str]` as `str | None`) and
+# SIM (collapse if/else into expressions). Both are style preferences rather
+# than bug-finders, and turning them on would flag ~500 places without making
+# anything more correct. If you'd like the codebase modernised that way it's
+# worth doing as its own deliberate pass, not as a permanent wall of warnings.
+select = ["E4", "E7", "E9", "F", "B"]
+
+[tool.ruff.lint.per-file-ignores]
+# Plugins must register their own modules before importing anything that
+# depends on that registration, so imports genuinely cannot all sit at the
+# top of the file. See plugin.py.template for why.
+"plugins/*/plugin.py" = ["E402"]
+
+# FastAPI's File()/Form()/Depends() are *meant* to be called in argument
+# defaults — that's how the framework declares what a request contains.
+# B008 is right in general and wrong here.
+"plugins/webui/src/app.py" = ["B008"]
+
+# Test files put the repository root on the import path before importing
+# from it, which necessarily happens after the first few imports.
+"**/tests/*" = ["E402"]
+"**/conftest.py" = ["E402"]
+
+# Standalone scripts do the same thing for the same reason.
+"scripts/*" = ["E402"]
+"data/visualize_usage.py" = ["E402"]
+
+# These six signatures default a parameter to `OutputOptions()`, which is
+# built once when the function is defined rather than per call. Harmless as
+# things stand — nothing ever modifies that object — but it is the kind of
+# shared default that bites badly the day someone does. Left as an ignore
+# rather than a silent pass: it is a known item in docs/code-review-2026-07.md
+# and should be fixed by taking `None` and constructing inside the function.
+"plugins/translation/src/runtime/document_handler.py" = ["B008"]
+"plugins/translation/src/services/translation_service.py" = ["B008"]
