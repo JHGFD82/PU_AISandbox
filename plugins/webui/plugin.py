@@ -160,14 +160,75 @@ class WebUiPlugin:
 plugin = WebUiPlugin()
 
 
+# Addresses that mean "only this computer can reach the server". Anything
+# else is reachable by other machines on the network — see _is_loopback_host().
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1", "[::1]"})
+
+
+def _is_loopback_host(host: str) -> bool:
+    """Return True if *host* can only be reached from this same computer.
+
+    A server listening on a loopback address (``127.0.0.1``, ``localhost``)
+    is invisible to everyone else — not to other people in the building, not
+    to the campus network. Listening on anything else, most commonly
+    ``0.0.0.0`` ("every network connection this computer has"), means other
+    machines can reach it.
+
+    Args:
+        host: The address the server has been asked to listen on.
+
+    Returns:
+        True if only this computer can reach it.
+    """
+    return host.strip().lower() in _LOOPBACK_HOSTS
+
+
 def _serve(args: argparse.Namespace) -> None:
-    """Start the local web server, falling back to this plugin's configured defaults for host/port."""
+    """Start the local web server, falling back to this plugin's configured defaults for host/port.
+
+    Raises:
+        CLIError: If the server has been asked to listen on an address other
+                  computers can reach while no unlock passphrase is set. See
+                  the check below for why that combination is refused.
+    """
     from src.settings import WEBUI_HOST, WEBUI_PORT
 
     host = getattr(args, "host", None) or WEBUI_HOST
     port = getattr(args, "port", None) or WEBUI_PORT
+
+    # Without a passphrase the web interface has no gate at all: anyone who
+    # opens it is straight into the chat screen. That's a reasonable default
+    # while the server is only reachable from this computer, and it's what
+    # keeps first-time setup painless. It stops being reasonable the moment
+    # the server is listening on an address other machines can reach, because
+    # then "anyone who opens it" means anyone on the network — and what's
+    # behind that door is every professor's conversation history, their usage
+    # and spending figures, and a chat box that spends their PortKey
+    # allocation.
+    #
+    # The person most likely to type --host 0.0.0.0 is someone trying to
+    # reach this from their iPad, and they are exactly the person least
+    # likely to connect that to a passphrase they never set. So rather than
+    # warn and continue, refuse to start and say precisely what to do.
+    auth = sys.modules["_pu_webui_auth"]
+    if not _is_loopback_host(host) and not auth.get_configured_backend().configured:
+        raise CLIError(
+            f"Refusing to start: --host {host} would let other computers on the "
+            "network reach this web interface, but no unlock passphrase is set, "
+            "so anyone reaching it would have full access to every professor's "
+            "conversations, spending data, and API budget.\n\n"
+            "Set a passphrase first:\n"
+            "    python main.py webui set-passphrase\n\n"
+            "Or leave the address alone to keep the web interface reachable only "
+            "from this computer:\n"
+            "    python main.py webui serve"
+        )
+
+    gate = "passphrase required" if auth.get_configured_backend().configured else "no passphrase set"
+    reach = "this computer only" if _is_loopback_host(host) else "reachable from other computers"
     app_module = sys.modules["_pu_webui_app"]
     print(f"Starting Princeton AI Sandbox web interface at http://{host}:{port}")
+    print(f"  Access: {reach} — {gate}")
     app_module.run_server(host=host, port=port)
 
 
