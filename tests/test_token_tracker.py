@@ -1280,3 +1280,34 @@ class TestConcurrentRecordUsage:
             t.join()
 
         assert len(concurrent_tracker.usage_data["session_history"]) == self.N_THREADS
+
+
+
+class TestUsageFileWithNoMonthRecorded:
+    """A usage file missing its 'month' key must not be archived to '.json'.
+
+    Comparing "" against a real month reads as "older than this month", which
+    sent the file into rollover: archived under an empty name, and the
+    professor's current totals silently zeroed.
+    """
+
+    def test_month_is_stamped_and_totals_survive(self, tmp_path, caplog):
+        import logging as _logging
+        data_file = tmp_path / "token_usage_testprof.json"
+        data_file.write_text(json.dumps({
+            "total_usage": UsageStats(
+                total_tokens=500, total_input_tokens=400, total_output_tokens=100,
+                total_cost=1.25, call_count=4,
+            ).to_dict(),
+            "model_usage": {}, "daily_usage": {}, "session_history": [],
+        }))
+
+        with caplog.at_level(_logging.WARNING):
+            with patch("src.tracking.token_tracker.get_monthly_limit", return_value=100.0):
+                t = TokenTracker("testprof", data_file=str(data_file), monthly_limit=100.0)
+
+        assert t.usage_data["total_usage"]["call_count"] == 4, "existing totals were discarded"
+        assert t.usage_data["month"] == t._get_current_month()
+        assert "no month recorded" in caplog.text
+        # Nothing should have been archived, least of all under an empty name.
+        assert not (tmp_path / ".json").exists()

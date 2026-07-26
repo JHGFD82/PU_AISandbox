@@ -487,6 +487,22 @@ class TokenTracker:
         # Rollover: file belongs to a past month → archive it and start fresh
         stored_month = data.get("month", "")
         current_month = self._get_current_month()
+        if not stored_month:
+            # A usage file with no month recorded at all. Comparing "" against
+            # a real month says "older than this month" and used to send this
+            # straight into rollover, where it was archived under the empty
+            # name — producing a file literally called ".json" and quietly
+            # emptying the professor's current totals. There's no way to tell
+            # which month such a file belongs to, so treat it as the current
+            # one and stamp it, which keeps the numbers and makes the file
+            # well-formed from here on.
+            logging.warning(
+                "Usage file for %s has no month recorded; treating it as the current "
+                "month (%s) and leaving its totals untouched.",
+                self.professor, current_month,
+            )
+            data["month"] = current_month
+            return data
         if stored_month < current_month:
             logging.info(f"Month rollover detected for {self.professor}: {stored_month} → {current_month}")
             self._archive_month(data, stored_month)
