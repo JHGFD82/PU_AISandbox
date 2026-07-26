@@ -42,10 +42,18 @@ For deeper documentation, see the `docs/` folder:
 
 ### 1. Create a virtual environment and install dependencies
 
+**You need Python 3.11 or newer.** Check what you have with `python3 --version`. If it's older, install a newer Python from [python.org](https://www.python.org/downloads/) (or `brew install python@3.11` on a Mac with Homebrew) and use that in place of `python3` below. The sandbox checks this at startup and will tell you if it's a problem, so you don't have to get it right first time.
+
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
+```
+
+If you plan to *change* the code rather than just use it, also install the development tools — a linter and a type checker:
+
+```bash
+pip install -r requirements-dev.txt
 ```
 
 ### 2. Configure professors
@@ -170,6 +178,45 @@ python main.py heller prompt -m cloud_provider:some-model
 ```
 
 See [`docs/cli-reference.md`](docs/cli-reference.md) for the full flag reference and [`docs/configuration.md`](docs/configuration.md) for endpoint setup.
+
+---
+
+## The Web Interface
+
+Everything above happens at the terminal. If you'd rather not work that way, the sandbox also has a browser interface: a chat window, a spending sidebar, and a form for running translation or transcription jobs on whole documents without typing a command.
+
+Start it:
+
+```bash
+python main.py webui serve
+```
+
+Then open **http://127.0.0.1:8000** in your browser. Leave the terminal window open — closing it stops the server. Press `Ctrl+C` there when you're finished.
+
+### What you can do in it
+
+- **Chat** with any model in your catalog, switching model, temperature and response length per conversation. Conversations are saved and reappear in the sidebar next time.
+- **Attach a document** to a question — a PDF, Word file, or spreadsheet — and ask about its contents.
+- **Run a translation or transcription** on a whole document or a folder, from a form rather than a command line. It runs in the background: you'll see per-page progress, and a download link when it finishes. You can keep chatting in another conversation while it works.
+- **Watch the spending** — this month's and all-time cost, broken down by model, updating as you go.
+- **Change settings** — add professors, set API keys, configure shared usage folders — from a settings page, instead of hand-editing `.settings`.
+
+### Who can reach it
+
+By default the server listens on `127.0.0.1`, which means **only your own computer can reach it**. Nobody else on the network can, so there's no password to set up and nothing to configure.
+
+If you want to reach it from another device — a tablet, or a second computer — you'll need to both open it up *and* set a passphrase, because opening it up without one would let anyone who can reach the port read every professor's conversations and spend their API budget. The sandbox will refuse to start in that combination and tell you so.
+
+```bash
+python main.py webui set-passphrase          # choose a passphrase (asked for at a hidden prompt)
+python main.py webui serve --host 0.0.0.0    # now reachable from other devices
+```
+
+Even then, be deliberate: this is a research tool holding real spending credentials, not something to leave open on a shared network.
+
+### If a job is interrupted
+
+Jobs run in memory, so restarting the server ends any job that was mid-run. The conversation will say so rather than sitting there looking busy forever. Every job form has a page-range field, so you can start a new job from wherever the last one stopped and combine the output files yourself.
 
 ---
 
