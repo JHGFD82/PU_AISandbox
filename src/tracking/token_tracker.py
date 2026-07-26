@@ -472,10 +472,49 @@ class TokenTracker:
         return data
 
     def _save_usage_data_to(self, data: dict[str, Any]) -> None:
-        """Write *data* to self.data_file."""
+        """Write *data* to self.data_file, replacing the old contents in one step.
+
+        The new contents are written to a temporary file alongside the real
+        one and only then moved into place, rather than opening the real file
+        and overwriting it directly. Writing directly would empty the file
+        first and fill it back in afterwards, leaving a brief moment where it
+        is half-written — and this file is read by other things while a run is
+        in progress: ``usage report`` from a second terminal, and the web
+        interface's spending sidebar, which polls it. A reader landing in that
+        moment sees an incomplete file and fails. Moving a finished file into
+        place is a single, indivisible step, so a reader always sees either
+        the complete old version or the complete new one.
+
+        This also means an interrupted run — a crash, a closed laptop, a
+        power cut — can no longer leave the month's accounting truncated:
+        the original file is untouched until the replacement is complete.
+
+        (This is the same approach ``ConversationStore.save()`` and
+        ``save_model_catalog()`` already use, for the same reason.)
+
+        Args:
+            data: The complete usage record to write, in the same shape
+                  ``_load_usage_data()`` returns.
+        """
         self.data_file.parent.mkdir(parents=True, exist_ok=True)
-        with open(self.data_file, "w") as f:
-            json.dump(data, f, indent=2)
+        # The temporary file goes in the same folder as the real one, because
+        # moving a file into place is only guaranteed to be a single step when
+        # both are on the same disk. Its name includes the process and thread
+        # doing the writing so two writers never reuse the same scratch file.
+        tmp_path = self.data_file.with_name(
+            f"{self.data_file.name}.{os.getpid()}.{threading.get_ident()}.tmp"
+        )
+        try:
+            with open(tmp_path, "w") as f:
+                json.dump(data, f, indent=2)
+            os.replace(tmp_path, self.data_file)
+        except Exception:
+            # Don't leave scratch files behind in data/ if the write failed.
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
 
     def _save_usage_data(self) -> None:
         """Save the current in-memory usage data."""
