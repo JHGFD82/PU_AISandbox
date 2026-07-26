@@ -122,3 +122,68 @@ class TestPrintPassphraseHash:
         from plugins.webui.plugin import _print_passphrase_hash
         with pytest.raises(CLIError, match="cannot be empty"):
             _print_passphrase_hash()
+
+
+class TestServeBindGuard:
+    """`webui serve` must not publish an ungated interface to the network.
+
+    With no passphrase set the interface has no gate at all, which is a fine
+    default while it's reachable only from this computer. Combined with a
+    host other machines can reach, it exposes every professor's
+    conversations, spending data, and API budget to anyone on the network.
+    """
+
+    @staticmethod
+    def _args(host):
+        return argparse.Namespace(host=host, port=8000)
+
+    @pytest.fixture
+    def no_passphrase(self, monkeypatch):
+        import plugins.webui.src.auth as auth_mod
+        monkeypatch.setattr(
+            auth_mod, "get_configured_backend", lambda: auth_mod.PassphraseBackend(passphrase_hash="")
+        )
+        return auth_mod
+
+    @pytest.fixture
+    def with_passphrase(self, monkeypatch):
+        import plugins.webui.src.auth as auth_mod
+        monkeypatch.setattr(
+            auth_mod,
+            "get_configured_backend",
+            lambda: auth_mod.PassphraseBackend(passphrase_hash=auth_mod.hash_passphrase("secret")),
+        )
+        return auth_mod
+
+    @pytest.mark.parametrize("host", ["0.0.0.0", "192.168.1.50", "::"])
+    def test_refuses_public_host_without_passphrase(self, host, no_passphrase, monkeypatch):
+        import plugins.webui.plugin as plugin_mod
+        monkeypatch.setitem(sys.modules, "_pu_webui_auth", no_passphrase)
+        with pytest.raises(CLIError) as exc:
+            plugin_mod._serve(self._args(host))
+        assert "set-passphrase" in str(exc.value)
+        assert host in str(exc.value)
+
+    @pytest.mark.parametrize("host", ["127.0.0.1", "localhost", "::1", "LocalHost"])
+    def test_allows_loopback_without_passphrase(self, host, no_passphrase, monkeypatch):
+        """The painless local default must keep working untouched."""
+        import plugins.webui.plugin as plugin_mod
+        started = {}
+        monkeypatch.setitem(sys.modules, "_pu_webui_auth", no_passphrase)
+        monkeypatch.setitem(
+            sys.modules, "_pu_webui_app",
+            type("M", (), {"run_server": staticmethod(lambda **kw: started.update(kw))})(),
+        )
+        plugin_mod._serve(self._args(host))
+        assert started == {"host": host, "port": 8000}
+
+    def test_allows_public_host_once_a_passphrase_is_set(self, with_passphrase, monkeypatch):
+        import plugins.webui.plugin as plugin_mod
+        started = {}
+        monkeypatch.setitem(sys.modules, "_pu_webui_auth", with_passphrase)
+        monkeypatch.setitem(
+            sys.modules, "_pu_webui_app",
+            type("M", (), {"run_server": staticmethod(lambda **kw: started.update(kw))})(),
+        )
+        plugin_mod._serve(self._args("0.0.0.0"))
+        assert started == {"host": "0.0.0.0", "port": 8000}
