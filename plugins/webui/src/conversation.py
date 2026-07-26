@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import secrets
 import threading
 from dataclasses import asdict, dataclass, field
@@ -23,6 +24,13 @@ from typing import Any, Optional
 # plugins/webui/src/conversation.py -> repo root is four parents up.
 _ROOT = Path(__file__).resolve().parent.parent.parent.parent
 CONVERSATIONS_DIR = _ROOT / "data" / "conversations"
+
+
+# The exact shape new_conversation_id() produces below: the letters "c_"
+# followed by 16 hexadecimal characters. Every id coming in from the browser
+# is checked against this before being used as a filename — see
+# ConversationStore._path().
+_CONVERSATION_ID_RE = re.compile(r"c_[0-9a-f]{16}")
 
 
 def new_conversation_id() -> str:
@@ -300,6 +308,30 @@ class ConversationStore:
         self._dir.mkdir(parents=True, exist_ok=True)
 
     def _path(self, conversation_id: str) -> Path:
+        """Return the file this conversation is stored in, refusing anything malformed.
+
+        Every id is checked against the exact shape
+        ``new_conversation_id()`` produces before it is turned into a
+        filename. This is a security check, not a tidiness one: an id
+        arrives from the browser, and it is pasted straight into a file
+        path. Without this, an id containing ``../`` would walk out of the
+        professor's own folder — letting a request read, overwrite, or
+        delete a ``.json`` file anywhere the server can reach.
+
+        The check lives here, in the one place every read and write funnels
+        through, rather than in each route that accepts an id. That way a
+        route added later inherits the protection automatically instead of
+        having to remember it.
+
+        Raises:
+            ValueError: If *conversation_id* isn't a well-formed id. Callers
+                        that are simply looking something up (``load``,
+                        ``delete``) catch this and report "not found"
+                        instead, since a malformed id can't name a real
+                        conversation anyway.
+        """
+        if not _CONVERSATION_ID_RE.fullmatch(conversation_id):
+            raise ValueError(f"Malformed conversation id: {conversation_id!r}")
         return self._dir / f"{conversation_id}.json"
 
     def list_conversations(self) -> list[dict[str, Any]]:
@@ -326,8 +358,18 @@ class ConversationStore:
         return summaries
 
     def load(self, conversation_id: str) -> Optional[Conversation]:
-        """Load one conversation by id, or None if it doesn't exist for this professor."""
-        path = self._path(conversation_id)
+        """Load one conversation by id, or None if it doesn't exist for this professor.
+
+        A malformed id counts as "doesn't exist" rather than an error: it
+        can't name a real conversation, and callers already handle ``None``
+        by reporting that nothing was found. Answering the same way for a
+        malformed id and a merely-absent one also avoids telling whoever
+        sent it which of the two it was.
+        """
+        try:
+            path = self._path(conversation_id)
+        except ValueError:
+            return None
         if not path.exists():
             return None
         return Conversation.from_dict(json.loads(path.read_text()))
@@ -364,8 +406,15 @@ class ConversationStore:
         return conv
 
     def delete(self, conversation_id: str) -> bool:
-        """Delete one conversation by id. Returns True if it existed."""
-        path = self._path(conversation_id)
+        """Delete one conversation by id. Returns True if it existed.
+
+        A malformed id returns ``False`` (nothing deleted) for the same
+        reason ``load()`` returns ``None`` — see its docstring.
+        """
+        try:
+            path = self._path(conversation_id)
+        except ValueError:
+            return False
         if path.exists():
             path.unlink()
             return True

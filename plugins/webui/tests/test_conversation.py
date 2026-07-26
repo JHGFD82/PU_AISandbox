@@ -115,8 +115,11 @@ class TestMessageAttachments:
 
 class TestConversationAttachmentRoundTrip:
     def _conv_with_attachment(self):
+        # A real-shaped id ("c_" + 16 hex characters), because one of the
+        # tests below saves this through ConversationStore, which rejects
+        # anything that isn't shaped like an id it could have issued itself.
         conv = Conversation(
-            id="c_test", title="Test", created_at="t", updated_at="t", model="gpt-4o",
+            id="c_0011223344556677", title="Test", created_at="t", updated_at="t", model="gpt-4o",
         )
         conv.messages.append(Message(
             role="user", content="What does this document say?", timestamp="t",
@@ -417,3 +420,59 @@ class TestConversationStore:
         r.join(timeout=1)
 
         assert errors == []
+
+
+class TestConversationIdValidation:
+    """The store must never turn a browser-supplied id into a path outside itself.
+
+    A conversation id arrives from the browser and is used as a filename.
+    Without a shape check, an id containing '../' walks out of the
+    professor's own folder — which made it possible to read, overwrite, or
+    delete any .json file the server could reach.
+    """
+
+    def _store(self, tmp_path):
+        return ConversationStore("heller", base_dir=tmp_path)
+
+    @pytest.mark.parametrize("bad_id", [
+        "../../victim",
+        "../victim",
+        "c_../../victim",
+        "c_0011223344556677/../../victim",
+        "/etc/passwd",
+        "c_SHORT",
+        "c_00112233445566778899",      # too long
+        "c_00112233445566ZZ",          # not hexadecimal
+        "",
+    ])
+    def test_malformed_ids_cannot_escape_the_store(self, tmp_path, bad_id):
+        store = self._store(tmp_path / "convs")
+        victim = tmp_path / "victim.json"
+        victim.write_text('{"id": "victim", "title": "SECRET", "created_at": "t", '
+                          '"updated_at": "t", "model": "gpt-4o", "messages": []}')
+
+        # Lookups report "not found" rather than raising, so routes keep
+        # returning their usual 404 instead of a server error.
+        assert store.load(bad_id) is None
+        assert store.delete(bad_id) is False
+        assert victim.exists(), "a file outside the store was reachable"
+
+    def test_save_refuses_a_malformed_id_outright(self, tmp_path):
+        """Unlike load/delete, saving with a bad id is a programming error, so it raises."""
+        store = self._store(tmp_path / "convs")
+        conv = Conversation(
+            id="../escape", title="T", created_at="t", updated_at="t", model="gpt-4o",
+        )
+        with pytest.raises(ValueError, match="Malformed conversation id"):
+            store.save(conv)
+
+    def test_ordinary_conversations_still_work(self, tmp_path):
+        """The check must not get in the way of the ids the store issues itself."""
+        store = self._store(tmp_path / "convs")
+        conv = store.create(model="gpt-4o")
+        conv.title = "Renamed"
+        store.save(conv)
+        assert store.load(conv.id).title == "Renamed"
+        assert [c["id"] for c in store.list_conversations()] == [conv.id]
+        assert store.delete(conv.id) is True
+        assert store.load(conv.id) is None
