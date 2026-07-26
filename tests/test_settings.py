@@ -12,6 +12,9 @@ settings module into any other test in the same session.
 
 import importlib
 import logging
+import sys
+
+import pytest
 
 import src.settings as settings_mod
 import src.settings_store as settings_store_mod
@@ -85,3 +88,74 @@ class TestLayeredLoadOrder:
         monkeypatch.setattr(settings_store_mod, "SETTINGS_PATH", tmp_path / ".settings")
         importlib.reload(settings_mod)
         assert isinstance(settings_mod.BUDGET_WARNING_THRESHOLD, int)
+
+
+class TestPluginSettingsLookup:
+    """src.settings.__getattr__ resolves constants defined by plugins.
+
+    Two things it must get right, both newly relevant now that the web
+    interface imports modules on demand from several threads at once.
+    """
+
+    def _fake_plugin_settings(self, monkeypatch, name, **values):
+        import types
+        mod = types.ModuleType(name)
+        for k, v in values.items():
+            setattr(mod, k, v)
+        monkeypatch.setitem(sys.modules, name, mod)
+        return mod
+
+    def test_finds_a_constant_defined_by_a_plugin(self, monkeypatch):
+        import src.settings as settings_mod
+        self._fake_plugin_settings(monkeypatch, "pu_plugin.demo.settings", DEMO_SETTING=42)
+        assert settings_mod.DEMO_SETTING == 42
+
+    def test_unknown_constant_still_raises(self, monkeypatch):
+        import src.settings as settings_mod
+        with pytest.raises(AttributeError):
+            # Assigned rather than left bare so it reads as a deliberate
+            # lookup that must fail, not a stray line.
+            _ = settings_mod.NO_SUCH_SETTING_ANYWHERE
+
+    def test_duplicate_constant_warns_and_names_both_plugins(self, monkeypatch, caplog):
+        """Which plugin wins depends on load order, so it must not be silent."""
+        import logging
+        import src.settings as settings_mod
+        self._fake_plugin_settings(monkeypatch, "pu_plugin.alpha.settings", SHARED_SETTING="a")
+        self._fake_plugin_settings(monkeypatch, "pu_plugin.beta.settings", SHARED_SETTING="b")
+        with caplog.at_level(logging.WARNING):
+            value = settings_mod.SHARED_SETTING
+        assert value in ("a", "b")
+        assert "SHARED_SETTING" in caplog.text
+        assert "pu_plugin.alpha.settings" in caplog.text
+        assert "pu_plugin.beta.settings" in caplog.text
+
+    def test_survives_modules_being_imported_while_it_looks(self, monkeypatch):
+        """Another thread importing mid-lookup must not break the lookup.
+
+        Iterating the live module registry raised "dictionary changed size
+        during iteration" the moment anything was imported on another thread
+        while this was scanning. The web interface imports on demand from
+        inside request handlers, so this was reachable in normal use.
+
+        Simulated by a module that inserts into sys.modules the moment the
+        scan touches it — the same mutation-while-iterating a real concurrent
+        import causes.
+        """
+        import types
+        import src.settings as settings_mod
+
+        inserting = types.ModuleType("pu_plugin.aaa_inserting.settings")
+
+        def _sneaky_getattr(attr):
+            # Runs during the scan's hasattr() check, mutating the registry
+            # the scan is walking.
+            sys.modules["pu_plugin.zzz_injected.settings"] = types.ModuleType("z")
+            raise AttributeError(attr)
+
+        inserting.__getattr__ = _sneaky_getattr
+        monkeypatch.setitem(sys.modules, "pu_plugin.aaa_inserting.settings", inserting)
+        self._fake_plugin_settings(monkeypatch, "pu_plugin.demo.settings", RACY_SETTING=7)
+        monkeypatch.delitem(sys.modules, "pu_plugin.zzz_injected.settings", raising=False)
+
+        assert settings_mod.RACY_SETTING == 7

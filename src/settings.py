@@ -29,6 +29,7 @@ this file, in ``.settings`` (since credentials are never meant to be shared
 or layered) — see ``src/services/api_config.py`` for how the two combine.
 """
 
+import logging
 import sys
 from pathlib import Path
 
@@ -69,10 +70,12 @@ try:
     with _TOML_PATH.open("rb") as _f:
         _s = tomllib.load(_f)
 except FileNotFoundError:
+    # `from None` because the message below says everything worth saying; the
+    # original "no such file" would only add noise above it.
     raise FileNotFoundError(
         f"settings.default.toml not found at {_TOML_PATH}. "
         "Copy settings.default.toml from the repository root and edit it to configure the sandbox."
-    )
+    ) from None
 
 # Layer 2: shared settings, only if .settings points at a real file.
 _shared_settings_path = settings_store.get_shared_settings_path()
@@ -128,13 +131,39 @@ def __getattr__(name: str):
     Any plugin that registers a module as ``pu_plugin.<name>.settings`` via
     ``_register()`` will have its constants available via ``from src.settings
     import <CONSTANT>`` without any changes to this file.
+
+    If two plugins define the same constant, the first one found wins and a
+    warning names both, since which one that is depends on load order rather
+    than on anything meaningful — a silent coin-toss over a configuration
+    value is worth knowing about.
     """
-    for mod_name, mod in sys.modules.items():
+    # Iterating over a *copy* of the module registry matters here. Python
+    # adds an entry to it every time anything is imported anywhere, and the
+    # web interface imports on demand from inside request handlers running on
+    # several threads at once. Iterating the live registry while another
+    # thread imports something raises "dictionary changed size during
+    # iteration" and fails a request for reasons having nothing to do with
+    # that request.
+    matches = [
+        (mod_name, mod)
+        for mod_name, mod in list(sys.modules.items())
         if (
-            mod_name.startswith("pu_plugin.") and
-            mod_name.endswith(".settings") and
-            mod is not None and
-            hasattr(mod, name)
-        ):
-            return getattr(mod, name)
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+            mod_name.startswith("pu_plugin.")
+            and mod_name.endswith(".settings")
+            and mod is not None
+            and hasattr(mod, name)
+        )
+    ]
+    if not matches:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    if len(matches) > 1:
+        logging.warning(
+            "The setting %r is defined by more than one plugin (%s). Using the one from "
+            "%r. Rename it in all but one of them — which plugin wins here depends on "
+            "the order they happened to load in, so this may behave differently on "
+            "another machine.",
+            name,
+            ", ".join(mod_name for mod_name, _ in matches),
+            matches[0][0],
+        )
+    return getattr(matches[0][1], name)
