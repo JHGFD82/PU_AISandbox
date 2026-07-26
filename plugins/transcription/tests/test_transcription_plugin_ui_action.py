@@ -365,6 +365,147 @@ class TestRunUiAction:
             )
 
 
+class TestRunUiActionEaExtensionFields:
+    """vertical/spread/passes and apply_extension_ui_hooks() — regression
+    coverage for extending the extension-plugin composer field mechanism
+    (already used for translate's Kanbun checkbox, see
+    plugins/translation/tests/test_translation_plugin_ui_action.py) to
+    transcribe. See this plugin's run_ui_action docstring for why
+    vertical/spread/passes are read directly here rather than through
+    apply_extension_ui_hooks — they're real keyword arguments
+    process_image/process_image_folder accept, not sandbox attributes.
+    """
+
+    def _patch_sandbox(self, monkeypatch, process_image_side_effect=None, process_folder_side_effect=None):
+        fake_sandbox = MagicMock()
+        fake_sandbox.image_processor_service = MagicMock()
+        if process_image_side_effect is not None:
+            fake_sandbox.process_image.side_effect = process_image_side_effect
+        if process_folder_side_effect is not None:
+            fake_sandbox.process_image_folder.side_effect = process_folder_side_effect
+        monkeypatch.setattr(
+            "src.runtime.sandbox_processor.SandboxProcessor",
+            MagicMock(return_value=fake_sandbox),
+        )
+        return fake_sandbox
+
+    def _write_output_file(self, file_path, target_language, output_file=None, **kw):
+        if output_file:
+            with open(output_file, "w", encoding="utf-8") as f:
+                f.write("extracted text")
+
+    def test_vertical_spread_passes_forwarded_to_process_image_folder(self, monkeypatch, plugin_module, tmp_path):
+        fake_sandbox = self._patch_sandbox(monkeypatch, process_folder_side_effect=self._write_output_file)
+        folder = tmp_path / "scans"
+        folder.mkdir()
+        (folder / "a.jpg").write_bytes(b"fake")
+
+        plugin_module.plugin.run_ui_action(
+            fields={
+                "target_language": "en", "file_path": str(folder), "file_name": "scans",
+                "vertical": "true", "spread": "on", "passes": "3",
+            },
+            professor="fake", model=None, on_progress=None, output_dir=str(tmp_path / "job_output"),
+        )
+        _, kwargs = fake_sandbox.process_image_folder.call_args
+        assert kwargs["vertical"] is True
+        assert kwargs["spread"] is True
+        assert kwargs["passes"] == 3
+
+    def test_vertical_spread_passes_forwarded_to_process_image(self, monkeypatch, plugin_module, tmp_path):
+        fake_sandbox = self._patch_sandbox(monkeypatch, process_image_side_effect=self._write_output_file)
+        src_file = tmp_path / "scan.jpg"
+        src_file.write_bytes(b"fake")
+
+        plugin_module.plugin.run_ui_action(
+            fields={
+                "target_language": "en", "file_path": str(src_file), "file_name": "scan.jpg",
+                "vertical": "true", "passes": "2",
+            },
+            professor="fake", model=None, on_progress=None, output_dir=str(tmp_path / "job_output"),
+        )
+        _, kwargs = fake_sandbox.process_image.call_args
+        assert kwargs["vertical"] is True
+        assert kwargs["spread"] is False
+        assert kwargs["passes"] == 2
+
+    def test_vertical_spread_passes_default_when_omitted(self, monkeypatch, plugin_module, tmp_path):
+        fake_sandbox = self._patch_sandbox(monkeypatch, process_folder_side_effect=self._write_output_file)
+        folder = tmp_path / "scans"
+        folder.mkdir()
+        (folder / "a.jpg").write_bytes(b"fake")
+
+        plugin_module.plugin.run_ui_action(
+            fields={"target_language": "en", "file_path": str(folder), "file_name": "scans"},
+            professor="fake", model=None, on_progress=None, output_dir=str(tmp_path / "job_output"),
+        )
+        _, kwargs = fake_sandbox.process_image_folder.call_args
+        assert kwargs["vertical"] is False
+        assert kwargs["spread"] is False
+        assert kwargs["passes"] == 1
+
+    def test_invalid_passes_raises_cli_error(self, monkeypatch, plugin_module, tmp_path):
+        self._patch_sandbox(monkeypatch, process_image_side_effect=self._write_output_file)
+        src_file = tmp_path / "scan.jpg"
+        src_file.write_bytes(b"fake")
+        with pytest.raises(CLIError, match="whole number"):
+            plugin_module.plugin.run_ui_action(
+                fields={
+                    "target_language": "en", "file_path": str(src_file), "file_name": "scan.jpg",
+                    "passes": "a couple",
+                },
+                professor="fake", model=None, on_progress=None, output_dir=str(tmp_path / "out"),
+            )
+
+    def test_passes_below_one_raises_cli_error(self, monkeypatch, plugin_module, tmp_path):
+        self._patch_sandbox(monkeypatch, process_image_side_effect=self._write_output_file)
+        src_file = tmp_path / "scan.jpg"
+        src_file.write_bytes(b"fake")
+        with pytest.raises(CLIError, match="at least 1"):
+            plugin_module.plugin.run_ui_action(
+                fields={
+                    "target_language": "en", "file_path": str(src_file), "file_name": "scan.jpg",
+                    "passes": "-1",
+                },
+                professor="fake", model=None, on_progress=None, output_dir=str(tmp_path / "out"),
+            )
+
+    def test_apply_extension_ui_hooks_called_with_resolved_code_and_fields(self, monkeypatch, plugin_module, tmp_path):
+        self._patch_sandbox(monkeypatch, process_image_side_effect=self._write_output_file)
+        src_file = tmp_path / "scan.jpg"
+        src_file.write_bytes(b"fake")
+        apply_mock = MagicMock()
+        monkeypatch.setattr(plugin_module, "apply_extension_ui_hooks", apply_mock)
+
+        submitted_fields = {
+            "target_language": "en", "file_path": str(src_file), "file_name": "scan.jpg",
+            "kanbun_mode": "kanbun",
+        }
+        plugin_module.plugin.run_ui_action(
+            fields=submitted_fields,
+            professor="fake", model=None, on_progress=None, output_dir=str(tmp_path / "out"),
+        )
+        apply_mock.assert_called_once()
+        args, _ = apply_mock.call_args
+        assert args[0] == "transcribe"
+        assert args[1] == "en"
+        assert args[3] == submitted_fields
+
+    def test_apply_extension_ui_hooks_is_a_noop_without_a_registered_extension(self, monkeypatch, plugin_module, tmp_path):
+        # No monkeypatching of apply_extension_ui_hooks here — this exercises
+        # the real function from src/runtime/ui_action.py, confirming an
+        # installation with no transcription-ea plugin (nothing registered
+        # for "en") behaves exactly as it did before this mechanism existed.
+        self._patch_sandbox(monkeypatch, process_image_side_effect=self._write_output_file)
+        src_file = tmp_path / "scan.jpg"
+        src_file.write_bytes(b"fake")
+        result = plugin_module.plugin.run_ui_action(
+            fields={"target_language": "en", "file_path": str(src_file), "file_name": "scan.jpg"},
+            professor="fake", model=None, on_progress=None, output_dir=str(tmp_path / "out"),
+        )
+        assert os.path.exists(result.output_path)
+
+
 class TestPreviewUiAction:
     """The composer's live two-pane prompt preview — must never raise on
     incomplete input (called after every keystroke, before a language or
@@ -411,3 +552,33 @@ class TestPreviewUiAction:
         )
         assert fake_sandbox.image_processor_service.system_note == "Ignore the stamp."
         assert fake_sandbox.image_processor_service.user_note == "Ignore the stamp."
+
+    def test_vertical_forwarded_to_build_prompts(self, monkeypatch, plugin_module):
+        fake_sandbox = self._patch_sandbox(monkeypatch)
+        plugin_module.plugin.preview_ui_action(
+            fields={"target_language": "en", "vertical": "true"}, professor="fake", model=None,
+        )
+        _, kwargs = fake_sandbox.image_processor_service.build_prompts.call_args
+        assert kwargs["vertical"] is True
+
+    def test_vertical_defaults_to_false(self, monkeypatch, plugin_module):
+        fake_sandbox = self._patch_sandbox(monkeypatch)
+        plugin_module.plugin.preview_ui_action(
+            fields={"target_language": "en"}, professor="fake", model=None,
+        )
+        _, kwargs = fake_sandbox.image_processor_service.build_prompts.call_args
+        assert kwargs["vertical"] is False
+
+    def test_apply_extension_ui_hooks_called_with_resolved_code(self, monkeypatch, plugin_module):
+        self._patch_sandbox(monkeypatch)
+        apply_mock = MagicMock()
+        monkeypatch.setattr(plugin_module, "apply_extension_ui_hooks", apply_mock)
+        submitted_fields = {"target_language": "en", "kanbun_mode": "kanbun"}
+        plugin_module.plugin.preview_ui_action(
+            fields=submitted_fields, professor="fake", model=None,
+        )
+        apply_mock.assert_called_once()
+        args, _ = apply_mock.call_args
+        assert args[0] == "transcribe"
+        assert args[1] == "en"
+        assert args[3] == submitted_fields

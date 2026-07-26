@@ -71,6 +71,14 @@ class TestUiActionDeclaration:
         required = {f.name for f in plugin_module.ui_action.fields if f.required}
         assert required == {"source_language", "target_language", "file"}
 
+    def test_file_field_allows_a_folder_of_images(self, plugin_module):
+        # translate's CLI already accepts -i pointed at a folder of page
+        # images (run()'s own os.path.isdir(input_path) branch, calling
+        # process_image_translation_folder) — the composer's file field
+        # must offer the same, matching transcribe's own file field.
+        field = next(f for f in plugin_module.ui_action.fields if f.name == "file")
+        assert field.allow_folder is True
+
     def test_field_kinds(self, plugin_module):
         kinds = {f.name: f.kind for f in plugin_module.ui_action.fields}
         assert kinds["source_language"] == "language"
@@ -456,6 +464,127 @@ class TestRunUiAction:
             )
 
 
+class TestRunUiActionFolderInput:
+    """A folder of page images uploaded via the composer's file field
+    (UiField.allow_folder=True) — mirrors transcribe's own folder-input
+    tests in plugins/transcription/tests/test_transcription_plugin_ui_action.py.
+    Routes through sandbox.process_image_translation_folder instead of
+    sandbox.translate_document, matching run()'s own os.path.isdir(input_path)
+    branch on the CLI side."""
+
+    def _patch_sandbox(self, monkeypatch, folder_side_effect=None):
+        fake_sandbox = MagicMock()
+        fake_sandbox.translation_service = MagicMock()
+        fake_sandbox.image_translation_service = MagicMock()
+        if folder_side_effect is not None:
+            fake_sandbox.process_image_translation_folder.side_effect = folder_side_effect
+        monkeypatch.setattr(
+            "src.runtime.sandbox_processor.SandboxProcessor",
+            MagicMock(return_value=fake_sandbox),
+        )
+        return fake_sandbox
+
+    def _write_output(self, *args, **kwargs):
+        opts = kwargs["opts"] if "opts" in kwargs else args[3]
+        with open(opts.output_file, "w", encoding="utf-8") as f:
+            f.write("translated content")
+
+    def test_folder_input_delegates_to_process_image_translation_folder(self, monkeypatch, plugin_module, tmp_path):
+        fake_sandbox = self._patch_sandbox(monkeypatch, folder_side_effect=self._write_output)
+        folder = tmp_path / "scans"
+        folder.mkdir()
+        (folder / "a.jpg").write_bytes(b"fake")
+        output_dir = tmp_path / "job_output"
+
+        result = plugin_module.plugin.run_ui_action(
+            fields={
+                "source_language": "ja", "target_language": "en",
+                "file_path": str(folder), "file_name": "scans",
+            },
+            professor="fake", model=None, on_progress=None, output_dir=str(output_dir),
+        )
+        fake_sandbox.process_image_translation_folder.assert_called_once()
+        fake_sandbox.translate_document.assert_not_called()
+        assert os.path.exists(result.output_path)
+        assert "scans" in result.summary
+
+    def test_on_progress_and_on_page_text_forwarded(self, monkeypatch, plugin_module, tmp_path):
+        fake_sandbox = self._patch_sandbox(monkeypatch, folder_side_effect=self._write_output)
+        folder = tmp_path / "scans"
+        folder.mkdir()
+        (folder / "a.jpg").write_bytes(b"fake")
+
+        def progress(done, total):
+            pass
+
+        def page_text(idx, text):
+            pass
+
+        plugin_module.plugin.run_ui_action(
+            fields={
+                "source_language": "ja", "target_language": "en",
+                "file_path": str(folder), "file_name": "scans",
+            },
+            professor="fake", model=None, on_progress=progress, output_dir=str(tmp_path / "out"),
+            on_page_text=page_text,
+        )
+        _, kwargs = fake_sandbox.process_image_translation_folder.call_args
+        assert kwargs["on_progress"] is progress
+        assert kwargs["on_page_text"] is page_text
+
+    def test_workers_and_spread_forwarded(self, monkeypatch, plugin_module, tmp_path):
+        fake_sandbox = self._patch_sandbox(monkeypatch, folder_side_effect=self._write_output)
+        folder = tmp_path / "scans"
+        folder.mkdir()
+        (folder / "a.jpg").write_bytes(b"fake")
+
+        plugin_module.plugin.run_ui_action(
+            fields={
+                "source_language": "ja", "target_language": "en",
+                "file_path": str(folder), "file_name": "scans",
+                "workers": "4", "spread": "true",
+            },
+            professor="fake", model=None, on_progress=None, output_dir=str(tmp_path / "out"),
+        )
+        _, kwargs = fake_sandbox.process_image_translation_folder.call_args
+        assert kwargs["workers"] == 4
+        assert kwargs["spread"] is True
+
+    def test_output_format_defaults_to_txt_for_a_folder(self, monkeypatch, plugin_module, tmp_path):
+        # file_name for a folder upload has no extension (e.g. "scans"),
+        # so the "same" default's docx-vs-txt gate falls to txt — matching
+        # transcribe's own folder-upload default.
+        self._patch_sandbox(monkeypatch, folder_side_effect=self._write_output)
+        folder = tmp_path / "scans"
+        folder.mkdir()
+        (folder / "a.jpg").write_bytes(b"fake")
+
+        result = plugin_module.plugin.run_ui_action(
+            fields={
+                "source_language": "ja", "target_language": "en",
+                "file_path": str(folder), "file_name": "scans",
+            },
+            professor="fake", model=None, on_progress=None, output_dir=str(tmp_path / "out"),
+        )
+        assert result.output_filename.endswith(".txt")
+
+    def test_preserve_media_with_a_folder_raises_cli_error(self, monkeypatch, plugin_module, tmp_path):
+        self._patch_sandbox(monkeypatch, folder_side_effect=self._write_output)
+        folder = tmp_path / "scans"
+        folder.mkdir()
+        (folder / "a.jpg").write_bytes(b"fake")
+
+        with pytest.raises(CLIError, match="no embedded media"):
+            plugin_module.plugin.run_ui_action(
+                fields={
+                    "source_language": "ja", "target_language": "en",
+                    "file_path": str(folder), "file_name": "scans",
+                    "output_format": "docx", "preserve_media": "true",
+                },
+                professor="fake", model=None, on_progress=None, output_dir=str(tmp_path / "out"),
+            )
+
+
 class TestPreviewUiAction:
     """The composer's live two-pane prompt preview — see UiPromptPreview's
     docstring in src/runtime/ui_action.py. Unlike run_ui_action, this must
@@ -584,6 +713,7 @@ class TestExtensionUiHooksIntegration:
         fake_sandbox = self._patch_sandbox(monkeypatch, translate_side_effect=self._write_output)
         calls = []
         register_extension_ui_hooks(
+            action_id="translate",
             token="ja",  # matches the "ja" -> Japanese registration this test file's own fixture adds
             fields=[UiField(name="kanbun", label="Use Kanbun conventions", kind="checkbox", required=False)],
             apply=lambda sandbox, fields: calls.append((sandbox, fields)),
@@ -608,7 +738,7 @@ class TestExtensionUiHooksIntegration:
         self._patch_sandbox(monkeypatch, translate_side_effect=self._write_output)
         calls = []
         register_extension_ui_hooks(
-            token="ja", fields=[], apply=lambda sandbox, fields: calls.append(1),
+            action_id="translate", token="ja", fields=[], apply=lambda sandbox, fields: calls.append(1),
         )
         src_file = tmp_path / "upload.txt"
         src_file.write_text("hello", encoding="utf-8")
@@ -649,7 +779,7 @@ class TestExtensionUiHooksIntegration:
         )
         calls = []
         register_extension_ui_hooks(
-            token="ja", fields=[], apply=lambda sandbox, fields: calls.append(fields),
+            action_id="translate", token="ja", fields=[], apply=lambda sandbox, fields: calls.append(fields),
         )
         plugin_module.plugin.preview_ui_action(
             fields={"source_language": "en", "target_language": "ja", "kanbun": "true"},

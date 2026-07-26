@@ -115,7 +115,10 @@ _register(
 from src.cli import add_common_flags, add_notes_flags           # noqa: E402
 from src.config import parse_single_language_code, register_language, LANGUAGE_MAP  # noqa: E402
 from src.errors import CLIError                                    # noqa: E402
-from src.runtime.ui_action import PageTextCallback, ProgressCallback, UiAction, UiField, UiJobResult, UiPromptPreview  # noqa: E402
+from src.runtime.ui_action import (  # noqa: E402
+    PageTextCallback, ProgressCallback, UiAction, UiField, UiJobResult, UiPromptPreview,
+    apply_extension_ui_hooks,
+)
 from src.services.constants import DEFAULT_PARALLEL_WORKERS        # noqa: E402
 
 # Register the language supported by this base plugin.
@@ -441,6 +444,28 @@ class TranscriptionPlugin:
           count; only the per-image live text preview (``on_page_text``
           below) is sequential-only — see ``on_progress``/``on_page_text``
           below.
+        - ``vertical`` / ``spread`` / ``passes``: optional, same meaning as
+          the ``transcription-ea`` extension's own ``--vertical``,
+          ``--spread``, and ``-P``/``--passes`` CLI flags. This base plugin
+          doesn't declare these in its own ``ui_action`` field list (see
+          below) — they're never shown, and never read as anything but
+          their defaults (``False``, ``False``, ``1``), unless a language
+          extension plugin registers them as its own composer fields via
+          ``register_extension_ui_hooks`` (see
+          ``src/runtime/ui_action.py``'s ``ExtensionUiHooks``) for whichever
+          destination-language token was picked. Read directly here (rather
+          than through ``apply_extension_ui_hooks`` below) because they're
+          real keyword arguments this method's own
+          ``sandbox.process_image``/``process_image_folder`` calls accept
+          — see those methods' own signatures — not settings an extension
+          can simply toggle as an attribute on the sandbox afterward.
+        - ``kanbun`` / ``kanbun_main`` / ``preserve_tables``: contributed
+          the same way, but applied through ``apply_extension_ui_hooks``
+          instead (see below) — these DO map onto plain attributes on
+          ``sandbox.image_processor_service`` (``.kanbun``, ``.kanbun_main``,
+          ``.tables``), the same shape ``translation/plugin.py``'s own
+          Kanbun example uses for ``variant_notes``, so an extension's
+          ``apply`` callback can just set them directly.
         - ``temperature`` / ``top_p`` / ``max_tokens``: optional sampling
           overrides, same as the CLI's ``-t``/``-T``/``-M`` flags. The web
           UI only shows these controls for models that accept them (see
@@ -510,6 +535,9 @@ class TranscriptionPlugin:
             except ValueError:
                 raise CLIError(f"Invalid {field_label} '{raw}' — must be a whole number.") from None
 
+        def _to_bool(value) -> bool:
+            return str(value if value is not None else "").strip().lower() in ("true", "1", "on", "yes")
+
         workers = _to_int(fields.get("workers"), "number of parallel workers") or 1
         if workers < 1:
             raise CLIError("Number of parallel workers must be at least 1.")
@@ -517,12 +545,36 @@ class TranscriptionPlugin:
         top_p = _to_float(fields.get("top_p"), "top-p")
         max_tokens = _to_int(fields.get("max_tokens"), "max tokens")
 
+        # Generic reads of vertical/spread/passes — see this method's own
+        # docstring above for why these are parsed unconditionally rather
+        # than through apply_extension_ui_hooks below: they're keyword
+        # arguments process_image/process_image_folder already accept
+        # (default False/False/1), not sandbox attributes an extension can
+        # toggle after the fact. Absent from every submission unless a
+        # language extension registered them as its own composer fields, in
+        # which case fields.get(...) just returns None/"" and these fall
+        # back to the same defaults as an installation with no extension.
+        vertical = _to_bool(fields.get("vertical"))
+        spread = _to_bool(fields.get("spread"))
+        passes = _to_int(fields.get("passes"), "number of OCR passes") or 1
+        if passes < 1:
+            raise CLIError("Number of OCR passes must be at least 1.")
+
         sandbox = SandboxProcessor(
             professor, model=model, temperature=temperature, top_p=top_p, max_tokens=max_tokens,
         )
         if notes:
             sandbox.image_processor_service.system_note = notes
             sandbox.image_processor_service.user_note = notes
+        # A language-extension plugin's own composer fields (e.g.
+        # transcription-ea's kanbun/kanbun_main/preserve_tables checkboxes)
+        # — registered separately, not part of this plugin's own declared
+        # fields, so they're applied through the shared registry rather
+        # than read directly here. A no-op when nothing is registered for
+        # this target-language token (the normal case without that
+        # extension installed). See translation/plugin.py's matching call
+        # for the sibling mechanism this mirrors.
+        apply_extension_ui_hooks("transcribe", code, sandbox, fields)
 
         base_name = os.path.splitext(file_name)[0] or "transcription"
         # Extension-driven format choice, same idea as -o on the CLI (the
@@ -540,11 +592,15 @@ class TranscriptionPlugin:
         if os.path.isdir(file_path):
             sandbox.process_image_folder(
                 file_path, target_language, output_path,
+                vertical=vertical, spread=spread, passes=passes,
                 workers=workers, on_progress=on_progress, on_page_text=on_page_text,
             )
             summary = f"Transcribed the images in '{file_name}' to {target_language}."
         else:
-            sandbox.process_image(file_path, target_language, output_path)
+            sandbox.process_image(
+                file_path, target_language, output_path,
+                vertical=vertical, spread=spread, passes=passes,
+            )
             summary = f"Transcribed {file_name} to {target_language}."
 
         if not os.path.exists(output_path):
@@ -591,13 +647,19 @@ class TranscriptionPlugin:
         code = (fields.get("target_language") or "").strip().lower()
         target_language = LANGUAGE_MAP.get(code, "the selected language")
         notes = (fields.get("notes") or "").strip() or None
+        vertical = str(fields.get("vertical", "")).strip().lower() in ("true", "1", "on", "yes")
 
         sandbox = SandboxProcessor(professor, model=model)
         if notes:
             sandbox.image_processor_service.system_note = notes
             sandbox.image_processor_service.user_note = notes
+        # Same extension-hook call run_ui_action makes (see its own comment
+        # there) — so a professor previewing a Japanese/Chinese/Korean job
+        # sees the kanbun/preserve-tables guidance actually reflected in the
+        # preview panel, not just applied silently once the job runs.
+        apply_extension_ui_hooks("transcribe", code, sandbox, fields)
 
-        sys_p, usr_p = sandbox.image_processor_service.build_prompts(target_language)
+        sys_p, usr_p = sandbox.image_processor_service.build_prompts(target_language, vertical=vertical)
         return UiPromptPreview(
             system_prompt=sys_p,
             user_prompt=usr_p,

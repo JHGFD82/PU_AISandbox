@@ -79,16 +79,20 @@ directory and adapt it as follows:
      translation rather than the source (see its docstring below for
      details).
 
-  8. Optionally call ``register_extension_ui_hooks(token, fields, apply)``
+  8. Optionally call ``register_extension_ui_hooks(action_id, token, fields, apply)``
      (from ``src.runtime.ui_action``) at import time to add your own
      field(s) to the web UI composer's job modal — e.g. a checkbox like
      "Use Kanbun reading conventions" — shown as a subsection that appears
      once a professor picks your language as the *destination* in the
      composer, the same trigger point as ``get_peer_guidance`` above but for
-     form fields instead of prompt text. See
-     ``ExtensionUiHooks``'s docstring in ``src/runtime/ui_action.py`` for
-     the exact shape, and ``docs/webui-plugin-plan.md`` section 10 for the
-     full design and reasoning (a plain global registry, not routed through
+     form fields instead of prompt text. ``action_id`` must match the owning
+     action's own ``UiAction.id`` (``"translate"`` here) — required
+     alongside ``token`` so a *different* action (e.g. ``"transcribe"``)
+     registering the same language token doesn't silently overwrite this
+     one's fields; see ``ExtensionUiHooks``'s docstring in
+     ``src/runtime/ui_action.py`` for the exact shape, and
+     ``docs/webui-plugin-plan.md`` section 10 for the full design and
+     reasoning (a plain global registry, not routed through
      ``DispatchPlugin`` — see that section for why). Example::
 
          from src.runtime.ui_action import UiField, register_extension_ui_hooks
@@ -98,6 +102,7 @@ directory and adapt it as follows:
                  sandbox.translation_service.variant_notes.append(KANBUN_NOTE)
 
          register_extension_ui_hooks(
+             action_id="translate",
              token="jp",
              fields=[UiField(
                  name="kanbun", label="Use Kanbun reading conventions",
@@ -754,7 +759,14 @@ class TranslationPlugin:
           names — the same codes typed on the command line.
         - ``file_path``: absolute path to the document the webui has
           already saved to disk (the uploaded file itself, not a form
-          value the person typed).
+          value the person typed) — or, if it points at a directory, every
+          image in it is translated and combined, the same as pointing the
+          CLI's ``-i`` at a folder of page images (see ``run()``'s own
+          ``os.path.isdir(input_path)`` branch, which this mirrors). The
+          composer's file field (``allow_folder=True``) lets a professor
+          pick several images or a whole folder at once; ``app.py``'s
+          job-start route is what saves multiple uploads into one directory
+          and sets this to that directory's path.
         - ``file_name``: the original filename, used only to build a
           readable output filename.
         - ``scanned``: optional, any of ``'true'``/``'1'``/``'on'``
@@ -888,7 +900,7 @@ class TranslationPlugin:
         # through the shared registry rather than read directly here. A
         # no-op when nothing is registered for this destination token
         # (the normal case without that extension installed).
-        apply_extension_ui_hooks(target_code_raw, sandbox, fields)
+        apply_extension_ui_hooks("translate", target_code_raw, sandbox, fields)
 
         base_name = os.path.splitext(file_name)[0] or "document"
         requested_format = (fields.get("output_format") or "same").strip().lower()
@@ -905,6 +917,15 @@ class TranslationPlugin:
             raise CLIError(
                 "Preserving embedded images requires a Word (.docx) output format."
             )
+        if preserve_media and os.path.isdir(file_path):
+            # Mirrors run()'s own --preserve-media validation for a single
+            # image file (there's no embedded media to carry over from a
+            # picture) — a folder of page images is the same situation, just
+            # several pictures instead of one.
+            raise CLIError(
+                "Cannot use preserve embedded media with an image folder input: "
+                "images have no embedded media to carry over."
+            )
 
         output_filename = f"{base_name}_{source_language}_to_{target_language}{out_ext}"
         output_path = os.path.join(output_dir, output_filename)
@@ -917,18 +938,34 @@ class TranslationPlugin:
             font_size=font_size,
         )
 
-        sandbox.translate_document(
-            file_path,
-            source_language,
-            target_language,
-            page_nums=page_nums,
-            opts=opts,
-            scanned=scanned,
-            workers=workers,
-            spread=spread,
-            on_progress=on_progress,
-            on_page_text=on_page_text,
-        )
+        # A folder of page images, same as pointing the CLI's -i at a
+        # folder (see this plugin's run()'s own os.path.isdir(input_path)
+        # branch) — the composer's file field allows this via
+        # UiField.allow_folder (see the module-level ui_action declaration
+        # below), the same mechanism transcribe's file field already uses.
+        # translate_document() below has no folder-handling logic of its
+        # own (only single-file _detect_and_validate_file), so this must be
+        # checked here first, exactly mirroring run()'s own CLI branch.
+        if os.path.isdir(file_path):
+            sandbox.process_image_translation_folder(
+                file_path, source_language, target_language, opts,
+                workers=workers, spread=spread, on_progress=on_progress, on_page_text=on_page_text,
+            )
+            summary = f"Translated the images in '{file_name}' from {source_language} to {target_language}."
+        else:
+            sandbox.translate_document(
+                file_path,
+                source_language,
+                target_language,
+                page_nums=page_nums,
+                opts=opts,
+                scanned=scanned,
+                workers=workers,
+                spread=spread,
+                on_progress=on_progress,
+                on_page_text=on_page_text,
+            )
+            summary = f"Translated {file_name} from {source_language} to {target_language}."
 
         if not os.path.exists(output_path):
             raise CLIError("Translation finished but no output file was produced.")
@@ -937,7 +974,7 @@ class TranslationPlugin:
         return UiJobResult(
             output_path=output_path,
             output_filename=output_filename,
-            summary=f"Translated {file_name} from {source_language} to {target_language}.",
+            summary=summary,
             prompt_tokens=session_usage["prompt_tokens"],
             completion_tokens=session_usage["completion_tokens"],
             cost=session_usage["total_cost"],
@@ -996,7 +1033,7 @@ class TranslationPlugin:
             sandbox.image_translation_service.tables = True
         if toc:
             sandbox.translation_service.toc = True
-        apply_extension_ui_hooks(fields.get("target_language"), sandbox, fields)
+        apply_extension_ui_hooks("translate", fields.get("target_language"), sandbox, fields)
 
         requested_format = (fields.get("output_format") or "").strip().lower()
         output_format = requested_format if requested_format in ("docx", "pdf", "txt", "md") else "console"
@@ -1032,7 +1069,10 @@ ui_action = UiAction(
     fields=[
         UiField(name="source_language", label="Source language", kind="language", group="Document"),
         UiField(name="target_language", label="Target language", kind="language", group="Document"),
-        UiField(name="file", label="Document", kind="file", group="Document"),
+        UiField(
+            name="file", label="Document (or select multiple images / a whole folder of scans)",
+            kind="file", group="Document", allow_folder=True,
+        ),
         UiField(
             name="page_nums", label="Page range (e.g. 8-12 — leave blank for the whole document)",
             kind="text", required=False, group="Document",

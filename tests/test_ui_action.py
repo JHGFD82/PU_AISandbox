@@ -108,8 +108,12 @@ class TestExtensionUiHooksRegistry:
     apply_extension_ui_hooks() — the mechanism a language-extension plugin
     (e.g. translation-ea, a separate git-ignored repo not present in this
     checkout) uses to contribute its own composer fields, keyed by
-    destination-language token rather than routed through DispatchPlugin.
-    See ExtensionUiHooks's docstring for the full reasoning.
+    (action_id, language token) rather than routed through DispatchPlugin.
+    See ExtensionUiHooks's docstring for the full reasoning, including why
+    action_id is part of the key: two different actions (translate,
+    transcribe) can legitimately register the same language token for
+    unrelated fields, and a token-only key would let one silently overwrite
+    the other.
 
     The registry is a module-level dict, so every test restores it
     afterward to avoid leaking a registration into an unrelated test."""
@@ -119,41 +123,71 @@ class TestExtensionUiHooksRegistry:
         monkeypatch.setattr(ui_action_module, "_EXTENSION_UI_HOOKS", {})
 
     def test_nothing_registered_returns_empty_fields(self):
-        assert get_extension_ui_fields("jp") == []
+        assert get_extension_ui_fields("translate", "jp") == []
 
     def test_blank_or_none_token_returns_empty_fields(self):
-        assert get_extension_ui_fields("") == []
-        assert get_extension_ui_fields(None) == []
+        assert get_extension_ui_fields("translate", "") == []
+        assert get_extension_ui_fields("translate", None) == []
 
-    def test_registered_fields_are_returned_for_matching_token(self):
+    def test_registered_fields_are_returned_for_matching_action_and_token(self):
         fields = [UiField(name="kanbun", label="Use Kanbun conventions", kind="checkbox", required=False)]
-        register_extension_ui_hooks(token="jp", fields=fields, apply=lambda sandbox, f: None)
-        assert get_extension_ui_fields("jp") == fields
+        register_extension_ui_hooks(action_id="translate", token="jp", fields=fields, apply=lambda sandbox, f: None)
+        assert get_extension_ui_fields("translate", "jp") == fields
 
     def test_token_lookup_is_case_and_whitespace_insensitive(self):
         fields = [UiField(name="kanbun", label="Use Kanbun conventions", kind="checkbox", required=False)]
-        register_extension_ui_hooks(token="JP", fields=fields, apply=lambda sandbox, f: None)
-        assert get_extension_ui_fields(" jp ") == fields
+        register_extension_ui_hooks(action_id="TRANSLATE", token="JP", fields=fields, apply=lambda sandbox, f: None)
+        assert get_extension_ui_fields(" translate ", " jp ") == fields
 
     def test_unregistered_token_returns_empty_even_if_others_are_registered(self):
-        register_extension_ui_hooks(token="jp", fields=[UiField(name="a", label="A", kind="text")], apply=lambda s, f: None)
-        assert get_extension_ui_fields("zh") == []
+        register_extension_ui_hooks(
+            action_id="translate", token="jp", fields=[UiField(name="a", label="A", kind="text")], apply=lambda s, f: None,
+        )
+        assert get_extension_ui_fields("translate", "zh") == []
+
+    def test_same_token_under_a_different_action_does_not_collide(self):
+        # The bug this key shape fixes: translate's Kanbun checkbox and
+        # transcribe's own vertical/spread/passes fields both legitimately
+        # apply to 'jp', but are unrelated registrations.
+        translate_fields = [UiField(name="kanbun", label="Kanbun", kind="checkbox", required=False)]
+        transcribe_fields = [UiField(name="vertical", label="Vertical", kind="checkbox", required=False)]
+        register_extension_ui_hooks(action_id="translate", token="jp", fields=translate_fields, apply=lambda s, f: None)
+        register_extension_ui_hooks(action_id="transcribe", token="jp", fields=transcribe_fields, apply=lambda s, f: None)
+        assert get_extension_ui_fields("translate", "jp") == translate_fields
+        assert get_extension_ui_fields("transcribe", "jp") == transcribe_fields
+
+    def test_unregistered_action_returns_empty_even_for_a_registered_token(self):
+        register_extension_ui_hooks(
+            action_id="translate", token="jp", fields=[UiField(name="a", label="A", kind="text")], apply=lambda s, f: None,
+        )
+        assert get_extension_ui_fields("transcribe", "jp") == []
 
     def test_apply_is_a_noop_when_nothing_registered(self):
         # Must not raise — every installation without the extension
         # installed hits this path on every job.
-        apply_extension_ui_hooks("jp", sandbox=object(), fields={})
+        apply_extension_ui_hooks("translate", "jp", sandbox=object(), fields={})
 
     def test_apply_is_a_noop_for_blank_token(self):
-        register_extension_ui_hooks(token="jp", fields=[], apply=lambda s, f: (_ for _ in ()).throw(AssertionError("should not be called")))
-        apply_extension_ui_hooks("", sandbox=object(), fields={})
-        apply_extension_ui_hooks(None, sandbox=object(), fields={})
+        register_extension_ui_hooks(
+            action_id="translate", token="jp", fields=[],
+            apply=lambda s, f: (_ for _ in ()).throw(AssertionError("should not be called")),
+        )
+        apply_extension_ui_hooks("translate", "", sandbox=object(), fields={})
+        apply_extension_ui_hooks("translate", None, sandbox=object(), fields={})
+
+    def test_apply_is_a_noop_for_a_different_action_with_the_same_token(self):
+        register_extension_ui_hooks(
+            action_id="translate", token="jp", fields=[],
+            apply=lambda s, f: (_ for _ in ()).throw(AssertionError("should not be called")),
+        )
+        apply_extension_ui_hooks("transcribe", "jp", sandbox=object(), fields={})
 
     def test_apply_calls_the_registered_callback_with_sandbox_and_fields(self):
         calls = []
         register_extension_ui_hooks(
-            token="jp", fields=[], apply=lambda sandbox, fields: calls.append((sandbox, fields)),
+            action_id="translate", token="jp", fields=[],
+            apply=lambda sandbox, fields: calls.append((sandbox, fields)),
         )
         fake_sandbox = object()
-        apply_extension_ui_hooks("jp", fake_sandbox, {"kanbun": "true"})
+        apply_extension_ui_hooks("translate", "jp", fake_sandbox, {"kanbun": "true"})
         assert calls == [(fake_sandbox, {"kanbun": "true"})]

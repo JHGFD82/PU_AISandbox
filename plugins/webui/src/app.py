@@ -660,21 +660,25 @@ def create_app() -> FastAPI:
 
         See ``ExtensionUiHooks``'s docstring (``src/runtime/ui_action.py``)
         and ``docs/webui-plugin-plan.md`` section 10: a language-extension
-        plugin (e.g. an East-Asian translation extension) never gets its
-        own composer entry, but can still register extra fields that appear
-        as a subsection once its language is picked as the destination —
-        this is the endpoint the composer polls (on every destination-
-        language change) to know what to render. ``action_id`` is accepted
-        for symmetry with the sibling ``/preview`` route but not otherwise
-        used — the registry is keyed by language token, not by action,
-        since a future non-translation action could use the same
-        mechanism. Always returns an empty list (never an error) when no
-        extension is installed for the given language, which is the normal
+        plugin (e.g. an East-Asian translation or transcription extension)
+        never gets its own composer entry, but can still register extra
+        fields that appear as a subsection once its language is picked —
+        this is the endpoint the composer polls (on every relevant-language
+        change) to know what to render. ``action_id`` IS used here (unlike
+        earlier, before both ``translate`` and ``transcribe`` used this
+        mechanism) — the registry is keyed by ``(action_id, token)``, not
+        by token alone, because two different actions can register the
+        same language token for entirely unrelated fields (translate's
+        Kanbun checkbox and transcribe's vertical/spread/passes fields both
+        apply to ``'jp'``, for instance); passing the wrong action_id here
+        would silently return the other action's fields instead. Always
+        returns an empty list (never an error) when no extension is
+        installed for the given action/language pair, which is the normal
         case for most installations.
         """
         _require_unlocked(request)
         from src.runtime.ui_action import get_extension_ui_fields
-        fields = get_extension_ui_fields(target_language)
+        fields = get_extension_ui_fields(action_id, target_language)
         return {"fields": [asdict(f) for f in fields]}
 
     @app.post("/api/plugin-actions/{action_id}/preview")

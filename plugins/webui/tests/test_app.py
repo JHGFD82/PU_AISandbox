@@ -707,9 +707,11 @@ class TestPluginActionPreview:
 class TestPluginActionExtensionFields:
     """GET /api/plugin-actions/{action_id}/extension-fields — the composer's
     dynamic subsection for whatever a language-extension plugin (e.g.
-    translation-ea) registers via register_extension_ui_hooks(), keyed by
-    destination-language token. See ExtensionUiHooks's docstring in
-    src/runtime/ui_action.py."""
+    translation-ea, transcription-ea) registers via
+    register_extension_ui_hooks(), keyed by (action_id, language token) —
+    see ExtensionUiHooks's docstring in src/runtime/ui_action.py for why
+    action_id is part of the key (two different actions can register the
+    same token for unrelated fields)."""
 
     @pytest.fixture(autouse=True)
     def _isolated_registry(self, monkeypatch):
@@ -726,6 +728,7 @@ class TestPluginActionExtensionFields:
     def test_returns_registered_fields_for_matching_token(self, unlocked_client):
         from src.runtime.ui_action import UiField, register_extension_ui_hooks
         register_extension_ui_hooks(
+            action_id="translate",
             token="jp",
             fields=[UiField(name="kanbun", label="Use Kanbun conventions", kind="checkbox", required=False)],
             apply=lambda sandbox, fields: None,
@@ -744,7 +747,8 @@ class TestPluginActionExtensionFields:
     def test_blank_target_language_returns_empty_list(self, unlocked_client):
         from src.runtime.ui_action import UiField, register_extension_ui_hooks
         register_extension_ui_hooks(
-            token="jp", fields=[UiField(name="kanbun", label="Kanbun", kind="checkbox", required=False)],
+            action_id="translate", token="jp",
+            fields=[UiField(name="kanbun", label="Kanbun", kind="checkbox", required=False)],
             apply=lambda sandbox, fields: None,
         )
         resp = unlocked_client.get(
@@ -755,11 +759,27 @@ class TestPluginActionExtensionFields:
     def test_unmatched_token_returns_empty_list(self, unlocked_client):
         from src.runtime.ui_action import UiField, register_extension_ui_hooks
         register_extension_ui_hooks(
-            token="jp", fields=[UiField(name="kanbun", label="Kanbun", kind="checkbox", required=False)],
+            action_id="translate", token="jp",
+            fields=[UiField(name="kanbun", label="Kanbun", kind="checkbox", required=False)],
             apply=lambda sandbox, fields: None,
         )
         resp = unlocked_client.get(
             "/api/plugin-actions/translate/extension-fields", params={"target_language": "zh"}
+        )
+        assert resp.json() == {"fields": []}
+
+    def test_different_action_with_the_same_token_returns_empty_list(self, unlocked_client):
+        # Regression coverage for the collision this key shape fixes:
+        # registering "jp" under "translate" must not leak into a request
+        # for "transcribe"'s own extension fields for the same token.
+        from src.runtime.ui_action import UiField, register_extension_ui_hooks
+        register_extension_ui_hooks(
+            action_id="translate", token="jp",
+            fields=[UiField(name="kanbun", label="Kanbun", kind="checkbox", required=False)],
+            apply=lambda sandbox, fields: None,
+        )
+        resp = unlocked_client.get(
+            "/api/plugin-actions/transcribe/extension-fields", params={"target_language": "jp"}
         )
         assert resp.json() == {"fields": []}
 

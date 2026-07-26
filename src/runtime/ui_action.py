@@ -234,37 +234,48 @@ class UiJobResult:
 
 @dataclass
 class ExtensionUiHooks:
-    """One extension plugin's composer contribution for a single destination-language token.
+    """One extension plugin's composer contribution for a single action/language-token pair.
 
     Args:
         fields: Extra ``UiField``s to render, in display order, once this
-                token is selected as the destination language.
+                token is selected as the relevant language for this action
+                (the destination language for ``translate``, the OCR
+                language for ``transcribe``).
         apply: Called from the base plugin's ``run_ui_action`` right before
-               the actual translation runs, as
-               ``apply(sandbox, fields_dict)`` — *sandbox* is the already-
-               constructed ``SandboxProcessor`` for this job (so e.g.
+               the actual job runs, as ``apply(sandbox, fields_dict)`` —
+               *sandbox* is the already-constructed ``SandboxProcessor`` for
+               this job (so e.g.
                ``sandbox.translation_service.variant_notes.append(...)``
                works exactly like it does inside ``_execute_translate``),
                *fields_dict* is the full submitted fields dict (so this can
                read its own field's value by name). Must not raise for a
-               blank/default value — called on every job for this
-               destination token, not just when something was changed.
+               blank/default value — called on every job for this action/
+               token pair, not just when something was changed.
     """
 
     fields: list[UiField]
     apply: Callable[[Any, dict], None]
 
 
-# token (e.g. 'jp') -> that token's registered extension hooks. Populated
-# only by register_extension_ui_hooks() below, read only by
+# (action_id, token) -> that pair's registered extension hooks, e.g.
+# ('translate', 'jp') for translation-ea's Kanbun checkbox and
+# ('transcribe', 'jp') for transcription-ea's own composer fields. Keyed by
+# the action alongside the language token — not by token alone — because
+# two different actions can legitimately register the *same* language token
+# for entirely unrelated fields (translate's Kanbun checkbox and
+# transcribe's vertical/spread/passes/kanbun-mode fields both apply to
+# 'jp', but mean completely different things); a token-only key would let
+# whichever plugin imports last silently overwrite the other's registration
+# for that token, breaking one of the two actions with no error raised.
+# Populated only by register_extension_ui_hooks() below, read only by
 # get_extension_ui_fields()/apply_extension_ui_hooks() below.
-_EXTENSION_UI_HOOKS: dict[str, ExtensionUiHooks] = {}
+_EXTENSION_UI_HOOKS: dict[tuple[str, str], ExtensionUiHooks] = {}
 
 
 def register_extension_ui_hooks(
-    token: str, fields: list[UiField], apply: Callable[[Any, dict], None],
+    action_id: str, token: str, fields: list[UiField], apply: Callable[[Any, dict], None],
 ) -> None:
-    """Register a language-extension plugin's composer fields for one destination-language token.
+    """Register a language-extension plugin's composer fields for one action's language token.
 
     Call once at plugin import time, the same way ``register_language()``
     is already called — see this module's "Extension-plugin composer
@@ -272,50 +283,69 @@ def register_extension_ui_hooks(
     rather than something routed through ``DispatchPlugin``.
 
     Args:
-        token: The short language code this contribution applies to when
-               selected as the *destination* language (e.g. ``'jp'``) —
-               matching a key in ``LANGUAGE_MAP`` and one of this
-               extension's own ``handles`` entries.
+        action_id: The composer action this contribution applies to (e.g.
+                   ``'translate'``, ``'transcribe'``) — matching that
+                   action's own ``UiAction.id``. Required alongside *token*
+                   so two different actions can each own the same language
+                   token without overwriting each other's registration —
+                   see the ``_EXTENSION_UI_HOOKS`` comment above for why.
+        token: The short language code this contribution applies to (e.g.
+               ``'jp'``) — matching a key in ``LANGUAGE_MAP`` and one of
+               this extension's own ``handles`` entries. Which side of the
+               job this token means depends on the action: the
+               *destination* language for ``translate``, the OCR language
+               for ``transcribe``.
         fields: The ``UiField``s to add to the composer when this token is
-                the selected destination language.
+                selected for this action.
         apply: See ``ExtensionUiHooks.apply``'s docstring.
     """
-    _EXTENSION_UI_HOOKS[token.lower()] = ExtensionUiHooks(fields=fields, apply=apply)
+    _EXTENSION_UI_HOOKS[(action_id.strip().lower(), token.strip().lower())] = ExtensionUiHooks(
+        fields=fields, apply=apply,
+    )
 
 
-def get_extension_ui_fields(token: Optional[str]) -> list[UiField]:
-    """Return the extra composer fields registered for *token* as a destination language.
+def get_extension_ui_fields(action_id: str, token: Optional[str]) -> list[UiField]:
+    """Return the extra composer fields registered for *token* under *action_id*.
 
     Args:
-        token: The selected destination-language short code, or ``None``/
-               blank if none is selected yet.
+        action_id: The composer action being rendered (e.g. ``'translate'``,
+                   ``'transcribe'``) — see ``register_extension_ui_hooks``'s
+                   docstring for why this is needed alongside *token*.
+        token: The selected language short code, or ``None``/blank if none
+               is selected yet.
 
     Returns:
         The registered ``UiField`` list, or ``[]`` if *token* is blank or no
-        extension has registered anything for it (the normal case for any
-        installation without that extension plugin installed).
+        extension has registered anything for this action/token pair (the
+        normal case for any installation without that extension plugin
+        installed).
     """
     if not token:
         return []
-    hooks = _EXTENSION_UI_HOOKS.get(token.strip().lower())
+    hooks = _EXTENSION_UI_HOOKS.get((action_id.strip().lower(), token.strip().lower()))
     return hooks.fields if hooks else []
 
 
-def apply_extension_ui_hooks(token: Optional[str], sandbox: Any, fields: dict) -> None:
-    """Apply a registered extension's fields to *sandbox*, if *token* has one registered.
+def apply_extension_ui_hooks(action_id: str, token: Optional[str], sandbox: Any, fields: dict) -> None:
+    """Apply a registered extension's fields to *sandbox*, if this action/token pair has one registered.
 
     A no-op (not an error) when *token* is blank or nothing is registered
-    for it — the normal case for any installation without that extension
-    plugin installed, which must behave identically to before this existed.
+    for this action/token pair — the normal case for any installation
+    without that extension plugin installed, which must behave identically
+    to before this existed.
 
     Args:
-        token: The selected destination-language short code.
+        action_id: The composer action this job is running (e.g.
+                   ``'translate'``, ``'transcribe'``) — see
+                   ``register_extension_ui_hooks``'s docstring for why this
+                   is needed alongside *token*.
+        token: The selected language short code.
         sandbox: The ``SandboxProcessor`` already constructed for this job.
         fields: The full submitted fields dict, so the extension's own
                 ``apply`` callback can read its field's value by name.
     """
     if not token:
         return
-    hooks = _EXTENSION_UI_HOOKS.get(token.strip().lower())
+    hooks = _EXTENSION_UI_HOOKS.get((action_id.strip().lower(), token.strip().lower()))
     if hooks:
         hooks.apply(sandbox, fields)
