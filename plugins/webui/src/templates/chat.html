@@ -1535,7 +1535,16 @@ async function loadUsage() {
   Object.entries(data.model_usage || {}).forEach(([model, stats]) => {
     const row = document.createElement("div");
     row.className = "spend-row";
-    row.innerHTML = `<span>${model}</span><span>${fmtMoney(stats.total_cost)}</span>`;
+    // Built with textContent rather than an HTML string, like every other
+    // piece of server-supplied text in this file. A model name is not
+    // something a professor types, so this was never a live hole — but it
+    // was the one place here where a value became markup instead of text,
+    // and it costs nothing to close.
+    const nameEl = document.createElement("span");
+    nameEl.textContent = model;
+    const costEl = document.createElement("span");
+    costEl.textContent = fmtMoney(stats.total_cost);
+    row.append(nameEl, costEl);
     byModel.appendChild(row);
   });
 }
