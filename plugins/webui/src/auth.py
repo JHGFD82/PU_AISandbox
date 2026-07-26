@@ -13,6 +13,8 @@ whatever object satisfies ``AuthBackend``.
 
 from __future__ import annotations
 
+import threading
+import time
 from typing import Protocol, runtime_checkable
 
 import bcrypt
@@ -27,6 +29,88 @@ from src import settings_store
 # ourselves here keeps behavior identical either way rather than depending
 # on which bcrypt version happens to be installed.
 _BCRYPT_MAX_BYTES = 72
+
+# How many wrong passphrases one computer may try before it has to wait, and
+# how long that wait is. Generous enough that a professor mistyping their own
+# passphrase a few times never notices it exists, while making it impractical
+# to work through a list of guesses: five tries per two minutes is roughly
+# 3,600 guesses a day, against a passphrase with vastly more possibilities
+# than that.
+_MAX_ATTEMPTS = 5
+_LOCKOUT_SECONDS = 120
+
+
+class AttemptLimiter:
+    """Slows down repeated wrong passphrases from the same computer.
+
+    Without this, nothing stops a program from trying passphrases as fast as
+    the server can check them until it finds the right one. Guesses are
+    counted per network address; once a computer has used up its allowance it
+    is refused for a short cooling-off period, whether or not its next guess
+    would have been correct. Getting in successfully clears that computer's
+    count.
+
+    Counts are kept in memory only, so restarting the server forgets them —
+    acceptable here, because restarting requires access to the machine the
+    server runs on, which is a bigger privilege than the gate protects.
+    """
+
+    def __init__(self, max_attempts: int = _MAX_ATTEMPTS, lockout_seconds: int = _LOCKOUT_SECONDS) -> None:
+        """Create a limiter.
+
+        Args:
+            max_attempts: Wrong guesses allowed before the cooling-off period.
+            lockout_seconds: How long a computer must wait once it has used
+                             up its allowance.
+        """
+        self._max_attempts = max_attempts
+        self._lockout_seconds = lockout_seconds
+        # client address -> (wrong guesses so far, time of the most recent one)
+        self._attempts: dict[str, tuple[int, float]] = {}
+        # The server handles requests on several threads at once, so this
+        # turn-taking lock stops two simultaneous guesses from reading and
+        # updating the same count at the same moment and losing one of them.
+        self._lock = threading.Lock()
+
+    def _client_key(self, request: Request) -> str:
+        """Return an identifier for the computer making *request*."""
+        client = getattr(request, "client", None)
+        return getattr(client, "host", None) or "unknown"
+
+    def seconds_remaining(self, request: Request) -> int:
+        """Return how long this computer must still wait, or 0 if it may try now.
+
+        Args:
+            request: The incoming unlock request.
+
+        Returns:
+            Whole seconds left in the cooling-off period; ``0`` when the
+            caller is free to attempt an unlock.
+        """
+        key = self._client_key(request)
+        with self._lock:
+            count, last_attempt = self._attempts.get(key, (0, 0.0))
+            if count < self._max_attempts:
+                return 0
+            elapsed = time.monotonic() - last_attempt
+            if elapsed >= self._lockout_seconds:
+                # Cooling-off period served — wipe the slate clean.
+                self._attempts.pop(key, None)
+                return 0
+            return int(self._lockout_seconds - elapsed) + 1
+
+    def record_failure(self, request: Request) -> None:
+        """Count one wrong guess from this computer."""
+        key = self._client_key(request)
+        with self._lock:
+            count, _ = self._attempts.get(key, (0, 0.0))
+            self._attempts[key] = (count + 1, time.monotonic())
+
+    def record_success(self, request: Request) -> None:
+        """Forget this computer's wrong guesses after a successful unlock."""
+        key = self._client_key(request)
+        with self._lock:
+            self._attempts.pop(key, None)
 
 
 def _prepare(passphrase: str) -> bytes:

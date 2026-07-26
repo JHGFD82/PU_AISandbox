@@ -83,6 +83,11 @@ templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
 # One backend instance for the life of the process — see auth.get_configured_backend().
 _auth_backend = auth.get_configured_backend()
 
+# Tracks wrong unlock attempts per computer. Process-lifetime, like the
+# backend above: a restart forgets them, which is fine because restarting
+# means access to the machine itself.
+_attempt_limiter = auth.AttemptLimiter()
+
 # One JobStore for the life of the process, same lifetime reasoning as
 # _auth_backend above — see jobs.py's module docstring for why this is
 # deliberately in-memory only (docs/webui-plugin-plan.md section 10).
@@ -368,10 +373,29 @@ def create_app() -> FastAPI:
 
     @app.post("/unlock")
     async def unlock(request: Request):
+        # Repeated wrong guesses from one computer are slowed down, so the
+        # passphrase can't simply be worked through one attempt at a time —
+        # see AttemptLimiter in auth.py. Checked before the passphrase itself
+        # so that a computer in its cooling-off period learns nothing about
+        # whether its latest guess was right.
+        wait = _attempt_limiter.seconds_remaining(request)
+        if wait > 0:
+            return templates.TemplateResponse(
+                request,
+                "unlock.html",
+                {"error": f"Too many incorrect attempts. Please wait {wait} seconds and try again."},
+                status_code=429,
+            )
         ok = await _auth_backend.authenticate(request)
         if ok:
+            _attempt_limiter.record_success(request)
             request.session["unlocked"] = True
             return RedirectResponse("/", status_code=303)
+        _attempt_limiter.record_failure(request)
+        logging.warning(
+            "Failed webui unlock attempt from %s.",
+            getattr(getattr(request, "client", None), "host", "unknown"),
+        )
         return templates.TemplateResponse(
             request,
             "unlock.html",

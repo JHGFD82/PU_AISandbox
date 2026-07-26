@@ -8,6 +8,7 @@ are made (the /api/chat route's SandboxProcessor is monkeypatched).
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -92,6 +93,40 @@ class TestUnlock:
         monkeypatch.setattr(app_module, "_auth_backend", auth.PassphraseBackend(passphrase_hash=hashed))
         resp = client.post("/unlock", data={"passphrase": "correct"}, follow_redirects=False)
         assert resp.status_code == 303
+
+    def test_repeated_wrong_passphrases_are_rate_limited(self, client, monkeypatch):
+        """After a few wrong guesses the route stops checking and asks the
+        caller to wait, so the passphrase can't be worked through one guess
+        at a time."""
+        auth = sys.modules["_pu_webui_auth"]
+        app_module = sys.modules["_pu_webui_app"]
+        hashed = auth.hash_passphrase("correct")
+        monkeypatch.setattr(app_module, "_auth_backend", auth.PassphraseBackend(passphrase_hash=hashed))
+        monkeypatch.setattr(app_module, "_attempt_limiter", auth.AttemptLimiter(max_attempts=3, lockout_seconds=60))
+
+        for _ in range(3):
+            assert client.post("/unlock", data={"passphrase": "wrong"}).status_code == 401
+        blocked = client.post("/unlock", data={"passphrase": "wrong"})
+        assert blocked.status_code == 429
+        assert "Too many incorrect attempts" in blocked.text
+
+        # Even the *correct* passphrase waits out the cooling-off period —
+        # otherwise the limit would leak whether a guess was right.
+        assert client.post("/unlock", data={"passphrase": "correct"}).status_code == 429
+
+    def test_successful_unlock_clears_the_attempt_count(self, client, monkeypatch):
+        auth = sys.modules["_pu_webui_auth"]
+        app_module = sys.modules["_pu_webui_app"]
+        hashed = auth.hash_passphrase("correct")
+        monkeypatch.setattr(app_module, "_auth_backend", auth.PassphraseBackend(passphrase_hash=hashed))
+        monkeypatch.setattr(app_module, "_attempt_limiter", auth.AttemptLimiter(max_attempts=3, lockout_seconds=60))
+
+        client.post("/unlock", data={"passphrase": "wrong"})
+        client.post("/unlock", data={"passphrase": "wrong"})
+        assert client.post("/unlock", data={"passphrase": "correct"}, follow_redirects=False).status_code == 303
+        # Allowance restored — a later typo doesn't immediately lock them out.
+        for _ in range(3):
+            assert client.post("/unlock", data={"passphrase": "wrong"}).status_code == 401
 
     def test_api_route_requires_unlock(self, client):
         resp = client.get("/api/professors")
