@@ -1282,6 +1282,77 @@ class TestConcurrentRecordUsage:
         assert len(concurrent_tracker.usage_data["session_history"]) == self.N_THREADS
 
 
+# ---------------------------------------------------------------------------
+# Cross-process safety: two programs recording for the same professor
+# ---------------------------------------------------------------------------
+
+class TestConcurrentProcessesDoNotClobber:
+    """A second program's spending must survive this one's next write.
+
+    The web interface runs for hours while the professor may also use the
+    command line, so two programs recording usage for the same professor at
+    once is ordinary. Each used to keep the totals from whenever it started
+    and write that copy back after every call, so whichever saved last
+    silently erased the other's spending.
+    """
+
+    def _tracker(self, data_file):
+        with patch("src.tracking.token_tracker.get_monthly_limit", return_value=100.0):
+            return TokenTracker("testprof", data_file=str(data_file), monthly_limit=100.0)
+
+    def _pricing(self):
+        return (
+            patch("src.tracking.token_tracker.get_pricing_unit", return_value=1_000_000),
+            patch("src.tracking.token_tracker.get_model_pricing",
+                  return_value={"input": 2.0, "output": 8.0}),
+        )
+
+    def test_second_trackers_usage_is_not_erased(self, tmp_path):
+        data_file = tmp_path / "token_usage_testprof.json"
+        # Both exist at once, each having loaded the file at startup —
+        # exactly the webui-plus-terminal situation.
+        webui = self._tracker(data_file)
+        cli = self._tracker(data_file)
+
+        p1, p2 = self._pricing()
+        with p1, p2:
+            webui.record_usage("gpt-4o", 100, 50, 150)
+            cli.record_usage("gpt-4o", 200, 100, 300)
+            # The webui records again from its now-stale in-memory copy.
+            webui.record_usage("gpt-4o", 100, 50, 150)
+
+        on_disk = json.loads(data_file.read_text())
+        assert on_disk["total_usage"]["call_count"] == 3, "a recorded call was lost"
+        assert on_disk["total_usage"]["total_tokens"] == 600
+        assert len(on_disk["session_history"]) == 3
+
+    def test_interleaved_recording_keeps_every_call(self, tmp_path):
+        data_file = tmp_path / "token_usage_testprof.json"
+        first = self._tracker(data_file)
+        second = self._tracker(data_file)
+
+        p1, p2 = self._pricing()
+        with p1, p2:
+            for _ in range(5):
+                first.record_usage("gpt-4o", 10, 5, 15)
+                second.record_usage("gpt-4o", 10, 5, 15)
+
+        on_disk = json.loads(data_file.read_text())
+        assert on_disk["total_usage"]["call_count"] == 10
+        assert on_disk["total_usage"]["total_tokens"] == 150
+
+    def test_unreadable_file_does_not_lose_the_call_being_recorded(self, tmp_path):
+        """If the re-read fails, fall back to the in-memory totals rather than
+        dropping the usage entirely."""
+        data_file = tmp_path / "token_usage_testprof.json"
+        t = self._tracker(data_file)
+        p1, p2 = self._pricing()
+        with p1, p2:
+            with patch.object(TokenTracker, "_load_usage_data", side_effect=OSError("disk hiccup")):
+                usage = t.record_usage("gpt-4o", 100, 50, 150)
+        assert usage.total_tokens == 150
+        assert t.usage_data["total_usage"]["call_count"] == 1
+
 
 class TestUsageFileWithNoMonthRecorded:
     """A usage file missing its 'month' key must not be archived to '.json'.

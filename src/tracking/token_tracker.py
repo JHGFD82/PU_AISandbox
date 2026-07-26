@@ -795,10 +795,16 @@ class TokenTracker:
         the specific model used, then immediately writes the updated file to
         disk so no data is lost if the program exits unexpectedly.
 
-        To prevent two background workers from writing at the same time and
-        overwriting each other's data, this method acquires an exclusive turn
-        before updating — only one call can proceed at a time (thread safety
-        via a lock).
+        Two things guard against one recorded call overwriting another:
+
+        * Within this program, only one call may be recording at a time (a
+          lock — a turn-taking mechanism), so two parallel workers
+          translating different pages can't interleave their updates.
+        * Across programs, the file is re-read immediately before the new
+          numbers are applied, so a run started at the command line while the
+          web interface is open adds to the current totals rather than to a
+          copy from whenever it happened to start. See
+          ``_refresh_from_disk_before_update()`` for the limits of this.
 
         Args:
             model: The model name as reported back by the API — may include a
@@ -841,6 +847,8 @@ class TokenTracker:
                 source=self._source_id,
             )
 
+            self._refresh_from_disk_before_update()
+
             self._update_stats(self.usage_data["total_usage"], prompt_tokens, completion_tokens, total_tokens, total_cost)
 
             if model not in self.usage_data["model_usage"]:
@@ -857,6 +865,41 @@ class TokenTracker:
 
         self._accumulate_session_usage(usage)
         return usage
+
+    def _refresh_from_disk_before_update(self) -> None:
+        """Re-read the usage file so this call is added to whatever is on disk now.
+
+        Without this, each running program keeps its own copy of the totals
+        from the moment it started and writes that copy back after every API
+        call. Two programs recording usage for the same professor at the same
+        time — which is now ordinary, since the web interface runs for hours
+        while the professor may also use the command line — would each be
+        working from their own increasingly out-of-date copy, and whichever
+        saved last would silently erase the other's spending.
+
+        Re-reading immediately before applying the new numbers means the only
+        vulnerable moment is the fraction of a second between this read and
+        the save a few lines later, rather than the entire lifetime of the
+        program. Combined with the file being replaced in one step rather than
+        rewritten in place (see ``_save_usage_data_to()``), that makes lost
+        records unlikely instead of routine.
+
+        This is not a complete guarantee — that would need the operating
+        system's own file locking, or the shared-write mode further down this
+        file, which sidesteps the problem entirely by never rewriting a shared
+        file at all. If a read fails for any reason, this keeps the totals
+        already in memory rather than losing the call being recorded.
+        """
+        try:
+            self.usage_data = self._load_usage_data()
+        except (json.JSONDecodeError, OSError) as e:
+            logging.warning(
+                "Could not re-read %s's usage file before recording this call (%s); "
+                "continuing with the totals already in memory. If another program is "
+                "recording usage for this professor at the same time, one of the two "
+                "may be overwritten.",
+                self.professor, e,
+            )
 
     def _accumulate_session_usage(self, usage: TokenUsage) -> None:
         """Add one API call's usage to this instance's running session total.
