@@ -117,6 +117,39 @@ def get_configured_data_roots() -> list[tuple[str, Path]]:
     return roots
 
 
+def _read_event_files_with_failures(event_dir: Path) -> tuple[list[dict[str, Any]], list[Path]]:
+    """Read every per-call usage record in a shared-write event-file directory.
+
+    Same as ``_read_event_files()``, but also reports which files couldn't be
+    read. Callers that only display totals don't care — a skipped file just
+    means a slightly low number this time round. The one caller that *must*
+    care is the month-rollover step, which deletes these files once it has
+    folded them into an archive: deleting a file whose contents never made it
+    into that archive destroys the record for good.
+
+    Args:
+        event_dir: The directory to read (e.g. one professor's current
+                   month under a shared source's ``events/`` tree).
+                   Missing directories simply yield no records.
+
+    Returns:
+        A ``(records, unreadable_paths)`` pair. ``unreadable_paths`` is empty
+        when every file was read successfully.
+    """
+    records: list[dict[str, Any]] = []
+    unreadable: list[Path] = []
+    if not event_dir.exists():
+        return records, unreadable
+    for event_file in sorted(event_dir.glob("*.json")):
+        try:
+            with open(event_file, "r") as f:
+                records.append(json.load(f))
+        except (json.JSONDecodeError, OSError) as e:
+            logging.warning(f"Could not read usage event file {event_file.name}: {e}")
+            unreadable.append(event_file)
+    return records, unreadable
+
+
 def _read_event_files(event_dir: Path) -> list[dict[str, Any]]:
     """Read every per-call usage record in a shared-write event-file directory.
 
@@ -130,15 +163,7 @@ def _read_event_files(event_dir: Path) -> list[dict[str, Any]]:
                    month under a shared source's ``events/`` tree).
                    Missing directories simply yield no records.
     """
-    records: list[dict[str, Any]] = []
-    if not event_dir.exists():
-        return records
-    for event_file in sorted(event_dir.glob("*.json")):
-        try:
-            with open(event_file, "r") as f:
-                records.append(json.load(f))
-        except (json.JSONDecodeError, OSError) as e:
-            logging.warning(f"Could not read usage event file {event_file.name}: {e}")
+    records, _ = _read_event_files_with_failures(event_dir)
     return records
 
 
@@ -686,8 +711,37 @@ class TokenTracker:
                 continue
             month = month_dir.name
             archive_path = _shared_archive_path(self._shared_source, self.professor, month)
+            records, unreadable = _read_event_files_with_failures(month_dir)
+
+            # A month whose event files couldn't all be read is left entirely
+            # alone — not archived, not deleted. Both halves matter:
+            #
+            # Deleting a file that wasn't folded in would destroy that API
+            # call's record for good. But writing the archive from only the
+            # files that *did* read is just as damaging in a quieter way:
+            # every later run sees an archive already exists, skips folding
+            # it again, and the missing calls are never recovered even once
+            # the unreadable files become readable.
+            #
+            # And they usually do. This is routine for the storage this mode
+            # is built for — a folder synced by Dropbox or OneDrive regularly
+            # holds a placeholder or partially-downloaded file that fails to
+            # parse now and reads perfectly a minute later. So the whole
+            # month is deferred and retried on the next run, by which point
+            # the sync has normally caught up.
+            if unreadable:
+                logging.warning(
+                    "Shared-write month %s for %s: leaving it untouched because "
+                    "%d of its usage files could not be read (%s). They may still "
+                    "be syncing — this month will be archived on a later run once "
+                    "all of them can be read. Nothing has been deleted.",
+                    month, self.professor, len(unreadable),
+                    ", ".join(p.name for p in unreadable[:5])
+                    + (", ..." if len(unreadable) > 5 else ""),
+                )
+                continue
+
             if not archive_path.exists():
-                records = _read_event_files(month_dir)
                 if records:
                     folded = fold_usage_records(records, month)
                     archive_path.parent.mkdir(parents=True, exist_ok=True)
@@ -696,6 +750,12 @@ class TokenTracker:
                         json.dump(folded, f, indent=2)
                     os.replace(tmp_path, archive_path)
                     logging.info(f"Folded shared-write month {month} for {self.professor} → {archive_path.name}")
+                else:
+                    # Nothing readable and nothing archived: an empty
+                    # directory, or one whose files vanished mid-read. Leave
+                    # it alone rather than tidying away something not
+                    # understood.
+                    continue
 
             for event_file in month_dir.glob("*.json"):
                 try:

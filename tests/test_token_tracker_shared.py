@@ -372,3 +372,71 @@ class TestSharedWriteRollover:
         _make_shared_tracker(shared_source)
         # Existing archive content must be untouched (not overwritten with the folded total)
         assert json.loads(archive_path.read_text())["total_usage"]["total_tokens"] == 777
+
+
+class TestRolloverPreservesUnreadableEvents:
+    """Month rollover must never delete an event file it couldn't fold in.
+
+    Shared-write mode is built for folders synced by Dropbox or OneDrive,
+    where a placeholder or partially-downloaded file that fails to parse now
+    reads perfectly a minute later. Rollover used to skip such a file when
+    building the archive and then delete it anyway, destroying that API
+    call's record and leaving the archive quietly short.
+    """
+
+    def _closed_month_dir(self, tmp_path, month="2020-01"):
+        d = tmp_path / "shared" / "events" / "smith" / month
+        d.mkdir(parents=True)
+        return d
+
+    def _good_event(self, path, tokens=150):
+        path.write_text(json.dumps({
+            "model": "gpt-4o", "prompt_tokens": 100, "completion_tokens": 50,
+            "total_tokens": tokens, "timestamp": "2020-01-05T00:00:00",
+            "input_cost": 0.1, "output_cost": 0.2, "total_cost": 0.3, "source": "x",
+        }))
+
+    def test_unreadable_event_file_is_not_deleted(self, shared_source, tmp_path):
+        d = self._closed_month_dir(tmp_path)
+        self._good_event(d / "20200105T000000_aaa_x.json")
+        corrupt = d / "20200105T000001_bbb_x.json"
+        corrupt.write_text("")  # mid-sync placeholder
+
+        t = _make_shared_tracker(shared_source)
+        t._rollover_closed_shared_months()
+
+        assert corrupt.exists(), "an unreadable event file was deleted"
+        assert (d / "20200105T000000_aaa_x.json").exists(), (
+            "readable files must also stay, so the month can be retried as a whole"
+        )
+
+    def test_archive_is_not_left_short_of_the_unreadable_record(self, shared_source, tmp_path):
+        d = self._closed_month_dir(tmp_path)
+        self._good_event(d / "20200105T000000_aaa_x.json")
+        (d / "20200105T000001_bbb_x.json").write_text("{not json")
+
+        t = _make_shared_tracker(shared_source)
+        t._rollover_closed_shared_months()
+
+        # Retry once the placeholder has finished syncing: nothing was lost,
+        # so the archive ends up complete rather than permanently missing a call.
+        self._good_event(d / "20200105T000001_bbb_x.json")
+        t._rollover_closed_shared_months()
+
+        archive = tmp_path / "shared" / "archives" / "smith" / "2020-01.json"
+        assert archive.exists()
+        assert json.loads(archive.read_text())["total_usage"]["call_count"] == 2
+        assert not d.exists(), "cleanly folded months should still be tidied away"
+
+    def test_fully_readable_month_still_rolls_over_and_is_cleaned_up(self, shared_source, tmp_path):
+        """The ordinary path must be unaffected by the guard above."""
+        d = self._closed_month_dir(tmp_path)
+        self._good_event(d / "20200105T000000_aaa_x.json")
+
+        t = _make_shared_tracker(shared_source)
+        t._rollover_closed_shared_months()
+
+        archive = tmp_path / "shared" / "archives" / "smith" / "2020-01.json"
+        assert archive.exists()
+        assert json.loads(archive.read_text())["total_usage"]["call_count"] == 1
+        assert not d.exists()
