@@ -20,7 +20,7 @@ from ..models import (
     model_uses_max_completion_tokens, model_has_fixed_parameters, model_omit_sampling_params,
     resolve_model, maybe_sync_model_pricing, get_model_max_completion_tokens,
 )
-from ..tracking.token_tracker import TokenTracker
+from ..tracking.token_tracker import TokenTracker, TokenUsage
 from .api_errors import APISignal, classify_api_error, is_transient_error
 from .constants import MAX_RETRIES, BASE_RETRY_DELAY
 
@@ -354,7 +354,7 @@ class BaseService:
         )
         return self.client.chat.completions.create(**kwargs)  # type: ignore[misc]
 
-    def _record_response_usage(self, response: Any, model: str, critical: bool = False) -> None:
+    def _record_response_usage(self, response: Any, model: str, critical: bool = False) -> Optional[TokenUsage]:
         """Record token usage from an API response and log a summary.
 
         Args:
@@ -363,6 +363,18 @@ class BaseService:
             critical: When True, logs a CRITICAL error instead of a warning when usage is missing.
                       Set this for operations (e.g. OCR, image translation) where missing billing
                       data indicates a serious configuration problem.
+
+        Returns:
+            The record of what this call used and cost, or ``None`` if the API
+            didn't report any usage figures.
+
+            Most callers ignore this — they only need the usage written down.
+            It's returned for the few that also need to *show* the cost of the
+            call they just made, such as the web interface printing "$0.0031"
+            under a reply. Without it, those callers had no way to get the
+            number back and were re-implementing this method's body to obtain
+            it, which meant two copies of the same "did the response report
+            usage?" logic drifting apart.
         """
         assert not isinstance(response, ABCIterator), "Unexpected stream response received."
 
@@ -413,11 +425,13 @@ class BaseService:
                 f"total: {response.usage.total_tokens}, "
                 f"cost: ${usage.total_cost:.4f}"
             )
+            return usage
+
+        if critical:
+            logging.error("CRITICAL: No token usage in response. Token tracking failed!")
         else:
-            if critical:
-                logging.error("CRITICAL: No token usage in response. Token tracking failed!")
-            else:
-                logging.warning("No token usage information available in response.")
+            logging.warning("No token usage information available in response.")
+        return None
 
     def _run_with_retry(
         self,

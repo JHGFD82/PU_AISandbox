@@ -81,33 +81,15 @@ class ChatService(BaseService):
         result = self._run_with_retry(_attempt, model, operation="webui chat turn")
         response, content = result
 
-        # Recording usage directly here (rather than via the shared
-        # _record_response_usage() helper every other service uses) because
-        # this needs the TokenUsage object's total_cost back to include in
-        # the API response the browser will show — _record_response_usage()
-        # only logs and doesn't return anything. The fields recorded are
-        # identical either way.
-        prompt_tokens: Optional[int] = None
-        completion_tokens: Optional[int] = None
-        cost: Optional[float] = None
-        if (
-            response.usage
-            and response.usage.prompt_tokens is not None
-            and response.usage.completion_tokens is not None
-            and response.usage.total_tokens is not None
-        ):
-            prompt_tokens = response.usage.prompt_tokens
-            completion_tokens = response.usage.completion_tokens
-            usage = self.token_tracker.record_usage(
-                model=response.model or model,
-                prompt_tokens=prompt_tokens,
-                completion_tokens=completion_tokens,
-                total_tokens=response.usage.total_tokens,
-                requested_model=model,
-            )
-            cost = usage.total_cost
-        else:
-            logging.warning("webui chat turn: no token usage information in response.")
+        # The shared helper every other service uses. It hands back what the
+        # call cost, which is what this one additionally needs — the browser
+        # shows it under the reply. (This used to be a copy of the helper's
+        # body, made because the helper returned nothing; it returns the
+        # record now, so the copy is gone.)
+        usage = self._record_response_usage(response, model)
+        prompt_tokens: Optional[int] = usage.prompt_tokens if usage else None
+        completion_tokens: Optional[int] = usage.completion_tokens if usage else None
+        cost: Optional[float] = usage.total_cost if usage else None
 
         return {
             "content": content,
