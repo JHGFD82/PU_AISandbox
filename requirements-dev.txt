@@ -8,7 +8,7 @@
 # Then, before opening a pull request:
 #
 #     ruff check .      # should report nothing; see pyproject.toml
-#     pyright           # optional type checking; see pyrightconfig.json
+#     pyright           # type checking; see pyproject.toml [tool.pyright]
 #     pytest -m "not live"
 #
 # The versions are pinned deliberately. Ruff's built-in defaults change

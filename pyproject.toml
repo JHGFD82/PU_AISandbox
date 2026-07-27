@@ -65,3 +65,42 @@ select = ["E4", "E7", "E9", "F", "B"]
 # and should be fixed by taking `None` and constructing inside the function.
 "plugins/translation/src/runtime/document_handler.py" = ["B008"]
 "plugins/translation/src/services/translation_service.py" = ["B008"]
+
+[tool.pyright]
+# Type checking, run as `pyright`. This lived in pyrightconfig.json until it
+# needed reasons attached to it — JSON has nowhere to put them, and an ignore
+# list without reasons is indistinguishable from one written to make a number
+# go down.
+#
+# The mode is pinned for the same reason the Ruff rules are: Pyright's default
+# changes between releases, so leaving it unset means two people running the
+# documented command get different answers. requirements-dev.txt pins the
+# version to match.
+typeCheckingMode = "standard"
+
+ignore = [
+    # Test files. A test double exists precisely to stand in for something it
+    # is not — monkeypatch replaces a function with a MagicMock, and the webui
+    # auth tests pass a small _FakeRequest where a real Request is declared.
+    # Pyright is right about every one of those and there is nothing to fix:
+    # silencing them would mean ~35 cast() calls that assert nothing. Core
+    # tests/ was already excluded on this reasoning; the plugin test folders
+    # were an oversight rather than a different decision.
+    "tests/",
+    "plugins/*/tests/",
+
+    # The East Asian language plugins are separate git repositories that this
+    # repo neither owns nor runs — they have their own pytest.ini and their
+    # own suites (see CLAUDE.md). Their imports resolve only through the
+    # sys.modules injection their plugin.py performs at import time, so from
+    # here they read as unresolvable. They type-check in their own repos.
+    "plugins/translation-ea/",
+    "plugins/transcription-ea/",
+
+    # Plugin-owned service modules are registered into sys.modules under
+    # src.services.* at import time, so nothing is at that path on disk for
+    # Pyright to follow. This is the plugin architecture working as designed;
+    # see docs/architecture.md.
+    "plugins/translation/src/",
+    "plugins/transcription/src/",
+]

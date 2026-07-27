@@ -37,7 +37,7 @@ PYTHONPATH=$(pwd) pytest --cov=src/ --cov-branch --cov-report=xml # matches CI (
 ### Lint / type-check
 ```bash
 ruff check .
-pyright     # pyrightconfig.json ignores tests/ and plugins/{translation,transcription}/src/
+pyright     # config in pyproject.toml [tool.pyright]; should report 0 errors
 ```
 
 ## Architecture
