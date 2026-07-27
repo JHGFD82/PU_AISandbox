@@ -457,12 +457,72 @@ class TokenTracker:
         logging.debug(
             f"Token tracking initialized for Professor {professor.title()} "
             f"(mode={self.source_mode}): "
-            f"{self.data_file if self.data_file else self._shared_source.resolved_path()}"
+            f"{self.data_file if self.data_file else self._require_shared_source().resolved_path()}"
         )
 
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    def _require_shared_source(self) -> "ExternalSource":
+        """Return the shared folder this professor's usage is written to.
+
+        Only meaningful in shared-write mode. ``source_mode`` and
+        ``_shared_source`` record the same fact — whether there is a shared
+        folder — and every shared-write method below is reached only after
+        something has already checked ``source_mode``. That check happens in
+        the caller, though, so by the time one of these methods runs there is
+        nothing left connecting the two, for a reader or for a type checker.
+
+        Going through here restates the connection in one place. If the two
+        ever disagree, this raises immediately and says so, instead of the
+        first use of the missing folder failing several lines later with
+        ``'NoneType' object has no attribute 'resolved_path'``, which says
+        nothing about what actually went wrong.
+
+        Returns:
+            The configured shared source.
+
+        Raises:
+            RuntimeError: If called when this professor has no shared folder
+                          configured, which means a shared-write-only method
+                          was reached in local mode — a fault in the sandbox
+                          rather than anything the professor did.
+        """
+        if self._shared_source is None:
+            raise RuntimeError(
+                f"Usage tracking for '{self.professor}' is in {self.source_mode} mode, "
+                "which has no shared folder, but a shared-folder-only operation was "
+                "attempted. This is a fault in the sandbox; please report it."
+            )
+        return self._shared_source
+
+    def _require_data_file(self) -> Path:
+        """Return the single usage file this professor's totals are kept in.
+
+        The mirror image of ``_require_shared_source()``, and there for the
+        same reason: only local mode has one file to rewrite, so
+        ``data_file`` is deliberately ``None`` in shared-write mode, and the
+        methods that use it are reached only after a caller has checked
+        ``source_mode``.
+
+        Returns:
+            The path to this professor's current-month usage file.
+
+        Raises:
+            RuntimeError: If called in shared-write mode, which keeps one
+                          file per call rather than one file to rewrite — a
+                          fault in the sandbox rather than anything the
+                          professor did.
+        """
+        if self.data_file is None:
+            raise RuntimeError(
+                f"Usage tracking for '{self.professor}' is in {self.source_mode} mode, "
+                "which keeps one file per call rather than a single file, but an "
+                "operation that rewrites that single file was attempted. This is a "
+                "fault in the sandbox; please report it."
+            )
+        return self.data_file
 
     @staticmethod
     def _get_current_date() -> str:
@@ -494,10 +554,11 @@ class TokenTracker:
 
     def _load_usage_data(self) -> dict[str, Any]:
         """Load usage data, handling month rollover."""
-        if not self.data_file.exists():
+        data_file = self._require_data_file()
+        if not data_file.exists():
             return self._empty_usage_data()
 
-        with open(self.data_file, "r") as f:
+        with open(data_file, "r") as f:
             data = json.load(f)
 
         # Rollover: file belongs to a past month → archive it and start fresh
@@ -553,18 +614,19 @@ class TokenTracker:
             data: The complete usage record to write, in the same shape
                   ``_load_usage_data()`` returns.
         """
-        self.data_file.parent.mkdir(parents=True, exist_ok=True)
+        data_file = self._require_data_file()
+        data_file.parent.mkdir(parents=True, exist_ok=True)
         # The temporary file goes in the same folder as the real one, because
         # moving a file into place is only guaranteed to be a single step when
         # both are on the same disk. Its name includes the process and thread
         # doing the writing so two writers never reuse the same scratch file.
-        tmp_path = self.data_file.with_name(
-            f"{self.data_file.name}.{os.getpid()}.{threading.get_ident()}.tmp"
+        tmp_path = data_file.with_name(
+            f"{data_file.name}.{os.getpid()}.{threading.get_ident()}.tmp"
         )
         try:
             with open(tmp_path, "w") as f:
                 json.dump(data, f, indent=2)
-            os.replace(tmp_path, self.data_file)
+            os.replace(tmp_path, data_file)
         except Exception:
             # Don't leave scratch files behind in data/ if the write failed.
             try:
@@ -610,7 +672,7 @@ class TokenTracker:
         in either mode.
         """
         month = self._get_current_month()
-        event_dir = _shared_event_dir(self._shared_source, self.professor, month)
+        event_dir = _shared_event_dir(self._require_shared_source(), self.professor, month)
         records = _read_event_files(event_dir)
         self.usage_data = fold_usage_records(records, month)
 
@@ -647,7 +709,7 @@ class TokenTracker:
             )
 
             month = self._get_current_month()
-            event_dir = _shared_event_dir(self._shared_source, self.professor, month)
+            event_dir = _shared_event_dir(self._require_shared_source(), self.professor, month)
             event_dir.mkdir(parents=True, exist_ok=True)
             filename = f"{datetime.now().strftime('%Y%m%dT%H%M%S%f')}_{secrets.token_hex(3)}_{self._source_id}.json"
             with open(event_dir / filename, "w") as f:
@@ -666,7 +728,7 @@ class TokenTracker:
             self._refresh_shared_usage_data()
             return self.usage_data["daily_usage"].get(date, UsageStats().to_dict())
 
-        archive_path = _shared_archive_path(self._shared_source, self.professor, month)
+        archive_path = _shared_archive_path(self._require_shared_source(), self.professor, month)
         if archive_path.exists():
             with open(archive_path, "r") as f:
                 archive = json.load(f)
@@ -682,7 +744,7 @@ class TokenTracker:
             self._refresh_shared_usage_data()
             return self.usage_data["total_usage"]
 
-        archive_path = _shared_archive_path(self._shared_source, self.professor, month)
+        archive_path = _shared_archive_path(self._require_shared_source(), self.professor, month)
         if archive_path.exists():
             with open(archive_path, "r") as f:
                 archive = json.load(f)
@@ -695,7 +757,7 @@ class TokenTracker:
         self._refresh_shared_usage_data()
         combined.merge_dict(self.usage_data["total_usage"])
 
-        archive_dir = _shared_archive_dir(self._shared_source, self.professor)
+        archive_dir = _shared_archive_dir(self._require_shared_source(), self.professor)
         if archive_dir.exists():
             for archive_file in sorted(archive_dir.glob("*.json")):
                 try:
@@ -723,7 +785,7 @@ class TokenTracker:
         than a live shared filesystem — an acceptable limitation for a
         once-a-month, already-closed-data operation.
         """
-        events_root = _shared_events_root(self._shared_source, self.professor)
+        events_root = _shared_events_root(self._require_shared_source(), self.professor)
         if not events_root.exists():
             return
 
@@ -732,7 +794,7 @@ class TokenTracker:
             if not month_dir.is_dir() or month_dir.name >= current_month:
                 continue
             month = month_dir.name
-            archive_path = _shared_archive_path(self._shared_source, self.professor, month)
+            archive_path = _shared_archive_path(self._require_shared_source(), self.professor, month)
             records, unreadable = _read_event_files_with_failures(month_dir)
 
             # A month whose event files couldn't all be read is left entirely
@@ -1043,13 +1105,13 @@ class TokenTracker:
             it exists yet.
         """
         if self.source_mode == "shared-write":
-            return _shared_archive_path(self._shared_source, self.professor, month)
+            return _shared_archive_path(self._require_shared_source(), self.professor, month)
         return get_archive_path(self.professor, month)
 
     def list_archived_months(self) -> list[str]:
         """Return a sorted list of month strings that have been archived."""
         if self.source_mode == "shared-write":
-            archive_dir = _shared_archive_dir(self._shared_source, self.professor)
+            archive_dir = _shared_archive_dir(self._require_shared_source(), self.professor)
         else:
             archive_dir = get_archive_dir(self.professor)
         return sorted(p.stem for p in archive_dir.glob("*.json")) if archive_dir.exists() else []
