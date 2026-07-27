@@ -30,13 +30,10 @@ from __future__ import annotations
 
 import argparse
 import logging
-from typing import TYPE_CHECKING, Optional
+from typing import Optional
 
 from .plugin import ModePlugin
 from src.errors import CLIError
-
-if TYPE_CHECKING:
-    pass
 
 logger = logging.getLogger(__name__)
 
