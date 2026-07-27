@@ -989,6 +989,50 @@ class TestStartJob:
         import os
         assert os.path.exists(received["file_path"])
 
+    def test_upload_filename_cannot_escape_the_job_directory(self, unlocked_client, monkeypatch):
+        """An uploaded file is written under its job's own directory, whatever it claims to be called.
+
+        The filename in a multipart upload is supplied by whoever made the
+        request, not by the browser's file picker, so it can contain "../".
+        The single-file branch used to build the path from it directly while
+        the multi-file branch stripped it, which meant a crafted name could
+        write outside the job directory entirely. Both strip it now.
+        """
+        app_module = sys.modules["_pu_webui_app"]
+        received = {}
+
+        def run_ui_action(fields, professor, model, on_progress, output_dir):
+            received.update(fields)
+            from src.runtime.ui_action import UiJobResult
+            out = f"{output_dir}/out.txt"
+            with open(out, "w", encoding="utf-8") as f:
+                f.write("done")
+            return UiJobResult(output_path=out, output_filename="out.txt", summary="Done.")
+
+        fake = _fake_plugin(action_id="translate", run_ui_action=run_ui_action)
+        monkeypatch.setattr(app_module, "_get_plugins", lambda: {"translate": fake})
+
+        create = unlocked_client.post("/api/conversations", json={"professor": "heller", "model": "gpt-4o"})
+        conv_id = create.json()["id"]
+
+        resp = unlocked_client.post(
+            "/api/jobs",
+            data={
+                "professor": "heller", "conversation_id": conv_id, "action_id": "translate",
+                "fields_json": json.dumps({"source_language": "ja", "target_language": "en"}),
+            },
+            files={"files": ("../../../../escaped.txt", b"payload", "text/plain")},
+        )
+        assert resp.status_code == 200
+        _wait_for_job_done(unlocked_client, conv_id, "heller")
+
+        import os
+        written = Path(received["file_path"]).resolve()
+        job_dir = Path(app_module.jobs.job_output_dir("heller", "x")).resolve().parent
+        assert written.name == "escaped.txt"
+        assert str(written).startswith(str(job_dir)), f"{written} escaped {job_dir}"
+        assert not os.path.exists("/escaped.txt")
+
     def test_multiple_uploaded_files_saved_into_one_folder(self, unlocked_client, monkeypatch):
         # A professor picking several images (or a whole folder, on a
         # browser that supports it) at once for an allow_folder field —

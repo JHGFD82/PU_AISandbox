@@ -832,25 +832,32 @@ def create_app() -> FastAPI:
             raise HTTPException(400, "fields_json must decode to a JSON object.")
 
         job_id = jobs.new_job_id()
-        uploaded = [f for f in files if f.filename]
+        # A multipart part with no filename isn't a file — an empty file input
+        # posts one — so those are dropped here. Each surviving part is paired
+        # with its name so that the filter stays visible further down, where
+        # the name is used to build a path. Reading it back off the part there
+        # would give something that might be missing, which is not what this
+        # list contains.
+        uploaded: list[tuple[UploadFile, str]] = [(f, f.filename) for f in files if f.filename]
         if len(uploaded) == 1:
+            part, filename = uploaded[0]
             output_dir = jobs.job_output_dir(professor, job_id)
-            upload_path = output_dir / uploaded[0].filename
-            data = await uploaded[0].read()
-            with open(upload_path, "wb") as f:
-                f.write(data)
+            upload_path = output_dir / os.path.basename(filename)
+            data = await part.read()
+            with open(upload_path, "wb") as out:
+                out.write(data)
             fields["file_path"] = str(upload_path)
-            fields["file_name"] = uploaded[0].filename
+            fields["file_name"] = filename
         elif len(uploaded) > 1:
             output_dir = jobs.job_output_dir(professor, job_id)
             upload_dir = output_dir / "input"
             upload_dir.mkdir(parents=True, exist_ok=True)
             saved_names = []
-            for f in uploaded:
-                data = await f.read()
-                with open(upload_dir / os.path.basename(f.filename), "wb") as out:
+            for part, filename in uploaded:
+                data = await part.read()
+                with open(upload_dir / os.path.basename(filename), "wb") as out:
                     out.write(data)
-                saved_names.append(f.filename)
+                saved_names.append(filename)
             fields["file_path"] = str(upload_dir)
             fields["file_name"] = f"{len(saved_names)} images"
 
