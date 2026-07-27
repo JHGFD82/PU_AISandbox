@@ -126,12 +126,16 @@ class ChatService(BaseService):
             wasn't billed," not as an error.
 
         Raises:
-            ValueError: If the model is no longer accessible through the AI
-                        gateway (e.g. this installation's license to it was
-                        revoked) — the model is removed from
-                        ``model_catalog.json`` first, same as every other
-                        service's ``handle_api_errors()`` cleanup, so later
-                        requests won't try it again.
+            CLIError: If the model is no longer accessible through the AI
+                      gateway (e.g. this installation's license to it was
+                      revoked) — the model is removed from
+                      ``model_catalog.json`` first, same as every other
+                      service's ``handle_api_errors()`` cleanup, so later
+                      requests won't try it again. ``CLIError`` marks the
+                      message as one written for the person using the tool,
+                      which is why the web interface shows it verbatim
+                      rather than replacing it (see ``_chat_error_message()``
+                      in app.py).
             Exception: Whatever else the underlying API call raises. Unlike
                        ``send_message()``, a failure here is never retried —
                        see ``BaseService._create_completion_stream()``'s

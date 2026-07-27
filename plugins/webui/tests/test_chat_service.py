@@ -7,7 +7,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from src.errors import CLIError
 from src.services.chat_service import ChatService
+from src.tracking.token_tracker import TokenUsage
 
 
 class _Usage:
@@ -58,10 +60,32 @@ class _Chunk:
         self.choices = [] if no_choices else [_ChunkChoice(content)]
 
 
+def _recorded(model, prompt_tokens, completion_tokens, total_tokens, **_):
+    """Stand in for TokenTracker.record_usage(), returning what the real one returns.
+
+    A real ``TokenUsage`` built from the arguments actually passed, rather
+    than a bare mock, because the billing figures ChatService reports to the
+    browser are now read back off this return value. Echoing the arguments
+    means a test can tell the difference between "reported what was billed"
+    and "reported some other number that happens to be an integer" — which a
+    mock returning fixed attributes cannot.
+    """
+    return TokenUsage(
+        model=model,
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        total_tokens=total_tokens,
+        timestamp="2026-07-27T00:00:00",
+        input_cost=0.0012,
+        output_cost=0.0030,
+        total_cost=0.0042,
+    )
+
+
 @pytest.fixture
 def svc():
     tracker = MagicMock()
-    tracker.record_usage.return_value = MagicMock(total_cost=0.0042)
+    tracker.record_usage.side_effect = _recorded
     return ChatService(api_key="fake-key", token_tracker=tracker)
 
 
@@ -316,7 +340,7 @@ class TestGenerateTitle:
             )
 
         with patch.object(svc, "_create_completion_stream", side_effect=boom):
-            with pytest.raises(ValueError, match="not accessible"):
+            with pytest.raises(CLIError, match="not accessible"):
                 list(svc.stream_message([{"role": "user", "content": "hi"}]))
         mock_remove.assert_called_once_with("gpt-4o")
 
@@ -334,7 +358,7 @@ class TestGenerateTitle:
 
         with patch.object(svc, "_create_completion_stream", return_value=flaky_stream()):
             events = []
-            with pytest.raises(ValueError, match="not accessible"):
+            with pytest.raises(CLIError, match="not accessible"):
                 for event in svc.stream_message([{"role": "user", "content": "hi"}]):
                     events.append(event)
         assert events == [{"type": "delta", "text": "partial"}]
