@@ -39,11 +39,21 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 logger = logging.getLogger(__name__)
 
 conversation = sys.modules["_pu_webui_conversation"]
+
+if TYPE_CHECKING:
+    # For type checkers only — never imported at runtime. At runtime this
+    # module is registered under the flat name "_pu_webui_conversation" (see
+    # the module docstring), which a type checker has no way to follow back
+    # to a file, so annotations mentioning ConversationStore resolved to
+    # nothing. This import is by file position, which the checker can follow,
+    # and the "if" guard means Python never executes it — so the flat-name
+    # registration the plugin loader needs is untouched.
+    from .conversation import ConversationStore
 
 # plugins/webui/src/jobs.py -> repo root is four parents up (matches
 # conversation.py's own CONVERSATIONS_DIR computation).
@@ -205,7 +215,7 @@ def start_job(
     professor: str,
     model: Optional[str],
     conversation_id: str,
-    conversation_store: "conversation.ConversationStore",  # noqa: F821 — see module docstring
+    conversation_store: "ConversationStore",
     job_store: JobStore,
     job_id: Optional[str] = None,
 ) -> Job:
@@ -276,7 +286,7 @@ def _run_job(
     fields: dict,
     professor: str,
     model: Optional[str],
-    conversation_store: "conversation.ConversationStore",  # noqa: F821
+    conversation_store: "ConversationStore",
     job_store: JobStore,
 ) -> None:
     """The background thread's body: run the plugin action and record what happened.

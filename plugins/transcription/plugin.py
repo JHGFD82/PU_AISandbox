@@ -41,7 +41,7 @@ import importlib.util
 import logging
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -121,6 +121,15 @@ from src.runtime.ui_action import (  # noqa: E402
 )
 from src.services.constants import DEFAULT_PARALLEL_WORKERS        # noqa: E402
 
+if TYPE_CHECKING:
+    # For type checkers only — never imported at runtime. SandboxProcessor is
+    # imported lazily inside run() on purpose: importing it at module level
+    # would freeze the set of plugin mixins before every plugin has finished
+    # registering (see _discover_plugin_mixins in sandbox_processor.py). The
+    # "if" guard keeps that property while still letting the annotations below
+    # name a real class instead of an undefined string.
+    from src.runtime.sandbox_processor import SandboxProcessor
+
 # Register the language supported by this base plugin.
 register_language('en', 'English')
 
@@ -128,7 +137,7 @@ register_language('en', 'English')
 # ── Shared execution helper ────────────────────────────────────────────────────
 
 def _run_transcription_review(
-    sandbox: "SandboxProcessor",  # noqa: F821 — imported lazily in run(), only for type hints
+    sandbox: "SandboxProcessor",
     text: str,
     language: str,
     output_file: Optional[str] = None,
@@ -182,6 +191,16 @@ class TranscriptionPlugin:
     """
 
     commands: list[str] = ["transcribe", "transcription_review"]
+
+    # Declared here, assigned at the bottom of this file. The web interface
+    # looks for ``ui_action`` on the plugin *instance*, so it has to be
+    # attached to the object rather than left as a module-level name — but
+    # the UiAction it's assigned is built further down, after the methods it
+    # refers to exist. Naming it here is what makes that later assignment a
+    # documented part of this class rather than an attribute appearing from
+    # nowhere.
+    ui_action: "UiAction"
+
     # ``handles`` lists the full language names (as returned by
     # ``parse_single_language_code``) that this plugin services. The
     # plugin loader uses this list to combine this plugin with any

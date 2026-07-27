@@ -511,6 +511,15 @@ class TranslationPlugin:
 
     commands: list[str] = ["translate"]
 
+    # Declared here, assigned at the bottom of this file. The web interface
+    # looks for ``ui_action`` on the plugin *instance*, so it has to be
+    # attached to the object rather than left as a module-level name — but
+    # the UiAction it's assigned is built further down, after the methods it
+    # refers to exist. Naming it here is what makes that later assignment a
+    # documented part of this class rather than an attribute appearing from
+    # nowhere.
+    ui_action: "UiAction"
+
     # Languages this plugin owns as source languages.
     # ``handles`` stores the short codes users type on the command line
     # (e.g. ``en`` for English), matching the keys in ``LANGUAGE_MAP``.

@@ -44,7 +44,13 @@ def save_to_excel(
         return
 
     wb = openpyxl.Workbook()
-    wb.remove(wb.active)  # remove default empty sheet
+    # A new workbook always opens with one empty sheet, which we replace with
+    # our own below. Checked rather than assumed, because openpyxl declares
+    # this as "the active sheet, if there is one" and removing nothing is the
+    # right thing to do if a future version ever starts empty.
+    default_sheet = wb.active
+    if default_sheet is not None:
+        wb.remove(default_sheet)
 
     # ── Split content into prose blocks and Markdown table blocks ──────────
     import re

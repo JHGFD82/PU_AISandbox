@@ -261,7 +261,11 @@ class DispatchPlugin:
         # Collect destination-side guidance from whichever plugin owns the
         # destination token, if it differs from the source owner.
         peer_guidance: list[str] = []
-        dest_owner = self.source_registry.get(dest_token)
+        # A single-code command (e.g. 'transcribe en') has no destination
+        # token, so there is no destination owner to ask. Looking the missing
+        # token up in the registry happened to return nothing anyway, but
+        # saying so directly is what the next few lines already assume.
+        dest_owner = self.source_registry.get(dest_token) if dest_token else None
         if dest_owner is not None and dest_owner is not owner:
             if hasattr(dest_owner, "get_peer_guidance"):
                 guidance = dest_owner.get_peer_guidance(dest_token)  # type: ignore[attr-defined]
