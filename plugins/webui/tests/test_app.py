@@ -273,6 +273,72 @@ class TestModelsEndpoint:
         assert resp.json()["models"][0]["accepts_sampling_params"] is False
 
 
+class TestUsageEndpoint:
+    """The spend sidebar's data, which had no test coverage at all.
+
+    The budget figures here must be the ones TokenTracker works out, not a
+    second copy of the arithmetic — an earlier version computed its own and
+    had already drifted from the terminal report.
+    """
+
+    @pytest.fixture
+    def tracker(self, monkeypatch):
+        """Install a stand-in TokenTracker and hand it back for assertions."""
+        app_module = sys.modules["_pu_webui_app"]
+        fake = MagicMock()
+        fake.monthly_limit = 50.0
+        fake.usage_data = {"model_usage": {"gpt-4o": {"total_cost": 12.5}}}
+        fake.get_all_time_usage.return_value = {"total_cost": 99.0}
+        fake.get_monthly_budget_status.return_value = {
+            "monthly_usage": {"total_cost": 12.5, "total_tokens": 4000},
+            "usage_percentage": 25.0,
+            "remaining_budget": 37.5,
+            "is_exceeded": False,
+            "approaching_limit": False,
+        }
+        monkeypatch.setattr(app_module, "TokenTracker", lambda professor: fake)
+        return fake
+
+    def test_returns_the_trackers_budget_figures(self, unlocked_client, tracker):
+        resp = unlocked_client.get("/api/usage", params={"professor": "heller"})
+        assert resp.status_code == 200
+        budget = resp.json()["budget"]
+        assert budget["monthly_limit"] == 50.0
+        assert budget["usage_percentage"] == 25.0
+        assert budget["remaining_budget"] == 37.5
+
+    def test_includes_the_two_warning_flags(self, unlocked_client, tracker):
+        """These were missing entirely, so the sidebar couldn't show "over budget"."""
+        tracker.get_monthly_budget_status.return_value |= {
+            "usage_percentage": 130.0,
+            "remaining_budget": 0.0,
+            "is_exceeded": True,
+            "approaching_limit": True,
+        }
+        budget = unlocked_client.get(
+            "/api/usage", params={"professor": "heller"}
+        ).json()["budget"]
+        assert budget["is_exceeded"] is True
+        assert budget["approaching_limit"] is True
+
+    def test_month_totals_come_from_the_same_call_as_the_budget(self, unlocked_client, tracker):
+        """One question, asked once — the month shown and the budget it's
+        measured against can't disagree if they came from the same answer."""
+        body = unlocked_client.get("/api/usage", params={"professor": "heller"}).json()
+        assert body["month"] == {"total_cost": 12.5, "total_tokens": 4000}
+        assert body["all_time"] == {"total_cost": 99.0}
+        assert body["model_usage"] == {"gpt-4o": {"total_cost": 12.5}}
+        tracker.get_monthly_budget_status.assert_called_once()
+
+    def test_requires_unlock(self, client, tracker):
+        assert client.get("/api/usage", params={"professor": "heller"}).status_code == 401
+
+    def test_rejects_unknown_professor(self, unlocked_client, tracker):
+        """The name reaches file paths, so it must name a configured professor."""
+        resp = unlocked_client.get("/api/usage", params={"professor": "nobody"})
+        assert resp.status_code == 400
+
+
 class TestChat:
     def test_chat_turn_streams_deltas_then_done_with_usage(self, unlocked_client, monkeypatch):
         create = unlocked_client.post("/api/conversations", json={"professor": "heller", "model": "gpt-4o"})

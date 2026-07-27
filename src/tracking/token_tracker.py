@@ -225,7 +225,23 @@ def fold_usage_records(records: list[dict[str, Any]], month: str) -> dict[str, A
 
 def _accumulate_stats_dict(stats: dict[str, Any], prompt_tokens: int, completion_tokens: int,
                             total_tokens: int, cost: float) -> None:
-    """Add one call's numbers into a plain stats dictionary in place (module-level twin of ``TokenTracker._update_stats``)."""
+    """Add one call's numbers into a plain stats dictionary, in place.
+
+    The single place running totals are advanced, used for the month, day,
+    and per-model summaries alike, in both local and shared-write mode.
+    ``TokenTracker`` used to carry a near-identical copy of this as a
+    method; the two differed only in how they coped with a dictionary that
+    had no ``call_count`` yet, which is precisely the sort of small
+    divergence that turns into two different answers to the same question.
+
+    Args:
+        stats: The running totals to add to, as stored in a usage file.
+               Modified in place; nothing is returned.
+        prompt_tokens: Tokens in what was sent to the model.
+        completion_tokens: Tokens in what came back.
+        total_tokens: The two above added together, as the API reported it.
+        cost: What this one call cost, in dollars.
+    """
     stats["total_tokens"] += total_tokens
     stats["total_input_tokens"] += prompt_tokens
     stats["total_output_tokens"] += completion_tokens
@@ -561,16 +577,6 @@ class TokenTracker:
         """Save the current in-memory usage data."""
         self._save_usage_data_to(self.usage_data)
 
-    def _update_stats(self, stats: dict[str, Any], prompt_tokens: int, completion_tokens: int,
-                      total_tokens: int, cost: float) -> None:
-        """Mutate a stats dictionary in-place."""
-        stats["total_tokens"] += total_tokens
-        stats["total_input_tokens"] += prompt_tokens
-        stats["total_output_tokens"] += completion_tokens
-        stats["total_cost"] += cost
-        stats.setdefault("call_count", 0)
-        stats["call_count"] += 1
-
     def _calculate_costs(self, model: str, prompt_tokens: int,
                          completion_tokens: int) -> tuple[float, float, float]:
         """Return (input_cost, output_cost, total_cost) for the given token counts."""
@@ -849,16 +855,16 @@ class TokenTracker:
 
             self._refresh_from_disk_before_update()
 
-            self._update_stats(self.usage_data["total_usage"], prompt_tokens, completion_tokens, total_tokens, total_cost)
+            _accumulate_stats_dict(self.usage_data["total_usage"], prompt_tokens, completion_tokens, total_tokens, total_cost)
 
             if model not in self.usage_data["model_usage"]:
                 self.usage_data["model_usage"][model] = UsageStats().to_dict()
-            self._update_stats(self.usage_data["model_usage"][model], prompt_tokens, completion_tokens, total_tokens, total_cost)
+            _accumulate_stats_dict(self.usage_data["model_usage"][model], prompt_tokens, completion_tokens, total_tokens, total_cost)
 
             date_str = self._get_current_date()
             if date_str not in self.usage_data["daily_usage"]:
                 self.usage_data["daily_usage"][date_str] = UsageStats().to_dict()
-            self._update_stats(self.usage_data["daily_usage"][date_str], prompt_tokens, completion_tokens, total_tokens, total_cost)
+            _accumulate_stats_dict(self.usage_data["daily_usage"][date_str], prompt_tokens, completion_tokens, total_tokens, total_cost)
 
             self.usage_data["session_history"].append(asdict(usage))
             self._save_usage_data()
@@ -1048,8 +1054,34 @@ class TokenTracker:
             archive_dir = get_archive_dir(self.professor)
         return sorted(p.stem for p in archive_dir.glob("*.json")) if archive_dir.exists() else []
 
-    def _get_monthly_budget_status(self, month: str | None = None) -> dict[str, Any]:
-        """Return a dict summarising budget consumption for *month*."""
+    def get_monthly_budget_status(self, month: str | None = None) -> dict[str, Any]:
+        """Answer "how much of this professor's monthly budget is left?".
+
+        This is the one place that question is answered. It is public
+        because the web interface's sidebar needs the same answer the
+        terminal report prints, and previously computed its own — which had
+        already drifted: it read the budget from the global setting rather
+        than from this professor's tracker, and never worked out the two
+        warning flags at all, so the browser couldn't show that someone was
+        over budget.
+
+        Args:
+            month: A month to report on in ``YYYY-MM`` form (e.g.
+                   ``'2026-03'``). Omit for the current month.
+
+        Returns:
+            A dictionary with:
+
+            * ``monthly_usage`` — that month's totals (tokens, cost, calls).
+            * ``usage_percentage`` — how much of the budget is spent, 0–100
+              (and possibly above 100).
+            * ``remaining_budget`` — dollars left, never below zero.
+            * ``is_exceeded`` — ``True`` once spending reaches the limit.
+            * ``approaching_limit`` — ``True`` past the warning threshold.
+
+            Both flags are advisory. Nothing in the sandbox stops work when
+            a budget runs out; see the module docstring.
+        """
         monthly_usage = self.get_monthly_usage(month)
         usage_pct = (monthly_usage["total_cost"] / self.monthly_limit) * 100 if self.monthly_limit > 0 else 0.0
         remaining = max(0.0, self.monthly_limit - monthly_usage["total_cost"])
@@ -1144,7 +1176,7 @@ class TokenTracker:
             print(f"Cost:   ${today_usage['total_cost']:.4f}")
 
         # Monthly budget
-        budget_status = self._get_monthly_budget_status()
+        budget_status = self.get_monthly_budget_status()
         print_subsection(f"Monthly Budget ({current_month})")
         print(f"Monthly Limit: ${self.monthly_limit:.2f}")
         print(f"Used:          ${monthly_total['total_cost']:.4f} ({budget_status['usage_percentage']:.1f}%)")

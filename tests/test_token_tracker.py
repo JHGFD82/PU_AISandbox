@@ -2,9 +2,9 @@
 Tests for token tracking data structures and math:
   - UsageStats.add_usage, merge_dict, to_dict
   - TokenTracker.__init__ (default data_file path)
-  - TokenTracker._update_stats
+  - _accumulate_stats_dict (running totals)
   - TokenTracker._calculate_costs  (mocked pricing)
-  - TokenTracker._get_monthly_budget_status  (current and past months)
+  - TokenTracker.get_monthly_budget_status  (current and past months)
   - Module-level path helpers
   - TokenUsage dataclass
   - TokenTracker._empty_usage_data
@@ -31,6 +31,7 @@ from src.tracking.token_tracker import (
     UsageStats,
     TokenTracker,
     TokenUsage,
+    _accumulate_stats_dict,
     get_usage_data_path,
     get_archive_dir,
     get_archive_path,
@@ -138,15 +139,15 @@ def tracker(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# TokenTracker._update_stats
+# _accumulate_stats_dict
 # ---------------------------------------------------------------------------
 
-class TestUpdateStats:
+class TestAccumulateStatsDict:
 
     def test_increments_all_fields(self, tracker):
         stats = {"total_tokens": 0, "total_input_tokens": 0,
                  "total_output_tokens": 0, "total_cost": 0.0}
-        tracker._update_stats(stats, prompt_tokens=10, completion_tokens=5,
+        _accumulate_stats_dict(stats, prompt_tokens=10, completion_tokens=5,
                               total_tokens=15, cost=0.02)
         assert stats["total_tokens"] == 15
         assert stats["total_input_tokens"] == 10
@@ -157,16 +158,16 @@ class TestUpdateStats:
     def test_accumulates_on_repeated_calls(self, tracker):
         stats = {"total_tokens": 0, "total_input_tokens": 0,
                  "total_output_tokens": 0, "total_cost": 0.0}
-        tracker._update_stats(stats, 10, 5, 15, 0.01)
-        tracker._update_stats(stats, 20, 10, 30, 0.02)
+        _accumulate_stats_dict(stats, 10, 5, 15, 0.01)
+        _accumulate_stats_dict(stats, 20, 10, 30, 0.02)
         assert stats["total_tokens"] == 45
         assert stats["call_count"] == 2
 
     def test_initialises_call_count_when_missing(self, tracker):
         stats = {"total_tokens": 0, "total_input_tokens": 0,
                  "total_output_tokens": 0, "total_cost": 0.0}
-        # call_count key absent — setdefault should create it
-        tracker._update_stats(stats, 1, 1, 2, 0.001)
+        # call_count key absent — it should be created, not raise
+        _accumulate_stats_dict(stats, 1, 1, 2, 0.001)
         assert "call_count" in stats
         assert stats["call_count"] == 1
 
@@ -206,7 +207,7 @@ class TestCalculateCosts:
 
 
 # ---------------------------------------------------------------------------
-# TokenTracker._get_monthly_budget_status
+# TokenTracker.get_monthly_budget_status
 # ---------------------------------------------------------------------------
 
 class TestMonthlyBudgetStatus:
@@ -217,42 +218,42 @@ class TestMonthlyBudgetStatus:
 
     def test_under_limit_not_exceeded(self, tracker):
         self._set_total_cost(tracker, 20.0)
-        status = tracker._get_monthly_budget_status()
+        status = tracker.get_monthly_budget_status()
         assert status["is_exceeded"] is False
 
     def test_over_limit_is_exceeded(self, tracker):
         self._set_total_cost(tracker, 110.0)
-        status = tracker._get_monthly_budget_status()
+        status = tracker.get_monthly_budget_status()
         assert status["is_exceeded"] is True
 
     def test_usage_percentage_calculated_correctly(self, tracker):
         self._set_total_cost(tracker, 25.0)   # 25/100 = 25%
-        status = tracker._get_monthly_budget_status()
+        status = tracker.get_monthly_budget_status()
         assert status["usage_percentage"] == pytest.approx(25.0)
 
     def test_remaining_budget_calculated_correctly(self, tracker):
         self._set_total_cost(tracker, 30.0)
-        status = tracker._get_monthly_budget_status()
+        status = tracker.get_monthly_budget_status()
         assert status["remaining_budget"] == pytest.approx(70.0)
 
     def test_remaining_budget_clamps_to_zero_when_exceeded(self, tracker):
         self._set_total_cost(tracker, 150.0)
-        status = tracker._get_monthly_budget_status()
+        status = tracker.get_monthly_budget_status()
         assert status["remaining_budget"] == 0.0
 
     def test_approaching_limit_false_below_80_percent(self, tracker):
         self._set_total_cost(tracker, 79.0)
-        status = tracker._get_monthly_budget_status()
+        status = tracker.get_monthly_budget_status()
         assert status["approaching_limit"] is False
 
     def test_approaching_limit_true_above_80_percent(self, tracker):
         self._set_total_cost(tracker, 81.0)
-        status = tracker._get_monthly_budget_status()
+        status = tracker.get_monthly_budget_status()
         assert status["approaching_limit"] is True
 
     def test_status_contains_monthly_usage_key(self, tracker):
         self._set_total_cost(tracker, 10.0)
-        status = tracker._get_monthly_budget_status()
+        status = tracker.get_monthly_budget_status()
         assert "monthly_usage" in status
 
 
@@ -871,7 +872,7 @@ def loaded_tracker(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# TokenTracker._get_monthly_budget_status  (past month via archive)
+# TokenTracker.get_monthly_budget_status  (past month via archive)
 # ---------------------------------------------------------------------------
 
 class TestMonthlyBudgetStatusPastMonth:
@@ -886,7 +887,7 @@ class TestMonthlyBudgetStatusPastMonth:
         archive_path.write_text(json.dumps(ARCHIVE_FEB_DATA))
 
         with patch("src.tracking.token_tracker.get_archive_path", return_value=archive_path):
-            status = t._get_monthly_budget_status(month="2026-02")
+            status = t.get_monthly_budget_status(month="2026-02")
 
         assert status["monthly_usage"]["total_tokens"] == 219991
         assert status["monthly_usage"]["call_count"] == 32
@@ -900,7 +901,7 @@ class TestMonthlyBudgetStatusPastMonth:
         archive_path.write_text(json.dumps(ARCHIVE_FEB_DATA))
 
         with patch("src.tracking.token_tracker.get_archive_path", return_value=archive_path):
-            status = t._get_monthly_budget_status(month="2026-02")
+            status = t.get_monthly_budget_status(month="2026-02")
 
         # 0.88636 / 250.0 * 100 ≈ 0.35 %
         assert status["usage_percentage"] == pytest.approx(
@@ -916,7 +917,7 @@ class TestMonthlyBudgetStatusPastMonth:
         archive_path.write_text(json.dumps(ARCHIVE_FEB_DATA))
 
         with patch("src.tracking.token_tracker.get_archive_path", return_value=archive_path):
-            status = t._get_monthly_budget_status(month="2026-02")
+            status = t.get_monthly_budget_status(month="2026-02")
 
         assert status["is_exceeded"] is False
 

@@ -61,7 +61,6 @@ from src.errors import CLIError
 from src.models import (
     DEFAULT_FALLBACK_MODEL,
     get_available_models,
-    get_monthly_limit,
     model_has_fixed_parameters,
     model_omit_sampling_params,
     model_supports_vision,
@@ -566,18 +565,22 @@ def create_app() -> FastAPI:
         _require_unlocked(request)
         _validated_professor(professor)
         tracker = TokenTracker(professor=professor)
-        month = tracker.get_monthly_usage()
-        all_time = tracker.get_all_time_usage()
-        monthly_limit = get_monthly_limit()
-        usage_pct = (month["total_cost"] / monthly_limit * 100) if monthly_limit > 0 else 0.0
+        # The same answer the terminal report prints, from the same method,
+        # rather than a second copy of the arithmetic here. The copy this
+        # replaced read the budget from the global setting instead of from
+        # this professor's tracker, and left out the two warning flags — so
+        # the sidebar had no way to say someone was over budget.
+        budget = tracker.get_monthly_budget_status()
         return {
-            "month": month,
-            "all_time": all_time,
+            "month": budget["monthly_usage"],
+            "all_time": tracker.get_all_time_usage(),
             "model_usage": tracker.usage_data.get("model_usage", {}),
             "budget": {
-                "monthly_limit": monthly_limit,
-                "usage_percentage": usage_pct,
-                "remaining_budget": max(0.0, monthly_limit - month["total_cost"]),
+                "monthly_limit": tracker.monthly_limit,
+                "usage_percentage": budget["usage_percentage"],
+                "remaining_budget": budget["remaining_budget"],
+                "is_exceeded": budget["is_exceeded"],
+                "approaching_limit": budget["approaching_limit"],
             },
         }
 
