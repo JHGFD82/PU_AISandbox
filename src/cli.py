@@ -34,17 +34,34 @@ logger = logging.getLogger(__name__)
 
 
 def _add_debug_flags(parser: argparse.ArgumentParser) -> None:
-    """Add --verbose and --debug-api flags to *parser*."""
+    """Add --verbose and --debug-api flags to *parser*.
+
+    These are offered in two places — before the professor name
+    (``main.py --verbose heller translate ...``) and after the command
+    (``main.py heller translate ... --verbose``) — because both read
+    naturally and the tool's own usage line advertises the first one.
+
+    Neither flag has a default here, which is the point. Adding the same
+    flag to a command's own parser normally makes that copy's "off" default
+    overwrite whatever the earlier one already set, so ``--verbose`` typed
+    before the professor name was silently discarded by the time the command
+    was parsed. ``SUPPRESS`` means a flag that wasn't typed writes nothing at
+    all, so whichever position the user did type it in survives. The
+    off-by-default values are set once, on the top-level parser, in
+    ``create_argument_parser()``.
+    """
     parser.add_argument(
         '--verbose',
         dest='verbose',
         action='store_true',
+        default=argparse.SUPPRESS,
         help='Enable verbose debug logging',
     )
     parser.add_argument(
         '--debug-api',
         dest='debug_api',
         action='store_true',
+        default=argparse.SUPPRESS,
         help='Log raw API payload details for troubleshooting provider errors',
     )
 
@@ -328,6 +345,10 @@ Run 'python main.py <professor> <command> --help' for plugin-specific usage.
         help='List all available models and their capabilities',
     )
     _add_debug_flags(parser)
+    # The one place the debug flags get an "off" value. Every other parser
+    # adds them with SUPPRESS so that a flag typed in one position isn't
+    # undone by a copy of itself somewhere else — see _add_debug_flags().
+    parser.set_defaults(verbose=False, debug_api=False)
 
     # Professor-based commands use subparsers
     parser.add_argument(
@@ -370,6 +391,32 @@ def _available_commands_hint(plugins: dict[str, ModePlugin]) -> str:
     return "\n".join(lines)
 
 
+def _run_info_command(args: argparse.Namespace) -> None:
+    """Run a reporting command (``--show-config``, ``usage``, ``env``) and confirm it ran.
+
+    ``handle_info_commands()`` reports whether it recognised the command,
+    and that answer was previously thrown away at both call sites. It can
+    only say "no" if a command was added to the parser but never wired up
+    to a handler — at which point the old behaviour was to return quietly,
+    so the person who typed the command saw nothing at all happen and no
+    explanation why. Checking the answer turns that into a message naming
+    the command.
+
+    Args:
+        args: The parsed command-line flags for this run.
+
+    Raises:
+        CLIError: If no handler recognised the command.
+    """
+    if not handle_info_commands(args):
+        raise CLIError(
+            f"The '{getattr(args, 'command', None) or 'requested'}' command was "
+            "recognised on the command line but isn't wired up to anything. This "
+            "is a fault in the sandbox itself, not something you typed wrong — "
+            "please report it to whoever looks after this installation."
+        )
+
+
 def _dispatch(args: argparse.Namespace, plugins: dict[str, ModePlugin]) -> None:
     """Check that the parsed arguments form a valid command, then hand off to the right handler.
 
@@ -394,7 +441,7 @@ def _dispatch(args: argparse.Namespace, plugins: dict[str, ModePlugin]) -> None:
     """
     # Handle global commands (no professor required)
     if args.show_config or args.list_models:
-        handle_info_commands(args)
+        _run_info_command(args)
         return
 
     # A plugin can opt out of the professor requirement (e.g. a shared local
@@ -423,7 +470,7 @@ def _dispatch(args: argparse.Namespace, plugins: dict[str, ModePlugin]) -> None:
         )
 
     if args.command in ('usage', 'env'):
-        handle_info_commands(args)
+        _run_info_command(args)
     elif args.command in plugins:
         plugins[args.command].run(
             args,
@@ -464,6 +511,13 @@ def _insert_professor_placeholder_if_needed(
     professor name, and for the same reason ``webui`` doesn't: it needs to
     work before any professor exists yet (``env add-professor``).
 
+    The command name is looked for after any leading flags rather than at
+    the very front, so that a global flag typed before the command —
+    ``python main.py --verbose webui serve`` — still works. It previously
+    checked only the first word, so any global flag turned a working command
+    into ``error: argument command: invalid choice: 'serve'``, which points
+    at the wrong word entirely.
+
     Args:
         argv: The raw command-line arguments, not including the program
               name (i.e. ``sys.argv[1:]``).
@@ -472,17 +526,26 @@ def _insert_professor_placeholder_if_needed(
                  that declared ``requires_professor = False``.
 
     Returns:
-        *argv* unchanged, or with an empty-string placeholder inserted at
-        the front when needed.
+        *argv* unchanged, or with an empty-string placeholder inserted just
+        before the command name when needed.
     """
-    if not argv:
+    # The first word that isn't a flag. Every global flag is a simple on/off
+    # switch that takes no value of its own, so nothing between the flags can
+    # be mistaken for the command. If a value-taking global flag is ever
+    # added, its value would be found here instead — it wouldn't name a
+    # command, so no placeholder is inserted and the behaviour is the same as
+    # if this helper hadn't run. That's the safe direction to fail in.
+    index = next((i for i, token in enumerate(argv) if not token.startswith("-")), None)
+    if index is None:
         return argv
-    if argv[0] == "env":
-        return [""] + argv
-    plugin = plugins.get(argv[0])
-    if plugin is not None and not getattr(plugin, "requires_professor", True):
-        return [""] + argv
-    return argv
+
+    command = argv[index]
+    if command != "env":
+        plugin = plugins.get(command)
+        if plugin is None or getattr(plugin, "requires_professor", True):
+            return argv
+
+    return argv[:index] + [""] + argv[index:]
 
 
 def main() -> None:

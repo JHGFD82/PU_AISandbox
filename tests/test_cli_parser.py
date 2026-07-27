@@ -196,6 +196,110 @@ class TestEnvSubcommand:
         assert args.key == "WEBUI_SESSION_SECRET"
 
 
+class TestGlobalFlagsBeforeProfessorlessCommand:
+    """A global flag typed before a professor-less command must not break it.
+
+    ``python main.py --verbose webui serve`` used to fail with
+    ``error: argument command: invalid choice: 'serve'`` — the placeholder
+    workaround only looked at the first word, saw ``--verbose``, and did
+    nothing. The error named 'serve', so it pointed at the wrong word too.
+    """
+
+    def test_verbose_before_webui_subcommand(self, parse_professor_optional):
+        args = parse_professor_optional(["--verbose", "webui", "serve"])
+        assert args.command == "webui"
+        assert args.webui_subcommand == "serve"
+        assert args.verbose is True
+        assert args.professor == ""
+
+    def test_multiple_global_flags_before_command(self, parse_professor_optional):
+        args = parse_professor_optional(["--debug-api", "--verbose", "webui", "serve"])
+        assert args.command == "webui"
+        assert args.webui_subcommand == "serve"
+        assert args.verbose is True
+        assert args.debug_api is True
+
+    def test_verbose_before_env_subcommand(self, parse_professor_optional):
+        args = parse_professor_optional(["--verbose", "env", "list"])
+        assert args.command == "env"
+        assert args.env_subcommand == "list"
+        assert args.verbose is True
+
+    def test_flags_keep_their_position(self):
+        """The placeholder goes immediately before the command, not at the front.
+
+        The flag stays where the user typed it; only the professor slot is
+        filled in. Checked directly because it's the shape argparse is known
+        to handle, and a change here would be invisible from parse results.
+        """
+        plugins = load_plugins(_PLUGINS_DIR)
+        result = _insert_professor_placeholder_if_needed(
+            ["--verbose", "webui", "serve"], plugins
+        )
+        assert result == ["--verbose", "", "webui", "serve"]
+
+    def test_professor_command_is_left_alone(self):
+        """A command that does need a professor gets no placeholder."""
+        plugins = load_plugins(_PLUGINS_DIR)
+        argv = ["--verbose", "heller", "prompt"]
+        assert _insert_professor_placeholder_if_needed(argv, plugins) == argv
+
+    def test_flags_only_argv_is_left_alone(self):
+        """No command word at all — nothing to insert a placeholder before."""
+        plugins = load_plugins(_PLUGINS_DIR)
+        argv = ["--list-models"]
+        assert _insert_professor_placeholder_if_needed(argv, plugins) == argv
+
+
+class TestDebugFlagsInEitherPosition:
+    """--verbose and --debug-api work before the professor name or after the command.
+
+    Both positions are offered, and the tool's own usage line advertises the
+    first one. Before this was fixed, a command's own copy of the flag wrote
+    its "off" default over the value the earlier one had already set, so
+    ``main.py --verbose heller translate ...`` ran with debug logging
+    silently switched off — no error, just no debug output.
+    """
+
+    @pytest.mark.parametrize("argv", [
+        ["--verbose", "heller", "prompt"],
+        ["heller", "prompt", "--verbose"],
+        ["--verbose", "heller", "usage", "report"],
+        ["heller", "usage", "report", "--verbose"],
+        ["--verbose", "heller", "usage", "sources", "list"],
+    ])
+    def test_verbose_is_honored(self, parser, argv):
+        assert parser.parse_args(argv).verbose is True
+
+    @pytest.mark.parametrize("argv", [
+        ["--debug-api", "heller", "prompt"],
+        ["heller", "prompt", "--debug-api"],
+        ["--debug-api", "heller", "usage", "report"],
+    ])
+    def test_debug_api_is_honored(self, parser, argv):
+        assert parser.parse_args(argv).debug_api is True
+
+    def test_both_flags_together(self, parser):
+        args = parser.parse_args(["--verbose", "--debug-api", "heller", "prompt"])
+        assert args.verbose is True
+        assert args.debug_api is True
+
+    @pytest.mark.parametrize("argv", [
+        [],
+        ["heller", "prompt"],
+        ["heller", "usage", "report"],
+        ["--list-models"],
+    ])
+    def test_off_by_default(self, parser, argv):
+        """Suppressing the per-command defaults must not lose the value entirely."""
+        args = parser.parse_args(argv)
+        assert args.verbose is False
+        assert args.debug_api is False
+
+    def test_verbose_before_professorless_command(self, parse_professor_optional):
+        assert parse_professor_optional(["--verbose", "env", "list"]).verbose is True
+
+
 class TestGlobalFlags:
 
     def test_list_models_flag(self, parser):
