@@ -3,6 +3,7 @@
 import logging
 from typing import List, TextIO
 
+from ..errors import CLIError
 from .base_text_processor import BaseTextProcessor
 from .constants import DEFAULT_PAGE_SIZE
 
@@ -40,7 +41,11 @@ class MarkdownProcessor(BaseTextProcessor):
                 processor = MarkdownProcessor()
                 content = processor.extract_raw_content(fh)
         except OSError as exc:
-            raise Exception(f"Failed to read Markdown file '{file_path}': {exc}") from exc
+            raise CLIError(
+                f"Could not read the Markdown file '{file_path}' ({exc}). Check "
+                "that the file is where you think it is and that you have "
+                "permission to read it."
+            ) from exc
 
         if not content:
             logging.warning("No content found in Markdown file '%s'", file_path)

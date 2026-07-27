@@ -17,6 +17,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from src.errors import CLIError
 from src.processors.txt_processor import TxtProcessor
 from src.processors.docx_processor import DocxProcessor
 from src.processors.image_processor import ImageProcessor
@@ -112,10 +113,15 @@ class TestTxtProcessor:
         assert "Second paragraph" in combined
         assert "Third paragraph" in combined
 
-    def test_process_txt_with_pages_raises_on_read_error(self):
+    def test_process_txt_with_pages_raises_cli_error_on_read_error(self):
+        """A file that can't be read must surface as a CLIError, not a traceback.
+
+        main() catches CLIError and prints just the message; anything else
+        reaches a non-CS professor as a raw traceback.
+        """
         bad_file = io.StringIO()
         bad_file.close()  # Closed → reading will raise ValueError
-        with pytest.raises(Exception, match="Failed to process"):
+        with pytest.raises(CLIError):
             TxtProcessor.process_txt_with_pages(bad_file)
 
 
@@ -184,10 +190,16 @@ class TestDocxProcessor:
         with pytest.raises(ImportError, match="python-docx is required"):
             p.extract_raw_content(buf)
 
-    def test_process_docx_with_pages_wraps_exception_on_error(self):
+    def test_process_docx_with_pages_wraps_error_as_cli_error(self):
+        """The underlying cause stays visible in the message, wrapped in a CLIError.
+
+        CLIError is what main() knows to print plainly instead of showing a
+        non-CS professor a traceback; keeping the original text in it means
+        the reason is still there for whoever has to diagnose it.
+        """
         buf = _make_docx_bytes(["Hello"])
         with patch.object(DocxProcessor, "extract_raw_content", side_effect=RuntimeError("disk error")):
-            with pytest.raises(Exception, match="Failed to process Word document"):
+            with pytest.raises(CLIError, match="disk error"):
                 DocxProcessor.process_docx_with_pages(buf)
 
 

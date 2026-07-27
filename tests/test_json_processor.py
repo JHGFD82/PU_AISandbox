@@ -4,6 +4,7 @@ import json
 
 import pytest
 
+from src.errors import CLIError
 from src.processors.json_processor import JsonProcessor, _flatten_value
 
 
@@ -69,16 +70,24 @@ class TestJsonProcessor:
         combined = "\n".join(pages)
         assert "a: 1" in combined
 
-    def test_invalid_json_raises_exception(self, tmp_path):
+    def test_invalid_json_raises_cli_error(self, tmp_path):
+        """A malformed file is the user's problem to fix, so it must be a CLIError.
+
+        main() catches CLIError and prints just the message; anything else
+        reaches a non-CS professor as a raw traceback. The message names the
+        file, since a run may be processing many.
+        """
         p = tmp_path / "bad.json"
         p.write_text("this is not json", encoding="utf-8")
-        with pytest.raises(Exception, match="Failed to parse"):
+        with pytest.raises(CLIError) as excinfo:
             JsonProcessor.process_json_with_pages(str(p))
+        assert "bad.json" in str(excinfo.value)
 
-    def test_missing_file_raises_exception(self, tmp_path):
+    def test_missing_file_raises_cli_error(self, tmp_path):
         missing = str(tmp_path / "nonexistent.json")
-        with pytest.raises(Exception, match="Failed to read"):
+        with pytest.raises(CLIError) as excinfo:
             JsonProcessor.process_json_with_pages(missing)
+        assert "nonexistent.json" in str(excinfo.value)
 
     def test_respects_page_size(self, tmp_path):
         data = {f"key{i}": f"value{i}" for i in range(50)}

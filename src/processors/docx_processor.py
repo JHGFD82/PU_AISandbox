@@ -3,6 +3,7 @@
 import logging
 from typing import List, BinaryIO, Union, TYPE_CHECKING
 
+from ..errors import CLIError
 from .base_text_processor import BaseTextProcessor
 from .constants import DEFAULT_PAGE_SIZE
 
@@ -105,8 +106,15 @@ class DocxProcessor(BaseTextProcessor):
             return pages
                 
         except Exception as e:
-            logging.error(f"Error processing Word document: {e}")
-            raise Exception(f"Failed to process Word document: {e}") from e
+            # As in txt_processor: full traceback to the log, one actionable
+            # sentence to the person running the command.
+            logging.exception("Error processing Word document")
+            raise CLIError(
+                f"Could not read this Word document ({e}). The usual causes are "
+                "that the file is password-protected, is still open in Word, or "
+                "is an older .doc file — opening it in Word and saving it as "
+                ".docx normally fixes the last one."
+            ) from e
 
     @staticmethod
     def extract_blocks(file_obj: BinaryIO) -> "List[Union[ParagraphBlock, TableBlock]]":

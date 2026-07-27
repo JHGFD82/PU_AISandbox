@@ -3,6 +3,7 @@
 import logging
 from typing import List
 
+from ..errors import CLIError
 from .base_text_processor import BaseTextProcessor
 from .constants import DEFAULT_PAGE_SIZE
 
@@ -36,7 +37,12 @@ class ExcelProcessor(BaseTextProcessor):
         try:
             wb = openpyxl.load_workbook(file_path, read_only=True, data_only=True)
         except Exception as exc:
-            raise Exception(f"Failed to open Excel file '{file_path}': {exc}") from exc
+            raise CLIError(
+                f"Could not open the Excel file '{file_path}' ({exc}). The usual "
+                "causes are that the file is password-protected, is still open "
+                "in Excel, or is an older .xls file — re-saving it as .xlsx "
+                "normally fixes the last one."
+            ) from exc
 
         processor = ExcelProcessor()
         sheet_blocks: List[str] = []

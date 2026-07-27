@@ -3,6 +3,7 @@
 import logging
 from typing import List, TextIO
 
+from ..errors import CLIError
 from .base_text_processor import BaseTextProcessor
 from .constants import DEFAULT_PAGE_SIZE
 
@@ -42,6 +43,14 @@ class TxtProcessor(BaseTextProcessor):
             return pages
                 
         except Exception as e:
-            logging.error(f"Error processing text file: {e}")
-            raise Exception(f"Failed to process text file: {e}") from e
+            # The full traceback goes to the log for whoever maintains the
+            # installation; the person at the keyboard gets a sentence they
+            # can act on. Raised as CLIError so main() prints it plainly and
+            # exits, rather than showing a non-CS user a raw traceback.
+            logging.exception("Error processing text file")
+            raise CLIError(
+                f"Could not read this text file ({e}). If it came from another "
+                "program, it may be saved in a character encoding the sandbox "
+                "doesn't recognise — re-saving it as UTF-8 usually fixes that."
+            ) from e
     

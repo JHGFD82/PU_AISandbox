@@ -4,6 +4,7 @@ import json
 import logging
 from typing import List
 
+from ..errors import CLIError
 from .base_text_processor import BaseTextProcessor
 from .constants import DEFAULT_PAGE_SIZE
 
@@ -55,9 +56,17 @@ class JsonProcessor(BaseTextProcessor):
             with open(file_path, "r", encoding="utf-8") as fh:
                 data = json.load(fh)
         except json.JSONDecodeError as exc:
-            raise Exception(f"Failed to parse JSON file '{file_path}': {exc}") from exc
+            raise CLIError(
+                f"'{file_path}' doesn't appear to be a valid JSON file. JSON is a "
+                "structured text format, and this file has something in it that "
+                f"breaks that structure ({exc}). If you exported it from another "
+                "program, try exporting it again."
+            ) from exc
         except OSError as exc:
-            raise Exception(f"Failed to read JSON file '{file_path}': {exc}") from exc
+            raise CLIError(
+                f"Could not open '{file_path}' ({exc}). Check that the file is "
+                "where you think it is and that you have permission to read it."
+            ) from exc
 
         lines = _flatten_value(data)
         if not lines:
