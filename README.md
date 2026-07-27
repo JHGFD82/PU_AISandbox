@@ -12,22 +12,31 @@ Modular AI platform for Princeton University faculty. Commands are implemented a
 ```text
 main.py
   → src/cli.py            controller + argument parser; loads plugins, routes commands
-    → src/config.py       shared config, model catalog, professor parsing helpers
+    → src/config.py       language registry, professor lookup, safe-filename helpers
+    → src/settings.py     layered settings (defaults → shared → local → plugin → flags)
   → src/runtime/
       plugin_loader.py    discovers plugins/*/plugin.py at startup
       info_commands.py    built-in: --list-models, usage subcommands
       sandbox_processor.py  shared service wiring used by plugins
-  → src/services/         API-facing operations (TranslationService, ImageProcessorService)
+  → src/services/         shared plumbing every AI service builds on — BaseService
+                          (API client, retries, usage recording), error handling
+  → src/models/           model catalog, pricing, model-name resolution
   → src/processors/       document ingestion (PDF, DOCX, TXT, MD, JSON, XLSX, image)
-  → src/tracking/         per-professor token accounting + pricing (model_catalog.json)
+  → src/tracking/         per-professor token accounting and budget reporting
   → src/output/           text / Markdown / PDF / Word / Excel / JSON output
   → plugins/
       prompt/             bundled plugin (ships with this repo)
       translation/        bundled plugin — base English translation (ships with this repo)
       transcription/      bundled plugin — base English OCR (ships with this repo)
+      webui/              bundled plugin — the browser interface (ships with this repo)
       translation-ea/     optional: separate git repo — EA language translation
       transcription-ea/   optional: separate git repo — EA language OCR
 ```
+
+The AI services themselves — `TranslationService`, `ImageProcessorService` and the
+rest — live inside the plugin that owns them, not in `src/`. `src/services/` keeps
+only what all of them share. That is what lets a new capability be added without
+editing core.
 
 `src/cli.py` decides *what* to run. Plugins decide *how* to run it. Only the `usage` subcommand is built in.
 
