@@ -1,5 +1,8 @@
 # PU AI Sandbox
 
+[![Python](https://img.shields.io/python/required-version-toml?tomlFilePath=https%3A%2F%2Fraw.githubusercontent.com%2FJHGFD82%2FPU_AISandbox%2Fmain%2Fpyproject.toml&logo=python&logoColor=white)](https://www.python.org/downloads/)
+[![codecov](https://codecov.io/gh/JHGFD82/PU_AISandbox/branch/main/graph/badge.svg)](https://codecov.io/gh/JHGFD82/PU_AISandbox)
+
 Modular AI platform for Princeton University faculty. Commands are implemented as plugins, so capabilities can be added or updated independently without touching core code.
 
 > **Access requirement:** Each user must have a valid Princeton University AI Sandbox API key (available through OIT). This tool is for Princeton faculty and authorized delegates only.
