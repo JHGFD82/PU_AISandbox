@@ -967,8 +967,11 @@ class TestStartJob:
         app_module = sys.modules["_pu_webui_app"]
         received = {}
 
+        seen_while_running = []
+
         def run_ui_action(fields, professor, model, on_progress, output_dir):
             received.update(fields)
+            seen_while_running.append(Path(fields["file_path"]).read_text())
             from src.runtime.ui_action import UiJobResult
             out = f"{output_dir}/out.txt"
             with open(out, "w", encoding="utf-8") as f:
@@ -993,8 +996,67 @@ class TestStartJob:
         _wait_for_job_done(unlocked_client, conv_id, "heller")
         assert received["file_name"] == "doc.txt"
         assert received["file_path"].endswith("doc.txt")
-        import os
-        assert os.path.exists(received["file_path"])
+        # Readable while the job ran — that is all a plugin needs.
+        assert seen_while_running == ["some document text"]
+        # And gone afterwards: the professor already has this file where
+        # they chose to keep it, so a second copy filed inside their usage
+        # data would grow forever for no purpose.
+        assert not Path(received["file_path"]).exists()
+
+    def test_uploads_never_land_in_the_professors_data(self, unlocked_client, monkeypatch):
+        """The whole point: nothing uploaded is stored under data/."""
+        app_module = sys.modules["_pu_webui_app"]
+        seen = {}
+
+        def run_ui_action(fields, professor, model, on_progress, output_dir):
+            seen["file_path"] = fields["file_path"]
+            from src.runtime.ui_action import UiJobResult
+            out = f"{output_dir}/out.txt"
+            with open(out, "w", encoding="utf-8") as f:
+                f.write("done")
+            return UiJobResult(output_path=out, output_filename="out.txt", summary="Done.")
+
+        fake = _fake_plugin(action_id="translate", run_ui_action=run_ui_action)
+        monkeypatch.setattr(app_module, "_get_plugins", lambda: {"translate": fake})
+        conv_id = unlocked_client.post(
+            "/api/conversations", json={"professor": "heller", "model": "gpt-4o"}
+        ).json()["id"]
+        unlocked_client.post(
+            "/api/jobs",
+            data={"professor": "heller", "conversation_id": conv_id, "action_id": "translate",
+                  "fields_json": json.dumps({})},
+            files={"files": ("paper.pdf", b"pdf bytes", "application/pdf")},
+        )
+        _wait_for_job_done(unlocked_client, conv_id, "heller")
+
+        conversation = sys.modules["_pu_webui_conversation"]
+        data_dir = Path(conversation.CONVERSATIONS_DIR)
+        assert "paper.pdf" not in [p.name for p in data_dir.rglob("*")]
+        assert not str(Path(seen["file_path"])).startswith(str(data_dir))
+
+    def test_no_input_folder_is_ever_created(self, unlocked_client, monkeypatch):
+        """`input/` used to hold copies of every uploaded file. It is gone."""
+        app_module = sys.modules["_pu_webui_app"]
+
+        def run_ui_action(fields, professor, model, on_progress, output_dir):
+            from src.runtime.ui_action import UiJobResult
+            return UiJobResult(output_path=None, output_filename=None, summary="Done.")
+
+        fake = _fake_plugin(action_id="transcribe", run_ui_action=run_ui_action)
+        monkeypatch.setattr(app_module, "_get_plugins", lambda: {"transcribe": fake})
+        conv_id = unlocked_client.post(
+            "/api/conversations", json={"professor": "heller", "model": "gpt-4o"}
+        ).json()["id"]
+        unlocked_client.post(
+            "/api/jobs",
+            data={"professor": "heller", "conversation_id": conv_id, "action_id": "transcribe",
+                  "fields_json": json.dumps({})},
+            files=[("files", ("a.jpg", b"one", "image/jpeg")),
+                   ("files", ("b.jpg", b"two", "image/jpeg"))],
+        )
+        _wait_for_job_done(unlocked_client, conv_id, "heller")
+        conversation = sys.modules["_pu_webui_conversation"]
+        assert "input" not in [p.name for p in Path(conversation.CONVERSATIONS_DIR).rglob("*")]
 
     def test_upload_filename_cannot_escape_the_job_directory(self, unlocked_client, monkeypatch):
         """An uploaded file is written under its job's own directory, whatever it claims to be called.
@@ -1008,8 +1070,11 @@ class TestStartJob:
         app_module = sys.modules["_pu_webui_app"]
         received = {}
 
+        seen_while_running = []
+
         def run_ui_action(fields, professor, model, on_progress, output_dir):
             received.update(fields)
+            seen_while_running.append(Path(fields["file_path"]).read_text())
             from src.runtime.ui_action import UiJobResult
             out = f"{output_dir}/out.txt"
             with open(out, "w", encoding="utf-8") as f:
@@ -1034,11 +1099,17 @@ class TestStartJob:
         _wait_for_job_done(unlocked_client, conv_id, "heller")
 
         import os
-        written = Path(received["file_path"]).resolve()
-        job_dir = Path(app_module.jobs.job_output_dir("heller", "x")).resolve().parent
+        written = Path(received["file_path"])
         assert written.name == "escaped.txt"
-        assert str(written).startswith(str(job_dir)), f"{written} escaped {job_dir}"
+        # It landed directly inside the scratch folder made for this job,
+        # not four levels above it.
+        assert written.parent.name.startswith("pu_webui_job_")
         assert not os.path.exists("/escaped.txt")
+        # And nothing named that reached the professor's own data.
+        conversation = sys.modules["_pu_webui_conversation"]
+        assert "escaped.txt" not in [
+            p.name for p in Path(conversation.CONVERSATIONS_DIR).rglob("*")
+        ]
 
     def test_multiple_uploaded_files_saved_into_one_folder(self, unlocked_client, monkeypatch):
         # A professor picking several images (or a whole folder, on a
@@ -1048,9 +1119,11 @@ class TestStartJob:
         # it would for a CLI user pointing -i at a folder directly.
         app_module = sys.modules["_pu_webui_app"]
         received = {}
+        seen_listing = []
 
         def run_ui_action(fields, professor, model, on_progress, output_dir):
             received.update(fields)
+            seen_listing.extend(sorted(p.name for p in Path(fields["file_path"]).iterdir()))
             from src.runtime.ui_action import UiJobResult
             out = f"{output_dir}/out.txt"
             with open(out, "w", encoding="utf-8") as f:
@@ -1077,17 +1150,22 @@ class TestStartJob:
         assert resp.status_code == 200
         _wait_for_job_done(unlocked_client, conv_id, "heller")
 
-        import os
         assert received["file_name"] == "2 images"
-        assert os.path.isdir(received["file_path"])
-        assert sorted(os.listdir(received["file_path"])) == ["page1.jpg", "page2.jpg"]
+        # One folder holding both, the same shape a plugin gets from a CLI
+        # user pointing -i at a directory — just not inside anyone's data.
+        assert seen_listing == ["page1.jpg", "page2.jpg"]
+        conversation = sys.modules["_pu_webui_conversation"]
+        assert not str(received["file_path"]).startswith(str(conversation.CONVERSATIONS_DIR))
 
     def test_no_files_leaves_fields_untouched(self, unlocked_client, monkeypatch):
         app_module = sys.modules["_pu_webui_app"]
         received = {}
 
+        seen_while_running = []
+
         def run_ui_action(fields, professor, model, on_progress, output_dir):
             received.update(fields)
+            seen_while_running.append(Path(fields["file_path"]).read_text())
             from src.runtime.ui_action import UiJobResult
             out = f"{output_dir}/out.txt"
             with open(out, "w", encoding="utf-8") as f:

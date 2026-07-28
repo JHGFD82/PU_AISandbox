@@ -804,24 +804,28 @@ def create_app() -> FastAPI:
         The submitted form's non-file values arrive JSON-encoded in
         ``fields_json`` — which fields exist is entirely plugin-defined
         (see ``UiAction``/``UiField``), not a fixed set this route could
-        declare individual ``Form(...)`` parameters for. Any uploaded files,
-        if this action needs them, arrive as ordinary multipart file parts
-        under the shared ``files`` key and are saved into this job's own
-        output directory before ``run_ui_action`` ever sees them — that
-        directory is created here (via a job id generated up front)
-        specifically so the upload has somewhere durable to live before the
-        job even starts.
+        declare individual ``Form(...)`` parameters for. Any uploaded files
+        arrive as ordinary multipart file parts under the shared ``files``
+        key.
 
-        A single uploaded file is saved directly and ``fields['file_path']``
-        points straight at it, same as before ``allow_folder`` (see
-        ``UiField``'s docstring) existed. More than one file — a professor
-        picking several images, or a whole folder via a browser that
-        supports it — are saved together into one ``input/`` subdirectory,
-        and ``fields['file_path']`` points at *that directory* instead,
-        exactly the shape a plugin's ``run_ui_action`` already expects from
-        a CLI user pointing ``-i`` at a folder (e.g.
+        A browser sends the *contents* of a chosen file and never its
+        location on disk, so those bytes have to be written down before a
+        plugin can open them. They go to scratch space that the job deletes
+        as soon as it finishes (see ``jobs.discard_scratch_dir()``), and
+        never into the person's own data: the file already exists wherever
+        they chose to keep it, and a second copy filed inside their usage
+        history would grow with every job, forever, for no purpose either of
+        them would recognise.
+
+        One uploaded file puts its path in ``fields['file_path']``. Several
+        — a professor picking a set of images, or a whole folder on a
+        browser that supports it — arrive together in one directory, and
+        ``fields['file_path']`` points at that directory instead: exactly
+        the shape a plugin's ``run_ui_action`` already expects from a CLI
+        user pointing ``-i`` at a folder (e.g.
         ``TranscriptionPlugin.run_ui_action``'s ``os.path.isdir(file_path)``
-        branch).
+        branch). Either way, a plugin should read what it needs while it
+        runs and not expect the files to still be there afterwards.
         """
         _require_unlocked(request)
         professor = _validated_professor(professor)
@@ -840,27 +844,31 @@ def create_app() -> FastAPI:
         # would give something that might be missing, which is not what this
         # list contains.
         uploaded: list[tuple[UploadFile, str]] = [(f, f.filename) for f in files if f.filename]
-        if len(uploaded) == 1:
-            part, filename = uploaded[0]
-            output_dir = jobs.job_output_dir(professor, job_id)
-            upload_path = output_dir / os.path.basename(filename)
-            data = await part.read()
-            with open(upload_path, "wb") as out:
-                out.write(data)
-            fields["file_path"] = str(upload_path)
-            fields["file_name"] = filename
-        elif len(uploaded) > 1:
-            output_dir = jobs.job_output_dir(professor, job_id)
-            upload_dir = output_dir / "input"
-            upload_dir.mkdir(parents=True, exist_ok=True)
-            saved_names = []
+        if uploaded:
+            # A browser sends the *contents* of a chosen file, never its
+            # location on disk — that boundary is deliberate and not
+            # something a web page can ask past. So the bytes have to be
+            # written somewhere for the plugin to open.
+            #
+            # Somewhere, but not here: they go to a scratch folder the
+            # operating system already cleans up after, and the job deletes
+            # it as soon as it finishes. Keeping them would mean every
+            # translated document quietly stored twice — once where the
+            # professor put it, once inside their usage data, growing
+            # forever, for no purpose either of them would recognise.
+            upload_dir = Path(tempfile.mkdtemp(prefix="pu_webui_job_"))
             for part, filename in uploaded:
                 data = await part.read()
                 with open(upload_dir / os.path.basename(filename), "wb") as out:
                     out.write(data)
-                saved_names.append(filename)
-            fields["file_path"] = str(upload_dir)
-            fields["file_name"] = f"{len(saved_names)} images"
+            fields["_scratch_dir"] = str(upload_dir)
+            if len(uploaded) == 1:
+                only_name = os.path.basename(uploaded[0][1])
+                fields["file_path"] = str(upload_dir / only_name)
+                fields["file_name"] = uploaded[0][1]
+            else:
+                fields["file_path"] = str(upload_dir)
+                fields["file_name"] = f"{len(uploaded)} images"
 
         store = conversation.ConversationStore(professor)
         try:

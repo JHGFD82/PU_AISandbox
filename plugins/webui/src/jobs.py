@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import logging
 import os
+import shutil
 import sys
 import threading
 import uuid
@@ -122,6 +123,32 @@ def job_output_dir(professor: str, job_id: str, base_dir: Optional[Path] = None)
     d = base / professor / "_job_outputs" / job_id
     d.mkdir(parents=True, exist_ok=True)
     return d
+
+
+def discard_scratch_dir(fields: dict) -> None:
+    """Delete the scratch folder holding a job's uploaded files, if it had one.
+
+    A browser sends the contents of a chosen file, never its location, so
+    the bytes have to be written down somewhere before a plugin can open
+    them. That somewhere is a scratch folder outside the person's own data:
+    the file already exists where they chose to keep it, and a second copy
+    filed inside their usage history — growing with every job, forever —
+    serves nobody.
+
+    Called however the job ends. Cleaning up is never allowed to be the
+    thing that fails a job that already finished.
+
+    Args:
+        fields: The job's field values, which carry the scratch folder under
+                ``_scratch_dir`` when the job was started with uploads.
+    """
+    scratch = fields.get("_scratch_dir")
+    if not scratch:
+        return
+    try:
+        shutil.rmtree(scratch, ignore_errors=True)
+    except Exception as e:
+        logger.debug("Could not remove scratch upload folder %s: %s", scratch, e)
 
 
 def resolve_output_path(
@@ -447,9 +474,15 @@ def _run_job(
 
     output_dir = job_output_dir(professor, job.id)
 
+    # The scratch folder is this module's bookkeeping, not something a
+    # plugin declared or should have to know about, so it doesn't travel
+    # into the plugin's field values.
+    plugin_fields = {k: v for k, v in fields.items() if not k.startswith("_")}
+
     try:
         result = plugin.run_ui_action(
-            fields, professor, model, on_progress, str(output_dir), on_page_text=on_page_text,
+            plugin_fields, professor, model, on_progress, str(output_dir),
+            on_page_text=on_page_text,
         )
     except Exception as e:
         logger.error("Job %s (%s) failed: %s", job.id, job.action_id, e, exc_info=True)
@@ -457,6 +490,7 @@ def _run_job(
         # empty folder behind for good. Anything it did manage to write is
         # kept — see discard_output_dir_if_empty().
         discard_output_dir_if_empty(output_dir)
+        discard_scratch_dir(fields)
         job_store.set_status(job.id, "error", error=str(e))
         conv = conversation_store.load(job.conversation_id)
         if conv is not None:
@@ -472,6 +506,7 @@ def _run_job(
         return
 
     job_store.set_status(job.id, "done")
+    discard_scratch_dir(fields)
     # A job can succeed without producing a file — a preview, or an action
     # whose whole result is the summary text. Nothing to keep the folder for
     # in that case.

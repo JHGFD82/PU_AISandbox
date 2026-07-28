@@ -81,12 +81,14 @@ class UiField:
                       lets the professor pick a whole folder (or several
                       individual files) instead of exactly one file, the
                       same way pointing the CLI's ``-i`` at a folder of
-                      images processes every image inside it in order. Every
-                      selected file is uploaded and saved into one job
-                      folder, whose path then arrives in ``run_ui_action``'s
+                      images processes every image inside it in order. The
+                      selected files arrive together in one folder, whose
+                      path reaches ``run_ui_action``'s
                       ``fields['file_path']`` — the same shape a plugin
                       already gets from a CLI user passing a folder path
-                      directly. Ignored for every other kind, and ``False``
+                      directly. That folder is scratch space that goes away
+                      when the job ends; a plugin should read from it, not
+                      expect it to still be there afterwards. Ignored for every other kind, and ``False``
                       by default so a single-document upload (e.g.
                       translate's own document field) still only ever
                       accepts one file.
