@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from src import first_run, paths
+from src import paths
 from src.errors import CLIError
 from src.runtime import setup_prompts
 

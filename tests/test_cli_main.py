@@ -14,7 +14,22 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from src import paths
 from src.cli import main, setup_logging
+
+
+@pytest.fixture(autouse=True)
+def _already_set_up(tmp_path, monkeypatch):
+    """Run these as an installation that has already been set up.
+
+    main() offers first-time setup when no marker file is present, and
+    refuses when there is no terminal to ask at — which is every test run.
+    These tests are about routing a command, not about setup, so they get a
+    marker pointing at a temporary folder.
+    """
+    marker = tmp_path / ".installation"
+    marker.write_text(str(tmp_path / "extras"), encoding="utf-8")
+    monkeypatch.setattr(paths, "INSTALL_MARKER", marker)
 
 
 # ---------------------------------------------------------------------------
