@@ -35,8 +35,6 @@ ENV/
 
 # Local settings overrides (user-specific, not committed)
 preferences.toml
-# Old name for the same thing
-settings.local.toml
 
 # Testing / coverage artifacts
 .coverage

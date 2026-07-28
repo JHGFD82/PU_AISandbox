@@ -1,7 +1,7 @@
-"""Tests for data/visualize_usage.py — the standalone usage-report script.
+"""Tests for scripts/visualize_usage.py — the standalone usage-report script.
 
 This script isn't imported by the package (it's run directly, as
-``python data/visualize_usage.py``), so it needs its module loaded by path
+``python scripts/visualize_usage.py``), so it needs its module loaded by path
 rather than a normal import.
 """
 
@@ -16,8 +16,8 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 
 @pytest.fixture(scope="module")
 def viz():
-    """Load data/visualize_usage.py as a module."""
-    path = _REPO_ROOT / "data" / "visualize_usage.py"
+    """Load scripts/visualize_usage.py as a module."""
+    path = _REPO_ROOT / "scripts" / "visualize_usage.py"
     spec = importlib.util.spec_from_file_location("_viz_under_test", path)
     module = importlib.util.module_from_spec(spec)
     sys.modules["_viz_under_test"] = module

@@ -89,9 +89,14 @@ class TestGetModelCatalogPath:
         path = get_model_catalog_path()
         assert path.name == "model_catalog.json"
 
-    def test_path_is_inside_src_directory(self):
-        path = get_model_catalog_path()
-        assert path.parent.name == "src"
+    def test_path_is_in_the_folder_this_installation_keeps_its_files_in(self):
+        """The catalogue belongs to the person, not the package.
+
+        It used to live under src/, which meant replacing the package
+        replaced their pricing and model list too.
+        """
+        from src import paths
+        assert get_model_catalog_path() == paths.extras_root() / "model_catalog.json"
 
 
 # ---------------------------------------------------------------------------

@@ -73,39 +73,6 @@ def _make_setup(root: Path, *, people: int = 1, months: int = 0):
     return root
 
 
-class TestUpgradingAnOlderInstallation:
-    """Files inside the package — the arrangement that made upgrading destructive."""
-
-    def test_one_keypress_moves_them_out(self, _isolate, tmp_path):
-        _make_setup(_isolate, people=3, months=11)
-        talk = _Conversation("")          # just Enter
-        result = setup_prompts.run_interactive_setup(talk.input_fn, talk.print_fn)
-
-        assert result == paths.DEFAULT_EXTRAS_ROOT
-        assert (result / paths.SETTINGS_FILENAME).is_file()
-        assert (result / paths.DATA_DIRNAME).is_dir()
-        assert not (_isolate / paths.SETTINGS_FILENAME).exists()
-        assert paths.is_installed() is True
-
-    def test_it_says_what_it_found_and_why_it_matters(self, _isolate):
-        _make_setup(_isolate, people=3, months=11)
-        talk = _Conversation("")
-        setup_prompts.run_interactive_setup(talk.input_fn, talk.print_fn)
-        transcript = talk.transcript
-        assert "3 people configured" in transcript
-        assert "11 months" in transcript
-        assert "destroy them" in transcript      # says why it matters
-        assert "nothing is deleted" in transcript
-
-    def test_declining_lets_them_choose_somewhere_else(self, _isolate, tmp_path):
-        _make_setup(_isolate, people=1)
-        elsewhere = tmp_path / "somewhere" / "else"
-        talk = _Conversation("n", str(elsewhere))
-        result = setup_prompts.run_interactive_setup(talk.input_fn, talk.print_fn)
-        assert result == elsewhere
-        assert (elsewhere / paths.SETTINGS_FILENAME).is_file()
-
-
 class TestFilesAlreadyOutsideThePackage:
     """The ordinary upgrade: the package was replaced, the files are fine."""
 
@@ -179,14 +146,14 @@ class TestCloudSyncWarning:
 
 class TestAnswerHandling:
     @pytest.mark.parametrize("answer", ["y", "Y", "yes", "YES", ""])
-    def test_yes_answers(self, _isolate, answer):
-        _make_setup(_isolate, people=1)
+    def test_yes_answers(self, answer):
+        _make_setup(paths.DEFAULT_EXTRAS_ROOT, people=1)
         talk = _Conversation(answer)
         setup_prompts.run_interactive_setup(talk.input_fn, talk.print_fn)
         assert paths.is_installed() is True
 
-    def test_unrecognised_answer_is_re_asked(self, _isolate):
-        _make_setup(_isolate, people=1)
+    def test_unrecognised_answer_is_re_asked(self):
+        _make_setup(paths.DEFAULT_EXTRAS_ROOT, people=1)
         talk = _Conversation("maybe", "")
         setup_prompts.run_interactive_setup(talk.input_fn, talk.print_fn)
         assert "Please answer y or n" in talk.transcript
@@ -200,11 +167,3 @@ class TestFailures:
         talk = _Conversation(str(blocker / "inside"))
         with pytest.raises(CLIError, match="Could not prepare"):
             setup_prompts.run_interactive_setup(talk.input_fn, talk.print_fn)
-
-    def test_moving_onto_an_existing_setup_reports_clearly(self, _isolate, tmp_path):
-        _make_setup(_isolate, people=1)
-        occupied = _make_setup(tmp_path / "occupied", people=9)
-        talk = _Conversation("n", str(occupied))
-        with pytest.raises(CLIError, match="Could not move"):
-            setup_prompts.run_interactive_setup(talk.input_fn, talk.print_fn)
-        assert "sk-8" in (occupied / paths.SETTINGS_FILENAME).read_text()

@@ -123,7 +123,7 @@ def get_configured_data_roots() -> list[tuple[str, Path]]:
     This is this installation's own local ``data/`` folder plus every
     external source configured in ``.settings`` — see
     ``src/settings_store.py`` and ``docs/webui-plugin-plan.md``
-    section 1. Used by ``data/visualize_usage.py`` and, eventually, the web
+    section 1. Used by ``scripts/visualize_usage.py`` and, eventually, the web
     UI's spend sidebar, so that logic to combine multiple installations'
     usage history lives in exactly one place.
 
@@ -278,7 +278,7 @@ def load_usage_tree(base_dir: Path) -> dict[str, dict[str, Any]]:
     shared-write event files (``events/{professor}/{month}/*.json``,
     folded into the same shape on the fly via ``fold_usage_records()``).
     This is the one place this logic lives, reused by
-    ``data/visualize_usage.py`` and, eventually, the web UI's spend
+    ``scripts/visualize_usage.py`` and, eventually, the web UI's spend
     sidebar — see ``docs/webui-plugin-plan.md`` section 1.
 
     Args:

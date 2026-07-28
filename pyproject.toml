@@ -55,7 +55,7 @@ select = ["E4", "E7", "E9", "F", "B"]
 
 # Standalone scripts do the same thing for the same reason.
 "scripts/*" = ["E402"]
-"data/visualize_usage.py" = ["E402"]
+"scripts/visualize_usage.py" = ["E402"]
 
 # These six signatures default a parameter to `OutputOptions()`, which is
 # built once when the function is defined rather than per call. Harmless as

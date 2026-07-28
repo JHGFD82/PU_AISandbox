@@ -62,10 +62,10 @@ class TestResolution:
         paths.write_install_marker(tmp_path / "chosen")
         assert paths.extras_root() == tmp_path / "chosen"
 
-    def test_falls_back_to_the_package_when_never_set_up(self):
-        """An installation predating all of this keeps working rather than
-        behaving as though its data had vanished."""
-        assert paths.extras_root() == paths.PACKAGE_ROOT
+    def test_asking_before_setup_raises_rather_than_guessing(self):
+        """No fallback. A guess here would silently read the wrong folder."""
+        with pytest.raises(paths.NotSetUpError, match="settings setup"):
+            paths.extras_root()
 
     def test_everything_hangs_off_one_root(self, tmp_path):
         extras = tmp_path / "extras"
@@ -73,10 +73,6 @@ class TestResolution:
         assert paths.settings_path() == extras / "settings.toml"
         assert paths.model_catalog_path() == extras / "model_catalog.json"
         assert paths.data_root() == extras / "data"
-
-    def test_catalog_stays_where_it_was_until_set_up(self):
-        """Before setup the catalog is still under src/, where it used to live."""
-        assert paths.model_catalog_path() == paths.PACKAGE_ROOT / "src" / "model_catalog.json"
 
     def test_moving_the_extras_folder_moves_everything(self, tmp_path):
         paths.write_install_marker(tmp_path / "before")

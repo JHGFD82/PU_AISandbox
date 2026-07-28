@@ -5,8 +5,8 @@ Reads data/ and data/archives/, generates an interactive HTML report,
 and opens it in the default browser.
 
 Usage:
-    python data/visualize_usage.py
-    python data/visualize_usage.py --no-open   # generate file, print path only
+    python scripts/visualize_usage.py
+    python scripts/visualize_usage.py --no-open   # generate file, print path only
 """
 
 import json
@@ -17,13 +17,18 @@ from pathlib import Path
 from datetime import datetime
 from collections import defaultdict
 
-# Make src/ importable when this script is run directly (python data/visualize_usage.py),
+# Make src/ importable when this script is run directly (python scripts/visualize_usage.py),
 # since a directly-run script only gets its own directory on sys.path by default.
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.tracking.token_tracker import get_configured_data_roots, load_usage_tree  # noqa: E402
 
-DATA_DIR = Path(__file__).parent
+# The report is written into the folder the data actually lives in,
+# wherever this installation keeps it — not next to this script, which
+# is part of the package and gets replaced on upgrade.
+from src.paths import data_root
+
+DATA_DIR = data_root()
 
 # --- Color palettes -----------------------------------------------------------
 

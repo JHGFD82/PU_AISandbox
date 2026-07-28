@@ -76,12 +76,6 @@ class TestInspect:
         assert got.people == 0
         assert got.is_usable is True     # the file is there; it just didn't parse
 
-    def test_finds_the_catalog_in_its_old_place_inside_the_package(self, _isolate):
-        (_isolate / "src").mkdir()
-        (_isolate / "src" / paths.MODEL_CATALOG_FILENAME).write_text("{}", encoding="utf-8")
-        (_isolate / paths.SETTINGS_FILENAME).write_text("", encoding="utf-8")
-        assert first_run.inspect_extras(_isolate, in_package=True).has_catalog is True
-
 
 class TestFindExisting:
     def test_nothing_anywhere_means_a_genuine_first_install(self):
@@ -92,20 +86,11 @@ class TestFindExisting:
         found = first_run.find_existing()
         assert len(found) == 1
         assert found[0].people == 2
-        assert found[0].in_package is False
 
-    def test_finds_an_older_installation_inside_the_package(self, _isolate):
-        """The arrangement that made upgrading destructive."""
+    def test_a_setup_inside_the_package_is_not_offered(self, _isolate):
+        """The package holds code. Anything found there is not someone's data."""
         _make_setup(_isolate, people=1, months=2)
-        found = first_run.find_existing()
-        assert len(found) == 1
-        assert found[0].in_package is True
-
-    def test_default_location_is_offered_before_the_package(self, _isolate):
-        _make_setup(paths.DEFAULT_EXTRAS_ROOT, people=1)
-        _make_setup(_isolate, people=1)
-        found = first_run.find_existing()
-        assert [c.in_package for c in found] == [False, True]
+        assert first_run.find_existing() == []
 
 
 class TestInitialize:
@@ -136,43 +121,6 @@ class TestInitialize:
             first_run.initialize_extras(existing)
         # and it is genuinely untouched
         assert "sk-0" in (existing / paths.SETTINGS_FILENAME).read_text()
-
-
-class TestMoveOutOfPackage:
-    def test_moves_settings_catalog_and_data(self, _isolate, tmp_path):
-        _make_setup(_isolate, people=2, months=1)
-        destination = tmp_path / "extras"
-        moved = first_run.move_out_of_package(destination)
-
-        assert (destination / paths.SETTINGS_FILENAME).is_file()
-        assert (destination / paths.MODEL_CATALOG_FILENAME).is_file()
-        assert (destination / paths.DATA_DIRNAME).is_dir()
-        assert not (_isolate / paths.SETTINGS_FILENAME).exists()
-        assert not (_isolate / paths.DATA_DIRNAME).exists()
-        assert any("API keys" in m for m in moved)
-
-    def test_keys_are_owner_only_after_moving(self, _isolate, tmp_path):
-        _make_setup(_isolate, people=1)
-        (_isolate / paths.SETTINGS_FILENAME).chmod(0o644)
-        destination = tmp_path / "extras"
-        first_run.move_out_of_package(destination)
-        mode = (destination / paths.SETTINGS_FILENAME).stat().st_mode & 0o777
-        assert mode == 0o600
-
-    def test_moves_the_catalog_from_its_old_place_under_src(self, _isolate, tmp_path):
-        (_isolate / "src").mkdir()
-        (_isolate / "src" / paths.MODEL_CATALOG_FILENAME).write_text('{"models":{}}', encoding="utf-8")
-        destination = tmp_path / "extras"
-        first_run.move_out_of_package(destination)
-        assert (destination / paths.MODEL_CATALOG_FILENAME).is_file()
-
-    def test_refuses_to_move_onto_an_existing_settings_file(self, _isolate, tmp_path):
-        _make_setup(_isolate, people=1)
-        destination = _make_setup(tmp_path / "occupied", people=5)
-        with pytest.raises(FileExistsError):
-            first_run.move_out_of_package(destination)
-        assert "sk-4" in (destination / paths.SETTINGS_FILENAME).read_text()
-        assert (_isolate / paths.SETTINGS_FILENAME).is_file()  # nothing moved
 
 
 class TestCompleteSetup:

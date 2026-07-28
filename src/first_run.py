@@ -5,10 +5,7 @@ that absence means one of three things:
 
 * **A first install.** Nobody has used the sandbox on this computer.
 * **An upgrade.** The package was replaced; the person's own files are
-  still sitting wherever they were.
-* **An older installation**, from before the sandbox kept those files
-  outside the package at all — so they are still *inside* it, which is what
-  made "delete the folder and download a fresh one" destroy them.
+  still sitting where they were, untouched.
 
 Rather than asking someone to work out which of those they are, this module
 goes and looks. Everything here answers questions and prepares folders; none
@@ -44,9 +41,6 @@ class ExtrasCandidate:
                 none or it couldn't be read.
         has_catalog: Whether a model catalog is there.
         months: How many months of usage history are there.
-        in_package: Whether this is the old layout, with everything inside
-                    the package itself — the arrangement that makes
-                    upgrading destructive.
     """
 
     path: Path
@@ -54,7 +48,6 @@ class ExtrasCandidate:
     people: int
     has_catalog: bool
     months: int
-    in_package: bool = False
 
     @property
     def is_usable(self) -> bool:
@@ -91,12 +84,11 @@ def _count_months(data_dir: Path) -> int:
     return len(months)
 
 
-def inspect_extras(path: Path, *, in_package: bool = False) -> ExtrasCandidate:
+def inspect_extras(path: Path) -> ExtrasCandidate:
     """Look at one folder and report what of a setup is there.
 
     Args:
         path: The folder to look at. It need not exist.
-        in_package: Mark this as the old inside-the-package layout.
 
     Returns:
         A description of what was found, for showing to someone before they
@@ -104,40 +96,25 @@ def inspect_extras(path: Path, *, in_package: bool = False) -> ExtrasCandidate:
     """
     settings_file = path / paths.SETTINGS_FILENAME
     found_settings = settings_file if settings_file.is_file() else None
-    catalog = path / paths.MODEL_CATALOG_FILENAME
-    if in_package and not catalog.is_file():
-        # Older installations kept the catalog under src/.
-        catalog = path / "src" / paths.MODEL_CATALOG_FILENAME
     return ExtrasCandidate(
         path=path,
         settings_file=found_settings,
         people=_count_people(found_settings) if found_settings else 0,
-        has_catalog=catalog.is_file(),
+        has_catalog=(path / paths.MODEL_CATALOG_FILENAME).is_file(),
         months=_count_months(path / paths.DATA_DIRNAME),
-        in_package=in_package,
     )
 
 
 def find_existing() -> list[ExtrasCandidate]:
     """Look in the likely places for a setup this package could carry forward.
 
-    Checked in the order they should be offered: the default location
-    first, then inside the package itself, which is where an installation
-    predating the split keeps everything.
-
     Returns:
-        Only the places that hold something worth carrying forward, best
-        first. Empty means this is a genuine first install — the only case
-        where someone should be asked to choose from scratch.
+        Only the places that hold something worth carrying forward. Empty
+        means this is a genuine first install — the only case where someone
+        should be asked to choose from scratch.
     """
-    found = []
-    for candidate in (
-        inspect_extras(paths.DEFAULT_EXTRAS_ROOT),
-        inspect_extras(paths.PACKAGE_ROOT, in_package=True),
-    ):
-        if candidate.is_usable:
-            found.append(candidate)
-    return found
+    candidate = inspect_extras(paths.DEFAULT_EXTRAS_ROOT)
+    return [candidate] if candidate.is_usable else []
 
 
 def initialize_extras(path: Path) -> list[str]:
@@ -188,67 +165,6 @@ def initialize_extras(path: Path) -> list[str]:
         copied.append(paths.MODEL_CATALOG_FILENAME)
 
     return copied
-
-
-def move_out_of_package(destination: Path) -> list[str]:
-    """Move an older installation's files out of the package.
-
-    The arrangement this undoes is the reason any of this exists: with
-    settings and history inside the package, replacing the package destroys
-    them.
-
-    Args:
-        destination: The extras folder to move them into.
-
-    Returns:
-        A description of each thing moved, for reporting.
-
-    Raises:
-        FileExistsError: If *destination* already holds a settings file.
-    """
-    settings_dest = destination / paths.SETTINGS_FILENAME
-    if settings_dest.exists():
-        raise FileExistsError(
-            f"{settings_dest} already exists — moving would overwrite it."
-        )
-
-    destination.mkdir(parents=True, exist_ok=True)
-    moved = []
-
-    settings_src = paths.PACKAGE_ROOT / paths.SETTINGS_FILENAME
-    if settings_src.is_file():
-        shutil.move(str(settings_src), str(settings_dest))
-        settings_dest.chmod(0o600)
-        moved.append(f"{paths.SETTINGS_FILENAME} (your API keys)")
-
-    for catalog_src in (
-        paths.PACKAGE_ROOT / paths.MODEL_CATALOG_FILENAME,
-        paths.PACKAGE_ROOT / "src" / paths.MODEL_CATALOG_FILENAME,
-    ):
-        catalog_dest = destination / paths.MODEL_CATALOG_FILENAME
-        if catalog_src.is_file() and not catalog_dest.exists():
-            shutil.move(str(catalog_src), str(catalog_dest))
-            moved.append(paths.MODEL_CATALOG_FILENAME)
-            break
-
-    # settings.local.toml was what preferences.toml used to be called.
-    prefs_dest = destination / paths.PREFERENCES_FILENAME
-    for prefs_src in (
-        paths.PACKAGE_ROOT / paths.PREFERENCES_FILENAME,
-        paths.PACKAGE_ROOT / "settings.local.toml",
-    ):
-        if prefs_src.is_file() and not prefs_dest.exists():
-            shutil.move(str(prefs_src), str(prefs_dest))
-            moved.append(f"{paths.PREFERENCES_FILENAME} (your own adjustments)")
-            break
-
-    data_src = paths.PACKAGE_ROOT / paths.DATA_DIRNAME
-    data_dest = destination / paths.DATA_DIRNAME
-    if data_src.is_dir() and not data_dest.exists():
-        shutil.move(str(data_src), str(data_dest))
-        moved.append(f"{paths.DATA_DIRNAME}/ (usage history and conversations)")
-
-    return moved
 
 
 def complete_setup(extras_root: Path) -> None:

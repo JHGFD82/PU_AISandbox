@@ -38,6 +38,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+
+class NotSetUpError(Exception):
+    """Raised when this copy of the sandbox hasn't been told where files live."""
+
+
 # The package directory — where the code lives. src/paths.py -> repo root.
 PACKAGE_ROOT = Path(__file__).resolve().parent.parent
 
@@ -53,17 +58,13 @@ DEFAULT_EXTRAS_ROOT = Path.home() / "PU_AISandbox_data"
 # not to the person — they are replaced wholesale on upgrade.
 TEMPLATES_DIR = PACKAGE_ROOT / "templates"
 
-# Visible, not a dotfile. The extras folder is meant to be opened and
-# understood; the most important thing in it being hidden from Finder
-# would undercut the reason for choosing a visible location at all.
+# Visible, not a dotfile: this folder is meant to be opened and understood,
+# and the most important thing in it shouldn't be hidden from Finder.
 SETTINGS_FILENAME = "settings.toml"
 MODEL_CATALOG_FILENAME = "model_catalog.json"
 
 # Optional adjustments to how the sandbox behaves — retry counts, font
-# sizes, worker limits. Named "preferences" rather than "settings.local"
-# because everything in the extras folder is local, and two files called
-# settings*.toml sitting next to each other tell a reader nothing about
-# which is which.
+# sizes, worker limits.
 PREFERENCES_FILENAME = "preferences.toml"
 DATA_DIRNAME = "data"
 
@@ -104,22 +105,23 @@ def is_installed() -> bool:
 def extras_root() -> Path:
     """Return the folder holding this person's settings, catalog and data.
 
-    The marker file if this package has been set up, otherwise — for an
-    installation that predates all of this — the package directory itself,
-    which is where everything used to live. That fallback keeps an
-    un-migrated installation working instead of behaving as though its data
-    had vanished.
-
-    Deliberately the only two answers. An environment variable was
-    considered and removed: the marker already lets two checkouts point at
-    two different folders, and invisible state is exactly what makes "my
+    Deliberately the only answer. An environment variable was considered
+    and removed: the marker already lets two checkouts point at two
+    different folders, and invisible state is exactly what makes "my
     history is empty" unanswerable — the command line and the web interface
     are started from different places, so only one of them would see it.
+
+    Raises:
+        NotSetUpError: If this copy of the sandbox hasn't been set up. The
+                       command line catches this and offers to do it.
     """
     recorded = read_install_marker()
-    if recorded is not None:
-        return recorded
-    return PACKAGE_ROOT
+    if recorded is None:
+        raise NotSetUpError(
+            "This copy of the sandbox doesn't know where your files are "
+            "kept yet. Run: python main.py settings setup"
+        )
+    return recorded
 
 
 def settings_path() -> Path:

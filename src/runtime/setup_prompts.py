@@ -107,32 +107,6 @@ def run_interactive_setup(
     print_fn(f"\n{_RULE}\nSetting up the PU AI Sandbox\n{_RULE}")
 
     for candidate in first_run.find_existing():
-        if candidate.in_package:
-            print_fn(
-                "\nYour files are currently inside the sandbox folder itself:\n"
-                + "\n".join(_describe(candidate))
-                + "\n\nThat's why replacing the sandbox with a newer version would\n"
-                  "destroy them. Moving them out fixes that for good — nothing is\n"
-                  "deleted, and everything keeps working exactly as it does now."
-            )
-            destination = paths.DEFAULT_EXTRAS_ROOT
-            print_fn(f"\nThey would move to: {destination}")
-            _warn_if_synced(destination, print_fn)
-            if not _ask_yes_no("Move them there?", default=True,
-                               input_fn=input_fn, print_fn=print_fn):
-                destination = _ask_for_location(input_fn, print_fn)
-            try:
-                moved = first_run.move_out_of_package(destination)
-            except (FileExistsError, OSError) as e:
-                raise CLIError(f"Could not move your files: {e}") from e
-            first_run.complete_setup(destination)
-            print_fn("\nMoved:")
-            for item in moved:
-                print_fn(f"    {item}")
-            print_fn(f"\nDone. Your files now live in {destination},")
-            print_fn("and the sandbox folder can be replaced whenever you like.")
-            return destination
-
         print_fn(
             f"\nFound your files already at {candidate.path}:\n"
             + "\n".join(_describe(candidate))
