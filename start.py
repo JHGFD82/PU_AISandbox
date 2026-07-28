@@ -206,6 +206,39 @@ def open_browser_shortly(url):
     thread.start()
 
 
+def ask_where_to_set_up():
+    """Ask whether to answer the setup questions here or in a browser.
+
+    Both routes ask the same things and record the same answers; this is
+    only about which is more comfortable. Offered because the people this
+    sandbox is for did not choose to be at a command line, and a form is a
+    kinder place to paste an API key than a terminal prompt.
+
+    Returns:
+        Either ``"browser"`` or ``"terminal"``. Anything unreadable — no
+        terminal attached, an interrupted prompt — answers ``"terminal"``,
+        because that route works without a browser and never leaves a server
+        running that nobody is looking at.
+    """
+    say("")
+    say("This sandbox hasn't been set up on this computer yet.")
+    say("It's a couple of questions. Where would you rather answer them?")
+    say("")
+    say("  1. Here, in this window")
+    say("  2. In your web browser")
+    say("")
+    try:
+        answer = raw_input("Choose 1 or 2 [1]: ").strip()  # noqa: F821
+    except NameError:
+        try:
+            answer = input("Choose 1 or 2 [1]: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            return "terminal"
+    except (EOFError, KeyboardInterrupt):
+        return "terminal"
+    return "browser" if answer == "2" else "terminal"
+
+
 def main():
     say("")
     say("Princeton AI Sandbox")
@@ -237,7 +270,10 @@ def main():
         # Run as its own step so its questions are answered before the web
         # interface starts, rather than competing with a server for the same
         # terminal.
-        setup = subprocess.call([venv_python(), sandbox, "settings", "setup"])
+        if ask_where_to_set_up() == "browser":
+            setup = subprocess.call([venv_python(), sandbox, "webui", "setup"])
+        else:
+            setup = subprocess.call([venv_python(), sandbox, "settings", "setup"])
         if setup != 0:
             return setup
 

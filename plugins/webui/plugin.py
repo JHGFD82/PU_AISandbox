@@ -19,6 +19,7 @@ import argparse
 import getpass
 import importlib.util
 import sys
+import threading
 from pathlib import Path
 
 _PLUGIN_DIR = Path(__file__).parent
@@ -76,6 +77,7 @@ _register("_pu_webui_attachments", "src/attachments.py")
 _register("_pu_webui_export", "src/export.py")
 _register("_pu_webui_jobs", "src/jobs.py")
 _register("src.services.chat_service", "src/services/chat_service.py")
+_register("_pu_webui_setup_web", "src/setup_web.py")
 _register("_pu_webui_app", "src/app.py")
 
 from src.config import register_setting
@@ -113,6 +115,12 @@ class WebUiPlugin:
         serve.add_argument("--host", default=None, help="Address to listen on (default: 127.0.0.1)")
         serve.add_argument("--port", type=int, default=None, help="Port to listen on (default: 8000)")
 
+        setup = webui_sub.add_parser(
+            "setup",
+            help="Do first-time setup in a browser instead of at the command line",
+        )
+        setup.add_argument("--port", type=int, default=None, help="Port to listen on (default: 8000)")
+
         webui_sub.add_parser(
             "set-passphrase",
             help="Set the web UI unlock passphrase (writes webui.passphrase_hash to settings.toml)",
@@ -147,12 +155,15 @@ class WebUiPlugin:
         subcommand = getattr(args, "webui_subcommand", None)
         if subcommand == "set-passphrase":
             _print_passphrase_hash()
+        elif subcommand == "setup":
+            _serve_setup(args)
         elif subcommand == "serve":
             _serve(args)
         else:
             raise CLIError(
                 "No webui subcommand specified.\n"
                 "Usage: python main.py webui serve [--host HOST] [--port PORT]\n"
+                "       python main.py webui setup\n"
                 "       python main.py webui set-passphrase"
             )
 
@@ -181,6 +192,64 @@ def _is_loopback_host(host: str) -> bool:
         True if only this computer can reach it.
     """
     return host.strip().lower() in _LOOPBACK_HOSTS
+
+
+def _serve_setup(args: argparse.Namespace) -> None:
+    """Ask where a person's files should go, in a browser, then stop.
+
+    A short-lived server on loopback only, serving one page. It exists so
+    that someone who would rather not answer questions in a terminal can
+    answer them in a form instead; the answers go to the same place either
+    way.
+
+    It stops as soon as setup is done, and the sandbox's real web interface
+    starts afterwards as a fresh process. Continuing in this one would mean
+    running against paths that were worked out before the person said where
+    anything should go.
+    """
+    import uvicorn
+
+    from src import paths
+
+    if paths.is_installed():
+        print("This copy of the sandbox is already set up.")
+        return
+
+    port = getattr(args, "port", None) or 8000
+    setup_web = sys.modules["_pu_webui_setup_web"]
+
+    finished = threading.Event()
+    chosen: list = []
+
+    def on_complete(folder):
+        chosen.append(folder)
+        finished.set()
+
+    app = setup_web.create_setup_app(on_complete)
+    config = uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning")
+    server = uvicorn.Server(config)
+
+    def stop_when_finished():
+        finished.wait()
+        server.should_exit = True
+
+    threading.Thread(target=stop_when_finished, daemon=True).start()
+
+    print(f"Open this in your browser to finish setting up:\n    http://127.0.0.1:{port}\n")
+    server.run()
+
+    if chosen:
+        print(f"Set up. Your files are in {chosen[0]}.")
+    else:
+        # Closing the browser without answering leaves nothing configured,
+        # which is a perfectly reasonable thing to do and shouldn't look
+        # like a failure.
+        raise CLIError(
+            "Setup was not finished. Run it again when you're ready:\n"
+            "    python main.py webui setup\n"
+            "or answer the same questions at the command line:\n"
+            "    python main.py settings setup"
+        )
 
 
 def _serve(args: argparse.Namespace) -> None:

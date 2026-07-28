@@ -66,6 +66,14 @@ def _set_up_if_needed():
     if any(arg in ("-h", "--help") for arg in sys.argv[1:]):
         return False
 
+    # The commands that *are* setup have to be allowed through, or this
+    # would answer them with a different setup than the one being asked
+    # for — which is exactly what happened to `webui setup`: it was
+    # intercepted here and replaced with the terminal version.
+    words = [arg for arg in sys.argv[1:] if not arg.startswith("-")]
+    if words[:2] in (["settings", "setup"], ["webui", "setup"]):
+        return False
+
     if not sys.stdin.isatty():
         sys.stderr.write(
             "\nThis copy of the sandbox hasn't been set up yet, and there's "
