@@ -66,6 +66,36 @@ def new_job_id() -> str:
     return "job_" + uuid.uuid4().hex[:16]
 
 
+def discard_output_dir_if_empty(output_dir: Path) -> bool:
+    """Remove a job's output directory if the job left nothing in it.
+
+    A job's output folder has to exist before the plugin runs, because the
+    plugin is handed the path and writes its result into it. But a job that
+    fails, or that produces no file at all, leaves an empty folder behind
+    for good — and those accumulate one per run, forever. This installation
+    had 1,198 of them against 606 real ones.
+
+    Removing it only when it is empty means a real output is never at risk:
+    if there is anything inside, this does nothing.
+
+    Args:
+        output_dir: The directory ``job_output_dir()`` returned for this job.
+
+    Returns:
+        ``True`` if the directory was removed, ``False`` if it was kept
+        (because it had contents) or was already gone.
+    """
+    try:
+        if not output_dir.is_dir() or any(output_dir.iterdir()):
+            return False
+        output_dir.rmdir()
+        return True
+    except OSError as e:
+        # Never let tidying up be the thing that fails a finished job.
+        logger.debug("Could not remove empty job output directory %s: %s", output_dir, e)
+        return False
+
+
 def job_output_dir(professor: str, job_id: str, base_dir: Optional[Path] = None) -> Path:
     """Return the directory a job's one output file should be written into, creating it if needed.
 
@@ -377,6 +407,10 @@ def _run_job(
         )
     except Exception as e:
         logger.error("Job %s (%s) failed: %s", job.id, job.action_id, e, exc_info=True)
+        # A failed job usually wrote nothing, so it would otherwise leave an
+        # empty folder behind for good. Anything it did manage to write is
+        # kept — see discard_output_dir_if_empty().
+        discard_output_dir_if_empty(output_dir)
         job_store.set_status(job.id, "error", error=str(e))
         conv = conversation_store.load(job.conversation_id)
         if conv is not None:
@@ -392,6 +426,10 @@ def _run_job(
         return
 
     job_store.set_status(job.id, "done")
+    # A job can succeed without producing a file — a preview, or an action
+    # whose whole result is the summary text. Nothing to keep the folder for
+    # in that case.
+    discard_output_dir_if_empty(output_dir)
     try:
         conv = conversation_store.load(job.conversation_id)
         if conv is not None:

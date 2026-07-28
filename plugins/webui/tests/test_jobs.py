@@ -217,10 +217,109 @@ class TestListUiActions:
 
 class TestJobOutputDir:
     def test_creates_and_returns_directory(self, tmp_path):
-        d = jobs.job_output_dir("heller", "job_1", base_dir=tmp_path)
+        d = jobs.job_output_dir("jh43", "job_1", base_dir=tmp_path)
         assert d.exists()
         assert d.is_dir()
-        assert d == tmp_path / "heller" / "_job_outputs" / "job_1"
+        assert d == tmp_path / "jh43" / "_job_outputs" / "job_1"
+
+
+class TestDiscardOutputDirIfEmpty:
+    """An empty output folder is removed; one with anything in it never is.
+
+    The folder has to be created before the plugin runs, because the plugin
+    is handed the path. So a job that fails, or that produces only a text
+    summary, used to leave one behind permanently — this installation had
+    accumulated 1,198 empty folders against 606 real ones.
+    """
+
+    def test_empty_directory_is_removed(self, tmp_path):
+        d = jobs.job_output_dir("jh43", "job_1", base_dir=tmp_path)
+        assert jobs.discard_output_dir_if_empty(d) is True
+        assert not d.exists()
+
+    def test_directory_with_a_file_is_kept(self, tmp_path):
+        d = jobs.job_output_dir("jh43", "job_1", base_dir=tmp_path)
+        (d / "translated.pdf").write_text("output")
+        assert jobs.discard_output_dir_if_empty(d) is False
+        assert (d / "translated.pdf").exists()
+
+    def test_directory_with_a_subfolder_is_kept(self, tmp_path):
+        """Uploads land in an 'input' subfolder — that counts as contents."""
+        d = jobs.job_output_dir("jh43", "job_1", base_dir=tmp_path)
+        (d / "input").mkdir()
+        assert jobs.discard_output_dir_if_empty(d) is False
+        assert d.exists()
+
+    def test_missing_directory_is_not_an_error(self, tmp_path):
+        assert jobs.discard_output_dir_if_empty(tmp_path / "never_existed") is False
+
+
+class TestJobLeavesNoEmptyOutputFolder:
+    """Whichever way a job ends, it must not leave an empty folder behind.
+
+    These are the two paths that produced the 1,198 empty folders: a job
+    that raised, and a job that succeeded without writing a file.
+    """
+
+    # The runner resolves its output directory from jobs._CONVERSATIONS_DIR,
+    # which the autouse fixture points at tmp_path/"conversations" — not from
+    # the conversation store's base_dir. Asserting against the wrong path here
+    # would make "the folder is gone" trivially true and the test worthless.
+    def _output_dir(self, tmp_path, job_id):
+        return tmp_path / "conversations" / "jh43" / "_job_outputs" / job_id
+
+    def test_failed_job_leaves_nothing_behind(self, tmp_path):
+        def boom(fields, professor, model, on_progress, output_dir, on_page_text=None):
+            raise RuntimeError("the model refused")
+
+        # job_output_dir() recreates it if asked, so check before asking.
+        store = _make_store(tmp_path)
+        conv = store.create(model="gpt-4o")
+        job_store = jobs.JobStore()
+        job = jobs.start_job(
+            plugins={"translate": _FakePlugin(run_ui_action=boom)},
+            action_id="translate", fields={}, professor="jh43", model=None,
+            conversation_id=conv.id, conversation_store=store, job_store=job_store,
+        )
+        _wait_until(lambda: job_store.get(job.id).status == "error")
+        assert not (tmp_path / "conversations" / "jh43" / "_job_outputs" / job.id).exists()
+
+    def test_successful_job_that_writes_nothing_leaves_nothing_behind(self, tmp_path):
+        def summary_only(fields, professor, model, on_progress, output_dir, on_page_text=None):
+            from src.runtime.ui_action import UiJobResult
+            return UiJobResult(output_path=None, output_filename=None, summary="Nothing to save.")
+
+        store = _make_store(tmp_path)
+        conv = store.create(model="gpt-4o")
+        job_store = jobs.JobStore()
+        job = jobs.start_job(
+            plugins={"translate": _FakePlugin(run_ui_action=summary_only)},
+            action_id="translate", fields={}, professor="jh43", model=None,
+            conversation_id=conv.id, conversation_store=store, job_store=job_store,
+        )
+        _wait_until(lambda: job_store.get(job.id).status == "done")
+        assert not (tmp_path / "conversations" / "jh43" / "_job_outputs" / job.id).exists()
+
+    def test_a_job_that_writes_a_file_keeps_its_folder(self, tmp_path):
+        """The property that makes the cleanup safe to do at all."""
+        def writes(fields, professor, model, on_progress, output_dir, on_page_text=None):
+            from src.runtime.ui_action import UiJobResult
+            out = f"{output_dir}/translated.txt"
+            with open(out, "w", encoding="utf-8") as f:
+                f.write("result")
+            return UiJobResult(output_path=out, output_filename="translated.txt", summary="Done.")
+
+        store = _make_store(tmp_path)
+        conv = store.create(model="gpt-4o")
+        job_store = jobs.JobStore()
+        job = jobs.start_job(
+            plugins={"translate": _FakePlugin(run_ui_action=writes)},
+            action_id="translate", fields={}, professor="jh43", model=None,
+            conversation_id=conv.id, conversation_store=store, job_store=job_store,
+        )
+        _wait_until(lambda: job_store.get(job.id).status == "done")
+        out_dir = tmp_path / "conversations" / "jh43" / "_job_outputs" / job.id
+        assert (out_dir / "translated.txt").read_text() == "result"
 
 
 class TestStartJob:
