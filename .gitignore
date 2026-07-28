@@ -23,18 +23,26 @@ ENV/
 # hasn't been set up yet.
 .installation
 
-# This installation's own credentials and local identity (professors,
-# secrets, endpoint keys, external usage-data sources) — see .settings.template.
-.settings
-# Old file name, kept ignored too in case a leftover/backup copy exists
-# (see scripts/migrate_config_to_settings.py)
+# A person's own files. These normally live outside the package entirely
+# (see src/paths.py), but a copy landing here must never be committable —
+# settings.toml holds API keys.
+#
+# Anchored with a leading slash so these match only the repository root.
+# plugins/*/settings.toml are a different thing entirely: per-plugin
+# defaults, tracked on purpose.
+/settings.toml
+/preferences.toml
+/model_catalog.json
+src/model_catalog.json
+
+# Any extras folder someone chose to put inside the package anyway. Setup
+# warns against it, but warning is not preventing.
+PU_AISandbox_data/
+
 .env
 .env.local
 .env.*.local
 .envrc
-
-# Local settings overrides (user-specific, not committed)
-preferences.toml
 
 # Testing / coverage artifacts
 .coverage
@@ -51,8 +59,6 @@ example_docs/
 fonts/*
 !fonts/README.md
 
-# Model catalog - local copy with personal pricing is not tracked; use model_catalog.template.json as starting point
-src/model_catalog.json
 
 # External/remote usage-data source config - superseded by the
 # [usage_sources] section in .settings (see scripts/migrate_config_to_settings.py);
