@@ -17,6 +17,12 @@ venv/
 env/
 ENV/
 
+# Records which extras folder this copy of the package was set up against —
+# see src/paths.py. It describes one installation and must never travel to
+# another; its absence is what tells a freshly downloaded package that it
+# hasn't been set up yet.
+.installation
+
 # This installation's own credentials and local identity (professors,
 # secrets, endpoint keys, external usage-data sources) — see .settings.template.
 .settings
