@@ -21,6 +21,11 @@ person:
 and rewrites the ``[professors.<old>]`` section names in ``.settings`` to
 ``[professors.<netid>]``, leaving every value and comment in place.
 
+It also repoints the job-output paths recorded inside existing
+conversations. Those are stored as absolute paths, so renaming the folders
+without this step leaves every "download" link in every saved conversation
+pointing at a folder that no longer exists.
+
 Run it once. Nothing here is needed again afterwards.
 
 Usage
@@ -42,6 +47,7 @@ listing the configuration created a folder for every name it saw::
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import shutil
 import sys
@@ -87,6 +93,64 @@ def _planned_moves(mapping: dict[str, str]) -> list[tuple[Path, Path]]:
         ]
         moves.extend((src, dst) for src, dst in candidates if src.exists())
     return moves
+
+
+def _rewrite_conversation_paths(mapping: dict[str, str], apply: bool) -> list[str]:
+    """Repoint the saved job-output paths inside conversation files.
+
+    A finished job records where it wrote its output, and the web interface
+    serves the download from that recorded path. Those paths are stored
+    absolute, so renaming a person's folder leaves every one of them
+    pointing at a folder that no longer exists — the files are still there
+    under the new name, but every "download" link in every saved
+    conversation is dead.
+
+    This is easy to miss, because nothing fails loudly: the conversations
+    still open, the results still show, and only clicking through reveals
+    it. Renaming the folders without this step is a half-migration.
+
+    Args:
+        mapping: The same ``{old_name: netid}`` mapping used for the renames.
+        apply: When ``False``, work out what would change without writing.
+
+    Returns:
+        One line per conversation file changed, for printing.
+    """
+    changed: list[str] = []
+    conversations = _DATA / "conversations"
+    if not conversations.exists():
+        return changed
+
+    for conv_file in sorted(conversations.glob("*/*.json")):
+        try:
+            original = conv_file.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        updated = original
+        for old, netid in mapping.items():
+            updated = updated.replace(
+                f"/conversations/{old}/", f"/conversations/{netid}/"
+            )
+        if updated == original:
+            continue
+        # Confirm it is still valid JSON before writing. The replacement is a
+        # plain text substitution over the whole file, which keeps formatting
+        # but means a mistake would be a corrupt conversation rather than a
+        # wrong one.
+        try:
+            json.loads(updated)
+        except json.JSONDecodeError as e:
+            print(f"  ! skipping {conv_file.name}: rewrite produced invalid JSON ({e})")
+            continue
+        n = sum(
+            original.count(f"/conversations/{old}/") for old in mapping
+        )
+        changed.append(f"{conv_file.parent.name}/{conv_file.name}  ({n} path(s))")
+        if apply:
+            tmp = conv_file.with_suffix(".json.tmp")
+            tmp.write_text(updated, encoding="utf-8")
+            tmp.replace(conv_file)
+    return changed
 
 
 def _rewrite_settings(mapping: dict[str, str], apply: bool) -> list[str]:
@@ -173,6 +237,12 @@ def main() -> int:
             print(f"  {d.relative_to(_ROOT)}")
             if args.apply:
                 shutil.rmtree(d)
+
+    conv_changed = _rewrite_conversation_paths(mapping, args.apply)
+    verb = "Repointed" if args.apply else "Would repoint"
+    print(f"\n{verb} saved job-output paths in {len(conv_changed)} conversation(s):")
+    for line in conv_changed:
+        print(f"  {line}")
 
     changed = _rewrite_settings(mapping, args.apply)
     verb = "Rewrote" if args.apply else "Would rewrite"
