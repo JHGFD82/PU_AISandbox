@@ -14,7 +14,7 @@ import pytest
 
 import src.models.catalog as _catalog_module
 
-_TEMPLATE_PATH = Path(__file__).parent.parent / "src" / "model_catalog.template.json"
+_TEMPLATE_PATH = Path(__file__).parent.parent / "templates" / "model_catalog.template.json"
 _REPO_ROOT = Path(__file__).parent.parent
 
 

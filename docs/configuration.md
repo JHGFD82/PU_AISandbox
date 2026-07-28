@@ -4,8 +4,8 @@ Three files control how PU_AISandbox is configured. One is git-ignored (you crea
 
 | File | Tracked | Template | Purpose |
 |------|---------|----------|---------|
-| `.settings` | ❌ git-ignored | `.settings.template` | Professor names/keys, endpoint credentials, webui secrets, external usage-data sources — this installation's own private configuration |
-| `src/model_catalog.json` | ❌ git-ignored | `src/model_catalog.template.json` | Model pricing and capabilities |
+| `.settings` | ❌ git-ignored | `templates/settings.template` | Professor names/keys, endpoint credentials, webui secrets, external usage-data sources — this installation's own private configuration |
+| `src/model_catalog.json` | ❌ git-ignored | `templates/model_catalog.template.json` | Model pricing and capabilities |
 | `settings.default.toml` | ✅ tracked | — | Runtime defaults (edit freely) and alternate-endpoint *definitions* |
 | A shared file (optional, any path) | ❌ not part of this repo | — | Runtime defaults a group wants to share (e.g. via Dropbox) |
 | `settings.local.toml` | ❌ git-ignored | — | This machine's personal overrides, highest precedence |
@@ -23,7 +23,7 @@ Editing it programmatically (via the `settings` command below) is safe specifica
 ### Setup
 
 ```bash
-cp .settings.template .settings
+cp templates/settings.template .settings
 ```
 
 Then either hand-edit `.settings`, or use the `settings` command below to add your first professor.
@@ -103,7 +103,7 @@ All of these are optional — leaving them unset falls back to documented defaul
 ### Setup
 
 ```bash
-cp src/model_catalog.template.json src/model_catalog.json
+cp templates/model_catalog.template.json src/model_catalog.json
 ```
 
 This file is git-ignored so each installation can maintain its own model list and pricing without conflicting with other users. It's kept as its own file rather than folded into `.settings` for a practical reason: the package updates it on its own (auto-registering pricing the first time you use `-m provider/model-name`), and that kind of frequent, automatic write is exactly the kind of thing that causes conflicts if it ever ends up in a synced or shared file. Runtime settings and shared defaults change rarely enough that sharing them is safe; model pricing can change every time someone tries a new model.
@@ -477,11 +477,11 @@ Every "✅ `/settings` page" row above is served by the webui plugin's `/setting
 
 ```bash
 # 1. Copy and populate .settings
-cp .settings.template .settings
+cp templates/settings.template .settings
 python main.py settings add-professor   # or hand-edit .settings — see the Format section above
 
 # 2. Copy the model catalog
-cp src/model_catalog.template.json src/model_catalog.json
+cp templates/model_catalog.template.json src/model_catalog.json
 # edit src/model_catalog.json if needed (pricing, defaults)
 
 # 3. Verify everything

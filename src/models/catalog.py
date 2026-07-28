@@ -108,12 +108,16 @@ def load_model_catalog() -> Dict[str, Any]:
 
 
     if not catalog_file.exists():
-        template_file = catalog_file.parent / "model_catalog.template.json"
+        # The template ships with the package; the catalog belongs to the
+        # person and lives wherever their extras folder is, so the two are
+        # no longer siblings and the path can't be derived from the other.
+        from ..paths import template_path
+        template_file = template_path("model_catalog.template.json")
         error_msg = (
             f"Model catalog file not found at {catalog_file}. "
             "Copy the template to get started:\n"
             f"  cp {template_file} {catalog_file}\n"
-            "Then edit src/model_catalog.json to configure your models, "
+            f"Then edit {catalog_file} to configure your models, "
             "or use 'openai/model-name' or 'provider/model-name' with -m to "
             "auto-register models on first use."
         )

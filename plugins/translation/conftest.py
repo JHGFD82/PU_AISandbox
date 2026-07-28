@@ -26,7 +26,7 @@ if str(_REPO_ROOT) not in sys.path:
 
 import src.models.catalog as _catalog_module  # noqa: E402 — must follow sys.path setup
 
-_TEMPLATE_PATH = _REPO_ROOT / "src" / "model_catalog.template.json"
+_TEMPLATE_PATH = _REPO_ROOT / "templates" / "model_catalog.template.json"
 
 _PLUGIN_DIR = Path(__file__).resolve().parent
 

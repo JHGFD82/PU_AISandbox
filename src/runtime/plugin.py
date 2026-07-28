@@ -2,7 +2,7 @@
 
 Every plugin module must expose a module-level attribute named ``plugin``
 that is an instance of a class satisfying the requirements described below.
-See ``plugin.py.template`` at the repository root for a fully-annotated
+See ``templates/plugin.py.template`` for a fully-annotated
 example to copy from.
 """
 
@@ -37,7 +37,7 @@ class ModePlugin(Protocol):
         user. Every API call made inside ``run()`` must be tracked with a
         ``TokenTracker(professor=professor)`` instance — this is mandatory
         for every plugin, so that per-professor usage reporting stays
-        accurate. See ``plugin.py.template`` for the required pattern.
+        accurate. See ``templates/plugin.py.template`` for the required pattern.
 
     Optional attribute:
         ``requires_professor`` — set this to ``False`` on a plugin whose

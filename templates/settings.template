@@ -1,4 +1,8 @@
-# .settings.template — copy this file to .settings (git-ignored) and fill it in.
+# settings.template — the starting point for your own .settings file.
+#
+# You normally never copy this by hand: setup does it for you, into the
+# folder you choose to keep your own files in. It's here for reference,
+# and for anyone who'd rather write the file themselves.
 #
 # .settings holds this installation's own credentials and local identity:
 # professor names/keys, optional feature secrets, alternate-endpoint API

@@ -84,7 +84,7 @@ def _load_one(
     if p is None:
         logger.warning(
             "Plugin '%s': no module-level 'plugin' attribute — skipped. "
-            "See plugin.py.template for the required structure.",
+            "See templates/plugin.py.template for the required structure.",
             plugin_name,
         )
         return

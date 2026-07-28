@@ -305,7 +305,7 @@ def get_api_key(netid: str) -> tuple[str, str]:
             error_msg = (
                 "No one is configured yet.\n"
                 "Add someone with: python main.py env add-professor\n"
-                "(or by hand — see .settings.template for the format)"
+                "(or by hand — see templates/settings.template for the format)"
             )
         raise ValueError(error_msg)
 

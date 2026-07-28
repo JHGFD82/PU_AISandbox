@@ -40,7 +40,7 @@ select = ["E4", "E7", "E9", "F", "B"]
 [tool.ruff.lint.per-file-ignores]
 # Plugins must register their own modules before importing anything that
 # depends on that registration, so imports genuinely cannot all sit at the
-# top of the file. See plugin.py.template for why.
+# top of the file. See templates/plugin.py.template for why.
 "plugins/*/plugin.py" = ["E402"]
 
 # FastAPI's File()/Form()/Depends() are *meant* to be called in argument

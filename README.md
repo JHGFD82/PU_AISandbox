@@ -73,7 +73,7 @@ pip install -r requirements-dev.txt
 Copy the template, then add your first professor with the built-in `settings` command (it prompts for the name and keys, keys hidden at entry):
 
 ```bash
-cp .settings.template .settings
+cp templates/settings.template .settings
 python main.py settings add-professor
 ```
 
@@ -106,7 +106,7 @@ python main.py --show-config
 The catalog (`src/model_catalog.json`) is not tracked by git. Copy the template:
 
 ```bash
-cp src/model_catalog.template.json src/model_catalog.json
+cp templates/model_catalog.template.json src/model_catalog.json
 ```
 
 For OpenAI or Google models, pricing is fetched automatically on first use — no manual edits needed. For all other providers, add entries directly to `src/model_catalog.json` following the template schema. See [`docs/configuration.md`](docs/configuration.md) for the full schema.
@@ -299,7 +299,7 @@ See [`docs/configuration.md`](docs/configuration.md) for plugin-level settings (
 1. Copy the template:
    ```bash
    mkdir plugins/myplugin
-   cp plugin.py.template plugins/myplugin/plugin.py
+   cp templates/plugin.py.template plugins/myplugin/plugin.py
    ```
 2. Edit `plugin.py`: rename `MyPlugin`, set `commands`, implement `register_subparsers` and `run`.
 3. Inside `run()`, pass `professor` to services that need it — they handle token tracking internally.

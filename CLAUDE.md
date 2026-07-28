@@ -12,8 +12,8 @@ PU AI Sandbox is a modular CLI platform for Princeton University faculty (primar
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-cp .settings.template .settings                # then: python main.py settings add-professor (or hand-edit)
-cp src/model_catalog.template.json src/model_catalog.json   # git-ignored, per-installation
+cp templates/settings.template .settings                # then: python main.py settings add-professor (or hand-edit)
+cp templates/model_catalog.template.json src/model_catalog.json   # git-ignored, per-installation
 ```
 
 ### Running

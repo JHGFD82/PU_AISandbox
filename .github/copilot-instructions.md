@@ -108,7 +108,7 @@ For translate, transcribe, and transcription_review command examples, see the RE
 - **Other Providers**: Add the model manually to `src/model_catalog.json`; edit the file directly following the template schema
 - **Provider Slug Mapping**: PortKey uses different slugs for some providers (e.g. `google` → `vertex-ai`). These mappings live in `model_catalog.json` under `config.provider_map`, not in code.
 - **List Models**: `python main.py --list-models` shows all catalog models with pricing and vision support
-- **Configuration**: Models and pricing defined in `src/model_catalog.json` (git-ignored; copy from `src/model_catalog.template.json` to set up) with `supports_vision` boolean flag
+- **Configuration**: Models and pricing defined in `src/model_catalog.json` (git-ignored; copy from `templates/model_catalog.template.json` to set up) with `supports_vision` boolean flag
 - **No CLI catalog management**: There are no CLI commands to add/update/sync models. Use `provider/model` with `-m` for auto-registration, or edit the JSON directly.
 
 ## Custom Prompt Command

@@ -48,6 +48,11 @@ INSTALL_MARKER = PACKAGE_ROOT / ".installation"
 # Where setup offers to put the extras folder if the person doesn't choose.
 DEFAULT_EXTRAS_ROOT = Path.home() / "PU_AISandbox_data"
 
+# Blank starting-point files, kept together so setup has one place to copy
+# from and a contributor has one place to look. They belong to the package,
+# not to the person — they are replaced wholesale on upgrade.
+TEMPLATES_DIR = PACKAGE_ROOT / "templates"
+
 SETTINGS_FILENAME = ".settings"
 MODEL_CATALOG_FILENAME = "model_catalog.json"
 DATA_DIRNAME = "data"
@@ -122,6 +127,20 @@ def model_catalog_path() -> Path:
     if not is_installed():
         return PACKAGE_ROOT / "src" / MODEL_CATALOG_FILENAME
     return extras_root() / MODEL_CATALOG_FILENAME
+
+
+def template_path(name: str) -> Path:
+    """Return one of the blank starting-point files shipped with the package.
+
+    Args:
+        name: The template's filename, e.g. ``'settings.template'``.
+
+    Returns:
+        Its path inside the package. Always in the package rather than the
+        extras folder: a template is part of the code, and a fresh copy
+        arrives with every upgrade.
+    """
+    return TEMPLATES_DIR / name
 
 
 def data_root() -> Path:

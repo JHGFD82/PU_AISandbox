@@ -58,7 +58,7 @@ def show_professor_config() -> None:
     if not professors:
         print("No professors configured in .settings.")
         print("Add one with: python main.py settings add-professor")
-        print("Or by hand, under a [professors.<netid>] table — see .settings.template.")
+        print("Or by hand, under a [professors.<netid>] table — see templates/settings.template.")
         _print_optional_settings()
         return
 
@@ -114,7 +114,7 @@ def _print_optional_settings() -> None:
         return
 
     print("\n" + "=" * 60)
-    print("Optional settings (all unset by default — see .settings.template):")
+    print("Optional settings (all unset by default — see templates/settings.template):")
     current_section = None
     for path, label, section, _secret in fields:
         if section != current_section:
