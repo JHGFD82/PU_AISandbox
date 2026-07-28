@@ -270,6 +270,10 @@ def _handle_settings_command(args: argparse.Namespace) -> None:
     """
     sub = getattr(args, 'settings_subcommand', None)
 
+    if sub == 'setup':
+        from .setup_prompts import run_interactive_setup
+        run_interactive_setup()
+        return
     if sub == 'add-professor':
         _settings_add_professor_interactive(args)
         return
@@ -288,7 +292,8 @@ def _handle_settings_command(args: argparse.Namespace) -> None:
 
     raise CLIError(
         "No settings subcommand specified.\n"
-        "Usage: python main.py settings add-professor\n"
+        "Usage: python main.py settings setup\n"
+        "       python main.py settings add-professor\n"
         "       python main.py settings remove-professor <identifier>\n"
         "       python main.py settings list\n"
         "       python main.py settings set <KEY>\n"
