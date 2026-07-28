@@ -50,95 +50,54 @@ For deeper documentation, see the `docs/` folder:
 
 ---
 
-## First-Run Setup
+## Getting Started
 
-### 0. Get the sandbox
+### The short version
 
 ```bash
 git clone https://github.com/JHGFD82/PU_AISandbox.git
 cd PU_AISandbox
+python3 start.py
 ```
 
-### 1. Create a virtual environment and install dependencies
+That's it. `start.py` does everything else: finds a Python new enough to run the sandbox, installs what it needs, asks where to keep your files, and opens the web interface in your browser.
 
-**You need Python 3.11 or newer.** Check what you have with `python3 --version`. If it's older, install a newer Python from [python.org](https://www.python.org/downloads/) (or `brew install python@3.11` on a Mac with Homebrew) and use that in place of `python3` below. The sandbox checks this at startup and will tell you if it's a problem, so you don't have to get it right first time.
+The first run takes a few minutes — about 200 MB of software is downloaded. Every run after that reaches the web interface in about a second, so this is also the normal way to open the sandbox day to day.
 
-```bash
-python3 -m venv .venv
-source .venv/bin/activate   # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-```
+Leave the terminal window open while you're using it. Closing it, or pressing Ctrl-C, stops the sandbox.
 
-If you plan to *change* the code rather than just use it, also install the development tools — a linter and a type checker:
+### If it says you need a newer Python
 
-```bash
-pip install -r requirements-dev.txt
-```
+Macs come with Python 3.9, and the sandbox needs 3.11 or newer. `start.py` looks for a newer one already on your computer and uses it if there is one — so this only comes up if there genuinely isn't.
 
-### 2. Set up your files, and add the first person
+If it does, it will tell you exactly what to do: install Python from [python.org/downloads](https://www.python.org/downloads/) (or `brew install python@3.13` if you use Homebrew), then run `python3 start.py` again. Installing a newer Python alongside the old one is safe and won't disturb anything.
 
-Run this once. It asks where to keep your own files — your API keys, usage history and saved conversations — and creates them for you:
+### Adding people
 
-```bash
-python main.py settings setup
-```
-
-The default is a folder called `PU_AISandbox_data` in your home folder. Keeping it *outside* this sandbox folder is what lets you replace the sandbox with a newer version later without losing anything (see [Upgrading](#upgrading) below).
-
-Then add whoever will be using it. It prompts for their netID, display name and API keys — the keys are typed hidden, never as a command-line flag:
+Once the sandbox is running, add whoever will be using it:
 
 ```bash
 python main.py settings add-professor
 ```
 
-You never need to copy any file by hand; setup does it. If you would rather write the settings yourself, the file lives in the folder setup created and looks like this:
+It asks for their netID, their display name, and their API keys — the keys are typed hidden, never as a command-line flag. Princeton faculty obtain API keys through OIT; each person registers independently.
 
-```toml
-[professors.jh43]
-name = "Jeff Heller"
-key = "your_primary_api_key_here"
-backup_key = "your_backup_api_key_here"
+### Using it from the command line instead
 
-[professors.as12]
-name = "Alice Smith"
-key = "another_primary_key_here"
-backup_key = "another_backup_key_here"
-```
-
-The table name is the person's **netID** — the university username they sign in with — and is what you type on the command line. `name` is their display name, shown in reports and the web interface.
-
-Princeton faculty obtain API keys through OIT. Each faculty member registers independently.
-
-Verify configuration (no API call made):
+The web interface is one way in; everything is also available as commands. If you prefer that, activate the environment `start.py` created and use `main.py` directly:
 
 ```bash
-python main.py --show-config
+source .venv/bin/activate      # Windows: .venv\Scripts\activate
+python main.py --help
 ```
 
-### 3. Models and pricing
+### Working on the code
 
-Setup already created your model catalogue, so there is nothing to do here.
-
-For OpenAI or Google models, pricing is fetched automatically the first time you use one. For other providers, add entries to `model_catalog.json` in the folder setup created. See [`docs/configuration.md`](docs/configuration.md) for the full schema.
-
-### 4. Install optional plugins
-
-The `prompt`, `translation`, and `transcription` plugins are bundled in this repo and load automatically.
-
-For East Asian language support (Japanese, Chinese, Korean), clone the EA extension plugins:
+If you plan to *change* the sandbox rather than use it, also install the development tools — a linter, a type checker and the test runner:
 
 ```bash
-git clone https://github.com/JHGFD82/PU_AISandbox_Translation_EA plugins/translation-ea
-git clone https://github.com/JHGFD82/PU_AISandbox_Transcription_EA plugins/transcription-ea
-```
-
-Each EA plugin repo has its own README with command-specific setup and usage examples.
-
-### 5. Verify everything works
-
-```bash
-python main.py --help          # lists all loaded commands
-python main.py --list-models   # shows catalog models with pricing
+source .venv/bin/activate
+pip install -r requirements-dev.txt
 ```
 
 ---
@@ -152,14 +111,16 @@ If you installed with `git clone`, the tidiest way is:
 ```bash
 cd PU_AISandbox
 git pull
+python3 start.py
 ```
+
+`start.py` notices if anything new is needed and installs it; if nothing changed, it goes straight to the web interface.
 
 If you would rather start from a clean copy — or you downloaded a ZIP rather than cloning — that is equally safe:
 
 1. Delete the whole `PU_AISandbox` folder.
 2. Get a fresh one (clone or download again).
-3. Set up its environment as in step 1 above.
-4. Run any command. The sandbox will notice it hasn't been set up, find your existing files, and ask you to confirm:
+3. Run `python3 start.py`. It rebuilds the environment, then finds your existing files and asks you to confirm:
 
 ```
 Found your files already at /Users/you/PU_AISandbox_data:

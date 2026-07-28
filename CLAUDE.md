@@ -10,9 +10,13 @@ PU AI Sandbox is a modular CLI platform for Princeton University faculty (primar
 
 ### Setup
 ```bash
+python3 start.py    # end-user path: finds a suitable Python, builds .venv, runs setup, opens the web UI
+```
+`start.py` is deliberately written to parse on Python 3.9 (what macOS ships) so it can find and use a newer one — see its module docstring. For working on the code:
+```bash
 python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-python main.py settings setup          # asks where to keep your files, creates settings.toml + model_catalog.json + preferences.toml
+pip install -r requirements.txt -r requirements-dev.txt
+python main.py settings setup          # where to keep your files; creates settings.toml + model_catalog.json + preferences.toml
 python main.py settings add-professor  # then add whoever will use it
 ```
 
