@@ -9,7 +9,7 @@ override earlier ones, key by key — a layer only needs to mention the
 settings it wants to change):
 
 1. ``settings.default.toml`` — the repo's checked-in defaults, same for everyone.
-2. A shared file, if ``shared_settings.path`` is set in ``.settings``
+2. A shared file, if ``shared_settings.path`` is set in ``settings.toml``
    (see ``src/settings_store.py``) — e.g. one synced with Dropbox between
    everyone in a group. Lets a group share defaults — a shared cluster's
    worker count, a group-wide font size, even a shared alternate-endpoint
@@ -25,7 +25,7 @@ settings it wants to change):
 The ``[endpoints]`` section (alternate AI API endpoint *definitions* — base
 URL, timeout, etc.) merges through these same three layers exactly like
 every other section. Only the credential for each endpoint lives outside
-this file, in ``.settings`` (since credentials are never meant to be shared
+this file, in ``settings.toml`` (since credentials are never meant to be shared
 or layered) — see ``src/services/api_config.py`` for how the two combine.
 """
 
@@ -77,7 +77,7 @@ except FileNotFoundError:
         "Copy settings.default.toml from the repository root and edit it to configure the sandbox."
     ) from None
 
-# Layer 2: shared settings, only if .settings points at a real file.
+# Layer 2: shared settings, only if settings.toml points at a real file.
 _shared_settings_path = settings_store.get_shared_settings_path()
 if _shared_settings_path:
     if _shared_settings_path.exists():
@@ -141,7 +141,7 @@ DEFAULT_FONT_SIZE: int = _s["output"]["default_font_size"]
 # ── Budget ─────────────────────────────────────────────────────────────────────
 BUDGET_WARNING_THRESHOLD: int = _s["budget"]["warning_threshold_pct"]
 
-# ── Alternate AI API endpoints (definitions only — credentials live in .settings) ──
+# ── Alternate AI API endpoints (definitions only — credentials live in settings.toml) ──
 ENDPOINTS: dict = _s.get("endpoints", {})
 DEFAULT_ENDPOINT = _s.get("config", {}).get("default_endpoint") or None
 

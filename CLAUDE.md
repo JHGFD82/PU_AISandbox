@@ -12,7 +12,7 @@ PU AI Sandbox is a modular CLI platform for Princeton University faculty (primar
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-cp templates/settings.template .settings                # then: python main.py settings add-professor (or hand-edit)
+cp templates/settings.template settings.toml                # then: python main.py settings add-professor (or hand-edit)
 cp templates/model_catalog.template.json src/model_catalog.json   # git-ignored, per-installation
 ```
 
@@ -75,7 +75,7 @@ Only the `usage` subcommand is built in; everything else (`translate`, `transcri
 - `src/tracking/token_tracker.py` — per-professor, per-calendar-month token accounting, thread-safe (`threading.Lock` around `record_usage()`).
 
 ### Professor configuration
-`.settings` pattern: `[professors.<netid>]` tables with `name` (display name), `key`, `backup_key` (optional). The table name is the person's university netID — letters and digits only, validated by `normalize_netid()` in `src/config.py`, and used verbatim as a filename. Missing/blank required fields → `ValueError` re-raised as `CLIError`, process exits 1. `.settings` also holds `[webui]` secrets, `[endpoints.<name>].key` credentials, `[shared_settings].path`, and `[usage_sources]` — see `src/settings_store.py` and `docs/configuration.md`.
+`settings.toml` pattern: `[professors.<netid>]` tables with `name` (display name), `key`, `backup_key` (optional). The table name is the person's university netID — letters and digits only, validated by `normalize_netid()` in `src/config.py`, and used verbatim as a filename. Missing/blank required fields → `ValueError` re-raised as `CLIError`, process exits 1. `settings.toml` also holds `[webui]` secrets, `[endpoints.<name>].key` credentials, `[shared_settings].path`, and `[usage_sources]` — see `src/settings_store.py` and `docs/configuration.md`.
 
 ### Token tracking
 - Active: `data/token_usage_{netid}.json` (current month only). Archives: `data/archives/{netid}/{YYYY-MM}.json`, written automatically on month rollover.
@@ -85,10 +85,10 @@ Only the `usage` subcommand is built in; everything else (`translate`, `transcri
 ### Model catalog & alternate endpoints
 - `src/model_catalog.json` (git-ignored; copy from `.template.json`) holds pricing/`supports_vision` per model, keyed by `[config.provider_map]` for provider slug quirks (e.g. `google` → `vertex-ai` for PortKey).
 - `openai/model-name` or `google/model-name` passed to `-m` auto-fetches and saves pricing from PortKey on first use. Other providers must be added to the JSON by hand — there is no CLI catalog management.
-- Colon syntax in `-m` (e.g. `-m my_cluster:llama-3-70b`) looks up the matching `[endpoints.<name>]` table (merged from `settings.*.toml`) plus its credential (`endpoints.<name>.key` in `.settings`) and points the OpenAI-compatible client at that alternate `base_url`, bypassing the model catalog entirely.
+- Colon syntax in `-m` (e.g. `-m my_cluster:llama-3-70b`) looks up the matching `[endpoints.<name>]` table (merged from `settings.*.toml`) plus its credential (`endpoints.<name>.key` in `settings.toml`) and points the OpenAI-compatible client at that alternate `base_url`, bypassing the model catalog entirely.
 
 ### Configuration layering (highest precedence last)
-`settings.default.toml` (repo root defaults, tracked) → an optional shared file (path set via `.settings`'s `shared_settings.path`) → `settings.local.toml` (git-ignored machine overrides) → `plugins/*/settings.toml` (plugin-specific defaults, each plugin's `src/settings.py` walks up to find its own) → CLI flags. `.settings` itself (professor keys, endpoint credentials, webui secrets, usage sources) is never layered — it's this installation's own private configuration, edited via the built-in `settings` command or by hand.
+`settings.default.toml` (repo root defaults, tracked) → an optional shared file (path set via `settings.toml`'s `shared_settings.path`) → `settings.local.toml` (git-ignored machine overrides) → `plugins/*/settings.toml` (plugin-specific defaults, each plugin's `src/settings.py` walks up to find its own) → CLI flags. `settings.toml` itself (professor keys, endpoint credentials, webui secrets, usage sources) is never layered — it's this installation's own private configuration, edited via the built-in `settings` command or by hand.
 
 ## Documentation & docstring standard
 
@@ -109,6 +109,6 @@ Only the `usage` subcommand is built in; everything else (`translate`, `transcri
 
 - [`docs/architecture.md`](docs/architecture.md) — full request lifecycle diagram, plugin `sys.modules` injection pattern, data-flow example
 - [`docs/cli-reference.md`](docs/cli-reference.md) — full flag reference
-- [`docs/configuration.md`](docs/configuration.md) — `.settings`/`model_catalog.json`/`settings.default.toml` schema
+- [`docs/configuration.md`](docs/configuration.md) — `settings.toml`/`model_catalog.json`/`settings.default.toml` schema
 - [`docs/token-usage-guide.md`](docs/token-usage-guide.md) — token tracking and budget troubleshooting
 - [`docs/plugin-authoring-guide.md`](docs/plugin-authoring-guide.md) — step-by-step new-plugin guide

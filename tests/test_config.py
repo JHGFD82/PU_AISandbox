@@ -189,7 +189,7 @@ class TestLoadProfessorConfig:
     @pytest.fixture(autouse=True)
     def _isolate_settings_path(self, tmp_path, monkeypatch):
         from src import settings_store
-        monkeypatch.setattr(settings_store, "SETTINGS_PATH", tmp_path / ".settings")
+        monkeypatch.setattr(settings_store, "SETTINGS_PATH", tmp_path / "settings.toml")
 
     def test_empty_settings_returns_empty_dict(self):
         assert load_professor_config() == {}
@@ -231,7 +231,7 @@ class TestLoadProfessorConfig:
         assert "jh43" in load_professor_config()
 
     def test_section_that_is_not_a_netid_is_skipped(self):
-        """An old-style name left in .settings must not become a filename."""
+        """An old-style name left in settings.toml must not become a filename."""
         from src import settings_store
         settings_store.set_value("professors.jeff_heller.name", "Jeff Heller")
         settings_store.set_value("professors.jeff_heller.key", "sk-old")
@@ -252,7 +252,7 @@ class TestGetApiKey:
     @pytest.fixture(autouse=True)
     def _isolate_settings_path(self, tmp_path, monkeypatch):
         from src import settings_store
-        monkeypatch.setattr(settings_store, "SETTINGS_PATH", tmp_path / ".settings")
+        monkeypatch.setattr(settings_store, "SETTINGS_PATH", tmp_path / "settings.toml")
 
     def _setup_one_prof(self, *, netid="jh43", name="Jeff Heller", primary="sk-primary", backup=None):
         """Helper: register one person and optionally set their keys."""

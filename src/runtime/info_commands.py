@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 
 def list_optional_settings() -> list[tuple[str, str, str, bool]]:
-    """Return every optional ``.settings`` value this installation knows about, for display.
+    """Return every optional ``settings.toml`` value this installation knows about, for display.
 
     Combines two sources: plugin-declared fields (registered via
     ``register_setting()``, e.g. the webui plugin's secrets) and
@@ -56,7 +56,7 @@ def show_professor_config() -> None:
     professors = load_professor_config()
 
     if not professors:
-        print("No professors configured in .settings.")
+        print("No professors configured in settings.toml.")
         print("Add one with: python main.py settings add-professor")
         print("Or by hand, under a [professors.<netid>] table — see templates/settings.template.")
         _print_optional_settings()
@@ -101,7 +101,7 @@ def show_professor_config() -> None:
 
 
 def _print_optional_settings() -> None:
-    """Print every optional ``.settings`` value this installation knows about and whether it's set.
+    """Print every optional ``settings.toml`` value this installation knows about and whether it's set.
 
     Never prints a secret's value — only whether it's currently set. Run
     after a `git pull` (or any update) to see whether a new optional
@@ -262,7 +262,7 @@ def handle_info_commands(args: argparse.Namespace) -> bool:
 def _handle_settings_command(args: argparse.Namespace) -> None:
     """Handle 'settings add-professor/remove-professor/list/set/unset'.
 
-    This is the CLI-side half of directly editing ``.settings`` — see
+    This is the CLI-side half of directly editing ``settings.toml`` — see
     ``src/settings_store.py`` for why writing to it directly is safe here
     (every edit is triggered by a person typing a command at their own
     keyboard, never over a network call or as part of syncing between
@@ -334,11 +334,11 @@ def _settings_remove_professor(args: argparse.Namespace) -> None:
     """Remove a professor by safe name or display name, after a yes/no confirmation.
 
     Confirmation matters here specifically because this deletes real key
-    material from .settings, not just a display entry.
+    material from settings.toml, not just a display entry.
     """
     identifier = args.identifier
     confirm = input(
-        f"Remove professor '{identifier}' from .settings? This deletes their API key(s). [y/N]: "
+        f"Remove professor '{identifier}' from settings.toml? This deletes their API key(s). [y/N]: "
     ).strip().lower()
     if confirm not in ("y", "yes"):
         print("Cancelled — nothing was removed.")
@@ -351,7 +351,7 @@ def _settings_remove_professor(args: argparse.Namespace) -> None:
 
 
 def _settings_set_value(args: argparse.Namespace) -> None:
-    """Set an optional ``.settings`` value, prompting for it (hidden input if it's a secret).
+    """Set an optional ``settings.toml`` value, prompting for it (hidden input if it's a secret).
 
     *key* is a dotted path (e.g. ``webui.session_secret``,
     ``endpoints.hpc_cluster.key``), not an environment-variable name.
@@ -383,7 +383,7 @@ def _settings_set_value(args: argparse.Namespace) -> None:
 
 
 def _settings_unset_value(args: argparse.Namespace) -> None:
-    """Remove an optional ``.settings`` value."""
+    """Remove an optional ``settings.toml`` value."""
     path = args.key.strip()
     settings_store.unset_value(path)
     print(f"{path} removed (if it was set).")
@@ -392,7 +392,7 @@ def _settings_unset_value(args: argparse.Namespace) -> None:
 def _handle_usage_sources(args: argparse.Namespace) -> None:
     """Handle 'usage sources list/add/remove'. See docs/webui-plugin-plan.md section 1.
 
-    Note that the external-source configuration itself (in ``.settings``)
+    Note that the external-source configuration itself (in ``settings.toml``)
     isn't scoped to the professor named on the command line — every usage
     subcommand requires a professor argument for consistency, but 'sources'
     manages this installation's config as a whole. The professor named on

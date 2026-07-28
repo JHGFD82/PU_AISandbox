@@ -4,7 +4,7 @@ Three files control how PU_AISandbox is configured. One is git-ignored (you crea
 
 | File | Tracked | Template | Purpose |
 |------|---------|----------|---------|
-| `.settings` | ❌ git-ignored | `templates/settings.template` | Professor names/keys, endpoint credentials, webui secrets, external usage-data sources — this installation's own private configuration |
+| `settings.toml` | ❌ git-ignored | `templates/settings.template` | Professor names/keys, endpoint credentials, webui secrets, external usage-data sources — this installation's own private configuration |
 | `src/model_catalog.json` | ❌ git-ignored | `templates/model_catalog.template.json` | Model pricing and capabilities |
 | `settings.default.toml` | ✅ tracked | — | Runtime defaults (edit freely) and alternate-endpoint *definitions* |
 | A shared file (optional, any path) | ❌ not part of this repo | — | Runtime defaults a group wants to share (e.g. via Dropbox) |
@@ -14,19 +14,19 @@ For a quick reference on every one of these — where each can live (this machin
 
 ---
 
-## `.settings` — This Installation's Private Configuration
+## `settings.toml` — This Installation's Private Configuration
 
-`.settings` is a TOML file at the repository root holding everything that is specific to this one installation and should never be synced or shared: professor names and API keys, the web UI's passphrase hash and session secret, alternate-endpoint credentials, and the list of external usage-data sources this installation reads from. It replaces four things that used to be separate files (`.env`, the credential half of `apis.json`, and `data_sources.json`).
+`settings.toml` is a TOML file at the repository root holding everything that is specific to this one installation and should never be synced or shared: professor names and API keys, the web UI's passphrase hash and session secret, alternate-endpoint credentials, and the list of external usage-data sources this installation reads from. It replaces four things that used to be separate files (`.env`, the credential half of `apis.json`, and `data_sources.json`).
 
-Editing it programmatically (via the `settings` command below) is safe specifically because every edit happens locally, driven by a command typed at this machine's own keyboard — never over a network call, never as part of syncing files between machines. That reasoning does not extend to placing `.settings` itself in a synced folder (Dropbox, iCloud, etc.) — never do that.
+Editing it programmatically (via the `settings` command below) is safe specifically because every edit happens locally, driven by a command typed at this machine's own keyboard — never over a network call, never as part of syncing files between machines. That reasoning does not extend to placing `settings.toml` itself in a synced folder (Dropbox, iCloud, etc.) — never do that.
 
 ### Setup
 
 ```bash
-cp templates/settings.template .settings
+cp templates/settings.template settings.toml
 ```
 
-Then either hand-edit `.settings`, or use the `settings` command below to add your first professor.
+Then either hand-edit `settings.toml`, or use the `settings` command below to add your first professor.
 
 ### Format
 
@@ -68,9 +68,9 @@ python main.py --show-config
 
 This prints all configured professors, their data-file paths, whether those files exist, and every optional setting registered below (and whether each is currently set — never the value itself).
 
-### Editing `.settings` from the command line
+### Editing `settings.toml` from the command line
 
-Rather than hand-editing `.settings`, the built-in `settings` command can add/remove professors and set any dotted-path value directly. Unlike every other command, `settings` never needs a netID first (you need it precisely when nobody is configured yet):
+Rather than hand-editing `settings.toml`, the built-in `settings` command can add/remove professors and set any dotted-path value directly. Unlike every other command, `settings` never needs a netID first (you need it precisely when nobody is configured yet):
 
 ```bash
 python main.py settings add-professor            # prompts for netID, display name + keys (keys hidden, never a flag)
@@ -83,13 +83,13 @@ python main.py settings unset webui.session_secret
 
 Secrets are always entered at a hidden prompt — never accepted as a command-line flag — so they can't end up in shell history or be seen by another process listing running commands.
 
-### Optional `.settings` values
+### Optional `settings.toml` values
 
 Beyond professor keys, a plugin can declare its own optional dotted-path setting (via `register_setting()` in `src/config.py`, the same mechanism a plugin uses to add a language) so it shows up automatically in `--show-config` and `settings list`. Currently registered:
 
 | Dotted path | Set by | Purpose |
 |----------|--------|---------|
-| `webui.passphrase_hash` | `python main.py webui set-passphrase` (writes the hash directly to `.settings`) | Unlock-gate passphrase for the web UI |
+| `webui.passphrase_hash` | `python main.py webui set-passphrase` (writes the hash directly to `settings.toml`) | Unlock-gate passphrase for the web UI |
 | `webui.session_secret` | `settings set webui.session_secret` (or `--generate`) | Keeps browser sessions signed in across server restarts |
 | `shared_settings.path` | `settings set shared_settings.path` | Path to a shared settings file — see [Local overrides](#local-overrides) |
 | `endpoints.<name>.key` (one per `[endpoints.<name>]` table in `settings.*.toml`) | `settings set endpoints.my_cluster.key` | API key for an alternate endpoint — see [Endpoint definitions](#endpoint-definitions-alternate-ai-api-connections) |
@@ -106,7 +106,7 @@ All of these are optional — leaving them unset falls back to documented defaul
 cp templates/model_catalog.template.json src/model_catalog.json
 ```
 
-This file is git-ignored so each installation can maintain its own model list and pricing without conflicting with other users. It's kept as its own file rather than folded into `.settings` for a practical reason: the package updates it on its own (auto-registering pricing the first time you use `-m provider/model-name`), and that kind of frequent, automatic write is exactly the kind of thing that causes conflicts if it ever ends up in a synced or shared file. Runtime settings and shared defaults change rarely enough that sharing them is safe; model pricing can change every time someone tries a new model.
+This file is git-ignored so each installation can maintain its own model list and pricing without conflicting with other users. It's kept as its own file rather than folded into `settings.toml` for a practical reason: the package updates it on its own (auto-registering pricing the first time you use `-m provider/model-name`), and that kind of frequent, automatic write is exactly the kind of thing that causes conflicts if it ever ends up in a synced or shared file. Runtime settings and shared defaults change rarely enough that sharing them is safe; model pricing can change every time someone tries a new model.
 
 ### Schema
 
@@ -267,7 +267,7 @@ CLI flags (`-t`, `-T`, `-M`, `-w`, etc.) always override these defaults for the 
 Settings merge from up to three layers, each optional and each overriding only the keys it mentions:
 
 1. **`settings.default.toml`** (tracked) — the repo's defaults, same for everyone.
-2. **A shared file** (optional, any path) — set `shared_settings.path` in `.settings` to the path of a `settings.default.toml`-format file, e.g. one synced across a group with Dropbox. Lets a group share defaults (a cluster's worker count, a group-wide font size, even a shared alternate-endpoint definition) without anyone hand-editing their own copy. Nothing changes unless this value is set.
+2. **A shared file** (optional, any path) — set `shared_settings.path` in `settings.toml` to the path of a `settings.default.toml`-format file, e.g. one synced across a group with Dropbox. Lets a group share defaults (a cluster's worker count, a group-wide font size, even a shared alternate-endpoint definition) without anyone hand-editing their own copy. Nothing changes unless this value is set.
 3. **`settings.local.toml`** (git-ignored, at the repository root) — this machine's personal overrides. Still the last word: even with a shared file in play, a setting placed here wins, so one person can override just their own quirk without touching the file everyone else reads.
 
 ```toml
@@ -316,10 +316,10 @@ Because `settings.default.toml` is tracked by git, put endpoint *definitions* yo
 
 #### API keys
 
-Each endpoint's credential is kept separately, in `.settings` — never alongside the definition, since credentials are never meant to be shared or layered the way definitions are:
+Each endpoint's credential is kept separately, in `settings.toml` — never alongside the definition, since credentials are never meant to be shared or layered the way definitions are:
 
 ```toml
-# .settings
+# settings.toml
 [endpoints.my_cluster]
 key = "sk-..."
 ```
@@ -360,7 +360,7 @@ See [CLI Reference → Specifying Models](cli-reference.md#specifying-models) fo
 
 ## External/Remote Usage-Data Sources
 
-The `[usage_sources]` table and `[[usage_sources.external]]` array in `.settings` list this installation's own external/remote usage-data sources. This is git-ignored, per-installation configuration — it's not hand-edited; it's managed entirely through `usage sources` commands.
+The `[usage_sources]` table and `[[usage_sources.external]]` array in `settings.toml` list this installation's own external/remote usage-data sources. This is git-ignored, per-installation configuration — it's not hand-edited; it's managed entirely through `usage sources` commands.
 
 ### Why use this?
 
@@ -457,17 +457,17 @@ Every configuration surface in the project, where it can live, whether a persona
 
 | Setting | Where it's stored | External/shared location allowed? | Personal override on top? | Edit via CLI | Edit via web UI |
 |---|---|---|---|---|---|
-| Professor name/keys | `.settings`, repo root, git-ignored | No — never sync `.settings` itself | N/A (this *is* the per-installation value) | ✅ `settings add-professor` / `settings remove-professor` | ✅ `/settings` page — add, remove, replace primary/backup key |
-| Webui passphrase hash | `.settings` (`webui.passphrase_hash`) | No | N/A | ✅ `webui set-passphrase` (writes directly to `.settings`) | ✅ `/settings` page — hashed server-side, never stored or shown in plaintext |
-| Webui session secret | `.settings` (`webui.session_secret`) | No | N/A | ✅ `settings set` / `settings set --generate` | ✅ `/settings` page — manual value or "generate" |
-| Shared settings pointer | `.settings` (`shared_settings.path`) | No (it's just a path) | N/A | ✅ `settings set` / `settings unset` | ✅ `/settings` page |
-| Alternate-endpoint API keys | `.settings` (`endpoints.<name>.key`) | No | N/A | ✅ `settings set` / `settings unset` | ✅ `/settings` page — one field per endpoint already defined in a settings layer |
+| Professor name/keys | `settings.toml`, repo root, git-ignored | No — never sync `settings.toml` itself | N/A (this *is* the per-installation value) | ✅ `settings add-professor` / `settings remove-professor` | ✅ `/settings` page — add, remove, replace primary/backup key |
+| Webui passphrase hash | `settings.toml` (`webui.passphrase_hash`) | No | N/A | ✅ `webui set-passphrase` (writes directly to `settings.toml`) | ✅ `/settings` page — hashed server-side, never stored or shown in plaintext |
+| Webui session secret | `settings.toml` (`webui.session_secret`) | No | N/A | ✅ `settings set` / `settings set --generate` | ✅ `/settings` page — manual value or "generate" |
+| Shared settings pointer | `settings.toml` (`shared_settings.path`) | No (it's just a path) | N/A | ✅ `settings set` / `settings unset` | ✅ `/settings` page |
+| Alternate-endpoint API keys | `settings.toml` (`endpoints.<name>.key`) | No | N/A | ✅ `settings set` / `settings unset` | ✅ `/settings` page — one field per endpoint already defined in a settings layer |
 | Endpoint definitions (URL, timeout, etc.) | `settings.default.toml` (or shared file, or `settings.local.toml`), repo root | Definitions may live in the tracked file or a shared file | ✅ `settings.local.toml` can override a definition | ❌ hand-edit TOML only | ❌ Read-only on the `/settings` page (shown for reference, with a copyable snippet) — deliberately not editable there; see [Endpoint definitions](#endpoint-definitions-alternate-ai-api-connections) |
 | Model pricing/capabilities | `src/model_catalog.json`, git-ignored | Not designed for this — per-installation by convention, deliberately kept separate to avoid concurrent-write conflicts | N/A (whole file is the "local" copy) | Indirectly — using `-m provider/model` auto-registers pricing | Not planned |
 | Runtime defaults (temperature, retries, etc.) | `settings.default.toml`, repo root, tracked by git | N/A — this is the shared baseline | ✅ `settings.local.toml` | ❌ hand-edit TOML only | Not planned |
 | Shared runtime defaults | Wherever `shared_settings.path` points | **Yes — this is the point** (e.g. a Dropbox-synced `.toml` file) | ✅ `settings.local.toml` still wins over it | Pointer is CLI-editable (`settings set shared_settings.path`); file contents are hand-edited TOML | Pointer only, via `/settings` page (see above); file contents still hand-edited TOML |
 | Plugin defaults (e.g. `plugins/webui/settings.toml`) | Inside each plugin's own directory, tracked by git (or in the EA plugin's separate repo) | N/A | **No** — no per-plugin local-override file exists today | ❌ hand-edit TOML only | Not planned |
-| External usage-data sources | `.settings` (`[usage_sources]`), repo root, git-ignored | **Yes — the whole point** (points at another installation's `data/` folder, e.g. via Dropbox) | N/A (flat list, no layering) | ✅ `usage sources add/list/remove` | ✅ `/settings` page — add/remove sources |
+| External usage-data sources | `settings.toml` (`[usage_sources]`), repo root, git-ignored | **Yes — the whole point** (points at another installation's `data/` folder, e.g. via Dropbox) | N/A (flat list, no layering) | ✅ `usage sources add/list/remove` | ✅ `/settings` page — add/remove sources |
 
 Every "✅ `/settings` page" row above is served by the webui plugin's `/settings` route (`plugins/webui/src/templates/settings.html` and the `/api/settings/*` routes in `plugins/webui/src/app.py`), gated behind the same unlock passphrase as the rest of the web UI. A first-time visitor with no professors configured yet is redirected straight there instead of an empty chat screen; the section order on the page itself flips depending on whether any professor is already configured (professors-first on a genuinely empty installation, shared-settings-first once there's at least one professor, since that's the more likely thing someone returns to tweak).
 
@@ -476,9 +476,9 @@ Every "✅ `/settings` page" row above is served by the webui plugin's `/setting
 ## First-Run Checklist
 
 ```bash
-# 1. Copy and populate .settings
-cp templates/settings.template .settings
-python main.py settings add-professor   # or hand-edit .settings — see the Format section above
+# 1. Copy and populate settings.toml
+cp templates/settings.template settings.toml
+python main.py settings add-professor   # or hand-edit settings.toml — see the Format section above
 
 # 2. Copy the model catalog
 cp templates/model_catalog.template.json src/model_catalog.json
@@ -494,8 +494,8 @@ python main.py --list-models    # checks model catalog
 If you have an existing installation with the older `.env` / `apis.json` / `data_sources.json` files, run the one-time migration script instead of starting from scratch:
 
 ```bash
-python scripts/migrate_config_to_settings.py            # writes .settings and settings.local.toml
+python scripts/migrate_config_to_settings.py            # writes settings.toml and settings.local.toml
 python scripts/migrate_config_to_settings.py --dry-run   # preview without writing anything
 ```
 
-It reads your existing `.env`, `apis.json`, and `data_sources.json`, writes the equivalent `.settings` and `settings.local.toml` content, and renames the old files to `.bak` (it never deletes anything). Refuses to overwrite an existing `.settings` unless `--force` is passed.
+It reads your existing `.env`, `apis.json`, and `data_sources.json`, writes the equivalent `settings.toml` and `settings.local.toml` content, and renames the old files to `.bak` (it never deletes anything). Refuses to overwrite an existing `settings.toml` unless `--force` is passed.

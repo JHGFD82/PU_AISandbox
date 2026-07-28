@@ -64,7 +64,7 @@ The loader checks for `commands`, `register_subparsers`, and `run`. Anything els
 
 ## Token Tracking (via SandboxProcessor)
 
-Every plugin that makes API calls **must** use `SandboxProcessor`. It handles API key resolution, `TokenTracker` creation, alternate-endpoint wiring (`[endpoints.<name>]` in the merged `settings.*.toml` layers, credentialed via `.settings`), and lazy service instantiation — all in one place. Token tracking is then structural rather than a convention that can be forgotten.
+Every plugin that makes API calls **must** use `SandboxProcessor`. It handles API key resolution, `TokenTracker` creation, alternate-endpoint wiring (`[endpoints.<name>]` in the merged `settings.*.toml` layers, credentialed via `settings.toml`), and lazy service instantiation — all in one place. Token tracking is then structural rather than a convention that can be forgotten.
 
 ```python
 from src.runtime.sandbox_processor import SandboxProcessor
@@ -81,7 +81,7 @@ def run(self, args, professor, model, temperature, top_p, max_tokens):
     ...
 ```
 
-`SandboxProcessor.__init__` creates the `TokenTracker` internally. If `model` contains a colon (e.g. `"my_cluster:llama-3-70b"`), `SandboxProcessor` automatically loads the matching `[endpoints.<name>]` entry (plus its credential from `.settings`), points the client at the alternate `base_url`, and bypasses the model catalog — you get correct alternate-API routing for free.
+`SandboxProcessor.__init__` creates the `TokenTracker` internally. If `model` contains a colon (e.g. `"my_cluster:llama-3-70b"`), `SandboxProcessor` automatically loads the matching `[endpoints.<name>]` entry (plus its credential from `settings.toml`), points the client at the alternate `base_url`, and bypasses the model catalog — you get correct alternate-API routing for free.
 
 ---
 

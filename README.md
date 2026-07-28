@@ -44,7 +44,7 @@ For deeper documentation, see the `docs/` folder:
 
 - [`docs/architecture.md`](docs/architecture.md) — request lifecycle, component descriptions, data-flow diagrams
 - [`docs/cli-reference.md`](docs/cli-reference.md) — full flag reference for all commands
-- [`docs/configuration.md`](docs/configuration.md) — `.settings`, `model_catalog.json`, `settings.default.toml` template and schema reference
+- [`docs/configuration.md`](docs/configuration.md) — `settings.toml`, `model_catalog.json`, `settings.default.toml` template and schema reference
 - [`docs/token-usage-guide.md`](docs/token-usage-guide.md) — token tracking, usage commands, budget settings, and troubleshooting
 - [`docs/plugin-authoring-guide.md`](docs/plugin-authoring-guide.md) — step-by-step guide to writing new plugins
 
@@ -73,11 +73,11 @@ pip install -r requirements-dev.txt
 Copy the template, then add your first professor with the built-in `settings` command (it prompts for the name and keys, keys hidden at entry):
 
 ```bash
-cp templates/settings.template .settings
+cp templates/settings.template settings.toml
 python main.py settings add-professor
 ```
 
-Or hand-edit `.settings` directly — add one table per professor:
+Or hand-edit `settings.toml` directly — add one table per professor:
 
 ```toml
 [professors.jh43]
@@ -184,7 +184,7 @@ python main.py jh43 transcribe en -i scan.png -o result.txt             # single
 python main.py jh43 transcribe en -i scans/                             # folder of images
 ```
 
-To use an alternate AI endpoint (HPC cluster or third-party provider), use colon syntax with a key from an `[endpoints.<name>]` table (defined in `settings.default.toml`, a shared file, or `settings.local.toml`; credentialed via `.settings`):
+To use an alternate AI endpoint (HPC cluster or third-party provider), use colon syntax with a key from an `[endpoints.<name>]` table (defined in `settings.default.toml`, a shared file, or `settings.local.toml`; credentialed via `settings.toml`):
 
 ```bash
 python main.py jh43 translate jp-en -i paper.pdf -m my_cluster:llama-3-70b
@@ -213,7 +213,7 @@ Then open **http://127.0.0.1:8000** in your browser. Leave the terminal window o
 - **Attach a document** to a question — a PDF, Word file, or spreadsheet — and ask about its contents.
 - **Run a translation or transcription** on a whole document or a folder, from a form rather than a command line. It runs in the background: you'll see per-page progress, and a download link when it finishes. You can keep chatting in another conversation while it works.
 - **Watch the spending** — this month's and all-time cost, broken down by model, updating as you go.
-- **Change settings** — add professors, set API keys, configure shared usage folders — from a settings page, instead of hand-editing `.settings`.
+- **Change settings** — add professors, set API keys, configure shared usage folders — from a settings page, instead of hand-editing `settings.toml`.
 
 ### Who can reach it
 
@@ -272,7 +272,7 @@ Prices are per 1,000,000 tokens (default `pricing_unit`). Set `"supports_vision"
 
 ## Runtime Settings
 
-`settings.default.toml` at the repo root controls defaults without touching code. Create `settings.local.toml` (git-ignored) to override individual keys for your machine only; one person can also share a settings file (pointed to via `.settings`'s `shared_settings.path`) that sits between the two. See [`docs/configuration.md`](docs/configuration.md#local-overrides) for how the three layers merge.
+`settings.default.toml` at the repo root controls defaults without touching code. Create `settings.local.toml` (git-ignored) to override individual keys for your machine only; one person can also share a settings file (pointed to via `settings.toml`'s `shared_settings.path`) that sits between the two. See [`docs/configuration.md`](docs/configuration.md#local-overrides) for how the three layers merge.
 
 | Section | Key | Default | Effect |
 |---------|-----|---------|--------|

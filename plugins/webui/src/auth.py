@@ -139,7 +139,7 @@ class AuthBackend(Protocol):
 class PassphraseBackend:
     """Checks a submitted passphrase against a bcrypt hash.
 
-    The hash is normally read from ``.settings`` at ``webui.passphrase_hash``
+    The hash is normally read from ``settings.toml`` at ``webui.passphrase_hash``
     (set by running ``python main.py webui set-passphrase``). If that value
     is unset or empty, this backend treats every request as already
     authenticated — this is the documented "no gate" mode meant for a
@@ -152,7 +152,7 @@ class PassphraseBackend:
         Args:
             passphrase_hash: The bcrypt hash to check submissions against.
                               ``None`` (the normal case) reads it from
-                              ``.settings`` instead.
+                              ``settings.toml`` instead.
         """
         self._hash = (
             passphrase_hash
@@ -192,7 +192,7 @@ class PassphraseBackend:
 
 
 def hash_passphrase(passphrase: str) -> str:
-    """Hash a plaintext passphrase for storage at ``.settings``'s ``webui.passphrase_hash``.
+    """Hash a plaintext passphrase for storage at ``settings.toml``'s ``webui.passphrase_hash``.
 
     Used by the ``webui set-passphrase`` CLI command — never called from a
     web request.

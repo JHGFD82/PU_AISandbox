@@ -70,7 +70,7 @@ class TestResolution:
     def test_everything_hangs_off_one_root(self, tmp_path):
         extras = tmp_path / "extras"
         paths.write_install_marker(extras)
-        assert paths.settings_path() == extras / ".settings"
+        assert paths.settings_path() == extras / "settings.toml"
         assert paths.model_catalog_path() == extras / "model_catalog.json"
         assert paths.data_root() == extras / "data"
 

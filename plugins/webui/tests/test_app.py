@@ -1309,11 +1309,11 @@ class TestExportConversation:
 
 @pytest.fixture
 def settings_env(monkeypatch, tmp_path):
-    """Redirect .settings to a tmp file and restore the real, settings_store-backed
+    """Redirect settings.toml to a tmp file and restore the real, settings_store-backed
     load_professor_config for these tests — undoing the module-level
     _configured_professors fixture's fixed fake dict, since these tests need to
     see data actually persisted through src/settings_store.py, not a stub."""
-    monkeypatch.setattr(settings_store_mod, "SETTINGS_PATH", tmp_path / ".settings")
+    monkeypatch.setattr(settings_store_mod, "SETTINGS_PATH", tmp_path / "settings.toml")
     app_module = sys.modules["_pu_webui_app"]
     monkeypatch.setattr(app_module, "load_professor_config", _real_load_professor_config)
     return tmp_path

@@ -5,7 +5,7 @@ python main.py [--show-config | --list-models]
 python main.py <netid> <command> [options]
 ```
 
-`<netid>` is the safe-filename form of a professor's name as configured in `.settings` (e.g. `heller`, `smith`). It is case-insensitive.
+`<netid>` is the safe-filename form of a professor's name as configured in `settings.toml` (e.g. `heller`, `smith`). It is case-insensitive.
 
 ---
 
@@ -339,7 +339,7 @@ python main.py jh43 prompt -m cloud_provider:model-name
 
 The part before the colon is the `[endpoints.<name>]` table's name; everything
 after is the model name passed to that endpoint. The API key for the endpoint
-is read from `endpoints.<name>.key` in `.settings`. Token usage is still
+is read from `endpoints.<name>.key` in `settings.toml`. Token usage is still
 recorded normally.
 
 **Default endpoint** — if `[config] default_endpoint` is set (in any settings

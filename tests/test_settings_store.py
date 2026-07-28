@@ -7,7 +7,7 @@ Tests for src/settings_store.py:
   - get_configured_sources / add_source / remove_source / get_shared_write_source
 
 Every test redirects settings_store.SETTINGS_PATH to a tmp_path location, so
-nothing here ever touches the real repo-root .settings file.
+nothing here ever touches the real repo-root settings.toml file.
 """
 
 from unittest.mock import patch
@@ -20,7 +20,7 @@ from src.settings_store import ExternalSource
 
 @pytest.fixture(autouse=True)
 def _isolate_settings_path(tmp_path, monkeypatch):
-    monkeypatch.setattr(settings_store, "SETTINGS_PATH", tmp_path / ".settings")
+    monkeypatch.setattr(settings_store, "SETTINGS_PATH", tmp_path / "settings.toml")
     yield
 
 

@@ -1,10 +1,10 @@
-# settings.template — the starting point for your own .settings file.
+# settings.template — the starting point for your own settings.toml file.
 #
 # You normally never copy this by hand: setup does it for you, into the
 # folder you choose to keep your own files in. It's here for reference,
 # and for anyone who'd rather write the file themselves.
 #
-# .settings holds this installation's own credentials and local identity:
+# settings.toml holds this installation's own credentials and local identity:
 # professor names/keys, optional feature secrets, alternate-endpoint API
 # keys, and which other installations' usage data to include in reports.
 # It is the one file in this project that should never be placed in a

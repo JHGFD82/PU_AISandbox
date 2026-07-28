@@ -53,7 +53,10 @@ DEFAULT_EXTRAS_ROOT = Path.home() / "PU_AISandbox_data"
 # not to the person — they are replaced wholesale on upgrade.
 TEMPLATES_DIR = PACKAGE_ROOT / "templates"
 
-SETTINGS_FILENAME = ".settings"
+# Visible, not a dotfile. The extras folder is meant to be opened and
+# understood; the most important thing in it being hidden from Finder
+# would undercut the reason for choosing a visible location at all.
+SETTINGS_FILENAME = "settings.toml"
 MODEL_CATALOG_FILENAME = "model_catalog.json"
 DATA_DIRNAME = "data"
 

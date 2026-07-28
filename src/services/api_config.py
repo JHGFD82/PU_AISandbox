@@ -7,7 +7,7 @@ shared file -> ``settings.local.toml``, same as every other setting).
 Each key under ``ENDPOINTS`` becomes the identifier used in colon syntax on
 the CLI (e.g. ``-m hpc_cluster:llama-3-70b``).
 
-The *credential* for each endpoint is kept separate, in ``.settings`` (see
+The *credential* for each endpoint is kept separate, in ``settings.toml`` (see
 ``src/settings_store.py``) at ``endpoints.<name>.key`` — credentials are
 never meant to be shared or layered the way definitions are.
 
@@ -24,7 +24,7 @@ names to a specific endpoint instead of the built-in Portkey service::
     openai_compatible = true
     default_model = "llama-3-70b-instruct"
 
-Then, separately, in .settings (via `python main.py env set endpoints.hpc_cluster.key`):
+Then, separately, in settings.toml (via `python main.py env set endpoints.hpc_cluster.key`):
 
     [endpoints.hpc_cluster]
     key = "sk-..."
@@ -44,7 +44,7 @@ from .. import settings, settings_store
 
 
 def credential_path_for_endpoint(api_name: str) -> str:
-    """Return the dotted ``.settings`` path holding the credential for *api_name*.
+    """Return the dotted ``settings.toml`` path holding the credential for *api_name*.
 
     Examples::
 
@@ -61,7 +61,7 @@ class APIConfig:
         api_name:           The endpoint key (e.g. ``hpc_cluster``).
         display_name:       Human-readable name shown in logs and --list-apis output.
         base_url:           The root URL for the API (e.g. ``https://example.com/v1``).
-        api_key:            Resolved API key (from ``.settings``).
+        api_key:            Resolved API key (from ``settings.toml``).
         openai_compatible:  When True, use the OpenAI SDK with ``base_url`` for LLM calls.
                             When False, use ``requests`` for generic HTTP calls.
         default_model:      Default model name for OpenAI-compatible endpoints.
@@ -84,11 +84,11 @@ def load_api_config(api_name: str) -> APIConfig:
     """Load and return the ``APIConfig`` for *api_name*.
 
     Combines the endpoint's definition (from the merged ``settings.*.toml``
-    layers) with its credential (from ``.settings``).
+    layers) with its credential (from ``settings.toml``).
 
     Raises:
         ValueError: If the endpoint is missing from every settings layer, or
-                    if its credential isn't set in ``.settings``.
+                    if its credential isn't set in ``settings.toml``.
     """
     endpoints: dict = settings.ENDPOINTS
 

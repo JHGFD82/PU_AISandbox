@@ -3,7 +3,7 @@
 Implements the ``webui`` command: ``webui serve`` starts a local FastAPI
 server (conversation history, model switching, a live spend sidebar) and
 ``webui set-passphrase`` sets the unlock-gate passphrase, writing its hash
-to ``.settings``. See ``docs/webui-plugin-plan.md`` for the full design.
+to ``settings.toml``. See ``docs/webui-plugin-plan.md`` for the full design.
 
 Unlike every other plugin, ``webui`` sets ``requires_professor = False`` —
 its command doesn't belong to one professor at CLI-invocation time (you run
@@ -41,7 +41,7 @@ def _register(module_name: str, rel_path: str) -> None:
                      other parts of the core project look up by convention
                      (this plugin's chat service, its settings), this
                      follows the existing ``src.services.<name>`` /
-                     ``pu_plugin.<plugin>.settings`` convention instead.
+                     ``pu_plugin.<plugin>settings.toml`` convention instead.
         rel_path: The file's real path, relative to this plugin's own
                   directory.
     """
@@ -115,7 +115,7 @@ class WebUiPlugin:
 
         webui_sub.add_parser(
             "set-passphrase",
-            help="Set the web UI unlock passphrase (writes webui.passphrase_hash to .settings)",
+            help="Set the web UI unlock passphrase (writes webui.passphrase_hash to settings.toml)",
         )
 
     def run(
@@ -233,10 +233,10 @@ def _serve(args: argparse.Namespace) -> None:
 
 
 def _print_passphrase_hash() -> None:
-    """Prompt for a new passphrase (hidden input), hash it, and write it directly to .settings.
+    """Prompt for a new passphrase (hidden input), hash it, and write it directly to settings.toml.
 
     Writing directly here (rather than printing a line to paste in, as this
-    used to work) is safe for the same reason every other ``.settings``
+    used to work) is safe for the same reason every other ``settings.toml``
     write is: it's driven by a command typed locally, never over a network
     call or as part of syncing files between machines.
     """

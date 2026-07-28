@@ -81,7 +81,7 @@ If two plugins claim the same command *and* both declare a `handles` list, the l
 - Holds processors (`PDFProcessor`, `ImageProcessor`) and the file output handler
 - **Lazily** loads plugin-owned services via `__getattr__`
 - **Composes plugin-owned command mixins** (e.g. `translate_document`, `process_image`) as base classes at class-definition time — see "Plugin Isolation and sys.modules Injection" below
-- **Alternate API routing**: if `model` contains colon syntax (e.g. `"my_cluster:llama-3-70b"`), automatically loads the matching `[endpoints.<name>]` definition (from the merged `settings.*.toml` layers) plus its credential (from `.settings`), points the OpenAI-compatible client at that `base_url`, and bypasses the model catalog
+- **Alternate API routing**: if `model` contains colon syntax (e.g. `"my_cluster:llama-3-70b"`), automatically loads the matching `[endpoints.<name>]` definition (from the merged `settings.*.toml` layers) plus its credential (from `settings.toml`), points the OpenAI-compatible client at that `base_url`, and bypasses the model catalog
 
 The lazy loader follows a naming convention: attribute `translation_service` maps to `sys.modules["src.services.translation_service"].TranslationService`. Plugins inject their service files into `sys.modules` at import time; the processor instantiates them on first access.
 
@@ -114,7 +114,7 @@ On-demand aggregation (`usage report --all-time`) sums the active file with all 
 ### `src/config.py` — Language Registry and Professor Config
 
 - `LANGUAGE_MAP` starts empty. Plugins call `register_language(code, name)` at import time to populate it. Argparse type-hooks (`parse_language_code`, `parse_single_language_code`) validate against this map at parse time — so plugins must load *before* the parser is built (the loader guarantees this).
-- `load_professor_config()` reads `[professors.<netid>]` tables from `.settings` (via `src/settings_store.py`), keyed by netID.
+- `load_professor_config()` reads `[professors.<netid>]` tables from `settings.toml` (via `src/settings_store.py`), keyed by netID.
 - `get_api_key(professor)` resolves primary key, falls back to backup key with a warning.
 
 ### `src/processors/` — Document Ingestion
@@ -192,9 +192,9 @@ This is safe because `SandboxProcessor` is only ever imported lazily inside a pl
 
 | Source | Controls |
 |--------|----------|
-| `.settings` (repo root, git-ignored) | Professor names/keys, endpoint credentials, webui secrets, external usage-data sources — this installation's own private configuration (see `src/settings_store.py`) |
+| `settings.toml` (repo root, git-ignored) | Professor names/keys, endpoint credentials, webui secrets, external usage-data sources — this installation's own private configuration (see `src/settings_store.py`) |
 | `settings.default.toml` (repo root) | Core defaults: temperature, retry, workers, font size, budget threshold, alternate-endpoint *definitions* |
-| A shared file (optional, path set via `.settings`'s `shared_settings.path`) | Same shape as `settings.default.toml`; overrides it, is overridden by `settings.local.toml` |
+| A shared file (optional, path set via `settings.toml`'s `shared_settings.path`) | Same shape as `settings.default.toml`; overrides it, is overridden by `settings.local.toml` |
 | `settings.local.toml` (repo root, git-ignored) | Machine-local overrides for any key in `settings.default.toml` or the shared file; applied last |
 | `plugins/*/settings.toml` | Plugin-specific defaults (each plugin's `src/settings.py` walks up to find it) |
 | `src/model_catalog.json` | Model registry: pricing, vision support, token limits (git-ignored; per-installation) |

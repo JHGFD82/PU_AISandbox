@@ -347,7 +347,7 @@ def create_app() -> FastAPI:
 
     # A random secret is fine for this session-cookie's purpose (signing,
     # not encrypting) — worst case on restart is everyone has to unlock
-    # again. Set webui.session_secret in .settings (e.g. via
+    # again. Set webui.session_secret in settings.toml (e.g. via
     # `python main.py env set webui.session_secret --generate`) to keep
     # sessions alive across restarts instead.
     secret = settings_store.get_value("webui.session_secret") or secrets.token_hex(32)

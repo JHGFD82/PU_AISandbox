@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""One-time migration: consolidate .env, apis.json, and data_sources.json into .settings.
+"""One-time migration: consolidate .env, apis.json, and data_sources.json into settings.toml.
 
 Why this exists
 ----------------
@@ -9,11 +9,11 @@ consolidated into fewer, more consistent files (see docs/configuration.md,
 
 - ``.env`` (professor names/keys, optional feature secrets) and
   ``data_sources.json`` (external usage-data sources) both fold into the new
-  ``.settings`` file (TOML format — see ``src/settings_store.py``).
+  ``settings.toml`` file (TOML format — see ``src/settings_store.py``).
 - ``apis.json``'s endpoint *definitions* (base_url, timeout, etc.) fold into
   ``settings.local.toml`` as ``[endpoints.<name>]`` tables, merged the same
   way every other runtime setting is. Each endpoint's *credential* moves to
-  ``.settings`` instead, since credentials are never meant to be shared.
+  ``settings.toml`` instead, since credentials are never meant to be shared.
 
 This script reads whatever combination of the old files exists on this
 installation and writes the new ones, without requiring you to re-enter
@@ -30,9 +30,9 @@ Run from the repository root::
 
     python scripts/migrate_config_to_settings.py            # migrates
     python scripts/migrate_config_to_settings.py --dry-run   # show what would happen, write nothing
-    python scripts/migrate_config_to_settings.py --force     # overwrite .settings even if it already exists
+    python scripts/migrate_config_to_settings.py --force     # overwrite settings.toml even if it already exists
 
-If ``.settings`` already exists, this script refuses to run (to avoid
+If ``settings.toml`` already exists, this script refuses to run (to avoid
 silently clobbering something you've already set up by hand or via
 ``python main.py env ...``) unless ``--force`` is passed.
 """
@@ -51,7 +51,7 @@ import tomlkit
 ENV_PATH = _ROOT / ".env"
 APIS_JSON_PATH = _ROOT / "apis.json"
 DATA_SOURCES_PATH = _ROOT / "data_sources.json"
-SETTINGS_PATH = _ROOT / ".settings"
+SETTINGS_PATH = _ROOT / "settings.toml"
 SETTINGS_LOCAL_PATH = _ROOT / "settings.local.toml"
 
 _PROF_NAME_RE = re.compile(r'^PROF_(.+?)_NAME$')
@@ -218,7 +218,7 @@ def _migrate_endpoint_definitions(endpoint_names: list[str]) -> int:
 
 
 def migrate(dry_run: bool = False, force: bool = False) -> None:
-    """Read the old .env/apis.json/data_sources.json files and write the new .settings/settings.local.toml."""
+    """Read the old .env/apis.json/data_sources.json files and write the new settings.toml/settings.local.toml."""
     if SETTINGS_PATH.exists() and not force and not dry_run:
         print(f"{SETTINGS_PATH} already exists — refusing to overwrite it.")
         print("Pass --force if you really want to regenerate it from the old files.")
@@ -238,7 +238,7 @@ def migrate(dry_run: bool = False, force: bool = False) -> None:
           f"{source_count} usage source(s) to migrate.")
 
     if dry_run:
-        print("\n--- .settings would contain ---")
+        print("\n--- settings.toml would contain ---")
         print(tomlkit.dumps(doc))
         print("Dry run — nothing was written. Re-run without --dry-run to apply.")
         return
@@ -274,7 +274,7 @@ def main() -> None:
     parser.add_argument(
         "--force",
         action="store_true",
-        help="Overwrite .settings even if it already exists",
+        help="Overwrite settings.toml even if it already exists",
     )
     args = parser.parse_args()
     migrate(dry_run=args.dry_run, force=args.force)

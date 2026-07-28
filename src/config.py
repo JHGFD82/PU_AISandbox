@@ -25,7 +25,7 @@ _PLUGIN_LANGUAGES: set[str] = set()
 
 @dataclass(frozen=True)
 class SettingField:
-    """One optional ``.settings`` value that a plugin or core feature knows how to use.
+    """One optional ``settings.toml`` value that a plugin or core feature knows how to use.
 
     Lets ``--show-config`` and the ``settings`` command list every optional
     value in the project without hard-coding plugin-specific knowledge —
@@ -34,7 +34,7 @@ class SettingField:
     language.
 
     Attributes:
-        key: The dotted path the value lives at in ``.settings``
+        key: The dotted path the value lives at in ``settings.toml``
              (e.g. ``'webui.session_secret'``).
         label: A short, plain-English description shown next to it in
                ``--show-config`` (e.g. ``'Session signing secret'``).
@@ -55,7 +55,7 @@ _SETTING_FIELDS: dict[str, SettingField] = {}
 
 
 def register_setting(key: str, label: str, *, section: str = "Other", secret: bool = False) -> None:
-    """Declare an optional ``.settings`` value so it shows up in ``--show-config`` and ``settings list``.
+    """Declare an optional ``settings.toml`` value so it shows up in ``--show-config`` and ``settings list``.
 
     Call this once, at import time, for every optional value a plugin reads
     — mirroring how ``register_language()`` works for languages. Without it,
@@ -63,7 +63,7 @@ def register_setting(key: str, label: str, *, section: str = "Other", secret: bo
     optional setting exists short of reading that plugin's source code.
 
     Args:
-        key: The dotted path the value lives at in ``.settings``
+        key: The dotted path the value lives at in ``settings.toml``
              (e.g. ``'webui.session_secret'``).
         label: A short, plain-English description of what the setting is for.
         section: A group heading for display purposes (e.g.
@@ -77,7 +77,7 @@ def register_setting(key: str, label: str, *, section: str = "Other", secret: bo
 
 
 def get_registered_settings() -> list[SettingField]:
-    """Return every optional ``.settings`` value registered so far, grouped by section for display."""
+    """Return every optional ``settings.toml`` value registered so far, grouped by section for display."""
     return sorted(_SETTING_FIELDS.values(), key=lambda f: (f.section, f.key))
 
 
@@ -124,7 +124,7 @@ def normalize_netid(value: str) -> str:
     always a copy-and-paste artefact.
 
     Args:
-        value: The netID as typed, on the command line or in ``.settings``.
+        value: The netID as typed, on the command line or in ``settings.toml``.
 
     Returns:
         The netID in lower case, safe to use directly as a file or folder
@@ -243,7 +243,7 @@ def parse_language_code(value: str) -> str | tuple[str, str]:
 def load_professor_config() -> dict[str, dict[str, str]]:
     """Read everyone configured on this installation and return them as a lookup table.
 
-    Reads from ``.settings`` (see ``src/settings_store.py``). The lookup
+    Reads from ``settings.toml`` (see ``src/settings_store.py``). The lookup
     table is keyed by netID — the university username, e.g. ``'jh43'`` —
     which is also what gets typed on the command line, so a typed name can
     be looked up here directly.
@@ -278,7 +278,7 @@ def get_api_key(netid: str) -> tuple[str, str]:
 
     Returns:
         A two-item tuple of ``(api_key, display_name)`` where ``api_key`` is
-        the credential string read from ``.settings`` and ``display_name`` is
+        the credential string read from ``settings.toml`` and ``display_name`` is
         the person's full name as configured (e.g. ``'Jeff Heller'``), for
         showing in messages.
 

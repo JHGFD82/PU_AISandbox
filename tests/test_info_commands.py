@@ -25,8 +25,8 @@ from src.runtime.info_commands import (
 
 @pytest.fixture(autouse=True)
 def _redirect_settings_path(tmp_path, monkeypatch):
-    """Keep 'env' and 'usage sources' tests from touching the real repo-root .settings file."""
-    monkeypatch.setattr(settings_store_mod, "SETTINGS_PATH", tmp_path / ".settings")
+    """Keep 'env' and 'usage sources' tests from touching the real repo-root settings.toml file."""
+    monkeypatch.setattr(settings_store_mod, "SETTINGS_PATH", tmp_path / "settings.toml")
 
 # ---------------------------------------------------------------------------
 # Shared test catalog (matches model_catalog.json schema)
@@ -209,7 +209,7 @@ class TestHandleInfoCommandsUsage:
 
         Usage commands now refuse a netID nobody is configured under, so
         these tests need theirs to exist. Patched rather than written to
-        .settings because what they are testing is the reporting, not the
+        settings.toml because what they are testing is the reporting, not the
         configuration lookup — that has its own test below.
         """
         monkeypatch.setattr(

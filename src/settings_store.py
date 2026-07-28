@@ -1,19 +1,19 @@
-"""Comment-preserving read/write access to ``.settings`` — this installation's
+"""Comment-preserving read/write access to ``settings.toml`` — this installation's
 own credentials and local identity (professors, secrets, endpoint keys, and
 which other installations' usage data to include in reports).
 
 This is the one file in the project that is never meant to be shared or
 synced — everything else configurable (``settings.default.toml``,
 ``settings.shared.toml``, ``settings.local.toml``) is designed to be shared
-or layered; ``.settings`` deliberately is not. See the project's July 2026
+or layered; ``settings.toml`` deliberately is not. See the project's July 2026
 configuration-consolidation discussion for the full reasoning: editing this
 file programmatically is safe specifically because every edit happens
 locally, driven by a command the person types at their own keyboard — never
 over a network call, never as part of syncing files between machines. That
-reasoning does not extend to placing ``.settings`` itself in a synced folder
+reasoning does not extend to placing ``settings.toml`` itself in a synced folder
 (Dropbox, iCloud, etc.) — never do that.
 
-``.settings`` replaces four things that used to be separate files:
+``settings.toml`` replaces four things that used to be separate files:
 
 - ``.env`` — professor names/keys and optional feature secrets
   (``WEBUI_PASSPHRASE_HASH``, ``WEBUI_SESSION_SECRET``).
@@ -71,13 +71,13 @@ import tomlkit
 from .errors import CLIError
 
 _ROOT = Path(__file__).parent.parent
-SETTINGS_PATH = _ROOT / ".settings"
+SETTINGS_PATH = _ROOT / "settings.toml"
 
 VALID_SOURCE_MODES = ("read-only", "shared-write")
 
 
 def _load() -> tomlkit.TOMLDocument:
-    """Parse ``.settings``, returning an empty (but valid) document if it doesn't exist yet."""
+    """Parse ``settings.toml``, returning an empty (but valid) document if it doesn't exist yet."""
     if not SETTINGS_PATH.exists():
         return tomlkit.document()
     with SETTINGS_PATH.open("r", encoding="utf-8") as f:
@@ -85,7 +85,7 @@ def _load() -> tomlkit.TOMLDocument:
 
 
 def _save(doc: tomlkit.TOMLDocument) -> None:
-    """Write *doc* back to ``.settings`` atomically (temp file + replace), preserving formatting."""
+    """Write *doc* back to ``settings.toml`` atomically (temp file + replace), preserving formatting."""
     SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp_path = tempfile.mkstemp(dir=str(SETTINGS_PATH.parent), suffix=".tmp")
     try:
@@ -194,7 +194,7 @@ def get_professors() -> dict[str, dict[str, Any]]:
             netid = normalize_netid(section_name)
         except CLIError as e:
             logging.warning(
-                "Skipping the [professors.%s] section in .settings: %s",
+                "Skipping the [professors.%s] section in settings.toml: %s",
                 section_name, e,
             )
             continue
@@ -208,7 +208,7 @@ def get_professors() -> dict[str, dict[str, Any]]:
 
 
 def add_professor(netid: str, name: str, key: str, backup_key: str | None = None) -> str:
-    """Add someone's configuration directly to ``.settings``.
+    """Add someone's configuration directly to ``settings.toml``.
 
     Args:
         netid: Their university netID (e.g. ``'jh43'``). This identifies
@@ -315,7 +315,7 @@ def set_professor_backup_key(netid: str, backup_key: str | None) -> None:
 
 
 def remove_professor(identifier: str) -> str:
-    """Remove a professor's configuration from ``.settings`` by safe name or display name.
+    """Remove a professor's configuration from ``settings.toml`` by safe name or display name.
 
     Args:
         identifier: Either the safe-filename identifier (e.g. ``'heller'``)

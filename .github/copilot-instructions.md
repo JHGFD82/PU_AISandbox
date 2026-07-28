@@ -14,7 +14,7 @@ If a professor exceeds their monthly token budget, `TokenTracker` logs a warning
 
 - **Entry Point**: `main.py` → `src/cli.py` (controller/parser) → runtime handlers in `src/runtime/`
 - **Core Services**: `BaseService` and shared API plumbing in `src/services/` — the AI services themselves (`TranslationService`, `ImageProcessorService`) live in the plugin that owns them. `TokenTracker` in `src/tracking/`, processors in `src/processors/`, `FileOutputHandler` in `src/output/`
-- **Configuration**: `.settings` (TOML, git-ignored) for people and API keys, layered `settings.*.toml` for runtime defaults, `src/model_catalog.json` for model pricing. There is no `.env` — it was replaced; see `src/settings_store.py`
+- **Configuration**: `settings.toml` (TOML, git-ignored) for people and API keys, layered `settings.*.toml` for runtime defaults, `src/model_catalog.json` for model pricing. There is no `.env` — it was replaced; see `src/settings_store.py`
 - **Plugin System**: All user-facing commands (translate, transcribe, transcription_review, prompt) are implemented as plugins in `plugins/`. `src/cli.py` discovers and loads them via `src/runtime/plugin_loader.py` at startup. Only `usage` is built-in.
 
 ### Plugin Architecture
@@ -62,7 +62,7 @@ PROF_[ID]_BACKUP_KEY=backup_key   # Fallback key
 
 ### Adding People
 1. Run `python main.py settings add-professor` (prompts for netID, display name and keys — keys are entered hidden, never as flags)
-2. Or hand-edit `.settings`: a `[professors.<netid>]` table with `name`, `key`, and optionally `backup_key`
+2. Or hand-edit `settings.toml`: a `[professors.<netid>]` table with `name`, `key`, and optionally `backup_key`
 3. Run `python main.py --show-config` to verify configuration
 4. Token tracking files auto-created on first use
 
@@ -168,7 +168,7 @@ def record_usage(self, model: str, tokens: int, professor: str) -> None:
                catalog (e.g., 'gpt-4o'). Tokens are the unit AI providers use
                to measure text length — roughly one token per word.
         tokens: The number of tokens consumed by this request.
-        professor: The person's netID as configured in .settings (e.g., 'jh43'),
+        professor: The person's netID as configured in settings.toml (e.g., 'jh43'),
                    used to locate the correct usage file under data/.
     """
 ```
