@@ -203,6 +203,21 @@ class TestHandleInfoCommandsGlobal:
 
 class TestHandleInfoCommandsUsage:
 
+    @pytest.fixture(autouse=True)
+    def _configured(self, monkeypatch):
+        """Make 'testprof' a configured netID for this class.
+
+        Usage commands now refuse a netID nobody is configured under, so
+        these tests need theirs to exist. Patched rather than written to
+        .settings because what they are testing is the reporting, not the
+        configuration lookup — that has its own test below.
+        """
+        monkeypatch.setattr(
+            "src.runtime.info_commands.load_professor_config",
+            lambda: {"testprof": {"name": "Test Prof", "key": "sk-x",
+                                  "backup_key": None, "netid": "testprof"}},
+        )
+
     def _make_mock_tracker(self):
         tracker = MagicMock()
         tracker.list_archived_months.return_value = ["2026-01", "2026-02"]
@@ -284,9 +299,9 @@ class TestHandleInfoCommandsUsage:
             handle_info_commands(args)
         mock_tracker.get_daily_usage.assert_called_with("2026-03-01")
 
-    def test_usage_missing_professor_raises_cli_error(self):
+    def test_usage_missing_netid_raises_cli_error(self):
         args = _make_ns(command="usage", professor=None, usage_subcommand="report")
-        with pytest.raises(CLIError, match="Professor name is required"):
+        with pytest.raises(CLIError, match="netID is required"):
             handle_info_commands(args)
 
     def test_invalid_usage_subcommand_raises_cli_error(self):
@@ -418,7 +433,7 @@ class TestShowProfessorConfig:
         monkeypatch.setattr(info_mod, "load_professor_config", dict)
         show_professor_config()
         out = capsys.readouterr().out
-        assert "professors.<safe_name>" in out
+        assert "professors.<netid>" in out
 
     def test_professor_shown_primary_key_set_no_archive(self, capsys, monkeypatch):
         """Primary key set, backup NOT set, usage file missing, no archive dir."""
@@ -481,47 +496,83 @@ class TestHandleInfoCommandsShowConfig:
 
 class TestHandleInfoCommandsEnv:
 
-    def test_add_professor_with_flag_and_prompted_keys(self, capsys, monkeypatch):
+    def test_usage_for_an_unconfigured_netid_is_an_error(self, monkeypatch):
+        """A mistyped netID must not produce a report full of zeroes.
+
+        Before this check, `usage report` for a netID nobody had heard of
+        printed a perfectly formatted report showing no spending — which
+        reads as "you are well within budget", not as "there is nobody by
+        that name here". For a tool whose job is tracking spending, being
+        told you are fine when the question was never answered is the worst
+        possible failure.
+        """
         monkeypatch.setattr("getpass.getpass", lambda *_: "sk-test-key")
-        args = _make_ns(command="env", env_subcommand="add-professor", name="Jeff Heller")
+        handle_info_commands(_make_ns(command="env", env_subcommand="add-professor",
+                                      netid="jh43", name="Jeff Heller"))
+        args = _make_ns(command="usage", usage_subcommand="report", professor="zz99")
+        with pytest.raises(CLIError) as excinfo:
+            handle_info_commands(args)
+        message = str(excinfo.value)
+        assert "zz99" in message
+        assert "jh43" in message          # says who *is* configured
+        assert "add-professor" in message  # and how to fix it
+
+    def test_add_professor_with_flags_and_prompted_keys(self, capsys, monkeypatch):
+        monkeypatch.setattr("getpass.getpass", lambda *_: "sk-test-key")
+        args = _make_ns(command="env", env_subcommand="add-professor",
+                        netid="jh43", name="Jeff Heller")
         result = handle_info_commands(args)
         assert result is True
         out = capsys.readouterr().out
-        assert "Added professor 'Jeff Heller'" in out
-        assert "jeff_heller" in out
+        assert "Jeff Heller" in out
+        assert "jh43" in out
 
-    def test_add_professor_prompts_for_name_when_not_given(self, capsys, monkeypatch):
-        monkeypatch.setattr("builtins.input", lambda *_: "Jeff Heller")
+    def test_add_professor_prompts_for_anything_not_passed(self, capsys, monkeypatch):
+        """netID first, then display name — the order the prompts ask in."""
+        answers = iter(["jh43", "Jeff Heller"])
+        monkeypatch.setattr("builtins.input", lambda *_: next(answers))
         monkeypatch.setattr("getpass.getpass", lambda *_: "sk-test-key")
-        args = _make_ns(command="env", env_subcommand="add-professor", name=None)
+        args = _make_ns(command="env", env_subcommand="add-professor", netid=None, name=None)
         handle_info_commands(args)
         out = capsys.readouterr().out
         assert "Jeff Heller" in out
+        assert "jh43" in out
 
     def test_add_professor_blank_name_raises_cli_error(self, monkeypatch):
         monkeypatch.setattr("getpass.getpass", lambda *_: "sk-test-key")
-        args = _make_ns(command="env", env_subcommand="add-professor", name="   ")
+        args = _make_ns(command="env", env_subcommand="add-professor",
+                        netid="jh43", name="   ")
         with pytest.raises(CLIError, match="blank"):
+            handle_info_commands(args)
+
+    def test_add_professor_rejects_a_display_name_as_the_netid(self, monkeypatch):
+        """The likeliest mistake, so it gets an error that names the fix."""
+        monkeypatch.setattr("getpass.getpass", lambda *_: "sk-test-key")
+        args = _make_ns(command="env", env_subcommand="add-professor",
+                        netid="Jeff Heller", name="Jeff Heller")
+        with pytest.raises(CLIError, match="netID"):
             handle_info_commands(args)
 
     def test_remove_professor_confirmed(self, capsys, monkeypatch):
         monkeypatch.setattr("getpass.getpass", lambda *_: "sk-test-key")
-        handle_info_commands(_make_ns(command="env", env_subcommand="add-professor", name="Jeff Heller"))
+        handle_info_commands(_make_ns(command="env", env_subcommand="add-professor",
+                                      netid="jh43", name="Jeff Heller"))
         capsys.readouterr()
 
         monkeypatch.setattr("builtins.input", lambda *_: "y")
-        args = _make_ns(command="env", env_subcommand="remove-professor", identifier="jeff_heller")
+        args = _make_ns(command="env", env_subcommand="remove-professor", identifier="jh43")
         handle_info_commands(args)
         out = capsys.readouterr().out
         assert "Removed professor 'Jeff Heller'" in out
 
     def test_remove_professor_declined(self, capsys, monkeypatch):
         monkeypatch.setattr("getpass.getpass", lambda *_: "sk-test-key")
-        handle_info_commands(_make_ns(command="env", env_subcommand="add-professor", name="Jeff Heller"))
+        handle_info_commands(_make_ns(command="env", env_subcommand="add-professor",
+                                      netid="jh43", name="Jeff Heller"))
         capsys.readouterr()
 
         monkeypatch.setattr("builtins.input", lambda *_: "n")
-        args = _make_ns(command="env", env_subcommand="remove-professor", identifier="jeff_heller")
+        args = _make_ns(command="env", env_subcommand="remove-professor", identifier="jh43")
         handle_info_commands(args)
         out = capsys.readouterr().out
         assert "Cancelled" in out

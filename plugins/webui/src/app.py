@@ -162,6 +162,7 @@ class RenameConversationBody(BaseModel):
 
 
 class AddProfessorBody(BaseModel):
+    netid: str
     name: str
     key: str
     backup_key: str | None = None
@@ -245,12 +246,12 @@ def _settings_snapshot() -> dict:
         "order": _SETTINGS_ORDER_FIRST_RUN if not has_professors else _SETTINGS_ORDER_REPEAT,
         "professors": [
             {
-                "safe_name": safe_name,
+                "netid": netid,
                 "name": prof["name"],
                 "has_key": bool(prof.get("key")),
                 "has_backup_key": bool(prof.get("backup_key")),
             }
-            for safe_name, prof in professors.items()
+            for netid, prof in professors.items()
         ],
         "webui": {
             "passphrase_configured": bool(settings_store.get_value("webui.passphrase_hash")),
@@ -270,8 +271,8 @@ def _settings_snapshot() -> dict:
     }
 
 
-def _validated_professor(safe_name: str | None) -> str:
-    """Confirm *safe_name* is a professor configured in .env, or raise a 400 error.
+def _validated_professor(netid: str | None) -> str:
+    """Confirm *netid* is a professor configured in .env, or raise a 400 error.
 
     Every route that accepts a professor name from the browser calls this
     first — the value ends up in file paths (usage data, conversation
@@ -279,9 +280,9 @@ def _validated_professor(safe_name: str | None) -> str:
     knows about, not arbitrary user input.
     """
     professors = load_professor_config()
-    if not safe_name or safe_name not in professors:
-        raise HTTPException(400, f"Unknown professor '{safe_name}'.")
-    return safe_name
+    if not netid or netid not in professors:
+        raise HTTPException(400, f"Unknown professor '{netid}'.")
+    return netid
 
 
 def _require_unlocked(request: Request) -> None:
@@ -417,7 +418,7 @@ def create_app() -> FastAPI:
             if active:
                 request.session["active_professor"] = active
         return {
-            "professors": [{"safe_name": k, "name": v["name"]} for k, v in professors.items()],
+            "professors": [{"netid": k, "name": v["name"]} for k, v in professors.items()],
             "active": active,
         }
 
@@ -445,36 +446,36 @@ def create_app() -> FastAPI:
     async def api_add_professor(request: Request, body: AddProfessorBody):
         _require_unlocked(request)
         try:
-            safe_name = settings_store.add_professor(body.name, body.key, body.backup_key)
-        except ValueError as e:
+            netid = settings_store.add_professor(body.netid, body.name, body.key, body.backup_key)
+        except (ValueError, CLIError) as e:
             raise HTTPException(400, str(e)) from e
-        return {"ok": True, "safe_name": safe_name}
+        return {"ok": True, "netid": netid}
 
-    @app.delete("/api/settings/professors/{safe_name}")
-    async def api_remove_professor(request: Request, safe_name: str):
+    @app.delete("/api/settings/professors/{netid}")
+    async def api_remove_professor(request: Request, netid: str):
         _require_unlocked(request)
         try:
-            removed_name = settings_store.remove_professor(safe_name)
+            removed_name = settings_store.remove_professor(netid)
         except ValueError as e:
             raise HTTPException(404, str(e)) from e
         return {"ok": True, "removed": removed_name}
 
-    @app.post("/api/settings/professors/{safe_name}/key")
-    async def api_set_professor_key(request: Request, safe_name: str, body: ProfessorKeyBody):
+    @app.post("/api/settings/professors/{netid}/key")
+    async def api_set_professor_key(request: Request, netid: str, body: ProfessorKeyBody):
         _require_unlocked(request)
         try:
-            settings_store.set_professor_key(safe_name, body.key)
+            settings_store.set_professor_key(netid, body.key)
         except ValueError as e:
             raise HTTPException(400, str(e)) from e
         return {"ok": True}
 
-    @app.post("/api/settings/professors/{safe_name}/backup-key")
+    @app.post("/api/settings/professors/{netid}/backup-key")
     async def api_set_professor_backup_key(
-        request: Request, safe_name: str, body: ProfessorBackupKeyBody
+        request: Request, netid: str, body: ProfessorBackupKeyBody
     ):
         _require_unlocked(request)
         try:
-            settings_store.set_professor_backup_key(safe_name, body.backup_key)
+            settings_store.set_professor_backup_key(netid, body.backup_key)
         except ValueError as e:
             raise HTTPException(400, str(e)) from e
         return {"ok": True}

@@ -143,7 +143,7 @@ class TestProfessors:
     def test_lists_configured_professors(self, unlocked_client):
         resp = unlocked_client.get("/api/professors")
         assert resp.status_code == 200
-        names = {p["safe_name"] for p in resp.json()["professors"]}
+        names = {p["netid"] for p in resp.json()["professors"]}
         assert names == {"heller", "smith"}
 
     def test_active_defaults_to_first_professor(self, unlocked_client):
@@ -1343,39 +1343,40 @@ class TestSettingsProfessors:
 
     def test_add_professor(self, unlocked_client, settings_env):
         resp = unlocked_client.post("/api/settings/professors", json={
-            "name": "Jeff Heller", "key": "sk-primary",
+            "netid": "jh43", "name": "Jeff Heller", "key": "sk-primary",
         })
         assert resp.status_code == 200
-        assert resp.json()["safe_name"] == "jeff_heller"
+        assert resp.json()["netid"] == "jh43"
 
         data = unlocked_client.get("/api/settings").json()
         assert data["has_professors"] is True
         assert data["order"] == ["shared", "professors", "webui", "external_sources"]
         prof = data["professors"][0]
         assert prof == {
-            "safe_name": "jeff_heller", "name": "Jeff Heller",
+            "netid": "jh43", "name": "Jeff Heller",
             "has_key": True, "has_backup_key": False,
         }
 
     def test_add_professor_with_backup_key(self, unlocked_client, settings_env):
         unlocked_client.post("/api/settings/professors", json={
-            "name": "Jeff Heller", "key": "sk-primary", "backup_key": "sk-backup",
+            "netid": "jh43", "name": "Jeff Heller", "key": "sk-primary",
+            "backup_key": "sk-backup",
         })
         prof = unlocked_client.get("/api/settings").json()["professors"][0]
         assert prof["has_backup_key"] is True
 
     def test_add_professor_blank_key_rejected(self, unlocked_client, settings_env):
-        resp = unlocked_client.post("/api/settings/professors", json={"name": "Jeff Heller", "key": "  "})
+        resp = unlocked_client.post("/api/settings/professors", json={"netid": "jh43", "name": "Jeff Heller", "key": "  "})
         assert resp.status_code == 400
 
     def test_add_duplicate_professor_rejected(self, unlocked_client, settings_env):
-        unlocked_client.post("/api/settings/professors", json={"name": "Jeff Heller", "key": "sk-1"})
-        resp = unlocked_client.post("/api/settings/professors", json={"name": "Jeff Heller", "key": "sk-2"})
+        unlocked_client.post("/api/settings/professors", json={"netid": "jh43", "name": "Jeff Heller", "key": "sk-1"})
+        resp = unlocked_client.post("/api/settings/professors", json={"netid": "jh43", "name": "Jeff Heller", "key": "sk-2"})
         assert resp.status_code == 400
 
     def test_remove_professor(self, unlocked_client, settings_env):
-        unlocked_client.post("/api/settings/professors", json={"name": "Jeff Heller", "key": "sk-1"})
-        resp = unlocked_client.delete("/api/settings/professors/jeff_heller")
+        unlocked_client.post("/api/settings/professors", json={"netid": "jh43", "name": "Jeff Heller", "key": "sk-1"})
+        resp = unlocked_client.delete("/api/settings/professors/jh43")
         assert resp.status_code == 200
         assert unlocked_client.get("/api/settings").json()["professors"] == []
 
@@ -1384,29 +1385,30 @@ class TestSettingsProfessors:
         assert resp.status_code == 404
 
     def test_update_professor_key(self, unlocked_client, settings_env):
-        unlocked_client.post("/api/settings/professors", json={"name": "Jeff Heller", "key": "sk-old"})
-        resp = unlocked_client.post("/api/settings/professors/jeff_heller/key", json={"key": "sk-new"})
+        unlocked_client.post("/api/settings/professors", json={"netid": "jh43", "name": "Jeff Heller", "key": "sk-old"})
+        resp = unlocked_client.post("/api/settings/professors/jh43/key", json={"key": "sk-new"})
         assert resp.status_code == 200
-        assert settings_store_mod.get_professors()["jeff_heller"]["key"] == "sk-new"
+        assert settings_store_mod.get_professors()["jh43"]["key"] == "sk-new"
 
     def test_update_professor_key_blank_rejected(self, unlocked_client, settings_env):
-        unlocked_client.post("/api/settings/professors", json={"name": "Jeff Heller", "key": "sk-old"})
-        resp = unlocked_client.post("/api/settings/professors/jeff_heller/key", json={"key": "  "})
+        unlocked_client.post("/api/settings/professors", json={"netid": "jh43", "name": "Jeff Heller", "key": "sk-old"})
+        resp = unlocked_client.post("/api/settings/professors/jh43/key", json={"key": "  "})
         assert resp.status_code == 400
 
     def test_set_backup_key(self, unlocked_client, settings_env):
-        unlocked_client.post("/api/settings/professors", json={"name": "Jeff Heller", "key": "sk-old"})
+        unlocked_client.post("/api/settings/professors", json={"netid": "jh43", "name": "Jeff Heller", "key": "sk-old"})
         resp = unlocked_client.post(
-            "/api/settings/professors/jeff_heller/backup-key", json={"backup_key": "sk-backup"}
+            "/api/settings/professors/jh43/backup-key", json={"backup_key": "sk-backup"}
         )
         assert resp.status_code == 200
         assert unlocked_client.get("/api/settings").json()["professors"][0]["has_backup_key"] is True
 
     def test_clear_backup_key(self, unlocked_client, settings_env):
         unlocked_client.post("/api/settings/professors", json={
-            "name": "Jeff Heller", "key": "sk-old", "backup_key": "sk-backup",
+            "netid": "jh43", "name": "Jeff Heller", "key": "sk-old",
+            "backup_key": "sk-backup",
         })
-        unlocked_client.post("/api/settings/professors/jeff_heller/backup-key", json={"backup_key": None})
+        unlocked_client.post("/api/settings/professors/jh43/backup-key", json={"backup_key": None})
         assert unlocked_client.get("/api/settings").json()["professors"][0]["has_backup_key"] is False
 
 

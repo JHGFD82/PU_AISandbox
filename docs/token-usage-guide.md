@@ -18,7 +18,7 @@ PU_AISandbox tracks every API call automatically. Each professor's usage is isol
 ### Current month report
 
 ```bash
-python main.py heller usage report
+python main.py jh43 usage report
 ```
 
 Prints token counts, model breakdown, daily breakdown, and budget status for the current calendar month.
@@ -26,7 +26,7 @@ Prints token counts, model breakdown, daily breakdown, and budget status for the
 ### Current month + all-time totals
 
 ```bash
-python main.py heller usage report --all-time
+python main.py jh43 usage report --all-time
 ```
 
 Prints the current month report, then aggregates all archived months on demand.
@@ -34,20 +34,20 @@ Prints the current month report, then aggregates all archived months on demand.
 ### Specific archived month
 
 ```bash
-python main.py heller usage report 2025-07
+python main.py jh43 usage report 2025-07
 ```
 
 ### List archived months
 
 ```bash
-python main.py heller usage months
+python main.py jh43 usage months
 ```
 
 ### Daily usage
 
 ```bash
-python main.py heller usage daily              # today
-python main.py heller usage daily 2026-02-14   # specific date
+python main.py jh43 usage daily              # today
+python main.py jh43 usage daily 2026-02-14   # specific date
 ```
 
 ---
@@ -99,8 +99,8 @@ See [`configuration.md`](configuration.md) for the full schema and customization
 **OpenAI and Google models** — pricing is fetched automatically from PortKey on first use of a new model name. Use the `provider/model` syntax:
 
 ```bash
-python main.py heller prompt -m openai/gpt-4o-new
-python main.py heller prompt -m google/gemini-2.5-pro
+python main.py jh43 prompt -m openai/gpt-4o-new
+python main.py jh43 prompt -m google/gemini-2.5-pro
 ```
 
 The fetched price is saved to `src/model_catalog.json` automatically.

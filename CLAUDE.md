@@ -21,8 +21,8 @@ cp src/model_catalog.template.json src/model_catalog.json   # git-ignored, per-i
 python main.py --help
 python main.py --show-config     # validates professor config, no API calls
 python main.py --list-models
-python main.py heller usage report --all-time
-python main.py heller prompt --dry-run -s
+python main.py jh43 usage report --all-time
+python main.py jh43 prompt --dry-run -s
 ```
 
 ### Testing
@@ -75,10 +75,10 @@ Only the `usage` subcommand is built in; everything else (`translate`, `transcri
 - `src/tracking/token_tracker.py` — per-professor, per-calendar-month token accounting, thread-safe (`threading.Lock` around `record_usage()`).
 
 ### Professor configuration
-`.settings` pattern: `[professors.<safe_name>]` tables with `name`, `key`, `backup_key` (optional). Missing/blank required fields → `ValueError` re-raised as `CLIError`, process exits 1. Names are passed through `make_safe_filename()` for token-usage filenames, CLI arg validation, and error messages. `.settings` also holds `[webui]` secrets, `[endpoints.<name>].key` credentials, `[shared_settings].path`, and `[usage_sources]` — see `src/settings_store.py` and `docs/configuration.md`.
+`.settings` pattern: `[professors.<netid>]` tables with `name` (display name), `key`, `backup_key` (optional). The table name is the person's university netID — letters and digits only, validated by `normalize_netid()` in `src/config.py`, and used verbatim as a filename. Missing/blank required fields → `ValueError` re-raised as `CLIError`, process exits 1. `.settings` also holds `[webui]` secrets, `[endpoints.<name>].key` credentials, `[shared_settings].path`, and `[usage_sources]` — see `src/settings_store.py` and `docs/configuration.md`.
 
 ### Token tracking
-- Active: `data/token_usage_{safe_name}.json` (current month only). Archives: `data/archives/{safe_name}/{YYYY-MM}.json`, written automatically on month rollover.
+- Active: `data/token_usage_{netid}.json` (current month only). Archives: `data/archives/{netid}/{YYYY-MM}.json`, written automatically on month rollover.
 - `usage report --all-time` aggregates the active file + all archives on demand (not loaded eagerly).
 - Exceeding the monthly budget only logs warnings at thresholds (e.g. 80%, 100%) — it never halts processing; the only way to stop usage is revoking the professor's API key externally.
 

@@ -106,127 +106,127 @@ class TestProfessors:
         assert settings_store.get_professors() == {}
 
     def test_add_and_get_professor(self):
-        safe_name = settings_store.add_professor("Jeff Heller", "sk-primary")
-        assert safe_name == "jeff_heller"
+        netid = settings_store.add_professor("jh43", "Jeff Heller", "sk-primary")
+        assert netid == "jh43"
         profs = settings_store.get_professors()
-        assert profs["jeff_heller"]["name"] == "Jeff Heller"
-        assert profs["jeff_heller"]["key"] == "sk-primary"
-        assert profs["jeff_heller"]["backup_key"] is None
-        assert profs["jeff_heller"]["safe_name"] == "jeff_heller"
+        assert profs["jh43"]["name"] == "Jeff Heller"
+        assert profs["jh43"]["key"] == "sk-primary"
+        assert profs["jh43"]["backup_key"] is None
+        assert profs["jh43"]["netid"] == "jh43"
 
     def test_add_professor_with_backup_key(self):
-        settings_store.add_professor("Jeff Heller", "sk-primary", "sk-backup")
-        assert settings_store.get_professors()["jeff_heller"]["backup_key"] == "sk-backup"
+        settings_store.add_professor("jh43", "Jeff Heller", "sk-primary", "sk-backup")
+        assert settings_store.get_professors()["jh43"]["backup_key"] == "sk-backup"
 
     def test_add_professor_persists_to_disk(self):
-        settings_store.add_professor("Jeff Heller", "sk-primary")
+        settings_store.add_professor("jh43", "Jeff Heller", "sk-primary")
         content = settings_store.SETTINGS_PATH.read_text()
         assert "Jeff Heller" in content
         assert "sk-primary" in content
 
     def test_blank_name_raises(self):
         with pytest.raises(ValueError, match="blank"):
-            settings_store.add_professor("   ", "sk-primary")
+            settings_store.add_professor("jh43", "   ", "sk-primary")
 
     def test_blank_key_raises(self):
         with pytest.raises(ValueError, match="blank"):
-            settings_store.add_professor("Jeff Heller", "  ")
+            settings_store.add_professor("jh43", "Jeff Heller", "  ")
 
     def test_duplicate_professor_raises(self):
-        settings_store.add_professor("Jeff Heller", "sk-1")
+        settings_store.add_professor("jh43", "Jeff Heller", "sk-1")
         with pytest.raises(ValueError, match="already configured"):
-            settings_store.add_professor("Jeff Heller", "sk-2")
+            settings_store.add_professor("jh43", "Jeff Heller", "sk-2")
 
     def test_two_professors_both_present(self):
-        settings_store.add_professor("Jeff Heller", "sk-1")
-        settings_store.add_professor("Alice Smith", "sk-2")
+        settings_store.add_professor("jh43", "Jeff Heller", "sk-1")
+        settings_store.add_professor("as12", "Alice Smith", "sk-2")
         profs = settings_store.get_professors()
-        assert set(profs.keys()) == {"jeff_heller", "alice_smith"}
+        assert set(profs.keys()) == {"jh43", "as12"}
 
-    def test_remove_by_safe_name(self):
-        settings_store.add_professor("Jeff Heller", "sk-primary")
-        removed = settings_store.remove_professor("jeff_heller")
+    def test_remove_by_netid(self):
+        settings_store.add_professor("jh43", "Jeff Heller", "sk-primary")
+        removed = settings_store.remove_professor("jh43")
         assert removed == "Jeff Heller"
         assert settings_store.get_professors() == {}
 
     def test_remove_by_display_name_case_insensitive(self):
-        settings_store.add_professor("Jeff Heller", "sk-primary")
+        settings_store.add_professor("jh43", "Jeff Heller", "sk-primary")
         assert settings_store.remove_professor("JEFF HELLER") == "Jeff Heller"
 
     def test_remove_unknown_raises(self):
-        with pytest.raises(ValueError, match="No configured professor"):
+        with pytest.raises(ValueError, match="No configured professor matches"):
             settings_store.remove_professor("nobody")
 
     def test_remove_leaves_others_intact(self):
-        settings_store.add_professor("Jeff Heller", "sk-1")
-        settings_store.add_professor("Alice Smith", "sk-2")
-        settings_store.remove_professor("jeff_heller")
-        assert set(settings_store.get_professors().keys()) == {"alice_smith"}
+        settings_store.add_professor("jh43", "Jeff Heller", "sk-1")
+        settings_store.add_professor("as12", "Alice Smith", "sk-2")
+        settings_store.remove_professor("jh43")
+        assert set(settings_store.get_professors().keys()) == {"as12"}
 
 
 class TestSetProfessorKey:
 
     def test_replaces_primary_key(self):
-        settings_store.add_professor("Jeff Heller", "sk-old")
-        settings_store.set_professor_key("jeff_heller", "sk-new")
-        assert settings_store.get_professors()["jeff_heller"]["key"] == "sk-new"
+        settings_store.add_professor("jh43", "Jeff Heller", "sk-old")
+        settings_store.set_professor_key("jh43", "sk-new")
+        assert settings_store.get_professors()["jh43"]["key"] == "sk-new"
 
     def test_blank_key_raises(self):
-        settings_store.add_professor("Jeff Heller", "sk-old")
+        settings_store.add_professor("jh43", "Jeff Heller", "sk-old")
         with pytest.raises(ValueError, match="blank"):
-            settings_store.set_professor_key("jeff_heller", "   ")
+            settings_store.set_professor_key("jh43", "   ")
 
     def test_unknown_professor_raises(self):
-        with pytest.raises(ValueError, match="No configured professor"):
+        with pytest.raises(ValueError, match="Nobody is configured"):
             settings_store.set_professor_key("nobody", "sk-new")
 
     def test_leaves_backup_key_and_other_professors_intact(self):
-        settings_store.add_professor("Jeff Heller", "sk-old", "sk-backup")
-        settings_store.add_professor("Alice Smith", "sk-alice")
-        settings_store.set_professor_key("jeff_heller", "sk-new")
+        settings_store.add_professor("jh43", "Jeff Heller", "sk-old", "sk-backup")
+        settings_store.add_professor("as12", "Alice Smith", "sk-alice")
+        settings_store.set_professor_key("jh43", "sk-new")
         profs = settings_store.get_professors()
-        assert profs["jeff_heller"]["backup_key"] == "sk-backup"
-        assert profs["alice_smith"]["key"] == "sk-alice"
+        assert profs["jh43"]["backup_key"] == "sk-backup"
+        assert profs["as12"]["key"] == "sk-alice"
 
 
 class TestSetProfessorBackupKey:
 
     def test_sets_new_backup_key(self):
-        settings_store.add_professor("Jeff Heller", "sk-primary")
-        settings_store.set_professor_backup_key("jeff_heller", "sk-backup")
-        assert settings_store.get_professors()["jeff_heller"]["backup_key"] == "sk-backup"
+        settings_store.add_professor("jh43", "Jeff Heller", "sk-primary")
+        settings_store.set_professor_backup_key("jh43", "sk-backup")
+        assert settings_store.get_professors()["jh43"]["backup_key"] == "sk-backup"
 
     def test_replaces_existing_backup_key(self):
-        settings_store.add_professor("Jeff Heller", "sk-primary", "sk-old-backup")
-        settings_store.set_professor_backup_key("jeff_heller", "sk-new-backup")
-        assert settings_store.get_professors()["jeff_heller"]["backup_key"] == "sk-new-backup"
+        settings_store.add_professor("jh43", "Jeff Heller", "sk-primary", "sk-old-backup")
+        settings_store.set_professor_backup_key("jh43", "sk-new-backup")
+        assert settings_store.get_professors()["jh43"]["backup_key"] == "sk-new-backup"
 
     def test_blank_clears_backup_key(self):
-        settings_store.add_professor("Jeff Heller", "sk-primary", "sk-old-backup")
-        settings_store.set_professor_backup_key("jeff_heller", "")
-        assert settings_store.get_professors()["jeff_heller"]["backup_key"] is None
+        settings_store.add_professor("jh43", "Jeff Heller", "sk-primary", "sk-old-backup")
+        settings_store.set_professor_backup_key("jh43", "")
+        assert settings_store.get_professors()["jh43"]["backup_key"] is None
 
     def test_none_clears_backup_key(self):
-        settings_store.add_professor("Jeff Heller", "sk-primary", "sk-old-backup")
-        settings_store.set_professor_backup_key("jeff_heller", None)
-        assert settings_store.get_professors()["jeff_heller"]["backup_key"] is None
+        settings_store.add_professor("jh43", "Jeff Heller", "sk-primary", "sk-old-backup")
+        settings_store.set_professor_backup_key("jh43", None)
+        assert settings_store.get_professors()["jh43"]["backup_key"] is None
 
     def test_clearing_when_unset_does_not_raise(self):
-        settings_store.add_professor("Jeff Heller", "sk-primary")
-        settings_store.set_professor_backup_key("jeff_heller", "")
-        assert settings_store.get_professors()["jeff_heller"]["backup_key"] is None
+        settings_store.add_professor("jh43", "Jeff Heller", "sk-primary")
+        settings_store.set_professor_backup_key("jh43", "")
+        assert settings_store.get_professors()["jh43"]["backup_key"] is None
 
     def test_unknown_professor_raises(self):
-        with pytest.raises(ValueError, match="No configured professor"):
+        with pytest.raises(ValueError, match="Nobody is configured"):
             settings_store.set_professor_backup_key("nobody", "sk-backup")
 
     def test_leaves_primary_key_and_other_professors_intact(self):
-        settings_store.add_professor("Jeff Heller", "sk-primary")
-        settings_store.add_professor("Alice Smith", "sk-alice")
-        settings_store.set_professor_backup_key("jeff_heller", "sk-backup")
+        settings_store.add_professor("jh43", "Jeff Heller", "sk-primary")
+        settings_store.add_professor("as12", "Alice Smith", "sk-alice")
+        settings_store.set_professor_backup_key("jh43", "sk-backup")
         profs = settings_store.get_professors()
-        assert profs["jeff_heller"]["key"] == "sk-primary"
-        assert profs["alice_smith"]["backup_key"] is None
+        assert profs["jh43"]["key"] == "sk-primary"
+        assert profs["as12"]["backup_key"] is None
 
 
 # ---------------------------------------------------------------------------

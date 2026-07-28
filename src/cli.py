@@ -27,6 +27,7 @@ try:
 except ImportError:
     pass
 
+from .config import normalize_netid
 from .errors import CLIError
 from .runtime import ModePlugin, handle_info_commands, load_plugins
 
@@ -240,8 +241,12 @@ def _build_env_subparser(subparsers: argparse._SubParsersAction) -> None:
     )
     _add_debug_flags(add_prof)
     add_prof.add_argument(
+        '--netid', type=str, default=None,
+        help="Their university netID, e.g. 'jh43' — this identifies them everywhere",
+    )
+    add_prof.add_argument(
         '--name', type=str, default=None,
-        help="The professor's display name, e.g. 'Jeff Heller'",
+        help="Their display name, shown in reports and the web interface, e.g. 'Jeff Heller'",
     )
 
     remove_prof = env_sub.add_parser('remove-professor', help='Remove a configured professor')
@@ -468,6 +473,15 @@ def _dispatch(args: argparse.Namespace, plugins: dict[str, ModePlugin]) -> None:
             + _available_commands_hint(plugins)
             + "\n\nRun 'python main.py --help' for full usage information."
         )
+
+    # Normalise the netID once, here, before anything downstream uses it.
+    # Everything past this point treats it as a file and folder name
+    # directly, so this is the boundary where "JH43" and "jh43 " become the
+    # one spelling that names that person's usage file — rather than each
+    # part of the sandbox making its own guess, which is how one person's
+    # spending previously ended up split across two files.
+    if args.professor:
+        args.professor = normalize_netid(args.professor)
 
     if args.command in ('usage', 'env'):
         _run_info_command(args)

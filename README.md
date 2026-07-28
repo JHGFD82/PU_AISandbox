@@ -80,16 +80,18 @@ python main.py env add-professor
 Or hand-edit `.settings` directly — add one table per professor:
 
 ```toml
-[professors.heller]
-name = "Heller"
+[professors.jh43]
+name = "Jeff Heller"
 key = "your_primary_api_key_here"
 backup_key = "your_backup_api_key_here"
 
-[professors.smith]
-name = "Smith"
+[professors.as12]
+name = "Alice Smith"
 key = "another_primary_key_here"
 backup_key = "another_backup_key_here"
 ```
+
+The table name is the person's **netID** — the university username they sign in with — and is what you type on the command line. `name` is their display name, shown in reports and the web interface.
 
 Princeton faculty obtain API keys through OIT. Each faculty member registers independently.
 
@@ -144,12 +146,12 @@ python main.py --list-models
 ### Usage reporting
 
 ```bash
-python main.py heller usage report              # current month + budget status
-python main.py heller usage report --all-time   # above + all-time totals
-python main.py heller usage report 2025-07      # a specific archived month
-python main.py heller usage months              # list all archived month files
-python main.py heller usage daily               # today's usage
-python main.py heller usage daily 2026-03-01    # specific date
+python main.py jh43 usage report              # current month + budget status
+python main.py jh43 usage report --all-time   # above + all-time totals
+python main.py jh43 usage report 2025-07      # a specific archived month
+python main.py jh43 usage months              # list all archived month files
+python main.py jh43 usage daily               # today's usage
+python main.py jh43 usage daily 2026-03-01    # specific date
 ```
 
 ### Prompt (built-in plugin)
@@ -157,11 +159,11 @@ python main.py heller usage daily 2026-03-01    # specific date
 Send a freeform prompt to the AI without any translation or OCR framing. Text is entered interactively and terminated with `---` on its own line.
 
 ```bash
-python main.py heller prompt                    # user prompt only
-python main.py heller prompt -s                 # system prompt first, then user prompt
-python main.py heller prompt -o response.txt    # save response to file
-python main.py heller prompt -m gpt-4o-mini     # specific model
-python main.py heller prompt -s --dry-run       # preview without API call
+python main.py jh43 prompt                    # user prompt only
+python main.py jh43 prompt -s                 # system prompt first, then user prompt
+python main.py jh43 prompt -o response.txt    # save response to file
+python main.py jh43 prompt -m gpt-4o-mini     # specific model
+python main.py jh43 prompt -s --dry-run       # preview without API call
 ```
 
 ### Translation and transcription
@@ -170,23 +172,23 @@ python main.py heller prompt -s --dry-run       # preview without API call
 **Output formats:** `.txt`, `.md`, `.pdf`, `.docx`, `.xlsx` (Excel), `.json` — inferred from the `-o` extension.
 
 ```bash
-python main.py heller translate jp-en -i paper.pdf -o output.pdf          # PDF to PDF
-python main.py heller translate zh-en -i article.docx -o translated.docx  # DOCX to DOCX
-python main.py heller translate jp-en -i data.json -o result.md           # JSON in, Markdown out
-python main.py heller translate jp-en -i data.xlsx -o result.xlsx         # Excel in, Excel out
-python main.py heller translate jp-en -i paper.pdf -p "1-10"              # page range
-python main.py heller translate jp-en -i paper.pdf --scanned              # scanned PDF
-python main.py heller translate jp-en -c                                  # paste text
+python main.py jh43 translate jp-en -i paper.pdf -o output.pdf          # PDF to PDF
+python main.py jh43 translate zh-en -i article.docx -o translated.docx  # DOCX to DOCX
+python main.py jh43 translate jp-en -i data.json -o result.md           # JSON in, Markdown out
+python main.py jh43 translate jp-en -i data.xlsx -o result.xlsx         # Excel in, Excel out
+python main.py jh43 translate jp-en -i paper.pdf -p "1-10"              # page range
+python main.py jh43 translate jp-en -i paper.pdf --scanned              # scanned PDF
+python main.py jh43 translate jp-en -c                                  # paste text
 
-python main.py heller transcribe en -i scan.png -o result.txt             # single image
-python main.py heller transcribe en -i scans/                             # folder of images
+python main.py jh43 transcribe en -i scan.png -o result.txt             # single image
+python main.py jh43 transcribe en -i scans/                             # folder of images
 ```
 
 To use an alternate AI endpoint (HPC cluster or third-party provider), use colon syntax with a key from an `[endpoints.<name>]` table (defined in `settings.default.toml`, a shared file, or `settings.local.toml`; credentialed via `.settings`):
 
 ```bash
-python main.py heller translate jp-en -i paper.pdf -m my_cluster:llama-3-70b
-python main.py heller prompt -m cloud_provider:some-model
+python main.py jh43 translate jp-en -i paper.pdf -m my_cluster:llama-3-70b
+python main.py jh43 prompt -m cloud_provider:some-model
 ```
 
 See [`docs/cli-reference.md`](docs/cli-reference.md) for the full flag reference and [`docs/configuration.md`](docs/configuration.md) for endpoint setup.

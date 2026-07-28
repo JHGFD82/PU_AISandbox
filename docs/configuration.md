@@ -31,31 +31,33 @@ Then either hand-edit `.settings`, or use the `env` command below to add your fi
 ### Format
 
 ```toml
-[professors.heller]
+[professors.jh43]
 name = "Jeff Heller"
 key = "sk-...primary_key..."
 backup_key = "sk-...backup_key..."   # optional
 
-[professors.smith]
-name = "Jane Smith"
+[professors.as12]
+name = "Alice Smith"
 key = "sk-...primary_key..."
 ```
 
-- The table name (`heller`, `smith`) is the safe-filename identifier used on the command line: `Jeff Heller` → `heller`, `Van Dyke` → `van_dyke`.
+- The table name (`jh43`, `as12`) is the person's **netID** — the university username they sign in with. This is what identifies them everywhere: it selects their API key, names their usage file, and is what you type on the command line.
+- `name` — their display name. Shown in reports and in the web interface's person picker, and nowhere else, so write it however reads best.
 - `key` — primary PortKey API key (obtained through Princeton OIT).
 - `backup_key` — fallback if the primary key fails. The application prints a warning when the backup is used.
 
-### How Professor Names Work
+### Why netIDs
 
-`get_api_key(professor)` in `src/config.py`:
-1. Looks up the professor by safe name (the `[professors.<safe_name>]` table name)
-2. Also matches the CLI argument against the original display name (case-insensitive)
-3. Returns the primary key, or the backup key with a printed warning
+A netID is letters and digits only, which means it can be used as a filename exactly as typed. That is the whole reason it is the identifier.
+
+The sandbox used to identify people by their display name, made filename-safe. Two parts of the code did that in two different ways — `Jeff Heller` became `jeff heller` in one place and `jeff_heller` in another — so one person's spending could be recorded as two people's, and an aggregate report would show them twice. There is nothing to make safe about `jh43`, so there is nothing for two parts of the code to disagree about.
+
+Capitalisation doesn't matter when you type it: `JH43` and `jh43` are the same person. Anything that isn't a letter or a digit is rejected with an error, since the usual cause is a display name typed where a netID was wanted.
 
 ```bash
-# These are all equivalent given [professors.heller] name = "Heller"
-python main.py heller usage report
-python main.py Heller usage report
+python main.py jh43 usage report
+python main.py JH43 usage report     # same person
+python main.py "Jeff Heller" usage report   # error: that's a display name
 ```
 
 ### Verifying the Configuration
@@ -71,8 +73,8 @@ This prints all configured professors, their data-file paths, whether those file
 Rather than hand-editing `.settings`, the built-in `env` command can add/remove professors and set any dotted-path value directly. Unlike every other command, `env` never needs a professor name first (you need it precisely when no professor exists yet):
 
 ```bash
-python main.py env add-professor            # prompts for name + keys (keys hidden, never a flag)
-python main.py env remove-professor heller  # asks to confirm before deleting
+python main.py env add-professor            # prompts for netID, display name + keys (keys hidden, never a flag)
+python main.py env remove-professor jh43    # asks to confirm before deleting
 python main.py env list                     # same optional-settings list as --show-config
 python main.py env set webui.session_secret             # prompts for a value (hidden, since it's a secret)
 python main.py env set webui.session_secret --generate   # or auto-generate a random one
@@ -165,8 +167,8 @@ This file is git-ignored so each installation can maintain its own model list an
 **OpenAI or Google** — use `provider/model-name` with `-m` on any command. Pricing is fetched from PortKey and saved automatically:
 
 ```bash
-python main.py heller prompt -m openai/gpt-4o-new
-python main.py heller prompt -m google/gemini-2.5-pro
+python main.py jh43 prompt -m openai/gpt-4o-new
+python main.py jh43 prompt -m google/gemini-2.5-pro
 ```
 
 **All other providers** — add an entry manually:
@@ -349,7 +351,7 @@ When `default_endpoint` is unset (the default), bare model strings are handled b
 Once an endpoint is defined, use it on the command line with colon syntax:
 
 ```bash
-python main.py heller prompt -m my_cluster:llama-3-70b
+python main.py jh43 prompt -m my_cluster:llama-3-70b
 ```
 
 See [CLI Reference → Specifying Models](cli-reference.md#specifying-models) for the full syntax.
@@ -371,10 +373,10 @@ Two modes:
 ### Commands
 
 ```bash
-python main.py heller usage sources list
-python main.py heller usage sources add --label "Prof. Smith" --path /path/to/shared/data --mode read-only
-python main.py heller usage sources add --label "This installation" --path /path/to/shared/data --mode shared-write --for-professor heller
-python main.py heller usage sources remove "Prof. Smith"
+python main.py jh43 usage sources list
+python main.py jh43 usage sources add --label "Prof. Smith" --path /path/to/shared/data --mode read-only
+python main.py jh43 usage sources add --label "This installation" --path /path/to/shared/data --mode shared-write --for-professor heller
+python main.py jh43 usage sources remove "Prof. Smith"
 ```
 
 `add` prompts interactively for anything not passed as a flag. A professor name is still required on the command line for these commands for consistency with every other `usage` subcommand, even though the source configuration itself isn't scoped to that professor — see `src/settings_store.py` and `docs/webui-plugin-plan.md` (§1) for the full design.

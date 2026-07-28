@@ -67,22 +67,22 @@ python main.py <professor> translate <language-code> [options]
 
 ```bash
 # Translate a PDF from English to Japanese:
-python main.py heller translate E-J -i article.pdf -o article_ja.pdf
+python main.py jh43 translate E-J -i article.pdf -o article_ja.pdf
 
 # Translate a Word document, preserving embedded images:
-python main.py heller translate E-J -i paper.docx -o paper_ja.docx --preserve-media
+python main.py jh43 translate E-J -i paper.docx -o paper_ja.docx --preserve-media
 
 # Translate specific pages only:
-python main.py heller translate E-J -i book.pdf -p 5-10 -o ch5-10_ja.txt
+python main.py jh43 translate E-J -i book.pdf -p 5-10 -o ch5-10_ja.txt
 
 # Enter custom text interactively:
-python main.py heller translate E-J -c
+python main.py jh43 translate E-J -c
 
 # Translate in parallel (4 workers):
-python main.py heller translate E-J -i long.pdf -o long_ja.pdf -w 4
+python main.py jh43 translate E-J -i long.pdf -o long_ja.pdf -w 4
 
 # Dry run — print prompts without calling the API:
-python main.py heller translate E-J -i article.pdf --dry-run
+python main.py jh43 translate E-J -i article.pdf --dry-run
 ```
 
 ---

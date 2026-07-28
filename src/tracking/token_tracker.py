@@ -34,7 +34,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from ..config import make_safe_filename
 from ..console import print_banner, print_subsection
 from ..models.catalog import (
     get_model_pricing,
@@ -55,18 +54,30 @@ ARCHIVES_SUBDIR = "archives"
 EVENTS_SUBDIR = "events"
 
 
-def get_usage_data_path(professor: str) -> Path:
-    """Return the active (current-month) data file path for a professor."""
+# Every path below uses the netID exactly as given, with no rewriting.
+#
+# That is the point of using a netID rather than a person's name. This
+# module used to lower-case the name for the local file and run it through
+# a make-it-safe-for-filenames step for shared folders — two different
+# rewrites of the same name, which meant "Jeff Heller" became "jeff heller"
+# in one place and "jeff_heller" in the other, and one person's spending was
+# recorded as two people's. A netID is letters and digits only (checked once,
+# in normalize_netid), so there is nothing left to rewrite and nothing left
+# for the two to disagree about.
+
+
+def get_usage_data_path(netid: str) -> Path:
+    """Return the active (current-month) data file path for one person."""
     project_root = Path(__file__).parent.parent.parent
     base_dir = project_root / USAGE_DATA_DIR
     base_dir.mkdir(exist_ok=True)
-    return base_dir / f"token_usage_{professor.lower()}.json"
+    return base_dir / f"token_usage_{netid}.json"
 
 
-def get_archive_dir(professor: str) -> Path:
-    """Return (and create if needed) the archive directory for a professor."""
+def get_archive_dir(netid: str) -> Path:
+    """Return (and create if needed) the archive directory for one person."""
     project_root = Path(__file__).parent.parent.parent
-    archive_dir = project_root / USAGE_DATA_DIR / ARCHIVES_SUBDIR / professor.lower()
+    archive_dir = project_root / USAGE_DATA_DIR / ARCHIVES_SUBDIR / netid
     archive_dir.mkdir(parents=True, exist_ok=True)
     return archive_dir
 
@@ -76,24 +87,24 @@ def get_archive_path(professor: str, month: str) -> Path:
     return get_archive_dir(professor) / f"{month}.json"
 
 
-def _shared_event_dir(source: "ExternalSource", professor: str, month: str) -> Path:
-    """Return the event-file directory for one professor/month inside a shared-write source."""
-    return source.resolved_path() / EVENTS_SUBDIR / make_safe_filename(professor) / month
+def _shared_event_dir(source: "ExternalSource", netid: str, month: str) -> Path:
+    """Return the event-file directory for one person/month inside a shared-write source."""
+    return source.resolved_path() / EVENTS_SUBDIR / netid / month
 
 
-def _shared_events_root(source: "ExternalSource", professor: str) -> Path:
-    """Return the directory holding every month's event files for one professor."""
-    return source.resolved_path() / EVENTS_SUBDIR / make_safe_filename(professor)
+def _shared_events_root(source: "ExternalSource", netid: str) -> Path:
+    """Return the directory holding every month's event files for one person."""
+    return source.resolved_path() / EVENTS_SUBDIR / netid
 
 
-def _shared_archive_dir(source: "ExternalSource", professor: str) -> Path:
-    """Return the archive directory for one professor inside a shared-write source."""
-    return source.resolved_path() / ARCHIVES_SUBDIR / make_safe_filename(professor)
+def _shared_archive_dir(source: "ExternalSource", netid: str) -> Path:
+    """Return the archive directory for one person inside a shared-write source."""
+    return source.resolved_path() / ARCHIVES_SUBDIR / netid
 
 
-def _shared_archive_path(source: "ExternalSource", professor: str, month: str) -> Path:
-    """Return the archive file path for one professor/month inside a shared-write source."""
-    return _shared_archive_dir(source, professor) / f"{month}.json"
+def _shared_archive_path(source: "ExternalSource", netid: str, month: str) -> Path:
+    """Return the archive file path for one person/month inside a shared-write source."""
+    return _shared_archive_dir(source, netid) / f"{month}.json"
 
 
 def get_configured_data_roots() -> list[tuple[str, Path]]:

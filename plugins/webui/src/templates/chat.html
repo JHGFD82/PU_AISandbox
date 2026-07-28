@@ -639,10 +639,10 @@ async function loadProfessors() {
   sel.innerHTML = "";
   data.professors.forEach(p => {
     const opt = document.createElement("option");
-    opt.value = p.safe_name; opt.textContent = p.name;
+    opt.value = p.netid; opt.textContent = p.name;
     sel.appendChild(opt);
   });
-  state.professor = data.active || (data.professors[0] && data.professors[0].safe_name);
+  state.professor = data.active || (data.professors[0] && data.professors[0].netid);
   if (state.professor) sel.value = state.professor;
   sel.addEventListener("change", async () => {
     stopJobPolling();

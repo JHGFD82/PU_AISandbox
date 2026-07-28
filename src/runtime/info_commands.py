@@ -58,28 +58,28 @@ def show_professor_config() -> None:
     if not professors:
         print("No professors configured in .settings.")
         print("Add one with: python main.py env add-professor")
-        print("Or by hand, under a [professors.<safe_name>] table — see .settings.template.")
+        print("Or by hand, under a [professors.<netid>] table — see .settings.template.")
         _print_optional_settings()
         return
 
     print("\nCurrent Professor Configuration:")
     print("=" * 60)
 
-    for safe_name, prof in professors.items():
+    for netid, prof in professors.items():
         primary_set = "set" if prof.get('key') else "NOT SET"
         backup_set = "set" if prof.get('backup_key') else "not set"
 
         # Data file on disk
-        usage_path = get_usage_data_path(safe_name)
+        usage_path = get_usage_data_path(netid)
         usage_exists = usage_path.exists()
         usage_label = str(usage_path) if usage_exists else f"{usage_path}  (not yet created)"
 
         # Archived months
-        archive_dir = get_archive_dir(safe_name)
+        archive_dir = get_archive_dir(netid)
         archived_months = sorted(p.stem for p in archive_dir.glob("*.json")) if archive_dir.exists() else []
 
         print(f"\n  {prof['name']}")
-        print(f"    Safe name:    {safe_name}")
+        print(f"    Safe name:    {netid}")
         print(f"    Primary key:  {primary_set}")
         print(f"    Backup key:   {backup_set}")
         print(f"    Usage file:   {usage_label}")
@@ -165,6 +165,35 @@ def _print_daily_usage(token_tracker: TokenTracker, professor_name: str, date: s
     print(f"API calls: {usage['call_count']}")
 
 
+def _require_configured_netid(netid: str) -> None:
+    """Stop with a helpful message if *netid* isn't someone this installation knows.
+
+    Args:
+        netid: The netID typed on the command line.
+
+    Raises:
+        CLIError: If nobody is configured under that netID. The message lists
+                  who *is* configured, since the usual cause is a typo or a
+                  half-remembered netID.
+    """
+    professors = load_professor_config()
+    if netid in professors:
+        return
+    if professors:
+        known = "\n".join(
+            f"  {n}  ({c['name']})" for n, c in sorted(professors.items())
+        )
+        raise CLIError(
+            f"Nobody with the netID '{netid}' is configured here.\n"
+            f"Configured netIDs:\n{known}\n\n"
+            f"To add someone: python main.py env add-professor"
+        )
+    raise CLIError(
+        "Nobody is configured on this installation yet.\n"
+        "Add someone with: python main.py env add-professor"
+    )
+
+
 def handle_info_commands(args: argparse.Namespace) -> bool:
     """Handle info/reporting commands without API-key dependent runtime initialization."""
     # Global info commands (no professor required)
@@ -183,13 +212,21 @@ def handle_info_commands(args: argparse.Namespace) -> bool:
     # Usage commands (professor required)
     if getattr(args, 'command', None) == 'usage':
         if not args.professor:
-            raise CLIError("Professor name is required for usage commands.")
+            raise CLIError("A netID is required for usage commands.")
 
         usage_subcommand = getattr(args, 'usage_subcommand', None)
 
         if usage_subcommand == 'sources':
             _handle_usage_sources(args)
             return True
+
+        # Check the netID is one this installation knows before reporting on
+        # it. Without this, a mistyped netID produced a perfectly formatted
+        # report full of zeroes — which reads as "you have spent nothing this
+        # month", not as "there is nobody by that name here". Being told you
+        # are within budget when the question was never actually answered is
+        # the worst outcome for a tool whose job is tracking spending.
+        _require_configured_netid(args.professor)
 
         token_tracker = TokenTracker(professor=args.professor)
 
@@ -260,22 +297,32 @@ def _handle_env_command(args: argparse.Namespace) -> None:
 
 
 def _env_add_professor_interactive(args: argparse.Namespace) -> None:
-    """Add a professor, prompting interactively for their name and keys.
+    """Add someone, prompting interactively for their netID, name and keys.
+
+    The netID is asked for first because it's the one that matters: it
+    identifies the person everywhere in the sandbox and is what gets typed
+    on the command line. The display name is only ever shown to people, so
+    it can be written however reads best.
 
     Keys are always entered at a hidden prompt (never a command-line flag),
     so they never end up in shell history or a process listing.
     """
-    name = getattr(args, 'name', None) or input("Professor's display name (e.g. 'Jeff Heller'): ").strip()
+    netid = getattr(args, 'netid', None) or input(
+        "netID (the university username they sign in with, e.g. 'jh43'): "
+    ).strip()
+    name = getattr(args, 'name', None) or input(
+        "Display name, shown in reports and the web interface (e.g. 'Jeff Heller'): "
+    ).strip()
     primary_key = getpass.getpass("Primary API key (hidden): ")
     backup_key = getpass.getpass("Backup API key (optional, hidden — press Enter to skip): ")
 
     try:
-        safe_name = settings_store.add_professor(name, primary_key, backup_key or None)
+        netid = settings_store.add_professor(netid, name, primary_key, backup_key or None)
     except ValueError as e:
         raise CLIError(str(e)) from e
 
-    print(f"\nAdded professor '{name}' (safe name: '{safe_name}').")
-    print(f"Try it out: python main.py {safe_name} usage report")
+    print(f"\nAdded {name} ({netid}).")
+    print(f"Try it out: python main.py {netid} usage report")
 
 
 def _env_remove_professor(args: argparse.Namespace) -> None:

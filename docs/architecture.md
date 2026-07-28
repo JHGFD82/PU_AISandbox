@@ -7,7 +7,7 @@ PU_AISandbox is a modular CLI platform. The core is deliberately thin: it discov
 ## Request Lifecycle
 
 ```
-python main.py heller translate jp-en -i doc.pdf
+python main.py jh43 translate jp-en -i doc.pdf
          │
          ▼
    main.py  ──────────────────────────────────────────────► src/cli.py::main()
@@ -114,7 +114,7 @@ On-demand aggregation (`usage report --all-time`) sums the active file with all 
 ### `src/config.py` — Language Registry and Professor Config
 
 - `LANGUAGE_MAP` starts empty. Plugins call `register_language(code, name)` at import time to populate it. Argparse type-hooks (`parse_language_code`, `parse_single_language_code`) validate against this map at parse time — so plugins must load *before* the parser is built (the loader guarantees this).
-- `load_professor_config()` reads `[professors.<safe_name>]` tables from `.settings` (via `src/settings_store.py`).
+- `load_professor_config()` reads `[professors.<netid>]` tables from `.settings` (via `src/settings_store.py`), keyed by netID.
 - `get_api_key(professor)` resolves primary key, falls back to backup key with a warning.
 
 ### `src/processors/` — Document Ingestion

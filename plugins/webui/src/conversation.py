@@ -1,7 +1,7 @@
 """Conversation data model and on-disk storage for the webui plugin.
 
 Each professor's conversations live as one JSON file per conversation under
-``data/conversations/{professor_safe_name}/{conversation_id}.json`` — see
+``data/conversations/{professor_netid}/{conversation_id}.json`` — see
 docs/webui-plugin-plan.md section 6 for the full shape and reasoning
 (one file per conversation, not one shared file, for the same
 safe-to-sync-over-Dropbox reasons behind the external usage-data sources in

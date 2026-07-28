@@ -2,10 +2,10 @@
 
 ```
 python main.py [--show-config | --list-models]
-python main.py <professor> <command> [options]
+python main.py <netid> <command> [options]
 ```
 
-`<professor>` is the safe-filename form of a professor's name as configured in `.settings` (e.g. `heller`, `smith`). It is case-insensitive.
+`<netid>` is the safe-filename form of a professor's name as configured in `.settings` (e.g. `heller`, `smith`). It is case-insensitive.
 
 ---
 
@@ -44,9 +44,9 @@ Print a usage report for the professor.
 | `usage report 2025-07` | Report for the specified archived month |
 
 ```bash
-python main.py heller usage report
-python main.py heller usage report --all-time
-python main.py heller usage report 2025-07
+python main.py jh43 usage report
+python main.py jh43 usage report --all-time
+python main.py jh43 usage report 2025-07
 ```
 
 ### `usage months`
@@ -54,7 +54,7 @@ python main.py heller usage report 2025-07
 List all archived month files for the professor.
 
 ```bash
-python main.py heller usage months
+python main.py jh43 usage months
 ```
 
 ### `usage daily [YYYY-MM-DD]`
@@ -62,8 +62,8 @@ python main.py heller usage months
 Print usage for a single day (default: today).
 
 ```bash
-python main.py heller usage daily
-python main.py heller usage daily 2026-03-01
+python main.py jh43 usage daily
+python main.py jh43 usage daily 2026-03-01
 ```
 
 ---
@@ -73,7 +73,7 @@ python main.py heller usage daily 2026-03-01
 Send a freeform prompt to the AI model. Text is entered interactively and terminated with `---` on its own line.
 
 ```bash
-python main.py heller prompt [options]
+python main.py jh43 prompt [options]
 ```
 
 ### Options
@@ -91,11 +91,11 @@ python main.py heller prompt [options]
 ### Examples
 
 ```bash
-python main.py heller prompt
-python main.py heller prompt -s
-python main.py heller prompt -o response.txt
-python main.py heller prompt -m gpt-4o-mini
-python main.py heller prompt -s --dry-run
+python main.py jh43 prompt
+python main.py jh43 prompt -s
+python main.py jh43 prompt -o response.txt
+python main.py jh43 prompt -m gpt-4o-mini
+python main.py jh43 prompt -s --dry-run
 ```
 
 ---
@@ -105,7 +105,7 @@ python main.py heller prompt -s --dry-run
 Translate a document from one language to another. Installed by the `translation` plugin (bundled) and optionally extended by `translation-ea` for East Asian languages.
 
 ```bash
-python main.py heller translate <language-pair> [options]
+python main.py jh43 translate <language-pair> [options]
 ```
 
 **Language pair format:** `source-target`, e.g. `jp-en`, `zh-en`, `en-jp`.  
@@ -208,17 +208,17 @@ When omitted, all pages are processed.
 ### Examples
 
 ```bash
-python main.py heller translate jp-en -i paper.pdf -o output.pdf
-python main.py heller translate zh-en -i article.docx -o translated.docx
-python main.py heller translate en-jp -i notes.txt -o notes_jp.txt
-python main.py heller translate jp-en -i paper.pdf -w 4           # parallel, 4 workers
-python main.py heller translate jp-en -i paper.pdf -p "1-10"      # first 10 pages only
-python main.py heller translate jp-en -i paper.pdf --scanned      # scanned PDF via vision
-python main.py heller translate jp-en -i spread.jpg --spread      # two-page spread image
-python main.py heller translate zh-en -i doc.docx -o out.docx --preserve-media
-python main.py heller translate jp-en -i paper.pdf --preserve-tables
-python main.py heller translate jp-en -i paper.pdf --dry-run
-python main.py heller translate jp-en -c                          # paste text interactively
+python main.py jh43 translate jp-en -i paper.pdf -o output.pdf
+python main.py jh43 translate zh-en -i article.docx -o translated.docx
+python main.py jh43 translate en-jp -i notes.txt -o notes_jp.txt
+python main.py jh43 translate jp-en -i paper.pdf -w 4           # parallel, 4 workers
+python main.py jh43 translate jp-en -i paper.pdf -p "1-10"      # first 10 pages only
+python main.py jh43 translate jp-en -i paper.pdf --scanned      # scanned PDF via vision
+python main.py jh43 translate jp-en -i spread.jpg --spread      # two-page spread image
+python main.py jh43 translate zh-en -i doc.docx -o out.docx --preserve-media
+python main.py jh43 translate jp-en -i paper.pdf --preserve-tables
+python main.py jh43 translate jp-en -i paper.pdf --dry-run
+python main.py jh43 translate jp-en -c                          # paste text interactively
 ```
 
 ---
@@ -228,7 +228,7 @@ python main.py heller translate jp-en -c                          # paste text i
 Transcribe the text content of an image file (or folder of images) using OCR. Installed by the `transcription` plugin (bundled). The `transcription-ea` extension plugin adds flags for East Asian languages (marked below).
 
 ```bash
-python main.py heller transcribe <language> [options]
+python main.py jh43 transcribe <language> [options]
 ```
 
 **Language:** A single language code, e.g. `en`. Available codes depend on installed plugins.
@@ -255,9 +255,9 @@ python main.py heller transcribe <language> [options]
 ### Examples
 
 ```bash
-python main.py heller transcribe en -i scan.png -o transcription.txt
-python main.py heller transcribe en -i scans/        # folder of images
-python main.py heller transcribe en -i scan.png --dry-run
+python main.py jh43 transcribe en -i scan.png -o transcription.txt
+python main.py jh43 transcribe en -i scans/        # folder of images
+python main.py jh43 transcribe en -i scan.png --dry-run
 ```
 
 ---
@@ -267,7 +267,7 @@ python main.py heller transcribe en -i scan.png --dry-run
 Review the output of a prior transcription for OCR errors. Returns a JSON report. Installed by the `transcription` plugin.
 
 ```bash
-python main.py heller transcription_review <language> [-i <file> | -c] [options]
+python main.py jh43 transcription_review <language> [-i <file> | -c] [options]
 ```
 
 Input is the **text output** of a prior transcription run — not the original image.
@@ -286,9 +286,9 @@ Input is the **text output** of a prior transcription run — not the original i
 ### Examples
 
 ```bash
-python main.py heller transcription_review en -i result.txt
-python main.py heller transcription_review en -c
-python main.py heller transcription_review en -i result.txt -o review.json
+python main.py jh43 transcription_review en -i result.txt
+python main.py jh43 transcription_review en -c
+python main.py jh43 transcription_review en -i result.txt -o review.json
 ```
 
 ---
@@ -313,15 +313,15 @@ These flags are available on all plugin commands (`prompt`, `translate`, `transc
 **Model already in catalog** — use the bare name:
 
 ```bash
-python main.py heller prompt -m gpt-4o
-python main.py heller prompt -m gpt-4o-mini
+python main.py jh43 prompt -m gpt-4o
+python main.py jh43 prompt -m gpt-4o-mini
 ```
 
 **Model not yet in catalog** — prefix with `provider/` to auto-register pricing from PortKey:
 
 ```bash
-python main.py heller prompt -m openai/gpt-4o-new
-python main.py heller prompt -m google/gemini-2.5-pro
+python main.py jh43 prompt -m openai/gpt-4o-new
+python main.py jh43 prompt -m google/gemini-2.5-pro
 ```
 
 Supported auto-registration providers: `openai`, `google`. For all other providers, add the model entry to `src/model_catalog.json` manually.
@@ -332,9 +332,9 @@ shared file, or `settings.local.toml`). The model bypasses the catalog
 entirely and is passed directly to the endpoint:
 
 ```bash
-python main.py heller prompt -m my_cluster:llama-3-70b-instruct
-python main.py heller translate jp-en -i paper.pdf -m my_cluster:llama-3-70b-instruct
-python main.py heller prompt -m cloud_provider:model-name
+python main.py jh43 prompt -m my_cluster:llama-3-70b-instruct
+python main.py jh43 translate jp-en -i paper.pdf -m my_cluster:llama-3-70b-instruct
+python main.py jh43 prompt -m cloud_provider:model-name
 ```
 
 The part before the colon is the `[endpoints.<name>]` table's name; everything
@@ -363,13 +363,13 @@ For non-interactive use, the inline flags `-ns`, `-nu`, and `-nb` set notes dire
 
 ```bash
 # Append a note to the system prompt
-python main.py heller translate jp-en -i paper.pdf -ns "Preserve all footnote markers."
+python main.py jh43 translate jp-en -i paper.pdf -ns "Preserve all footnote markers."
 
 # Append the same note to both prompts
-python main.py heller translate jp-en -i paper.pdf -nb "Academic journal style."
+python main.py jh43 translate jp-en -i paper.pdf -nb "Academic journal style."
 
 # Append different notes to each prompt
-python main.py heller translate jp-en -i paper.pdf \
+python main.py jh43 translate jp-en -i paper.pdf \
     -ns "Use formal register." \
     -nu "Preserve original paragraph breaks."
 ```

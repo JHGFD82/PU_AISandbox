@@ -264,12 +264,18 @@ class TestMonthlyBudgetStatus:
 class TestPathHelpers:
 
     def test_get_usage_data_path_filename(self):
-        path = get_usage_data_path("Heller")
-        assert path.name == "token_usage_heller.json"
+        path = get_usage_data_path("jh43")
+        assert path.name == "token_usage_jh43.json"
 
-    def test_get_usage_data_path_lowercases(self):
-        path = get_usage_data_path("SMITH")
-        assert path.name == "token_usage_smith.json"
+    def test_get_usage_data_path_uses_the_netid_verbatim(self):
+        """No rewriting happens here — that is the point of using netIDs.
+
+        This used to lower-case its argument while the shared-folder helpers
+        ran the same name through a separate make-it-safe step, so one
+        person could be recorded under two names. Capitalisation is folded
+        once, in normalize_netid, before anything reaches these helpers.
+        """
+        assert get_usage_data_path("ab99").name == "token_usage_ab99.json"
 
     def test_get_archive_dir_structure(self):
         path = get_archive_dir("heller")

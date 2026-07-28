@@ -58,6 +58,7 @@ Schema::
 
 from __future__ import annotations
 
+import logging
 import os
 import platform
 import tempfile
@@ -66,6 +67,8 @@ from pathlib import Path
 from typing import Any, Literal, overload
 
 import tomlkit
+
+from .errors import CLIError
 
 _ROOT = Path(__file__).parent.parent
 SETTINGS_PATH = _ROOT / ".settings"
@@ -165,62 +168,85 @@ def get_shared_settings_path() -> Path | None:
 # ---------------------------------------------------------------------------
 
 def get_professors() -> dict[str, dict[str, Any]]:
-    """Return every configured professor, keyed by safe name.
+    """Return everyone configured on this installation, keyed by netID.
 
-    Each value has ``name`` (display name), ``key`` (primary API key),
-    ``backup_key`` (backup API key, or ``None``), and ``safe_name`` (same as
-    the outer key).
+    Each value has ``name`` (display name, for showing to people), ``key``
+    (primary API key), ``backup_key`` (backup API key, or ``None``), and
+    ``netid`` (the same as the outer key, repeated so a single record can be
+    passed around on its own).
+
+    A section whose name isn't a valid netID is skipped with a warning
+    rather than loaded. Everything downstream uses the netID directly as a
+    file and folder name, so letting an arbitrary string through here is
+    what would put a space — or a path separator — into a filename.
     """
+    from .config import (
+        normalize_netid,  # deferred: config.py imports this module too
+    )
+
     doc = _load()
     table = _get_table(doc, "professors")
     if table is None:
         return {}
     result = {}
-    for safe_name, record in table.items():
-        result[safe_name] = {
-            "name": str(record.get("name", safe_name)),
+    for section_name, record in table.items():
+        try:
+            netid = normalize_netid(section_name)
+        except CLIError as e:
+            logging.warning(
+                "Skipping the [professors.%s] section in .settings: %s",
+                section_name, e,
+            )
+            continue
+        result[netid] = {
+            "name": str(record.get("name", netid)),
             "key": str(record["key"]) if record.get("key") else "",
             "backup_key": str(record["backup_key"]) if record.get("backup_key") else None,
-            "safe_name": safe_name,
+            "netid": netid,
         }
     return result
 
 
-def add_professor(name: str, key: str, backup_key: str | None = None) -> str:
-    """Add a new professor's configuration directly to ``.settings``.
+def add_professor(netid: str, name: str, key: str, backup_key: str | None = None) -> str:
+    """Add someone's configuration directly to ``.settings``.
 
     Args:
-        name: The professor's display name (e.g. ``'Jeff Heller'``).
+        netid: Their university netID (e.g. ``'jh43'``). This identifies
+               them everywhere: it selects their API key, names their usage
+               file, and is what gets typed on the command line.
+        name: Their display name (e.g. ``'Jeff Heller'``). Used only for
+              showing to people — in reports, and in the web interface's
+              person picker — so it can be written however reads best.
         key: Their primary API key.
         backup_key: Their backup API key, used automatically if the primary
                     one ever stops working. Optional.
 
     Returns:
-        The safe-filename identifier assigned to this professor (e.g.
-        ``'jeff_heller'``), for use on the command line.
+        The netID, in the lower-case form it was stored under.
 
     Raises:
-        ValueError: If *name* or *key* is blank, or if a professor with this
-                    name is already configured.
+        ValueError: If *name* or *key* is blank, or if this netID is already
+                    configured.
+        CLIError: If *netid* isn't shaped like a netID.
     """
     from .config import (
-        make_safe_filename,  # deferred: config.py imports this module too
+        normalize_netid,  # deferred: config.py imports this module too
     )
 
+    netid = normalize_netid(netid)
     name = name.strip()
     key = key.strip()
     if not name:
-        raise ValueError("Professor name cannot be blank.")
+        raise ValueError("Display name cannot be blank.")
     if not key:
         raise ValueError("Primary API key cannot be blank.")
 
-    safe_name = make_safe_filename(name)
     existing = get_professors()
-    if safe_name in existing:
+    if netid in existing:
         raise ValueError(
-            f"A professor named '{existing[safe_name]['name']}' is already configured "
-            f"(safe name '{safe_name}'). Remove them first if you want to replace them: "
-            f"python main.py env remove-professor {safe_name}"
+            f"The netID '{netid}' is already configured, for "
+            f"{existing[netid]['name']}. Remove them first if you want to "
+            f"replace them: python main.py env remove-professor {netid}"
         )
 
     doc = _load()
@@ -230,12 +256,12 @@ def add_professor(name: str, key: str, backup_key: str | None = None) -> str:
     record["key"] = key
     if backup_key and backup_key.strip():
         record["backup_key"] = backup_key.strip()
-    professors[safe_name] = record
+    professors[netid] = record
     _save(doc)
-    return safe_name
+    return netid
 
 
-def set_professor_key(safe_name: str, key: str) -> None:
+def set_professor_key(netid: str, key: str) -> None:
     """Replace an existing professor's primary API key.
 
     Unlike ``add_professor``, this updates a professor that's already
@@ -243,11 +269,11 @@ def set_professor_key(safe_name: str, key: str) -> None:
     UI's settings page) without having to remove and re-add them first.
 
     Args:
-        safe_name: The professor's safe-filename identifier (e.g. ``'heller'``).
+        netid: The person's university netID (e.g. ``'jh43'``).
         key: The new primary API key.
 
     Raises:
-        ValueError: If *key* is blank, or no professor matches *safe_name*.
+        ValueError: If *key* is blank, or nobody matches *netid*.
     """
     key = key.strip()
     if not key:
@@ -255,31 +281,31 @@ def set_professor_key(safe_name: str, key: str) -> None:
 
     doc = _load()
     professors = _get_table(doc, "professors")
-    if professors is None or safe_name not in professors:
-        raise ValueError(f"No configured professor with safe name '{safe_name}'.")
+    if professors is None or netid not in professors:
+        raise ValueError(f"Nobody is configured with the netID '{netid}'.")
 
-    professors[safe_name]["key"] = key
+    professors[netid]["key"] = key
     _save(doc)
 
 
-def set_professor_backup_key(safe_name: str, backup_key: str | None) -> None:
+def set_professor_backup_key(netid: str, backup_key: str | None) -> None:
     """Replace or clear an existing professor's backup API key.
 
     Args:
-        safe_name: The professor's safe-filename identifier (e.g. ``'heller'``).
+        netid: The person's university netID (e.g. ``'jh43'``).
         backup_key: The new backup API key, or a blank/``None`` value to
                     remove the backup key entirely (the professor then has
                     only a primary key, same as never having set one).
 
     Raises:
-        ValueError: If no professor matches *safe_name*.
+        ValueError: If nobody matches *netid*.
     """
     doc = _load()
     professors = _get_table(doc, "professors")
-    if professors is None or safe_name not in professors:
-        raise ValueError(f"No configured professor with safe name '{safe_name}'.")
+    if professors is None or netid not in professors:
+        raise ValueError(f"Nobody is configured with the netID '{netid}'.")
 
-    record = professors[safe_name]
+    record = professors[netid]
     cleaned = backup_key.strip() if backup_key else ""
     if cleaned:
         record["backup_key"] = cleaned
@@ -314,8 +340,8 @@ def remove_professor(identifier: str) -> str:
 
     doc = _load()
     table = _get_table(doc, "professors")
-    if table is not None and match["safe_name"] in table:
-        del table[match["safe_name"]]
+    if table is not None and match["netid"] in table:
+        del table[match["netid"]]
         _save(doc)
     return match["name"]
 

@@ -11,6 +11,8 @@ import argparse
 import re
 from dataclasses import dataclass
 
+from .errors import CLIError
+
 # Language registry — starts empty; populated by plugins at import time via
 # register_language().  The framework needs this dict and the parser functions
 # here (argparse type= hooks must be importable from src), but the *entries*
@@ -100,29 +102,55 @@ def register_language(code: str, name: str) -> None:
     _PLUGIN_LANGUAGES.add(code)
 
 
-def make_safe_filename(name: str) -> str:
-    """Convert a name to a version that is safe to use inside a file or folder name.
+# A netID is letters and digits, nothing else. Princeton issues them in no
+# single fixed shape — most are a couple of letters followed by a couple of
+# digits, and most are eight characters or fewer, but neither is guaranteed,
+# so neither is enforced here. What *is* enforced is the part the sandbox
+# depends on: a netID contains nothing that means something special to a
+# filesystem, so it can be used as a file or folder name exactly as typed.
+_NETID_RE = re.compile(r"^[a-z0-9]+$")
 
-    Spaces and most special characters are replaced with underscores, consecutive
-    underscores are collapsed to one, and the result is lowercased. This produces
-    a consistent, filesystem-friendly identifier (safe filename) used throughout
-    the project to name token-usage files and archive folders.
 
-    For example: ``'Jeff Heller'`` → ``'jeff_heller'``,
-    ``'Smith & Jones'`` → ``'smith_jones'``.
+def normalize_netid(value: str) -> str:
+    """Check that something looks like a netID and return it in its standard form.
+
+    A netID is the university username a person signs in with — ``jh43``,
+    for example. The sandbox uses it as the one name for a person: it picks
+    the right API key, names their usage file, and labels their spending in
+    reports.
+
+    Capital letters are accepted and folded to lower case, so ``JH43`` and
+    ``jh43`` are the same person rather than two people with separate
+    running totals. Surrounding spaces are ignored, since they are almost
+    always a copy-and-paste artefact.
 
     Args:
-        name: Any string — typically the professor's display name as set in
-              ``.env`` (e.g. ``'Jeff Heller'``).
+        value: The netID as typed, on the command line or in ``.settings``.
 
     Returns:
-        A lowercase string with only letters, digits, hyphens, and underscores
-        (e.g. ``'jeff_heller'``).
+        The netID in lower case, safe to use directly as a file or folder
+        name.
+
+    Raises:
+        CLIError: If it is empty or contains anything other than letters and
+                  digits — a space, a dot, a slash. The message says what was
+                  wrong, because the usual cause is a display name being
+                  entered where a netID was wanted.
     """
-    safe_name = re.sub(r'[^\w\-_\.]', '_', name)
-    safe_name = re.sub(r'_+', '_', safe_name)
-    safe_name = safe_name.strip('_')
-    return safe_name.lower()
+    candidate = value.strip().lower()
+    if not candidate:
+        raise CLIError(
+            "A netID is required, but nothing was given. A netID is the "
+            "university username someone signs in with, such as 'jh43'."
+        )
+    if not _NETID_RE.match(candidate):
+        raise CLIError(
+            f"'{value}' doesn't look like a netID. A netID is the university "
+            "username someone signs in with — letters and digits only, such "
+            "as 'jh43'. If you meant to give a person's full name, that goes "
+            "in the 'name' field instead; the netID is what identifies them."
+        )
+    return candidate
 
 
 def _language_keys_str() -> str:
@@ -214,77 +242,73 @@ def parse_language_code(value: str) -> str | tuple[str, str]:
 
 
 def load_professor_config() -> dict[str, dict[str, str]]:
-    """Read all professor configurations and return them as a lookup table.
+    """Read everyone configured on this installation and return them as a lookup table.
 
-    Reads from ``.settings`` (see ``src/settings_store.py``) rather than
-    environment variables. The lookup table is keyed by the safe-filename
-    form of the professor's name (e.g. ``'heller'``) so it can be matched
-    against command-line input.
+    Reads from ``.settings`` (see ``src/settings_store.py``). The lookup
+    table is keyed by netID — the university username, e.g. ``'jh43'`` —
+    which is also what gets typed on the command line, so a typed name can
+    be looked up here directly.
 
     Returns:
-        A dictionary where each key is the professor's safe-filename
-        identifier (e.g. ``'heller'``) and each value is a sub-dictionary
-        with the keys ``'name'`` (display name), ``'key'`` (primary API key
-        value), ``'backup_key'`` (backup API key value, or ``None``), and
-        ``'safe_name'`` (same as the outer key). Returns an empty dictionary
-        if no professors are configured.
+        A dictionary where each key is a netID and each value is a
+        sub-dictionary with the keys ``'name'`` (display name, for showing
+        to people), ``'key'`` (primary API key value), ``'backup_key'``
+        (backup API key value, or ``None``), and ``'netid'`` (same as the
+        outer key). Returns an empty dictionary if nobody is configured.
     """
     from . import (
-        settings_store,  # deferred: settings_store imports make_safe_filename from here
+        settings_store,  # deferred: settings_store imports normalize_netid from here
     )
     return settings_store.get_professors()
 
 
-def get_api_key(professor_name: str) -> tuple[str, str]:
-    """Look up a professor's API key (the private credential that grants access to the AI service).
+def get_api_key(netid: str) -> tuple[str, str]:
+    """Look up someone's API key (the private credential that grants access to the AI service).
 
-    Tries the professor's primary key first, then falls back to the backup key
-    if the primary is not set. Accepts both the professor's display name
-    (e.g. ``'Heller'``) and the safe-filename form (e.g. ``'heller'``) so
-    either can be typed on the command line.
+    Tries their primary key first, then falls back to the backup key if the
+    primary is not set.
+
+    Looked up by netID only. A display name is *not* accepted, even though
+    it once was: two ways of naming the same person is how one person's
+    spending ended up recorded under two different names, and a netID is
+    already the one identifier the university guarantees is unique.
 
     Args:
-        professor_name: The professor's name or safe-filename identifier as
-                        typed on the command line (e.g. ``'heller'``).
+        netid: The netID as typed on the command line (e.g. ``'jh43'``).
+               Capitalisation doesn't matter.
 
     Returns:
         A two-item tuple of ``(api_key, display_name)`` where ``api_key`` is
         the credential string read from ``.settings`` and ``display_name`` is
-        the professor's full name as configured (e.g. ``'Jeff Heller'``).
+        the person's full name as configured (e.g. ``'Jeff Heller'``), for
+        showing in messages.
 
     Raises:
-        ValueError: If the professor name is not found in the configuration, or
-                    if neither their primary nor backup API key is set.
+        ValueError: If the netID is not configured, or if neither their
+                    primary nor backup API key is set.
+        CLIError: If *netid* isn't shaped like a netID at all.
     """
+    netid = normalize_netid(netid)
     professors = load_professor_config()
 
-    if professor_name in professors:
-        prof_config = professors[professor_name]
-    else:
-        prof_config = None
-        for _, config in professors.items():
-            if config['name'].lower() == professor_name.lower():
-                prof_config = config
-                break
-
-        if prof_config is None:
-            available_names = [config['name'] for config in professors.values()]
-            available_safe = list(professors.keys())
-
-            if available_names:
-                error_msg = (
-                    f"Professor '{professor_name}' not found. Available professors:\n"
-                    f"Full names: {', '.join(available_names)}\n"
-                    f"CLI names: {', '.join(available_safe)}\n\n"
-                    f"To add a new professor: python main.py env add-professor"
-                )
-            else:
-                error_msg = (
-                    "No professors configured yet.\n"
-                    "Add one with: python main.py env add-professor\n"
-                    "(or by hand — see .settings.template for the format)"
-                )
-            raise ValueError(error_msg)
+    prof_config = professors.get(netid)
+    if prof_config is None:
+        if professors:
+            known = ", ".join(
+                f"{n} ({c['name']})" for n, c in sorted(professors.items())
+            )
+            error_msg = (
+                f"No one with the netID '{netid}' is configured.\n"
+                f"Configured netIDs: {known}\n\n"
+                f"To add someone: python main.py env add-professor"
+            )
+        else:
+            error_msg = (
+                "No one is configured yet.\n"
+                "Add someone with: python main.py env add-professor\n"
+                "(or by hand — see .settings.template for the format)"
+            )
+        raise ValueError(error_msg)
 
     primary_key = prof_config.get('key')
     if primary_key:

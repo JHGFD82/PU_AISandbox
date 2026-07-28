@@ -246,13 +246,13 @@ function renderProfessors(data) {
     row.innerHTML = `
       <div class="main">
         <div class="name">${p.name}</div>
-        <div class="sub">${p.safe_name}</div>
+        <div class="sub">${p.netid}</div>
         <details class="manage"><summary>Manage keys</summary>
-          <form class="inline" data-safe-name="${p.safe_name}" data-kind="key">
+          <form class="inline" data-safe-name="${p.netid}" data-kind="key">
             <div><label>Replace primary key</label><input type="password" required></div>
             <button type="submit">Save</button>
           </form>
-          <form class="inline" data-safe-name="${p.safe_name}" data-kind="backup-key">
+          <form class="inline" data-safe-name="${p.netid}" data-kind="backup-key">
             <div><label>Replace backup key (blank clears it)</label><input type="password"></div>
             <button type="submit">Save</button>
           </form>
@@ -260,7 +260,7 @@ function renderProfessors(data) {
       </div>
       <span class="badge ${p.has_key ? 'set' : 'unset'}">${p.has_key ? 'key set' : 'NO KEY'}</span>
       <span class="badge ${p.has_backup_key ? 'set' : 'unset'}">${p.has_backup_key ? 'backup set' : 'no backup'}</span>
-      <button class="danger" data-remove="${p.safe_name}">Remove</button>
+      <button class="danger" data-remove="${p.netid}">Remove</button>
     `;
     list.appendChild(row);
   });

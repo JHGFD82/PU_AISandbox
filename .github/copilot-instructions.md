@@ -72,19 +72,19 @@ python main.py --help
 python main.py --list-models
 
 # Usage / reporting
-python main.py heller usage report              # Current month + budget status
-python main.py heller usage report --all-time   # Above + all-time totals
-python main.py heller usage report 2025-07      # Report for a specific archived month
-python main.py heller usage months              # List all archived month files
-python main.py heller usage daily               # Today's usage
-python main.py heller usage daily 2026-03-01    # Specific date
+python main.py jh43 usage report              # Current month + budget status
+python main.py jh43 usage report --all-time   # Above + all-time totals
+python main.py jh43 usage report 2025-07      # Report for a specific archived month
+python main.py jh43 usage months              # List all archived month files
+python main.py jh43 usage daily               # Today's usage
+python main.py jh43 usage daily 2026-03-01    # Specific date
 
 # Custom prompts (fully interactive — text entered at runtime, end with ---)
-python main.py heller prompt                    # User prompt only
-python main.py heller prompt -s                 # System prompt first, then user prompt
-python main.py heller prompt -o response.txt    # Save response to file
-python main.py heller prompt -m gpt-4o-mini     # Use specific model
-python main.py heller prompt -s --dry-run       # Preview prompts without API call
+python main.py jh43 prompt                    # User prompt only
+python main.py jh43 prompt -s                 # System prompt first, then user prompt
+python main.py jh43 prompt -o response.txt    # Save response to file
+python main.py jh43 prompt -m gpt-4o-mini     # Use specific model
+python main.py jh43 prompt -s --dry-run       # Preview prompts without API call
 ```
 
 For translate, transcribe, and transcription_review command examples, see the README in each plugin repo.
