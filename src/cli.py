@@ -613,7 +613,15 @@ def _ensure_set_up(args: argparse.Namespace) -> None:
 
     from .runtime.setup_prompts import run_interactive_setup
     run_interactive_setup()
-    print()
+
+    # Stop here rather than carrying on with the command that triggered
+    # this. Several modules work out where the settings and preferences
+    # files are when they are first imported, which happened before setup
+    # ran and moved them — so continuing now would read the old locations
+    # and quietly fall back to defaults. Starting again is one keystroke
+    # and always right.
+    print("\nSetup is done — run your command again and it will work.")
+    raise SystemExit(0)
 
 
 def main() -> None:

@@ -1,0 +1,22 @@
+# preferences.toml — your own adjustments to how the sandbox behaves.
+#
+# Everything in here is optional. Delete this file and the sandbox works
+# exactly as it did; every setting has a sensible default already.
+#
+# The full list of what can be adjusted, with the default for each and an
+# explanation of what it does, is in settings.default.toml inside the
+# sandbox folder. Copy any line from there into this file to change it.
+# Deliberately not repeated here — one list that is always right beats two
+# that drift apart.
+#
+# Anything you put here wins over the defaults and over any shared settings
+# file, and it survives replacing the sandbox with a newer version.
+#
+# A couple of examples, commented out:
+
+# [retry]
+# max_retries = 3            # How many times to retry a failed API call
+# retry_delay_seconds = 5.0  # How long to wait between those attempts
+
+# [output]
+# default_font_size = 11     # Body text size in PDF and Word output

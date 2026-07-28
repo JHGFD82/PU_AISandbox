@@ -23,7 +23,7 @@ Editing it programmatically (via the `settings` command below) is safe specifica
 ### Setup
 
 ```bash
-cp templates/settings.template settings.toml
+python main.py settings setup
 ```
 
 Then either hand-edit `settings.toml`, or use the `settings` command below to add your first professor.
@@ -103,7 +103,7 @@ All of these are optional — leaving them unset falls back to documented defaul
 ### Setup
 
 ```bash
-cp templates/model_catalog.template.json src/model_catalog.json
+python main.py settings setup
 ```
 
 This file is git-ignored so each installation can maintain its own model list and pricing without conflicting with other users. It's kept as its own file rather than folded into `settings.toml` for a practical reason: the package updates it on its own (auto-registering pricing the first time you use `-m provider/model-name`), and that kind of frequent, automatic write is exactly the kind of thing that causes conflicts if it ever ends up in a synced or shared file. Runtime settings and shared defaults change rarely enough that sharing them is safe; model pricing can change every time someone tries a new model.
@@ -476,18 +476,20 @@ Every "✅ `/settings` page" row above is served by the webui plugin's `/setting
 ## First-Run Checklist
 
 ```bash
-# 1. Copy and populate settings.toml
-cp templates/settings.template settings.toml
-python main.py settings add-professor   # or hand-edit settings.toml — see the Format section above
+# 1. Choose where your own files live, and create them.
+#    Creates settings.toml, model_catalog.json and preferences.toml
+#    in the folder you pick. Nothing to copy by hand.
+python main.py settings setup
 
-# 2. Copy the model catalog
-cp templates/model_catalog.template.json src/model_catalog.json
-# edit src/model_catalog.json if needed (pricing, defaults)
+# 2. Add whoever will be using it (prompts for netID, name and keys)
+python main.py settings add-professor
 
 # 3. Verify everything
-python main.py --show-config    # checks professor setup (no API call)
-python main.py --list-models    # checks model catalog
+python main.py --show-config    # checks who is configured (no API call)
+python main.py --list-models    # checks the model catalogue
 ```
+
+Setup runs on its own the first time you use an un-set-up copy of the sandbox, so you can also just run whatever command you wanted and answer its questions.
 
 ## Migrating an Existing Installation
 

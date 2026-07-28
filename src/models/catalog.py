@@ -114,12 +114,11 @@ def load_model_catalog() -> Dict[str, Any]:
         from ..paths import template_path
         template_file = template_path("model_catalog.template.json")
         error_msg = (
-            f"Model catalog file not found at {catalog_file}. "
-            "Copy the template to get started:\n"
-            f"  cp {template_file} {catalog_file}\n"
-            f"Then edit {catalog_file} to configure your models, "
-            "or use 'openai/model-name' or 'provider/model-name' with -m to "
-            "auto-register models on first use."
+            f"No model catalogue found at {catalog_file}.\n"
+            "Setup creates this for you — run it once:\n"
+            "  python main.py settings setup\n"
+            f"(The starting point it copies from is {template_file}, if you "
+            "would rather put it there yourself.)"
         )
         logging.error(error_msg)
         raise FileNotFoundError(error_msg)

@@ -52,6 +52,13 @@ For deeper documentation, see the `docs/` folder:
 
 ## First-Run Setup
 
+### 0. Get the sandbox
+
+```bash
+git clone https://github.com/JHGFD82/PU_AISandbox.git
+cd PU_AISandbox
+```
+
 ### 1. Create a virtual environment and install dependencies
 
 **You need Python 3.11 or newer.** Check what you have with `python3 --version`. If it's older, install a newer Python from [python.org](https://www.python.org/downloads/) (or `brew install python@3.11` on a Mac with Homebrew) and use that in place of `python3` below. The sandbox checks this at startup and will tell you if it's a problem, so you don't have to get it right first time.
@@ -68,16 +75,23 @@ If you plan to *change* the code rather than just use it, also install the devel
 pip install -r requirements-dev.txt
 ```
 
-### 2. Configure professors
+### 2. Set up your files, and add the first person
 
-Copy the template, then add your first professor with the built-in `settings` command (it prompts for the name and keys, keys hidden at entry):
+Run this once. It asks where to keep your own files — your API keys, usage history and saved conversations — and creates them for you:
 
 ```bash
-cp templates/settings.template settings.toml
+python main.py settings setup
+```
+
+The default is a folder called `PU_AISandbox_data` in your home folder. Keeping it *outside* this sandbox folder is what lets you replace the sandbox with a newer version later without losing anything (see [Upgrading](#upgrading) below).
+
+Then add whoever will be using it. It prompts for their netID, display name and API keys — the keys are typed hidden, never as a command-line flag:
+
+```bash
 python main.py settings add-professor
 ```
 
-Or hand-edit `settings.toml` directly — add one table per professor:
+You never need to copy any file by hand; setup does it. If you would rather write the settings yourself, the file lives in the folder setup created and looks like this:
 
 ```toml
 [professors.jh43]
@@ -101,15 +115,11 @@ Verify configuration (no API call made):
 python main.py --show-config
 ```
 
-### 3. Set up the model catalog
+### 3. Models and pricing
 
-The catalog (`src/model_catalog.json`) is not tracked by git. Copy the template:
+Setup already created your model catalogue, so there is nothing to do here.
 
-```bash
-cp templates/model_catalog.template.json src/model_catalog.json
-```
-
-For OpenAI or Google models, pricing is fetched automatically on first use — no manual edits needed. For all other providers, add entries directly to `src/model_catalog.json` following the template schema. See [`docs/configuration.md`](docs/configuration.md) for the full schema.
+For OpenAI or Google models, pricing is fetched automatically the first time you use one. For other providers, add entries to `model_catalog.json` in the folder setup created. See [`docs/configuration.md`](docs/configuration.md) for the full schema.
 
 ### 4. Install optional plugins
 
@@ -130,6 +140,39 @@ Each EA plugin repo has its own README with command-specific setup and usage exa
 python main.py --help          # lists all loaded commands
 python main.py --list-models   # shows catalog models with pricing
 ```
+
+---
+
+## Upgrading
+
+Your API keys, usage history and saved conversations live **outside** this folder — in the folder you chose during setup, `PU_AISandbox_data` in your home folder unless you picked somewhere else. That is deliberate: it means getting a newer version can never take them with it.
+
+If you installed with `git clone`, the tidiest way is:
+
+```bash
+cd PU_AISandbox
+git pull
+```
+
+If you would rather start from a clean copy — or you downloaded a ZIP rather than cloning — that is equally safe:
+
+1. Delete the whole `PU_AISandbox` folder.
+2. Get a fresh one (clone or download again).
+3. Set up its environment as in step 1 above.
+4. Run any command. The sandbox will notice it hasn't been set up, find your existing files, and ask you to confirm:
+
+```
+Found your files already at /Users/you/PU_AISandbox_data:
+    your settings and API keys   (2 people configured)
+    your model catalogue
+    your usage history           (11 months)
+
+Use these? [Y/n]
+```
+
+Press Enter and you're done — nothing to copy, nothing to re-enter.
+
+> **Upgrading from a version before this change?** If your files are still inside the sandbox folder, setup notices that too and offers to move them out first, so this is the last time you have to think about it. Nothing is deleted.
 
 ---
 
@@ -272,7 +315,9 @@ Prices are per 1,000,000 tokens (default `pricing_unit`). Set `"supports_vision"
 
 ## Runtime Settings
 
-`settings.default.toml` at the repo root controls defaults without touching code. Create `settings.local.toml` (git-ignored) to override individual keys for your machine only; one person can also share a settings file (pointed to via `settings.toml`'s `shared_settings.path`) that sits between the two. See [`docs/configuration.md`](docs/configuration.md#local-overrides) for how the three layers merge.
+`settings.default.toml` in the sandbox folder holds the defaults for everything below. To change any of them, put just the lines you want to change into `preferences.toml` in your own files folder — setup creates it for you, already commented with examples. Because it lives outside the sandbox folder, your adjustments survive upgrading.
+
+A group can also share a settings file between installations, sitting between the two (pointed at by `shared_settings.path` in `settings.toml`). See [`docs/configuration.md`](docs/configuration.md#local-overrides) for how the layers merge.
 
 | Section | Key | Default | Effect |
 |---------|-----|---------|--------|

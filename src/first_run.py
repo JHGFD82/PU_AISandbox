@@ -175,6 +175,12 @@ def initialize_extras(path: Path) -> list[str]:
         settings_file.chmod(0o600)
         copied.append(paths.SETTINGS_FILENAME)
 
+    prefs_template = paths.template_path("preferences.template.toml")
+    prefs = path / paths.PREFERENCES_FILENAME
+    if prefs_template.is_file() and not prefs.exists():
+        shutil.copyfile(prefs_template, prefs)
+        copied.append(paths.PREFERENCES_FILENAME)
+
     catalog_template = paths.template_path("model_catalog.template.json")
     catalog = path / paths.MODEL_CATALOG_FILENAME
     if catalog_template.is_file() and not catalog.exists():
@@ -223,6 +229,17 @@ def move_out_of_package(destination: Path) -> list[str]:
         if catalog_src.is_file() and not catalog_dest.exists():
             shutil.move(str(catalog_src), str(catalog_dest))
             moved.append(paths.MODEL_CATALOG_FILENAME)
+            break
+
+    # settings.local.toml was what preferences.toml used to be called.
+    prefs_dest = destination / paths.PREFERENCES_FILENAME
+    for prefs_src in (
+        paths.PACKAGE_ROOT / paths.PREFERENCES_FILENAME,
+        paths.PACKAGE_ROOT / "settings.local.toml",
+    ):
+        if prefs_src.is_file() and not prefs_dest.exists():
+            shutil.move(str(prefs_src), str(prefs_dest))
+            moved.append(f"{paths.PREFERENCES_FILENAME} (your own adjustments)")
             break
 
     data_src = paths.PACKAGE_ROOT / paths.DATA_DIRNAME

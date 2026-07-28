@@ -89,7 +89,7 @@ Files grow only within a month, then are archived and replaced. No single file a
 Copy the tracked template on first install:
 
 ```bash
-cp templates/model_catalog.template.json src/model_catalog.json
+python main.py settings setup
 ```
 
 See [`configuration.md`](configuration.md) for the full schema and customization options.
@@ -202,7 +202,7 @@ Daily Breakdown:
 
 1. Confirm `src/model_catalog.json` exists — copy from the template if needed:
    ```bash
-   cp templates/model_catalog.template.json src/model_catalog.json
+   python main.py settings setup
    ```
 2. Validate the JSON (no syntax errors)
 3. Confirm the file contains both a `"config"` section and a non-empty `"models"` section
@@ -217,7 +217,7 @@ Daily Breakdown:
 
 | Message | Fix |
 |---------|-----|
-| `Model catalog file not found` | `cp templates/model_catalog.template.json src/model_catalog.json` |
+| `Model catalog file not found` | `python main.py settings setup` |
 | `Invalid JSON in model catalog file` | Fix syntax errors in `src/model_catalog.json` |
 | `Missing required 'models' section` | Add a `"models"` key to the catalog |
 | `No models configured` | Add at least one model entry to `"models"` |

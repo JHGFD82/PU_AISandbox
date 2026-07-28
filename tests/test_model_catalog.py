@@ -477,10 +477,18 @@ class TestLoadModelCatalogMissingFileError:
             from src.models.catalog import load_model_catalog as lmc
             lmc()
 
-    def test_missing_file_error_mentions_openai_google(self, monkeypatch, tmp_path):
+    def test_missing_file_error_names_the_one_command_that_fixes_it(self, monkeypatch, tmp_path):
+        """Setup creates the catalogue, so that is the whole answer.
+
+        This used to also suggest passing 'openai/model-name' to -m to
+        auto-register a model. That advice is unusable at this exact moment:
+        auto-registering writes *into* the catalogue, which is the thing
+        that isn't there. Offering someone a second option that cannot work
+        makes the first one harder to find.
+        """
         missing = tmp_path / "model_catalog.json"
         monkeypatch.setattr(catalog_module, "get_model_catalog_path", lambda: missing)
-        with pytest.raises(FileNotFoundError, match="openai/model-name"):
+        with pytest.raises(FileNotFoundError, match="settings setup"):
             from src.models.catalog import load_model_catalog as lmc
             lmc()
 

@@ -17,7 +17,7 @@ settings it wants to change):
    hand-editing their own copy. Absent by default; nothing changes unless
    this is set. A common case: one person manages several professors'
    installations and wants them all to use the same tuned settings.
-3. ``settings.local.toml`` — this machine's personal overrides, git-ignored.
+3. ``preferences.toml`` in the extras folder — this person's own
    Still the last word: even with a shared file in play, a setting
    placed here wins, so one person can override just their own quirk
    without touching the file everyone else reads.
@@ -35,12 +35,12 @@ from pathlib import Path
 
 import tomllib
 
-from . import settings_store
+from . import paths, settings_store
 from .config import register_setting
 
 _ROOT = Path(__file__).parent.parent  # src/ -> repo root
 _TOML_PATH = _ROOT / "settings.default.toml"
-_LOCAL_TOML_PATH = _ROOT / "settings.local.toml"
+_PREFERENCES_PATH = paths.preferences_path()
 
 register_setting(
     "shared_settings.path",
@@ -89,9 +89,9 @@ if _shared_settings_path:
             "there — shared settings were not applied."
         )
 
-# Layer 3: settings.local.toml — this machine's personal overrides, still the last word.
-if _LOCAL_TOML_PATH.exists():
-    _merge_layer(_s, _LOCAL_TOML_PATH)
+# Layer 3: preferences.toml — this person's own adjustments, still the last word.
+if _PREFERENCES_PATH.exists():
+    _merge_layer(_s, _PREFERENCES_PATH)
 
 # ── Custom prompt ──────────────────────────────────────────────────────────────
 DEFAULT_SYSTEM_PROMPT: str = _s["prompt"]["default_system_prompt"]

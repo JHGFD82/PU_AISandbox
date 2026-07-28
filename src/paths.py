@@ -58,6 +58,13 @@ TEMPLATES_DIR = PACKAGE_ROOT / "templates"
 # would undercut the reason for choosing a visible location at all.
 SETTINGS_FILENAME = "settings.toml"
 MODEL_CATALOG_FILENAME = "model_catalog.json"
+
+# Optional adjustments to how the sandbox behaves — retry counts, font
+# sizes, worker limits. Named "preferences" rather than "settings.local"
+# because everything in the extras folder is local, and two files called
+# settings*.toml sitting next to each other tell a reader nothing about
+# which is which.
+PREFERENCES_FILENAME = "preferences.toml"
 DATA_DIRNAME = "data"
 
 
@@ -130,6 +137,15 @@ def model_catalog_path() -> Path:
     if not is_installed():
         return PACKAGE_ROOT / "src" / MODEL_CATALOG_FILENAME
     return extras_root() / MODEL_CATALOG_FILENAME
+
+
+def preferences_path() -> Path:
+    """Return the file holding optional adjustments to how the sandbox behaves.
+
+    Absent is a perfectly normal state: every setting it can carry has a
+    default already.
+    """
+    return extras_root() / PREFERENCES_FILENAME
 
 
 def template_path(name: str) -> Path:
