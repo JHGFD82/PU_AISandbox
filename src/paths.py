@@ -36,7 +36,6 @@ to the cloud also syncs the API keys in it. See ``describe_cloud_sync()``.
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 # The package directory — where the code lives. src/paths.py -> repo root.
@@ -45,10 +44,6 @@ PACKAGE_ROOT = Path(__file__).resolve().parent.parent
 # The marker file, inside the package, naming the extras folder. Git-ignored:
 # it describes one installation and must never travel to another.
 INSTALL_MARKER = PACKAGE_ROOT / ".installation"
-
-# Overrides everything, for tests and for anyone running more than one
-# installation side by side.
-EXTRAS_ENV_VAR = "PU_SANDBOX_EXTRAS"
 
 # Where setup offers to put the extras folder if the person doesn't choose.
 DEFAULT_EXTRAS_ROOT = Path.home() / "PU_AISandbox_data"
@@ -86,24 +81,26 @@ def is_installed() -> bool:
     """Return whether this package has been set up yet.
 
     ``False`` means a fresh package — first-time install or upgrade — and is
-    what triggers the setup flow. An override in the environment counts as
-    set up, since it says where everything is.
+    what triggers the setup flow.
     """
-    return bool(os.environ.get(EXTRAS_ENV_VAR)) or read_install_marker() is not None
+    return read_install_marker() is not None
 
 
 def extras_root() -> Path:
     """Return the folder holding this person's settings, catalog and data.
 
-    Checked in order: an override in the environment, then the marker file,
-    then — for an installation that predates all of this — the package
-    directory itself, which is where everything used to live. That last
-    fallback keeps an un-migrated installation working instead of behaving
-    as though its data had vanished.
+    The marker file if this package has been set up, otherwise — for an
+    installation that predates all of this — the package directory itself,
+    which is where everything used to live. That fallback keeps an
+    un-migrated installation working instead of behaving as though its data
+    had vanished.
+
+    Deliberately the only two answers. An environment variable was
+    considered and removed: the marker already lets two checkouts point at
+    two different folders, and invisible state is exactly what makes "my
+    history is empty" unanswerable — the command line and the web interface
+    are started from different places, so only one of them would see it.
     """
-    override = os.environ.get(EXTRAS_ENV_VAR)
-    if override:
-        return Path(override).expanduser()
     recorded = read_install_marker()
     if recorded is not None:
         return recorded

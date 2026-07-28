@@ -15,9 +15,8 @@ from src import paths
 
 @pytest.fixture(autouse=True)
 def _isolate(tmp_path, monkeypatch):
-    """Point the marker file and the environment override somewhere disposable."""
+    """Point the marker file somewhere disposable."""
     monkeypatch.setattr(paths, "INSTALL_MARKER", tmp_path / ".installation")
-    monkeypatch.delenv(paths.EXTRAS_ENV_VAR, raising=False)
 
 
 class TestInstallMarker:
@@ -47,13 +46,19 @@ class TestInstallMarker:
 
 
 class TestResolution:
-    def test_environment_override_wins(self, tmp_path, monkeypatch):
-        paths.write_install_marker(tmp_path / "from_marker")
-        monkeypatch.setenv(paths.EXTRAS_ENV_VAR, str(tmp_path / "from_env"))
-        assert paths.extras_root() == tmp_path / "from_env"
-        assert paths.is_installed() is True
+    def test_marker_is_the_only_thing_that_decides(self, tmp_path, monkeypatch):
+        """No environment variable, deliberately.
 
-    def test_marker_used_when_no_override(self, tmp_path):
+        Two checkouts already point at two different folders because each
+        has its own marker. An environment variable would only add invisible
+        state that the command line sees and a web interface started from a
+        desktop shortcut doesn't.
+        """
+        monkeypatch.setenv("PU_SANDBOX_EXTRAS", str(tmp_path / "ignored"))
+        paths.write_install_marker(tmp_path / "chosen")
+        assert paths.extras_root() == tmp_path / "chosen"
+
+    def test_marker_used_when_set(self, tmp_path):
         paths.write_install_marker(tmp_path / "chosen")
         assert paths.extras_root() == tmp_path / "chosen"
 
