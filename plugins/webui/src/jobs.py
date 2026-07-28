@@ -33,6 +33,7 @@ interrupted work is the same page-range field every job form already has
 from __future__ import annotations
 
 import logging
+import os
 import sys
 import threading
 import uuid
@@ -120,6 +121,50 @@ def job_output_dir(professor: str, job_id: str, base_dir: Optional[Path] = None)
     d = base / professor / "_job_outputs" / job_id
     d.mkdir(parents=True, exist_ok=True)
     return d
+
+
+def resolve_output_path(
+    netid: str, job_id: str, output_filename: Optional[str],
+    stored_path: Optional[str] = None,
+) -> Optional[Path]:
+    """Work out where a finished job's output file is *now*.
+
+    Rebuilt from three things that don't move — whose data it is, which job
+    produced it, and what the file is called — rather than read back from a
+    path recorded when the job ran.
+
+    An absolute path is a fact about one machine at one moment. It stops
+    being true when the folder is renamed, the data folder is moved, the
+    repository is re-cloned somewhere else, or a backup is restored to a
+    different place. Renaming people to netIDs broke every stored path at
+    once, which is how this was found; moving the data folder would have
+    done it again.
+
+    Rebuilding also makes the result *safe by construction*: the path can
+    only ever land inside this person's job-output directory, because that
+    is the only thing it is built from. Serving a path read out of a file
+    means serving whatever that file happens to say.
+
+    Args:
+        netid: Whose data this is. Callers get this from a validated
+               source, never straight from a request.
+        job_id: The job that produced the file.
+        output_filename: The file's name, as recorded on the job result.
+        stored_path: The old recorded absolute path, used only when
+                     *output_filename* is missing — records written before
+                     filenames were kept have nothing else to go on.
+
+    Returns:
+        The path to the file, or ``None`` if there is nothing to point at.
+        Existence is *not* checked; the caller decides what a missing file
+        means.
+    """
+    if output_filename:
+        # basename() because the filename is echoed from the plugin that
+        # produced it. Everything else here is trusted, so this is the only
+        # component that could carry a path separator.
+        return job_output_dir(netid, job_id) / os.path.basename(output_filename)
+    return Path(stored_path) if stored_path else None
 
 
 @dataclass

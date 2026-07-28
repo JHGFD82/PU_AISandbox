@@ -898,9 +898,19 @@ def create_app() -> FastAPI:
         match = next(
             (m for m in conv.messages if m.kind == "job_result" and m.job_id == job_id), None
         )
-        if match is None or not match.output_path or not os.path.exists(match.output_path):
+        if match is None:
             raise HTTPException(404, "Job output not found.")
-        return FileResponse(match.output_path, filename=match.output_filename)
+        # Rebuilt from the netID, job id and filename rather than read back
+        # from the path recorded when the job ran — see resolve_output_path().
+        # That path stops being true whenever the data folder moves, and
+        # rebuilding also means the result can only ever land inside this
+        # person's own job-output directory.
+        path = jobs.resolve_output_path(
+            professor, job_id, match.output_filename, match.output_path,
+        )
+        if path is None or not path.exists():
+            raise HTTPException(404, "Job output not found.")
+        return FileResponse(str(path), filename=match.output_filename)
 
     @app.post("/api/chat")
     async def api_chat(request: Request, body: ChatBody):

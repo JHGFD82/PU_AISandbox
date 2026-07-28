@@ -6,6 +6,7 @@ See docs/webui-plugin-plan.md section 10.
 
 from __future__ import annotations
 
+import pathlib
 import sys
 import time
 
@@ -221,6 +222,55 @@ class TestJobOutputDir:
         assert d.exists()
         assert d.is_dir()
         assert d == tmp_path / "jh43" / "_job_outputs" / "job_1"
+
+
+class TestResolveOutputPath:
+    """Where a job's output is, worked out fresh rather than remembered.
+
+    The path recorded when a job ran is a fact about one machine at one
+    moment. Renaming people to netIDs invalidated every one of them at
+    once; moving the data folder would do it again. Rebuilding from the
+    netID, job id and filename survives both.
+    """
+
+    def test_rebuilds_from_netid_job_and_filename(self, tmp_path):
+        got = jobs.resolve_output_path("jh43", "job_1", "translated.pdf")
+        assert got == tmp_path / "conversations" / "jh43" / "_job_outputs" / "job_1" / "translated.pdf"
+
+    def test_ignores_a_stale_stored_path(self):
+        """The whole point: the stored path is wrong, and is not consulted."""
+        got = jobs.resolve_output_path(
+            "jh43", "job_1", "translated.pdf",
+            stored_path="/somewhere/that/moved/heller/_job_outputs/job_1/translated.pdf",
+        )
+        assert got is not None
+        assert got.name == "translated.pdf"
+        assert "heller" not in str(got)
+        assert "jh43" in str(got)
+
+    def test_survives_the_data_folder_moving(self, tmp_path, monkeypatch):
+        """Relocating the data folder must not break an existing download."""
+        first = jobs.resolve_output_path("jh43", "job_1", "out.pdf")
+        monkeypatch.setattr(jobs, "_CONVERSATIONS_DIR", tmp_path / "moved" / "conversations")
+        second = jobs.resolve_output_path("jh43", "job_1", "out.pdf")
+        assert first != second
+        assert second is not None and second.parts[-4:] == ("jh43", "_job_outputs", "job_1", "out.pdf")
+
+    def test_falls_back_to_the_stored_path_when_no_filename(self):
+        """Records written before filenames were kept have nothing else to go on."""
+        got = jobs.resolve_output_path("jh43", "job_1", None, stored_path="/old/place/file.txt")
+        assert got == pathlib.Path("/old/place/file.txt")
+
+    def test_returns_none_when_there_is_nothing_to_point_at(self):
+        assert jobs.resolve_output_path("jh43", "job_1", None, None) is None
+
+    def test_a_filename_cannot_escape_the_job_directory(self, tmp_path):
+        """The filename is echoed from the plugin, so it is the one untrusted part."""
+        got = jobs.resolve_output_path("jh43", "job_1", "../../../../escaped.pdf")
+        assert got is not None
+        expected_dir = tmp_path / "conversations" / "jh43" / "_job_outputs" / "job_1"
+        assert got.parent == expected_dir
+        assert got.name == "escaped.pdf"
 
 
 class TestDiscardOutputDirIfEmpty:

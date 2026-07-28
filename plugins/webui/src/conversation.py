@@ -113,12 +113,23 @@ class Message:
                 an ordinary chat message.
         output_filename: For a ``'job_result'`` message, the filename to
                          show and offer for download. ``None`` otherwise.
-        output_path: For a ``'job_result'`` message, the absolute
-                     server-side path to the finished file. Never sent back
-                     to the browser as something to act on directly — the
-                     download endpoint looks this up server-side by
-                     ``job_id`` rather than trusting a client-supplied path.
-                     ``None`` otherwise.
+        output_path: For a ``'job_result'`` message, where the finished file
+                     was written, as an absolute server-side path.
+
+                     **Kept for older conversations; not the way to find the
+                     file.** An absolute path is a fact about one machine at
+                     one moment, recorded permanently — it stops being true
+                     the moment the folder is renamed, the data is moved, or
+                     the same conversation is opened from a different
+                     checkout. Renaming people to netIDs broke every one of
+                     these at once, which is how the problem was found.
+
+                     Use ``resolve_output_path()`` instead: it rebuilds the
+                     location from the netID, the job id and
+                     ``output_filename``, none of which move, and falls back
+                     to this field only for records written before that
+                     existed. Never sent back to the browser as something to
+                     act on directly.
         progress_done: For a ``'job_progress'`` message, how many units of
                        work (pages, images) had finished as of this ping.
                        Kept as a separate number rather than only baked into
