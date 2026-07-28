@@ -215,12 +215,17 @@ def _build_usage_sources_subparser(usage_subparsers: argparse._SubParsersAction)
     sources_remove.add_argument('label', type=str, help='The label of the source to remove (see: usage sources list)')
 
 
-def _build_env_subparser(subparsers: argparse._SubParsersAction) -> None:
-    """Register the 'env' command: add/remove professors and manage optional .settings values.
+def _build_settings_subparser(subparsers: argparse._SubParsersAction) -> None:
+    """Register the 'settings' command: add/remove people and manage optional .settings values.
 
-    Unlike every other built-in command, 'env' never requires a professor
-    name on the command line — you need it precisely when no professor
-    exists yet (adding the first one). See
+    Named after the file it edits. It was called 'env' until 2026-07, after
+    the file it edited had already been replaced: there is no .env any more,
+    so the name pointed at nothing and quietly suggested that environment
+    variables were involved somewhere.
+
+    Unlike every other built-in command, 'settings' never requires a person's
+    netID on the command line — you need it precisely when nobody is
+    configured yet (adding the first person). See
     ``_insert_professor_placeholder_if_needed()`` and ``_dispatch()`` below
     for how that exception is wired in, the same way an individual plugin
     can opt out via ``requires_professor = False``.
@@ -229,13 +234,15 @@ def _build_env_subparser(subparsers: argparse._SubParsersAction) -> None:
     command handler, never accepted as a flag — so they never end up in
     shell history or a process listing.
     """
-    env_parser = subparsers.add_parser(
-        'env', help="Add/remove professors and manage optional .settings values"
+    settings_parser = subparsers.add_parser(
+        'settings', help="Add/remove people and manage optional .settings values"
     )
-    _add_debug_flags(env_parser)
-    env_sub = env_parser.add_subparsers(dest='env_subcommand', help='env subcommand')
+    _add_debug_flags(settings_parser)
+    settings_sub = settings_parser.add_subparsers(
+        dest='settings_subcommand', help='settings subcommand',
+    )
 
-    add_prof = env_sub.add_parser(
+    add_prof = settings_sub.add_parser(
         'add-professor',
         help='Add a new professor (prompts interactively for anything not passed as a flag)',
     )
@@ -249,19 +256,19 @@ def _build_env_subparser(subparsers: argparse._SubParsersAction) -> None:
         help="Their display name, shown in reports and the web interface, e.g. 'Jeff Heller'",
     )
 
-    remove_prof = env_sub.add_parser('remove-professor', help='Remove a configured professor')
+    remove_prof = settings_sub.add_parser('remove-professor', help='Remove a configured professor')
     _add_debug_flags(remove_prof)
     remove_prof.add_argument(
         'identifier', type=str,
         help='netID or display name of the person to remove (see: --show-config)',
     )
 
-    list_parser = env_sub.add_parser(
+    list_parser = settings_sub.add_parser(
         'list', help='List optional .settings values and whether each is currently set',
     )
     _add_debug_flags(list_parser)
 
-    set_parser = env_sub.add_parser(
+    set_parser = settings_sub.add_parser(
         'set',
         help='Set an optional .settings value (prompts for it; hidden input for secrets)',
     )
@@ -275,7 +282,7 @@ def _build_env_subparser(subparsers: argparse._SubParsersAction) -> None:
         help='Auto-generate a random value instead of prompting (secrets only)',
     )
 
-    unset_parser = env_sub.add_parser('unset', help='Remove an optional .settings value')
+    unset_parser = settings_sub.add_parser('unset', help='Remove an optional .settings value')
     _add_debug_flags(unset_parser)
     unset_parser.add_argument('key', type=str, help='The variable to remove')
 
@@ -367,7 +374,7 @@ Run 'python main.py <professor> <command> --help' for plugin-specific usage.
     subparsers = parser.add_subparsers(dest='command', help='Command to execute')
 
     _build_usage_subparser(subparsers)
-    _build_env_subparser(subparsers)
+    _build_settings_subparser(subparsers)
 
     # translate, transcribe, transcription_review, and prompt are all registered
     # by their respective plugins in plugins/.
@@ -386,10 +393,10 @@ def _available_commands_hint(plugins: dict[str, ModePlugin]) -> str:
         "  usage report [YYYY-MM] [--all-time]  Token usage report",
         "  usage months                         List archived month files",
         "  usage daily [YYYY-MM-DD]             Daily usage",
-        "  env add-professor                    Add a new professor (no professor name needed first)",
-        "  env remove-professor <identifier>    Remove a configured professor",
-        "  env list                             List optional .settings values and their status",
-        "  env set <path> / env unset <path>     Set or remove an optional .settings value",
+        "  settings add-professor                  Add someone (no netID needed first)",
+        "  settings remove-professor <identifier>  Remove someone configured",
+        "  settings list                           List optional .settings values and their status",
+        "  settings set <path> / settings unset <path>   Set or remove an optional .settings value",
     ]
     if plugins:
         lines.append("\nPlugin commands: " + ", ".join(sorted(plugins)))
@@ -397,7 +404,7 @@ def _available_commands_hint(plugins: dict[str, ModePlugin]) -> str:
 
 
 def _run_info_command(args: argparse.Namespace) -> None:
-    """Run a reporting command (``--show-config``, ``usage``, ``env``) and confirm it ran.
+    """Run a reporting command (``--show-config``, ``usage``, ``settings``) and confirm it ran.
 
     ``handle_info_commands()`` reports whether it recognised the command,
     and that answer was previously thrown away at both call sites. It can
@@ -429,7 +436,7 @@ def _dispatch(args: argparse.Namespace, plugins: dict[str, ModePlugin]) -> None:
     those don't require a professor name. Otherwise, confirms that both a
     professor name and a command were supplied before routing to the ``usage``
     reporter or a plugin command (e.g., ``translate``, ``prompt``). The
-    built-in ``env`` command is the other exception to "a professor name is
+    built-in ``settings`` command is the other exception to "a netID is
     required" — you need it precisely when no professor is configured yet,
     so it's exempted the same way a plugin can opt out via
     ``requires_professor = False`` (see ``webui`` for an example).
@@ -454,7 +461,7 @@ def _dispatch(args: argparse.Namespace, plugins: dict[str, ModePlugin]) -> None:
     # requires_professor = False on its plugin object. Every other plugin —
     # including ones that don't define this attribute at all — still
     # requires a professor name, which is why this defaults to True.
-    command_requires_professor = args.command != "env" and getattr(
+    command_requires_professor = args.command != "settings" and getattr(
         plugins.get(args.command), "requires_professor", True
     )
 
@@ -483,7 +490,7 @@ def _dispatch(args: argparse.Namespace, plugins: dict[str, ModePlugin]) -> None:
     if args.professor:
         args.professor = normalize_netid(args.professor)
 
-    if args.command in ('usage', 'env'):
+    if args.command in ('usage', 'settings'):
         _run_info_command(args)
     elif args.command in plugins:
         plugins[args.command].run(
@@ -520,10 +527,10 @@ def _insert_professor_placeholder_if_needed(
     empty string is converted back to ``None`` after parsing (see
     ``main()``) — callers never see the placeholder.
 
-    ``env`` needs the same treatment even though it isn't a plugin — it's
+    ``settings`` needs the same treatment even though it isn't a plugin — it's
     a built-in command, but one that (like ``webui``) never requires a
     professor name, and for the same reason ``webui`` doesn't: it needs to
-    work before any professor exists yet (``env add-professor``).
+    work before anyone is configured yet (``settings add-professor``).
 
     The command name is looked for after any leading flags rather than at
     the very front, so that a global flag typed before the command —
@@ -554,7 +561,7 @@ def _insert_professor_placeholder_if_needed(
         return argv
 
     command = argv[index]
-    if command != "env":
+    if command != "settings":
         plugin = plugins.get(command)
         if plugin is None or getattr(plugin, "requires_professor", True):
             return argv

@@ -18,7 +18,7 @@ For a quick reference on every one of these — where each can live (this machin
 
 `.settings` is a TOML file at the repository root holding everything that is specific to this one installation and should never be synced or shared: professor names and API keys, the web UI's passphrase hash and session secret, alternate-endpoint credentials, and the list of external usage-data sources this installation reads from. It replaces four things that used to be separate files (`.env`, the credential half of `apis.json`, and `data_sources.json`).
 
-Editing it programmatically (via the `env` command below) is safe specifically because every edit happens locally, driven by a command typed at this machine's own keyboard — never over a network call, never as part of syncing files between machines. That reasoning does not extend to placing `.settings` itself in a synced folder (Dropbox, iCloud, etc.) — never do that.
+Editing it programmatically (via the `settings` command below) is safe specifically because every edit happens locally, driven by a command typed at this machine's own keyboard — never over a network call, never as part of syncing files between machines. That reasoning does not extend to placing `.settings` itself in a synced folder (Dropbox, iCloud, etc.) — never do that.
 
 ### Setup
 
@@ -26,7 +26,7 @@ Editing it programmatically (via the `env` command below) is safe specifically b
 cp .settings.template .settings
 ```
 
-Then either hand-edit `.settings`, or use the `env` command below to add your first professor.
+Then either hand-edit `.settings`, or use the `settings` command below to add your first professor.
 
 ### Format
 
@@ -70,29 +70,29 @@ This prints all configured professors, their data-file paths, whether those file
 
 ### Editing `.settings` from the command line
 
-Rather than hand-editing `.settings`, the built-in `env` command can add/remove professors and set any dotted-path value directly. Unlike every other command, `env` never needs a professor name first (you need it precisely when no professor exists yet):
+Rather than hand-editing `.settings`, the built-in `settings` command can add/remove professors and set any dotted-path value directly. Unlike every other command, `settings` never needs a netID first (you need it precisely when nobody is configured yet):
 
 ```bash
-python main.py env add-professor            # prompts for netID, display name + keys (keys hidden, never a flag)
-python main.py env remove-professor jh43    # asks to confirm before deleting
-python main.py env list                     # same optional-settings list as --show-config
-python main.py env set webui.session_secret             # prompts for a value (hidden, since it's a secret)
-python main.py env set webui.session_secret --generate   # or auto-generate a random one
-python main.py env unset webui.session_secret
+python main.py settings add-professor            # prompts for netID, display name + keys (keys hidden, never a flag)
+python main.py settings remove-professor jh43    # asks to confirm before deleting
+python main.py settings list                     # same optional-settings list as --show-config
+python main.py settings set webui.session_secret             # prompts for a value (hidden, since it's a secret)
+python main.py settings set webui.session_secret --generate   # or auto-generate a random one
+python main.py settings unset webui.session_secret
 ```
 
 Secrets are always entered at a hidden prompt — never accepted as a command-line flag — so they can't end up in shell history or be seen by another process listing running commands.
 
 ### Optional `.settings` values
 
-Beyond professor keys, a plugin can declare its own optional dotted-path setting (via `register_env_field()` in `src/config.py`, the same mechanism a plugin uses to add a language) so it shows up automatically in `--show-config` and `env list`. Currently registered:
+Beyond professor keys, a plugin can declare its own optional dotted-path setting (via `register_setting()` in `src/config.py`, the same mechanism a plugin uses to add a language) so it shows up automatically in `--show-config` and `settings list`. Currently registered:
 
 | Dotted path | Set by | Purpose |
 |----------|--------|---------|
 | `webui.passphrase_hash` | `python main.py webui set-passphrase` (writes the hash directly to `.settings`) | Unlock-gate passphrase for the web UI |
-| `webui.session_secret` | `env set webui.session_secret` (or `--generate`) | Keeps browser sessions signed in across server restarts |
-| `shared_settings.path` | `env set shared_settings.path` | Path to a shared settings file — see [Local overrides](#local-overrides) |
-| `endpoints.<name>.key` (one per `[endpoints.<name>]` table in `settings.*.toml`) | `env set endpoints.my_cluster.key` | API key for an alternate endpoint — see [Endpoint definitions](#endpoint-definitions-alternate-ai-api-connections) |
+| `webui.session_secret` | `settings set webui.session_secret` (or `--generate`) | Keeps browser sessions signed in across server restarts |
+| `shared_settings.path` | `settings set shared_settings.path` | Path to a shared settings file — see [Local overrides](#local-overrides) |
+| `endpoints.<name>.key` (one per `[endpoints.<name>]` table in `settings.*.toml`) | `settings set endpoints.my_cluster.key` | API key for an alternate endpoint — see [Endpoint definitions](#endpoint-definitions-alternate-ai-api-connections) |
 
 All of these are optional — leaving them unset falls back to documented default behavior (no unlock gate, a fresh session secret each restart, no shared settings, no alternate endpoints).
 
@@ -327,7 +327,7 @@ key = "sk-..."
 Set it with:
 
 ```bash
-python main.py env set endpoints.my_cluster.key
+python main.py settings set endpoints.my_cluster.key
 ```
 
 #### Setting a default endpoint
@@ -457,15 +457,15 @@ Every configuration surface in the project, where it can live, whether a persona
 
 | Setting | Where it's stored | External/shared location allowed? | Personal override on top? | Edit via CLI | Edit via web UI |
 |---|---|---|---|---|---|
-| Professor name/keys | `.settings`, repo root, git-ignored | No — never sync `.settings` itself | N/A (this *is* the per-installation value) | ✅ `env add-professor` / `env remove-professor` | ✅ `/settings` page — add, remove, replace primary/backup key |
+| Professor name/keys | `.settings`, repo root, git-ignored | No — never sync `.settings` itself | N/A (this *is* the per-installation value) | ✅ `settings add-professor` / `settings remove-professor` | ✅ `/settings` page — add, remove, replace primary/backup key |
 | Webui passphrase hash | `.settings` (`webui.passphrase_hash`) | No | N/A | ✅ `webui set-passphrase` (writes directly to `.settings`) | ✅ `/settings` page — hashed server-side, never stored or shown in plaintext |
-| Webui session secret | `.settings` (`webui.session_secret`) | No | N/A | ✅ `env set` / `env set --generate` | ✅ `/settings` page — manual value or "generate" |
-| Shared settings pointer | `.settings` (`shared_settings.path`) | No (it's just a path) | N/A | ✅ `env set` / `env unset` | ✅ `/settings` page |
-| Alternate-endpoint API keys | `.settings` (`endpoints.<name>.key`) | No | N/A | ✅ `env set` / `env unset` | ✅ `/settings` page — one field per endpoint already defined in a settings layer |
+| Webui session secret | `.settings` (`webui.session_secret`) | No | N/A | ✅ `settings set` / `settings set --generate` | ✅ `/settings` page — manual value or "generate" |
+| Shared settings pointer | `.settings` (`shared_settings.path`) | No (it's just a path) | N/A | ✅ `settings set` / `settings unset` | ✅ `/settings` page |
+| Alternate-endpoint API keys | `.settings` (`endpoints.<name>.key`) | No | N/A | ✅ `settings set` / `settings unset` | ✅ `/settings` page — one field per endpoint already defined in a settings layer |
 | Endpoint definitions (URL, timeout, etc.) | `settings.default.toml` (or shared file, or `settings.local.toml`), repo root | Definitions may live in the tracked file or a shared file | ✅ `settings.local.toml` can override a definition | ❌ hand-edit TOML only | ❌ Read-only on the `/settings` page (shown for reference, with a copyable snippet) — deliberately not editable there; see [Endpoint definitions](#endpoint-definitions-alternate-ai-api-connections) |
 | Model pricing/capabilities | `src/model_catalog.json`, git-ignored | Not designed for this — per-installation by convention, deliberately kept separate to avoid concurrent-write conflicts | N/A (whole file is the "local" copy) | Indirectly — using `-m provider/model` auto-registers pricing | Not planned |
 | Runtime defaults (temperature, retries, etc.) | `settings.default.toml`, repo root, tracked by git | N/A — this is the shared baseline | ✅ `settings.local.toml` | ❌ hand-edit TOML only | Not planned |
-| Shared runtime defaults | Wherever `shared_settings.path` points | **Yes — this is the point** (e.g. a Dropbox-synced `.toml` file) | ✅ `settings.local.toml` still wins over it | Pointer is CLI-editable (`env set shared_settings.path`); file contents are hand-edited TOML | Pointer only, via `/settings` page (see above); file contents still hand-edited TOML |
+| Shared runtime defaults | Wherever `shared_settings.path` points | **Yes — this is the point** (e.g. a Dropbox-synced `.toml` file) | ✅ `settings.local.toml` still wins over it | Pointer is CLI-editable (`settings set shared_settings.path`); file contents are hand-edited TOML | Pointer only, via `/settings` page (see above); file contents still hand-edited TOML |
 | Plugin defaults (e.g. `plugins/webui/settings.toml`) | Inside each plugin's own directory, tracked by git (or in the EA plugin's separate repo) | N/A | **No** — no per-plugin local-override file exists today | ❌ hand-edit TOML only | Not planned |
 | External usage-data sources | `.settings` (`[usage_sources]`), repo root, git-ignored | **Yes — the whole point** (points at another installation's `data/` folder, e.g. via Dropbox) | N/A (flat list, no layering) | ✅ `usage sources add/list/remove` | ✅ `/settings` page — add/remove sources |
 
@@ -478,7 +478,7 @@ Every "✅ `/settings` page" row above is served by the webui plugin's `/setting
 ```bash
 # 1. Copy and populate .settings
 cp .settings.template .settings
-python main.py env add-professor   # or hand-edit .settings — see the Format section above
+python main.py settings add-professor   # or hand-edit .settings — see the Format section above
 
 # 2. Copy the model catalog
 cp src/model_catalog.template.json src/model_catalog.json

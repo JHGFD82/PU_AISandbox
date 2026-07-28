@@ -78,21 +78,21 @@ _register("_pu_webui_jobs", "src/jobs.py")
 _register("src.services.chat_service", "src/services/chat_service.py")
 _register("_pu_webui_app", "src/app.py")
 
-from src.config import register_env_field
+from src.config import register_setting
 from src.errors import CLIError
 
 # Lets `--show-config` and `python main.py env set/list` discover these two
 # optional values without needing to know anything about the webui plugin
-# specifically — see register_env_field()'s docstring in src/config.py.
-register_env_field(
+# specifically — see register_setting()'s docstring in src/config.py.
+register_setting(
     "webui.passphrase_hash",
     "Unlock passphrase hash (generate via 'webui set-passphrase')",
     section="Web UI plugin",
     secret=True,
 )
-register_env_field(
+register_setting(
     "webui.session_secret",
-    "Session signing secret (any long random string; 'env set webui.session_secret --generate' works)",
+    "Session signing secret (any long random string; 'settings set webui.session_secret --generate' works)",
     section="Web UI plugin",
     secret=True,
 )

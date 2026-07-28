@@ -72,7 +72,7 @@ def _make_ns(**kwargs) -> argparse.Namespace:
         path=None,
         mode=None,
         for_professor=None,
-        env_subcommand=None,
+        settings_subcommand=None,
         name=None,
         identifier=None,
         key=None,
@@ -494,7 +494,7 @@ class TestHandleInfoCommandsShowConfig:
 # ---------------------------------------------------------------------------
 
 
-class TestHandleInfoCommandsEnv:
+class TestHandleInfoCommandsSettings:
 
     def test_usage_for_an_unconfigured_netid_is_an_error(self, monkeypatch):
         """A mistyped netID must not produce a report full of zeroes.
@@ -507,7 +507,7 @@ class TestHandleInfoCommandsEnv:
         possible failure.
         """
         monkeypatch.setattr("getpass.getpass", lambda *_: "sk-test-key")
-        handle_info_commands(_make_ns(command="env", env_subcommand="add-professor",
+        handle_info_commands(_make_ns(command="settings", settings_subcommand="add-professor",
                                       netid="jh43", name="Jeff Heller"))
         args = _make_ns(command="usage", usage_subcommand="report", professor="zz99")
         with pytest.raises(CLIError) as excinfo:
@@ -519,7 +519,7 @@ class TestHandleInfoCommandsEnv:
 
     def test_add_professor_with_flags_and_prompted_keys(self, capsys, monkeypatch):
         monkeypatch.setattr("getpass.getpass", lambda *_: "sk-test-key")
-        args = _make_ns(command="env", env_subcommand="add-professor",
+        args = _make_ns(command="settings", settings_subcommand="add-professor",
                         netid="jh43", name="Jeff Heller")
         result = handle_info_commands(args)
         assert result is True
@@ -532,7 +532,7 @@ class TestHandleInfoCommandsEnv:
         answers = iter(["jh43", "Jeff Heller"])
         monkeypatch.setattr("builtins.input", lambda *_: next(answers))
         monkeypatch.setattr("getpass.getpass", lambda *_: "sk-test-key")
-        args = _make_ns(command="env", env_subcommand="add-professor", netid=None, name=None)
+        args = _make_ns(command="settings", settings_subcommand="add-professor", netid=None, name=None)
         handle_info_commands(args)
         out = capsys.readouterr().out
         assert "Jeff Heller" in out
@@ -540,7 +540,7 @@ class TestHandleInfoCommandsEnv:
 
     def test_add_professor_blank_name_raises_cli_error(self, monkeypatch):
         monkeypatch.setattr("getpass.getpass", lambda *_: "sk-test-key")
-        args = _make_ns(command="env", env_subcommand="add-professor",
+        args = _make_ns(command="settings", settings_subcommand="add-professor",
                         netid="jh43", name="   ")
         with pytest.raises(CLIError, match="blank"):
             handle_info_commands(args)
@@ -548,44 +548,44 @@ class TestHandleInfoCommandsEnv:
     def test_add_professor_rejects_a_display_name_as_the_netid(self, monkeypatch):
         """The likeliest mistake, so it gets an error that names the fix."""
         monkeypatch.setattr("getpass.getpass", lambda *_: "sk-test-key")
-        args = _make_ns(command="env", env_subcommand="add-professor",
+        args = _make_ns(command="settings", settings_subcommand="add-professor",
                         netid="Jeff Heller", name="Jeff Heller")
         with pytest.raises(CLIError, match="netID"):
             handle_info_commands(args)
 
     def test_remove_professor_confirmed(self, capsys, monkeypatch):
         monkeypatch.setattr("getpass.getpass", lambda *_: "sk-test-key")
-        handle_info_commands(_make_ns(command="env", env_subcommand="add-professor",
+        handle_info_commands(_make_ns(command="settings", settings_subcommand="add-professor",
                                       netid="jh43", name="Jeff Heller"))
         capsys.readouterr()
 
         monkeypatch.setattr("builtins.input", lambda *_: "y")
-        args = _make_ns(command="env", env_subcommand="remove-professor", identifier="jh43")
+        args = _make_ns(command="settings", settings_subcommand="remove-professor", identifier="jh43")
         handle_info_commands(args)
         out = capsys.readouterr().out
         assert "Removed professor 'Jeff Heller'" in out
 
     def test_remove_professor_declined(self, capsys, monkeypatch):
         monkeypatch.setattr("getpass.getpass", lambda *_: "sk-test-key")
-        handle_info_commands(_make_ns(command="env", env_subcommand="add-professor",
+        handle_info_commands(_make_ns(command="settings", settings_subcommand="add-professor",
                                       netid="jh43", name="Jeff Heller"))
         capsys.readouterr()
 
         monkeypatch.setattr("builtins.input", lambda *_: "n")
-        args = _make_ns(command="env", env_subcommand="remove-professor", identifier="jh43")
+        args = _make_ns(command="settings", settings_subcommand="remove-professor", identifier="jh43")
         handle_info_commands(args)
         out = capsys.readouterr().out
         assert "Cancelled" in out
 
     def test_remove_unknown_professor_raises_cli_error(self, monkeypatch):
         monkeypatch.setattr("builtins.input", lambda *_: "y")
-        args = _make_ns(command="env", env_subcommand="remove-professor", identifier="nobody")
+        args = _make_ns(command="settings", settings_subcommand="remove-professor", identifier="nobody")
         with pytest.raises(CLIError, match="No configured professor"):
             handle_info_commands(args)
 
     def test_set_secret_value_hides_it_in_output(self, capsys, monkeypatch):
         monkeypatch.setattr("getpass.getpass", lambda *_: "super-secret")
-        args = _make_ns(command="env", env_subcommand="set", key="webui.session_secret", generate=False)
+        args = _make_ns(command="settings", settings_subcommand="set", key="webui.session_secret", generate=False)
         handle_info_commands(args)
         out = capsys.readouterr().out
         assert "super-secret" not in out
@@ -595,21 +595,21 @@ class TestHandleInfoCommandsEnv:
         def _boom(*_a, **_k):
             raise AssertionError("should not prompt when --generate is used")
         monkeypatch.setattr("getpass.getpass", _boom)
-        args = _make_ns(command="env", env_subcommand="set", key="webui.session_secret", generate=True)
+        args = _make_ns(command="settings", settings_subcommand="set", key="webui.session_secret", generate=True)
         handle_info_commands(args)
         assert settings_store_mod.get_value("webui.session_secret")
 
     def test_unset_removes_value(self, monkeypatch):
         monkeypatch.setattr("getpass.getpass", lambda *_: "some-value")
-        handle_info_commands(_make_ns(command="env", env_subcommand="set", key="webui.session_secret"))
-        handle_info_commands(_make_ns(command="env", env_subcommand="unset", key="webui.session_secret"))
+        handle_info_commands(_make_ns(command="settings", settings_subcommand="set", key="webui.session_secret"))
+        handle_info_commands(_make_ns(command="settings", settings_subcommand="unset", key="webui.session_secret"))
         assert settings_store_mod.get_value("webui.session_secret") is None
 
     def test_no_subcommand_raises_cli_error(self):
-        args = _make_ns(command="env", env_subcommand=None)
-        with pytest.raises(CLIError, match="No env subcommand"):
+        args = _make_ns(command="settings", settings_subcommand=None)
+        with pytest.raises(CLIError, match="No settings subcommand"):
             handle_info_commands(args)
 
     def test_list_returns_true(self):
-        args = _make_ns(command="env", env_subcommand="list")
+        args = _make_ns(command="settings", settings_subcommand="list")
         assert handle_info_commands(args) is True

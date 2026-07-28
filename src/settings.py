@@ -36,13 +36,13 @@ from pathlib import Path
 import tomllib
 
 from . import settings_store
-from .config import register_env_field
+from .config import register_setting
 
 _ROOT = Path(__file__).parent.parent  # src/ -> repo root
 _TOML_PATH = _ROOT / "settings.default.toml"
 _LOCAL_TOML_PATH = _ROOT / "settings.local.toml"
 
-register_env_field(
+register_setting(
     "shared_settings.path",
     "Path to a shared settings.toml, merged between settings.default.toml and settings.local.toml",
     section="Core",

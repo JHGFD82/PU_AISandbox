@@ -70,11 +70,11 @@ pip install -r requirements-dev.txt
 
 ### 2. Configure professors
 
-Copy the template, then add your first professor with the built-in `env` command (it prompts for the name and keys, keys hidden at entry):
+Copy the template, then add your first professor with the built-in `settings` command (it prompts for the name and keys, keys hidden at entry):
 
 ```bash
 cp .settings.template .settings
-python main.py env add-professor
+python main.py settings add-professor
 ```
 
 Or hand-edit `.settings` directly — add one table per professor:

@@ -13,8 +13,8 @@ If a professor exceeds their monthly token budget, `TokenTracker` logs a warning
 **Multi-Professor Service Architecture**: Each professor has isolated API keys and token tracking through environment-based configuration.
 
 - **Entry Point**: `main.py` → `src/cli.py` (controller/parser) → runtime handlers in `src/runtime/`
-- **Core Services**: `TranslationService` and `ImageProcessorService` in `src/services/`, `TokenTracker` in `src/tracking/`, processors in `src/processors/`, `FileOutputHandler` in `src/output/`
-- **Configuration**: Environment variables (`.env`) for professor configs, `model_catalog.json` for model pricing
+- **Core Services**: `BaseService` and shared API plumbing in `src/services/` — the AI services themselves (`TranslationService`, `ImageProcessorService`) live in the plugin that owns them. `TokenTracker` in `src/tracking/`, processors in `src/processors/`, `FileOutputHandler` in `src/output/`
+- **Configuration**: `.settings` (TOML, git-ignored) for people and API keys, layered `settings.*.toml` for runtime defaults, `src/model_catalog.json` for model pricing. There is no `.env` — it was replaced; see `src/settings_store.py`
 - **Plugin System**: All user-facing commands (translate, transcribe, transcription_review, prompt) are implemented as plugins in `plugins/`. `src/cli.py` discovers and loads them via `src/runtime/plugin_loader.py` at startup. Only `usage` is built-in.
 
 ### Plugin Architecture
@@ -60,10 +60,13 @@ PROF_[ID]_BACKUP_KEY=backup_key   # Fallback key
 
 ## Key Development Workflows
 
-### Adding New Professors
-1. Add to `.env`: `PROF_N_NAME=name`, `PROF_N_KEY=key`, `PROF_N_BACKUP_KEY=backup`
-2. Run `python main.py --show-config` to verify configuration
-3. Token tracking files auto-created on first use
+### Adding People
+1. Run `python main.py settings add-professor` (prompts for netID, display name and keys — keys are entered hidden, never as flags)
+2. Or hand-edit `.settings`: a `[professors.<netid>]` table with `name`, `key`, and optionally `backup_key`
+3. Run `python main.py --show-config` to verify configuration
+4. Token tracking files auto-created on first use
+
+People are identified by **netID** (e.g. `jh43`) — letters and digits only, validated by `normalize_netid()` in `src/config.py` and used verbatim as a filename. `name` is a display name only.
 
 ### Testing CLI Changes
 ```bash
@@ -165,7 +168,7 @@ def record_usage(self, model: str, tokens: int, professor: str) -> None:
                catalog (e.g., 'gpt-4o'). Tokens are the unit AI providers use
                to measure text length — roughly one token per word.
         tokens: The number of tokens consumed by this request.
-        professor: The professor's display name as set in .env (e.g., 'heller'),
+        professor: The person's netID as configured in .settings (e.g., 'jh43'),
                    used to locate the correct usage file under data/.
     """
 ```

@@ -8,7 +8,7 @@
 # machines, copy that one line by hand over a channel you trust.
 #
 # You can also build this file entirely from the command line instead of
-# copying/editing it by hand — see `python main.py env --help`.
+# copying/editing it by hand — see `python main.py settings --help`.
 
 # One table per person. The table name is their university netID — the
 # username they sign in with. That netID is what identifies them everywhere:
@@ -44,7 +44,7 @@ backup_key = "another_backup_key_here"
 # Keeps browser sessions signed-in across server restarts. Any long random
 # string works — if left unset, a new one is generated each time the server
 # starts, meaning everyone has to unlock again after a restart. Set with:
-#   python main.py env set webui.session_secret --generate
+#   python main.py settings set webui.session_secret --generate
 # session_secret = "..."
 
 # ── Shared settings (optional) ──────────────────────────────────────────────────

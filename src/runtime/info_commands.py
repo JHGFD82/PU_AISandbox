@@ -8,7 +8,7 @@ import secrets
 from datetime import datetime
 
 from .. import settings_store
-from ..config import LANGUAGE_MAP, get_registered_env_fields, load_professor_config
+from ..config import LANGUAGE_MAP, get_registered_settings, load_professor_config
 from ..errors import CLIError
 from ..models.catalog import get_pricing_unit, load_model_catalog
 from ..services.api_config import credential_path_for_endpoint, list_apis
@@ -23,16 +23,16 @@ from ..tracking.token_tracker import TokenTracker, get_archive_dir, get_usage_da
 logger = logging.getLogger(__name__)
 
 
-def list_optional_env_fields() -> list[tuple[str, str, str, bool]]:
+def list_optional_settings() -> list[tuple[str, str, str, bool]]:
     """Return every optional ``.settings`` value this installation knows about, for display.
 
     Combines two sources: plugin-declared fields (registered via
-    ``register_env_field()``, e.g. the webui plugin's secrets) and
+    ``register_setting()``, e.g. the webui plugin's secrets) and
     alternate-API-endpoint credential paths derived from the configured
     endpoints (which don't go through the registry since their names depend
     on what's configured in ``settings.*.toml``, not on any plugin).
 
-    Shared by both the CLI (``--show-config``/``env list``) and the web
+    Shared by both the CLI (``--show-config``/``settings list``) and the web
     UI's settings page, so the two never drift on what counts as a known,
     safe-to-edit dotted path.
 
@@ -40,7 +40,7 @@ def list_optional_env_fields() -> list[tuple[str, str, str, bool]]:
         A list of ``(dotted_path, label, section, secret)`` tuples, sorted
         by section then path.
     """
-    fields = [(f.key, f.label, f.section, f.secret) for f in get_registered_env_fields()]
+    fields = [(f.key, f.label, f.section, f.secret) for f in get_registered_settings()]
     for api_name in list_apis():
         fields.append((
             credential_path_for_endpoint(api_name),
@@ -57,7 +57,7 @@ def show_professor_config() -> None:
 
     if not professors:
         print("No professors configured in .settings.")
-        print("Add one with: python main.py env add-professor")
+        print("Add one with: python main.py settings add-professor")
         print("Or by hand, under a [professors.<netid>] table — see .settings.template.")
         _print_optional_settings()
         return
@@ -109,7 +109,7 @@ def _print_optional_settings() -> None:
     automatically once a plugin registers them, no separate "what's new"
     tracking needed.
     """
-    fields = list_optional_env_fields()
+    fields = list_optional_settings()
     if not fields:
         return
 
@@ -122,7 +122,7 @@ def _print_optional_settings() -> None:
             current_section = section
         status = "set" if settings_store.get_value(path) else "not set"
         print(f"    {path}  ({status})  {label}")
-    print("\nSet one with: python main.py env set <dotted.path>")
+    print("\nSet one with: python main.py settings set <dotted.path>")
 
 
 def list_available_models() -> None:
@@ -186,11 +186,11 @@ def _require_configured_netid(netid: str) -> None:
         raise CLIError(
             f"Nobody with the netID '{netid}' is configured here.\n"
             f"Configured netIDs:\n{known}\n\n"
-            f"To add someone: python main.py env add-professor"
+            f"To add someone: python main.py settings add-professor"
         )
     raise CLIError(
         "Nobody is configured on this installation yet.\n"
-        "Add someone with: python main.py env add-professor"
+        "Add someone with: python main.py settings add-professor"
     )
 
 
@@ -205,8 +205,8 @@ def handle_info_commands(args: argparse.Namespace) -> bool:
         list_available_models()
         return True
 
-    if getattr(args, 'command', None) == 'env':
-        _handle_env_command(args)
+    if getattr(args, 'command', None) == 'settings':
+        _handle_settings_command(args)
         return True
 
     # Usage commands (professor required)
@@ -259,8 +259,8 @@ def handle_info_commands(args: argparse.Namespace) -> bool:
     return False
 
 
-def _handle_env_command(args: argparse.Namespace) -> None:
-    """Handle 'env add-professor/remove-professor/list/set/unset'.
+def _handle_settings_command(args: argparse.Namespace) -> None:
+    """Handle 'settings add-professor/remove-professor/list/set/unset'.
 
     This is the CLI-side half of directly editing ``.settings`` — see
     ``src/settings_store.py`` for why writing to it directly is safe here
@@ -268,35 +268,35 @@ def _handle_env_command(args: argparse.Namespace) -> None:
     keyboard, never over a network call or as part of syncing between
     machines).
     """
-    sub = getattr(args, 'env_subcommand', None)
+    sub = getattr(args, 'settings_subcommand', None)
 
     if sub == 'add-professor':
-        _env_add_professor_interactive(args)
+        _settings_add_professor_interactive(args)
         return
     if sub == 'remove-professor':
-        _env_remove_professor(args)
+        _settings_remove_professor(args)
         return
     if sub == 'list':
         _print_optional_settings()
         return
     if sub == 'set':
-        _env_set_value(args)
+        _settings_set_value(args)
         return
     if sub == 'unset':
-        _env_unset_value(args)
+        _settings_unset_value(args)
         return
 
     raise CLIError(
-        "No env subcommand specified.\n"
-        "Usage: python main.py env add-professor\n"
-        "       python main.py env remove-professor <identifier>\n"
-        "       python main.py env list\n"
-        "       python main.py env set <KEY>\n"
-        "       python main.py env unset <KEY>"
+        "No settings subcommand specified.\n"
+        "Usage: python main.py settings add-professor\n"
+        "       python main.py settings remove-professor <identifier>\n"
+        "       python main.py settings list\n"
+        "       python main.py settings set <KEY>\n"
+        "       python main.py settings unset <KEY>"
     )
 
 
-def _env_add_professor_interactive(args: argparse.Namespace) -> None:
+def _settings_add_professor_interactive(args: argparse.Namespace) -> None:
     """Add someone, prompting interactively for their netID, name and keys.
 
     The netID is asked for first because it's the one that matters: it
@@ -325,7 +325,7 @@ def _env_add_professor_interactive(args: argparse.Namespace) -> None:
     print(f"Try it out: python main.py {netid} usage report")
 
 
-def _env_remove_professor(args: argparse.Namespace) -> None:
+def _settings_remove_professor(args: argparse.Namespace) -> None:
     """Remove a professor by safe name or display name, after a yes/no confirmation.
 
     Confirmation matters here specifically because this deletes real key
@@ -345,7 +345,7 @@ def _env_remove_professor(args: argparse.Namespace) -> None:
     print(f"Removed professor '{removed_name}'.")
 
 
-def _env_set_value(args: argparse.Namespace) -> None:
+def _settings_set_value(args: argparse.Namespace) -> None:
     """Set an optional ``.settings`` value, prompting for it (hidden input if it's a secret).
 
     *key* is a dotted path (e.g. ``webui.session_secret``,
@@ -355,14 +355,14 @@ def _env_set_value(args: argparse.Namespace) -> None:
     turns out to be a key would not be.
     """
     path = args.key.strip()
-    known_secrets = {k: secret for k, _label, _section, secret in list_optional_env_fields()}
+    known_secrets = {k: secret for k, _label, _section, secret in list_optional_settings()}
     is_secret = known_secrets.get(path, True)
 
     if getattr(args, 'generate', False):
         if not is_secret:
             raise CLIError(
                 f"--generate is only for secret values; '{path}' isn't registered as one. "
-                f"Use 'python main.py env set {path}' instead."
+                f"Use 'python main.py settings set {path}' instead."
             )
         value = secrets.token_urlsafe(32)
     else:
@@ -377,7 +377,7 @@ def _env_set_value(args: argparse.Namespace) -> None:
     print(f"\n{path} set (value hidden)." if is_secret else f"\n{path}={value}")
 
 
-def _env_unset_value(args: argparse.Namespace) -> None:
+def _settings_unset_value(args: argparse.Namespace) -> None:
     """Remove an optional ``.settings`` value."""
     path = args.key.strip()
     settings_store.unset_value(path)

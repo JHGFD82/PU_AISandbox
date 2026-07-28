@@ -24,21 +24,21 @@ _PLUGIN_LANGUAGES: set[str] = set()
 
 
 @dataclass(frozen=True)
-class EnvField:
-    """One optional ``.env`` variable that a plugin or core feature knows how to use.
+class SettingField:
+    """One optional ``.settings`` value that a plugin or core feature knows how to use.
 
-    Lets ``--show-config`` and the ``env`` command list every optional
-    setting in the project without hard-coding plugin-specific knowledge —
-    each plugin declares its own fields by calling ``register_env_field()``
-    once at import time, the same way it calls ``register_language()`` to
-    add a language.
+    Lets ``--show-config`` and the ``settings`` command list every optional
+    value in the project without hard-coding plugin-specific knowledge —
+    each plugin declares its own by calling ``register_setting()`` once at
+    import time, the same way it calls ``register_language()`` to add a
+    language.
 
     Attributes:
-        key: The exact environment-variable name, matching what appears in
-             ``.env`` (e.g. ``'WEBUI_SESSION_SECRET'``).
+        key: The dotted path the value lives at in ``.settings``
+             (e.g. ``'webui.session_secret'``).
         label: A short, plain-English description shown next to it in
                ``--show-config`` (e.g. ``'Session signing secret'``).
-        section: A group heading used to cluster related fields when they're
+        section: A group heading used to cluster related values when they're
                  displayed (e.g. ``'Web UI plugin'``).
         secret: Whether the value is sensitive. When ``True``, only whether
                 it is set is ever shown — never the value itself.
@@ -50,22 +50,21 @@ class EnvField:
     secret: bool = False
 
 
-# Populated by plugins (and core) at import time via register_env_field().
-_ENV_FIELDS: dict[str, EnvField] = {}
+# Populated by plugins (and core) at import time via register_setting().
+_SETTING_FIELDS: dict[str, SettingField] = {}
 
 
-def register_env_field(key: str, label: str, *, section: str = "Other", secret: bool = False) -> None:
-    """Declare an optional ``.env`` variable so it shows up in ``--show-config`` and ``env`` commands.
+def register_setting(key: str, label: str, *, section: str = "Other", secret: bool = False) -> None:
+    """Declare an optional ``.settings`` value so it shows up in ``--show-config`` and ``settings list``.
 
-    Call this once, at import time, for every optional environment variable
-    a plugin reads — mirroring how ``register_language()`` works for
-    languages. Without this, a person running ``--show-config`` would have
-    no way to discover an optional setting exists short of reading that
-    plugin's source code.
+    Call this once, at import time, for every optional value a plugin reads
+    — mirroring how ``register_language()`` works for languages. Without it,
+    someone running ``--show-config`` would have no way to discover an
+    optional setting exists short of reading that plugin's source code.
 
     Args:
-        key: The exact environment-variable name (e.g.
-             ``'WEBUI_SESSION_SECRET'``).
+        key: The dotted path the value lives at in ``.settings``
+             (e.g. ``'webui.session_secret'``).
         label: A short, plain-English description of what the setting is for.
         section: A group heading for display purposes (e.g.
                  ``'Web UI plugin'``). Defaults to ``'Other'``.
@@ -74,12 +73,12 @@ def register_env_field(key: str, label: str, *, section: str = "Other", secret: 
                 or echoed back, only whether it's currently set. Defaults to
                 ``False``.
     """
-    _ENV_FIELDS[key] = EnvField(key=key, label=label, section=section, secret=secret)
+    _SETTING_FIELDS[key] = SettingField(key=key, label=label, section=section, secret=secret)
 
 
-def get_registered_env_fields() -> list[EnvField]:
-    """Return every optional ``.env`` field registered so far, grouped by section for display."""
-    return sorted(_ENV_FIELDS.values(), key=lambda f: (f.section, f.key))
+def get_registered_settings() -> list[SettingField]:
+    """Return every optional ``.settings`` value registered so far, grouped by section for display."""
+    return sorted(_SETTING_FIELDS.values(), key=lambda f: (f.section, f.key))
 
 
 def register_language(code: str, name: str) -> None:

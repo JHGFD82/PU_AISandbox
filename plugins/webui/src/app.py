@@ -65,7 +65,7 @@ from src.models import (
     model_omit_sampling_params,
     model_supports_vision,
 )
-from src.runtime.info_commands import list_optional_env_fields
+from src.runtime.info_commands import list_optional_settings
 from src.services.api_config import credential_path_for_endpoint
 from src.settings import ENDPOINTS, WEBUI_SESSION_COOKIE_NAME
 from src.tracking.token_tracker import TokenTracker
@@ -204,7 +204,7 @@ class SourceBody(BaseModel):
 # generic one.
 def _directly_editable_paths() -> set[str]:
     return {
-        path for path, _label, _section, _secret in list_optional_env_fields()
+        path for path, _label, _section, _secret in list_optional_settings()
         if path != "webui.passphrase_hash"
     }
 
@@ -222,7 +222,7 @@ def _settings_snapshot() -> dict:
 
     field_status = {
         path: bool(settings_store.get_value(path))
-        for path, _label, _section, _secret in list_optional_env_fields()
+        for path, _label, _section, _secret in list_optional_settings()
     }
 
     endpoints = []

@@ -1493,7 +1493,7 @@ class TestSettingsValues:
         fake_endpoints = {"hpc_cluster": {"name": "HPC Cluster", "base_url": "http://x.internal/v1"}}
         # ENDPOINTS is imported by value into both src.settings (real) and app.py's
         # own namespace, so both copies need patching for list_apis() (used inside
-        # list_optional_env_fields()) and _settings_snapshot()'s own loop to agree.
+        # list_optional_settings()) and _settings_snapshot()'s own loop to agree.
         monkeypatch.setattr(core_settings_mod, "ENDPOINTS", fake_endpoints)
         monkeypatch.setattr(sys.modules["_pu_webui_app"], "ENDPOINTS", fake_endpoints)
 

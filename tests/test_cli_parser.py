@@ -158,41 +158,41 @@ class TestUsageSourcesSubcommand:
         assert args.for_professor == "smith"
 
 
-class TestEnvSubcommand:
+class TestSettingsSubcommand:
 
-    def test_env_requires_no_professor(self, parse_professor_optional):
-        # 'env' alone parses fine with no professor positional supplied.
-        args = parse_professor_optional(["env", "list"])
-        assert args.command == "env"
+    def test_settings_requires_no_netid(self, parse_professor_optional):
+        # 'settings' alone parses fine with no netID positional supplied.
+        args = parse_professor_optional(["settings", "list"])
+        assert args.command == "settings"
         # main() converts the "" placeholder back to None after parse_args();
         # parse_args() alone still returns the raw placeholder value.
         assert args.professor == ""
-        assert args.env_subcommand == "list"
+        assert args.settings_subcommand == "list"
 
-    def test_env_add_professor_parses(self, parse_professor_optional):
-        args = parse_professor_optional(["env", "add-professor"])
-        assert args.env_subcommand == "add-professor"
+    def test_settings_add_professor_parses(self, parse_professor_optional):
+        args = parse_professor_optional(["settings", "add-professor"])
+        assert args.settings_subcommand == "add-professor"
         assert args.name is None
 
     def test_env_add_professor_name_flag(self, parse_professor_optional):
-        args = parse_professor_optional(["env", "add-professor", "--name", "Jeff Heller"])
+        args = parse_professor_optional(["settings", "add-professor", "--name", "Jeff Heller"])
         assert args.name == "Jeff Heller"
 
-    def test_env_remove_professor_requires_identifier(self, parse_professor_optional):
-        args = parse_professor_optional(["env", "remove-professor", "heller"])
+    def test_settings_remove_professor_requires_identifier(self, parse_professor_optional):
+        args = parse_professor_optional(["settings", "remove-professor", "heller"])
         assert args.identifier == "heller"
 
-    def test_env_set_requires_key(self, parse_professor_optional):
-        args = parse_professor_optional(["env", "set", "WEBUI_SESSION_SECRET"])
+    def test_settings_set_requires_key(self, parse_professor_optional):
+        args = parse_professor_optional(["settings", "set", "WEBUI_SESSION_SECRET"])
         assert args.key == "WEBUI_SESSION_SECRET"
         assert args.generate is False
 
-    def test_env_set_generate_flag(self, parse_professor_optional):
-        args = parse_professor_optional(["env", "set", "WEBUI_SESSION_SECRET", "--generate"])
+    def test_settings_set_generate_flag(self, parse_professor_optional):
+        args = parse_professor_optional(["settings", "set", "WEBUI_SESSION_SECRET", "--generate"])
         assert args.generate is True
 
-    def test_env_unset_requires_key(self, parse_professor_optional):
-        args = parse_professor_optional(["env", "unset", "WEBUI_SESSION_SECRET"])
+    def test_settings_unset_requires_key(self, parse_professor_optional):
+        args = parse_professor_optional(["settings", "unset", "WEBUI_SESSION_SECRET"])
         assert args.key == "WEBUI_SESSION_SECRET"
 
 
@@ -219,10 +219,10 @@ class TestGlobalFlagsBeforeProfessorlessCommand:
         assert args.verbose is True
         assert args.debug_api is True
 
-    def test_verbose_before_env_subcommand(self, parse_professor_optional):
-        args = parse_professor_optional(["--verbose", "env", "list"])
-        assert args.command == "env"
-        assert args.env_subcommand == "list"
+    def test_verbose_before_settings_subcommand(self, parse_professor_optional):
+        args = parse_professor_optional(["--verbose", "settings", "list"])
+        assert args.command == "settings"
+        assert args.settings_subcommand == "list"
         assert args.verbose is True
 
     def test_flags_keep_their_position(self):
@@ -297,7 +297,7 @@ class TestDebugFlagsInEitherPosition:
         assert args.debug_api is False
 
     def test_verbose_before_professorless_command(self, parse_professor_optional):
-        assert parse_professor_optional(["--verbose", "env", "list"]).verbose is True
+        assert parse_professor_optional(["--verbose", "settings", "list"]).verbose is True
 
 
 class TestGlobalFlags:
