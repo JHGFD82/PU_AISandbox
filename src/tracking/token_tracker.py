@@ -67,24 +67,36 @@ EVENTS_SUBDIR = "events"
 
 
 def get_usage_data_path(netid: str) -> Path:
-    """Return the active (current-month) data file path for one person."""
+    """Return the active (current-month) data file path for one person.
+
+    Works out a path and nothing else — asking where something lives does
+    not bring it into existence. See ``ensure_archive_dir()`` for why that
+    distinction is worth keeping.
+    """
     project_root = Path(__file__).parent.parent.parent
-    base_dir = project_root / USAGE_DATA_DIR
-    base_dir.mkdir(exist_ok=True)
-    return base_dir / f"token_usage_{netid}.json"
+    return project_root / USAGE_DATA_DIR / f"token_usage_{netid}.json"
 
 
 def get_archive_dir(netid: str) -> Path:
-    """Return (and create if needed) the archive directory for one person."""
+    """Return the archive directory for one person, without creating it.
+
+    This used to create the directory as a side effect of being asked for
+    it, which meant merely *listing* the configuration — ``--show-config``,
+    or a test naming a fictional person — left a real folder behind. That is
+    where the stray ``data/archives/testprof`` and ``data/archives/warntest``
+    folders came from, and why the usage-visualising script carried a
+    hard-coded list of names to ignore.
+
+    Callers that are about to write create the directory themselves, right
+    where the write happens.
+    """
     project_root = Path(__file__).parent.parent.parent
-    archive_dir = project_root / USAGE_DATA_DIR / ARCHIVES_SUBDIR / netid
-    archive_dir.mkdir(parents=True, exist_ok=True)
-    return archive_dir
+    return project_root / USAGE_DATA_DIR / ARCHIVES_SUBDIR / netid
 
 
-def get_archive_path(professor: str, month: str) -> Path:
-    """Return the archive file path for a professor and month string (e.g. '2026-02')."""
-    return get_archive_dir(professor) / f"{month}.json"
+def get_archive_path(netid: str, month: str) -> Path:
+    """Return the archive file path for one person and month (e.g. '2026-02'), without creating anything."""
+    return get_archive_dir(netid) / f"{month}.json"
 
 
 def _shared_event_dir(source: "ExternalSource", netid: str, month: str) -> Path:
@@ -556,6 +568,10 @@ class TokenTracker:
     def _archive_month(self, data: dict[str, Any], month: str) -> None:
         """Write *data* to the archive file for *month*, skipping if already archived."""
         archive_path = get_archive_path(self.professor, month)
+        # Created here, at the point of writing, rather than as a side effect
+        # of asking for the path — see get_archive_dir(). Matches what the
+        # shared-write rollover below already does.
+        archive_path.parent.mkdir(parents=True, exist_ok=True)
         if archive_path.exists():
             logging.info(f"Archive already exists for {month}, skipping: {archive_path.name}")
             return

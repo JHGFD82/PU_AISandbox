@@ -15,6 +15,22 @@ jobs = sys.modules["_pu_webui_jobs"]
 conversation = sys.modules["_pu_webui_conversation"]
 
 
+@pytest.fixture(autouse=True)
+def _isolate_conversation_storage(tmp_path, monkeypatch):
+    """Keep every job in this file inside a temp directory.
+
+    ``jobs.py`` works out where conversations live independently of
+    ``conversation.py``, so a job started here wrote its output folder into
+    the real ``data/conversations/<netid>/_job_outputs/`` — dozens of them
+    per test run, under whatever name the fixtures happened to use. That is
+    also why a folder for a since-renamed person kept reappearing in real
+    data after the move to netIDs. Both module constants have to point at
+    the temp directory.
+    """
+    monkeypatch.setattr(jobs, "_CONVERSATIONS_DIR", tmp_path / "conversations")
+    monkeypatch.setattr(conversation, "CONVERSATIONS_DIR", tmp_path / "conversations")
+
+
 def _wait_until(predicate, timeout=2.0, interval=0.01):
     """Poll predicate() until it's truthy or timeout elapses; assert it succeeded.
 

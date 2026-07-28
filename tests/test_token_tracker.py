@@ -278,15 +278,28 @@ class TestPathHelpers:
         assert get_usage_data_path("ab99").name == "token_usage_ab99.json"
 
     def test_get_archive_dir_structure(self):
-        path = get_archive_dir("heller")
-        # Should end with archives/heller
-        assert path.parts[-1] == "heller"
+        path = get_archive_dir("zz99")
+        assert path.parts[-1] == "zz99"
         assert path.parts[-2] == "archives"
 
     def test_get_archive_path_filename(self):
-        path = get_archive_path("heller", "2026-01")
+        path = get_archive_path("zz99", "2026-01")
         assert path.name == "2026-01.json"
-        assert path.parts[-2] == "heller"
+        assert path.parts[-2] == "zz99"
+
+    def test_asking_for_a_path_does_not_create_it(self):
+        """A getter that creates directories leaves folders behind for people who don't exist.
+
+        This is how ``data/archives/testprof`` and ``data/archives/warntest``
+        got into the real data directory: ``--show-config`` asked for every
+        configured person's archive folder in order to list it, and the act
+        of asking created it. Writers call ``ensure_archive_dir()`` instead.
+        """
+        path = get_archive_dir("nobodyhere")
+        assert not path.exists()
+        assert not get_usage_data_path("nobodyhere").parent.joinpath(
+            "archives", "nobodyhere"
+        ).exists()
 
 
 # ---------------------------------------------------------------------------

@@ -54,8 +54,15 @@ def _no_passphrase(monkeypatch):
 def client(tmp_path, monkeypatch):
     app_module = sys.modules["_pu_webui_app"]
     conversation = sys.modules["_pu_webui_conversation"]
+    jobs = sys.modules["_pu_webui_jobs"]
     # Redirect conversation storage to a temp dir so tests never touch real data/.
     monkeypatch.setattr(conversation, "CONVERSATIONS_DIR", tmp_path / "conversations")
+    # jobs.py works out the same directory independently, so patching only the
+    # one above left every job test writing its output into the real
+    # data/conversations/<netid>/_job_outputs/ — which is how a folder for a
+    # test-fixture professor kept reappearing in real data after it had been
+    # migrated away. Both have to point at the temp directory.
+    monkeypatch.setattr(jobs, "_CONVERSATIONS_DIR", tmp_path / "conversations")
 
     app = app_module.create_app()
     return TestClient(app)

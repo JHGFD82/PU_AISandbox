@@ -25,9 +25,6 @@ from src.tracking.token_tracker import get_configured_data_roots, load_usage_tre
 
 DATA_DIR = Path(__file__).parent
 
-# Professors excluded from all reports (test/dev accounts)
-EXCLUDED_PROFESSORS = {"testprof", "warntest"}
-
 # --- Color palettes -----------------------------------------------------------
 
 PROF_COLORS = [
@@ -65,8 +62,6 @@ def load_all_data() -> dict:
     for _label, root in get_configured_data_roots():
         tree = load_usage_tree(root)
         for prof, months in tree.items():
-            if prof in EXCLUDED_PROFESSORS:
-                continue
             result.setdefault(prof, {}).update(months)
     return result
 
