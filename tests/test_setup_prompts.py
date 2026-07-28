@@ -11,7 +11,7 @@ import pytest
 
 from src import paths
 from src.errors import CLIError
-from src.runtime import setup_prompts
+from src import setup_prompts
 
 
 @pytest.fixture(autouse=True)

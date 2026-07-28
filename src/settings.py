@@ -40,7 +40,13 @@ from .config import register_setting
 
 _ROOT = Path(__file__).parent.parent  # src/ -> repo root
 _TOML_PATH = _ROOT / "settings.default.toml"
-_PREFERENCES_PATH = paths.preferences_path()
+# Resolved defensively: a copy of the sandbox that hasn't been set up yet
+# has no preferences file, and asking where one would be is itself an error
+# at that point. No preferences simply means the defaults below stand.
+try:
+    _PREFERENCES_PATH = paths.preferences_path()
+except paths.NotSetUpError:
+    _PREFERENCES_PATH = None
 
 register_setting(
     "shared_settings.path",
@@ -90,7 +96,7 @@ if _shared_settings_path:
         )
 
 # Layer 3: preferences.toml — this person's own adjustments, still the last word.
-if _PREFERENCES_PATH.exists():
+if _PREFERENCES_PATH is not None and _PREFERENCES_PATH.exists():
     _merge_layer(_s, _PREFERENCES_PATH)
 
 # ── Custom prompt ──────────────────────────────────────────────────────────────

@@ -271,7 +271,7 @@ def _handle_settings_command(args: argparse.Namespace) -> None:
     sub = getattr(args, 'settings_subcommand', None)
 
     if sub == 'setup':
-        from .setup_prompts import run_interactive_setup
+        from ..setup_prompts import run_interactive_setup
         run_interactive_setup()
         return
     if sub == 'add-professor':

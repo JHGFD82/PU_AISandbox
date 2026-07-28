@@ -72,27 +72,67 @@ from .errors import CLIError
 
 from . import paths
 
-SETTINGS_PATH = paths.settings_path()
+
+def __getattr__(name: str):
+    """Resolve ``SETTINGS_PATH`` the first time it is asked for, not at import.
+
+    Importing this module must not require knowing where the settings file
+    is. On a freshly downloaded copy of the sandbox that isn't known yet,
+    and the code that asks — setup — cannot run if importing its way here
+    already failed. Deferring it means ``--help`` and the setup flow work on
+    a copy that has never been configured.
+
+    Tests that replace ``SETTINGS_PATH`` with a temporary path still work:
+    assigning the name creates a real module attribute, which takes
+    precedence over this.
+    """
+    if name == "SETTINGS_PATH":
+        return paths.settings_path()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def _settings_path() -> Path:
+    """Return the settings file, honouring a test that replaced the path.
+
+    Module-level ``__getattr__`` above only fires for lookups from *outside*
+    this module, so the functions in here go through this instead. Reading
+    the module's own namespace first is what keeps
+    ``monkeypatch.setattr(settings_store, "SETTINGS_PATH", ...)`` working.
+    """
+    replaced = globals().get("SETTINGS_PATH")
+    return replaced if replaced is not None else paths.settings_path()
 
 VALID_SOURCE_MODES = ("read-only", "shared-write")
 
 
 def _load() -> tomlkit.TOMLDocument:
-    """Parse ``settings.toml``, returning an empty (but valid) document if it doesn't exist yet."""
-    if not SETTINGS_PATH.exists():
+    """Parse ``settings.toml``, returning an empty (but valid) document if there isn't one.
+
+    "There isn't one" covers two cases that look the same to every caller:
+    the file hasn't been created yet, and this copy of the sandbox doesn't
+    yet know where its files live at all. Reading is answered with "nothing
+    configured" either way. Writing is not — see ``_save()``, which still
+    refuses, because saving into a folder nobody has chosen would put a
+    settings file somewhere the person would never find it.
+    """
+    try:
+        settings_file = _settings_path()
+    except paths.NotSetUpError:
         return tomlkit.document()
-    with SETTINGS_PATH.open("r", encoding="utf-8") as f:
+    if not settings_file.exists():
+        return tomlkit.document()
+    with settings_file.open("r", encoding="utf-8") as f:
         return tomlkit.parse(f.read())
 
 
 def _save(doc: tomlkit.TOMLDocument) -> None:
     """Write *doc* back to ``settings.toml`` atomically (temp file + replace), preserving formatting."""
-    SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp_path = tempfile.mkstemp(dir=str(SETTINGS_PATH.parent), suffix=".tmp")
+    _settings_path().parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_path = tempfile.mkstemp(dir=str(_settings_path().parent), suffix=".tmp")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(tomlkit.dumps(doc))
-        os.replace(tmp_path, SETTINGS_PATH)
+        os.replace(tmp_path, _settings_path())
     except Exception:
         try:
             os.unlink(tmp_path)

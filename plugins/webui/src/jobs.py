@@ -59,9 +59,28 @@ if TYPE_CHECKING:
     # registration the plugin loader needs is untouched.
     from .conversation import ConversationStore
 
-# Worked out the same way conversation.py works it out, from the one place
-# that knows where this installation keeps things.
-_CONVERSATIONS_DIR = data_root() / "conversations"
+def __getattr__(name: str):
+    """Resolve ``_CONVERSATIONS_DIR`` on first use, not at import.
+
+    Importing this module must not require knowing where the sandbox keeps
+    its files — a freshly downloaded copy doesn't know yet. Present as an
+    attribute rather than only a function so that a test can replace it in
+    the ordinary way.
+    """
+    if name == "_CONVERSATIONS_DIR":
+        return data_root() / "conversations"
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def _conversations_dir():
+    """The conversations directory, worked out the same way conversation.py does.
+
+    Resolved on use rather than at import, for the same reason: a freshly
+    downloaded copy of the sandbox doesn't yet know where anything lives,
+    and importing must not be what forces the question.
+    """
+    replaced = globals().get("_CONVERSATIONS_DIR")
+    return replaced if replaced is not None else data_root() / "conversations"
 
 
 def new_job_id() -> str:
@@ -119,7 +138,7 @@ def job_output_dir(professor: str, job_id: str, base_dir: Optional[Path] = None)
     Returns:
         The absolute path to the (now-existing) output directory.
     """
-    base = base_dir if base_dir is not None else _CONVERSATIONS_DIR
+    base = base_dir if base_dir is not None else _conversations_dir()
     d = base / professor / "_job_outputs" / job_id
     d.mkdir(parents=True, exist_ok=True)
     return d

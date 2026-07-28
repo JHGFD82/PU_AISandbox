@@ -1,5 +1,10 @@
 """The questions setup asks at the terminal, and the wording it asks them in.
 
+Kept beside ``first_run.py`` rather than under ``src/runtime/`` for a
+practical reason as well as a tidy one: importing ``src.runtime`` pulls in
+the settings machinery, which cannot load until the sandbox knows where the
+settings *are*. Setup has to run before that, so it must not depend on it.
+
 The decisions themselves live in ``src/first_run.py``; this is only the
 conversation. Keeping them apart means the web interface can ask in its own
 way without either copy of the reasoning drifting from the other.
@@ -17,8 +22,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Callable
 
-from .. import first_run, paths
-from ..errors import CLIError
+from . import first_run, paths
+from .errors import CLIError
 
 _RULE = "─" * 64
 

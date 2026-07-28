@@ -21,15 +21,21 @@
 #
 # `name` is only ever shown to people — in reports, and in the web
 # interface's person picker — so write it however reads best.
-[professors.jh43]
-name = "Jeff Heller"
-key = "your_primary_key_here"
-backup_key = "your_backup_key_here"
-
-[professors.as12]
-name = "Alice Smith"
-key = "another_primary_key_here"
-backup_key = "another_backup_key_here"
+# Commented out on purpose: these are the shape to copy, not people. Left
+# live, a brand-new installation would report two people configured who
+# don't exist, with placeholder keys that fail at the first API call.
+#
+# The easy way to add someone is `python main.py settings add-professor`,
+# which asks for each part and hides the keys as you type them.
+#
+# [professors.jh43]
+# name = "Jeff Heller"
+# key = "their_primary_key_here"
+# backup_key = "their_backup_key_here"   # optional
+#
+# [professors.as12]
+# name = "Alice Smith"
+# key = "another_primary_key_here"
 
 # ── Alternate API endpoint keys ────────────────────────────────────────────────
 # For each [endpoints.<name>] entry you define in settings.default.toml,

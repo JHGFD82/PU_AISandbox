@@ -575,55 +575,6 @@ def _insert_professor_placeholder_if_needed(
     return argv[:index] + [""] + argv[index:]
 
 
-def _ensure_set_up(args: argparse.Namespace) -> None:
-    """Run first-time setup if this copy of the sandbox hasn't had it yet.
-
-    A freshly downloaded package doesn't know where the person's own files
-    are kept, and asking is a one-time thing — so rather than failing with
-    an error nobody can act on, it asks, and then carries on with whatever
-    was typed.
-
-    Two commands are exempt. ``settings setup`` *is* the thing being
-    triggered, and ``--show-config`` is what someone runs to find out what
-    state they're in, which shouldn't itself change that state.
-
-    Raises:
-        CLIError: If nothing can be asked — a script, or a scheduled job,
-                  with no one at the keyboard to answer. Better to say
-                  exactly what to run than to hang forever on a prompt
-                  nobody will see.
-    """
-    from . import paths
-
-    if paths.is_installed():
-        return
-    if getattr(args, "show_config", False):
-        return
-    if getattr(args, "command", None) == "settings" and \
-            getattr(args, "settings_subcommand", None) == "setup":
-        return
-
-    if not sys.stdin.isatty():
-        raise CLIError(
-            "This copy of the sandbox hasn't been set up yet, and there's "
-            "nobody at the keyboard to ask where your files should be kept.\n"
-            "Run this once, from a terminal:\n"
-            "    python main.py settings setup"
-        )
-
-    from .runtime.setup_prompts import run_interactive_setup
-    run_interactive_setup()
-
-    # Stop here rather than carrying on with the command that triggered
-    # this. Several modules work out where the settings and preferences
-    # files are when they are first imported, which happened before setup
-    # ran and moved them — so continuing now would read the old locations
-    # and quietly fall back to defaults. Starting again is one keystroke
-    # and always right.
-    print("\nSetup is done — run your command again and it will work.")
-    raise SystemExit(0)
-
-
 def main() -> None:
     """Run the AI Sandbox tool from the command line.
 
@@ -651,7 +602,6 @@ def main() -> None:
                 "responses may include sensitive data."
             )
 
-        _ensure_set_up(args)
         _dispatch(args, _plugins)
 
     except CLIError as e:

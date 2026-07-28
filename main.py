@@ -43,6 +43,45 @@ if sys.version_info < _REQUIRED:
     )
     raise SystemExit(1)
 
+def _set_up_if_needed():
+    """Offer first-time setup before anything that needs a settings file loads.
+
+    This has to happen here, ahead of importing the rest of the sandbox.
+    Several modules work out where the settings file is *while they are
+    being imported*, and on a freshly downloaded copy there is no answer to
+    that question yet — so importing them first would fail before there was
+    any chance to ask. Only ``src.paths`` and the two setup modules are
+    touched, none of which need to know where anything lives.
+
+    Returns:
+        ``True`` if setup just ran, meaning the command should not carry on
+        — the files it would read have only now been put in place.
+    """
+    from src import paths
+
+    if paths.is_installed():
+        return False
+
+    # Someone asking for help hasn't committed to anything yet.
+    if any(arg in ("-h", "--help") for arg in sys.argv[1:]):
+        return False
+
+    if not sys.stdin.isatty():
+        sys.stderr.write(
+            "\nThis copy of the sandbox hasn't been set up yet, and there's "
+            "nobody at the keyboard to ask where your files should be kept.\n"
+            "Run this once, from a terminal:\n"
+            "    python main.py settings setup\n\n"
+        )
+        raise SystemExit(1)
+
+    from src.setup_prompts import run_interactive_setup
+    run_interactive_setup()
+    print("\nSetup is done — run your command again and it will work.")
+    return True
+
+
 if __name__ == '__main__':
-    from src.cli import main
-    main()
+    if not _set_up_if_needed():
+        from src.cli import main
+        main()

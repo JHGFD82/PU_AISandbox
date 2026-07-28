@@ -21,9 +21,29 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 
-from src.paths import data_root
+def __getattr__(name: str):
+    """Resolve the conversations directory on first use, not at import.
 
-CONVERSATIONS_DIR = data_root() / "conversations"
+    Importing this module must not require knowing where the sandbox keeps
+    its files: a freshly downloaded copy doesn't know yet, and the setup
+    that would tell it cannot run if getting this far already failed.
+
+    Tests that replace the name with a temporary directory still work —
+    assigning it creates a real module attribute, which wins over this.
+    """
+    if name == "CONVERSATIONS_DIR":
+        from src.paths import data_root
+        return data_root() / "conversations"
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def _conversations_dir():
+    """The conversations directory, honouring a test that replaced it."""
+    replaced = globals().get("CONVERSATIONS_DIR")
+    if replaced is not None:
+        return replaced
+    from src.paths import data_root
+    return data_root() / "conversations"
 
 
 # The exact shape new_conversation_id() produces below: the letters "c_"
@@ -315,7 +335,7 @@ class ConversationStore:
                       redirected to a temporary directory in tests.
         """
         self.professor = professor
-        self._dir = (base_dir if base_dir is not None else CONVERSATIONS_DIR) / professor
+        self._dir = (base_dir if base_dir is not None else _conversations_dir()) / professor
         self._dir.mkdir(parents=True, exist_ok=True)
 
     def _path(self, conversation_id: str) -> Path:
