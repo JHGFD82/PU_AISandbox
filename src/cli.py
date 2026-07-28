@@ -253,7 +253,7 @@ def _build_env_subparser(subparsers: argparse._SubParsersAction) -> None:
     _add_debug_flags(remove_prof)
     remove_prof.add_argument(
         'identifier', type=str,
-        help='Safe name or display name of the professor to remove (see: --show-config)',
+        help='netID or display name of the person to remove (see: --show-config)',
     )
 
     list_parser = env_sub.add_parser(

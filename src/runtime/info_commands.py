@@ -79,7 +79,7 @@ def show_professor_config() -> None:
         archived_months = sorted(p.stem for p in archive_dir.glob("*.json")) if archive_dir.exists() else []
 
         print(f"\n  {prof['name']}")
-        print(f"    Safe name:    {netid}")
+        print(f"    netID:        {netid}")
         print(f"    Primary key:  {primary_set}")
         print(f"    Backup key:   {backup_set}")
         print(f"    Usage file:   {usage_label}")
