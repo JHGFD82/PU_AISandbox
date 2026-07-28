@@ -44,9 +44,9 @@ _catalog_cache_stamp: Optional[tuple[int, int]] = None
 
 
 def get_model_catalog_path() -> Path:
-    """Get the path to the model catalog file (src/model_catalog.json)."""
-    # __file__ is src/models/catalog.py; parent.parent is src/
-    return Path(__file__).parent.parent / MODEL_CATALOG_FILE
+    """Return the model catalogue file, wherever this installation keeps it."""
+    from ..paths import model_catalog_path
+    return model_catalog_path()
 
 
 def _file_change_stamp(path: Path) -> Optional[tuple[int, int]]:

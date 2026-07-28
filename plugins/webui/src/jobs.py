@@ -42,6 +42,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional
 
+from src.paths import data_root
+
 logger = logging.getLogger(__name__)
 
 conversation = sys.modules["_pu_webui_conversation"]
@@ -56,10 +58,9 @@ if TYPE_CHECKING:
     # registration the plugin loader needs is untouched.
     from .conversation import ConversationStore
 
-# plugins/webui/src/jobs.py -> repo root is four parents up (matches
-# conversation.py's own CONVERSATIONS_DIR computation).
-_ROOT = Path(__file__).resolve().parent.parent.parent.parent
-_CONVERSATIONS_DIR = _ROOT / "data" / "conversations"
+# Worked out the same way conversation.py works it out, from the one place
+# that knows where this installation keeps things.
+_CONVERSATIONS_DIR = data_root() / "conversations"
 
 
 def new_job_id() -> str:

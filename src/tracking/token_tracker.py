@@ -35,6 +35,7 @@ from pathlib import Path
 from typing import Any
 
 from ..console import print_banner, print_subsection
+from ..paths import data_root
 from ..models.catalog import (
     get_model_pricing,
     get_monthly_limit,
@@ -70,11 +71,9 @@ def get_usage_data_path(netid: str) -> Path:
     """Return the active (current-month) data file path for one person.
 
     Works out a path and nothing else — asking where something lives does
-    not bring it into existence. See ``ensure_archive_dir()`` for why that
-    distinction is worth keeping.
+    not bring it into existence.
     """
-    project_root = Path(__file__).parent.parent.parent
-    return project_root / USAGE_DATA_DIR / f"token_usage_{netid}.json"
+    return data_root() / f"token_usage_{netid}.json"
 
 
 def get_archive_dir(netid: str) -> Path:
@@ -90,8 +89,7 @@ def get_archive_dir(netid: str) -> Path:
     Callers that are about to write create the directory themselves, right
     where the write happens.
     """
-    project_root = Path(__file__).parent.parent.parent
-    return project_root / USAGE_DATA_DIR / ARCHIVES_SUBDIR / netid
+    return data_root() / ARCHIVES_SUBDIR / netid
 
 
 def get_archive_path(netid: str, month: str) -> Path:
@@ -133,8 +131,7 @@ def get_configured_data_roots() -> list[tuple[str, Path]]:
         A list of ``(label, path)`` pairs, always starting with
         ``("local", <this installation's data/ folder>)``.
     """
-    project_root = Path(__file__).parent.parent.parent
-    roots: list[tuple[str, Path]] = [("local", project_root / USAGE_DATA_DIR)]
+    roots: list[tuple[str, Path]] = [("local", data_root())]
     for source in get_configured_sources():
         roots.append((source.label, source.resolved_path()))
     return roots

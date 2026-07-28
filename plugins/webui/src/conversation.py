@@ -21,9 +21,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 
-# plugins/webui/src/conversation.py -> repo root is four parents up.
-_ROOT = Path(__file__).resolve().parent.parent.parent.parent
-CONVERSATIONS_DIR = _ROOT / "data" / "conversations"
+from src.paths import data_root
+
+CONVERSATIONS_DIR = data_root() / "conversations"
 
 
 # The exact shape new_conversation_id() produces below: the letters "c_"

@@ -70,8 +70,9 @@ import tomlkit
 
 from .errors import CLIError
 
-_ROOT = Path(__file__).parent.parent
-SETTINGS_PATH = _ROOT / "settings.toml"
+from . import paths
+
+SETTINGS_PATH = paths.settings_path()
 
 VALID_SOURCE_MODES = ("read-only", "shared-write")
 
