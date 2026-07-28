@@ -100,17 +100,47 @@ class TestGenuineFirstInstall:
         assert (result / paths.DATA_DIRNAME).is_dir()
         assert "add-professor" in talk.transcript    # says what to do next
 
-    def test_a_typed_folder_is_used(self, tmp_path):
+    def test_a_typed_folder_is_used_once_confirmed(self, tmp_path):
         chosen = tmp_path / "my files" / "sandbox"
-        talk = _Conversation(str(chosen))
+        talk = _Conversation(str(chosen), "y")
         assert setup_prompts.run_interactive_setup(talk.input_fn, talk.print_fn) == chosen
         assert (chosen / paths.SETTINGS_FILENAME).is_file()
+
+    def test_a_typed_path_is_shown_in_full_before_anything_is_made(self, tmp_path):
+        chosen = tmp_path / "somewhere"
+        talk = _Conversation(str(chosen), "y")
+        setup_prompts.run_interactive_setup(talk.input_fn, talk.print_fn)
+        assert f"That folder is: {chosen}" in talk.transcript
+
+    def test_a_word_that_is_not_a_path_does_not_silently_become_a_folder(self, tmp_path, monkeypatch):
+        """Typing 'y' at this prompt used to create a folder called 'y'.
+
+        Whatever is typed here is a path, and a bare word is a perfectly
+        valid *relative* one — so it landed wherever the command happened
+        to be run from, with the person's API keys inside, and they would
+        never find it again. Declining now re-asks instead.
+        """
+        monkeypatch.chdir(tmp_path)
+        good = tmp_path / "proper place"
+        talk = _Conversation("y", "n", str(good), "y")
+        result = setup_prompts.run_interactive_setup(talk.input_fn, talk.print_fn)
+        assert result == good
+        assert not (tmp_path / "y").exists()
+
+    def test_a_folder_inside_the_package_is_called_out(self, _isolate, tmp_path):
+        """The one place these files must not go."""
+        inside = _isolate / "my_data"
+        elsewhere = tmp_path / "outside"
+        talk = _Conversation(str(inside), "n", str(elsewhere), "y")
+        setup_prompts.run_interactive_setup(talk.input_fn, talk.print_fn)
+        assert "inside the sandbox folder itself" in talk.transcript
+        assert "would delete them" in talk.transcript
 
     def test_a_typed_path_that_is_a_file_is_rejected_and_re_asked(self, tmp_path):
         a_file = tmp_path / "not-a-folder"
         a_file.write_text("x", encoding="utf-8")
         good = tmp_path / "good"
-        talk = _Conversation(str(a_file), str(good))
+        talk = _Conversation(str(a_file), str(good), "y")
         assert setup_prompts.run_interactive_setup(talk.input_fn, talk.print_fn) == good
         assert "is a file, not a folder" in talk.transcript
 
@@ -118,7 +148,7 @@ class TestGenuineFirstInstall:
         """Never initialise over real settings, however we arrived at them."""
         existing = _make_setup(tmp_path / "hidden away", people=5)
         before = (existing / paths.SETTINGS_FILENAME).read_bytes()
-        talk = _Conversation(str(existing))
+        talk = _Conversation(str(existing), "y")
         result = setup_prompts.run_interactive_setup(talk.input_fn, talk.print_fn)
         assert result == existing
         assert (existing / paths.SETTINGS_FILENAME).read_bytes() == before
@@ -164,6 +194,6 @@ class TestFailures:
         blocker = tmp_path / "blocked"
         blocker.write_text("i am a file", encoding="utf-8")
         monkeypatch.setattr(paths, "DEFAULT_EXTRAS_ROOT", tmp_path / "unused")
-        talk = _Conversation(str(blocker / "inside"))
+        talk = _Conversation(str(blocker / "inside"), "y")
         with pytest.raises(CLIError, match="Could not prepare"):
             setup_prompts.run_interactive_setup(talk.input_fn, talk.print_fn)

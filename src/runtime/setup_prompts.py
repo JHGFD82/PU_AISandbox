@@ -75,12 +75,47 @@ def _ask_for_location(input_fn: Callable[[str], str],
     )
     while True:
         typed = input_fn(f"Folder [{default}]: ").strip()
-        chosen = Path(typed).expanduser() if typed else default
-        _warn_if_synced(chosen, print_fn)
+        if not typed:
+            _warn_if_synced(default, print_fn)
+            return default
+
+        # Resolved, and shown, before anything is created. What someone
+        # types here is a path, and a word that isn't one is still a valid
+        # relative path — typing "y" would quietly make a folder called "y"
+        # wherever the command happened to be run from, and put their API
+        # keys in it. Showing where it actually lands turns an invisible
+        # mistake into an obvious one.
+        chosen = Path(typed).expanduser()
+        if not chosen.is_absolute():
+            chosen = (Path.cwd() / chosen).resolve()
+
         if chosen.exists() and not chosen.is_dir():
-            print_fn(f"  {chosen} is a file, not a folder. Try another.")
+            print_fn(f"\n  {chosen} is a file, not a folder. Try another.")
             continue
-        return chosen
+
+        print_fn(f"\n  That folder is: {chosen}")
+        if _is_within(chosen, paths.PACKAGE_ROOT):
+            print_fn(
+                "\n  Careful: that is inside the sandbox folder itself, which is\n"
+                "  the one place these files should not go — replacing the sandbox\n"
+                "  with a newer version would delete them along with it."
+            )
+        _warn_if_synced(chosen, print_fn)
+
+        # Defaulting to no, because reaching this line at all means what was
+        # typed wasn't the obvious answer.
+        if _ask_yes_no("  Use this folder?", default=False,
+                       input_fn=input_fn, print_fn=print_fn):
+            return chosen
+
+
+def _is_within(candidate: Path, parent: Path) -> bool:
+    """Return whether *candidate* sits inside *parent*."""
+    try:
+        candidate.resolve().relative_to(parent.resolve())
+        return True
+    except (ValueError, OSError):
+        return False
 
 
 def run_interactive_setup(
