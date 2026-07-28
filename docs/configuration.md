@@ -203,7 +203,7 @@ default_system_prompt = "You are a helpful assistant."
 [retry]
 page_delay_seconds = 3.0
 max_retries = 10
-base_retry_delay = 3.0
+retry_delay_seconds = 5.0
 
 [processing]
 default_parallel_workers = 1
@@ -235,7 +235,7 @@ warning_threshold_pct = 80
 |-----|---------|--------|
 | `page_delay_seconds` | `3.0` | Pause between pages in sequential processing mode |
 | `max_retries` | `10` | Maximum retry attempts on transient errors or content filter hits |
-| `base_retry_delay` | `3.0` | Base seconds for exponential backoff (`delay = base × 2^attempt`) |
+| `retry_delay_seconds` | `5.0` | Seconds to wait between retries (the same every time) |
 
 #### `[processing]`
 

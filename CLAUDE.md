@@ -69,7 +69,7 @@ Only the `usage` subcommand is built in; everything else (`translate`, `transcri
 ### Core layers (`src/`)
 - `src/cli.py` — controller/parser; routes commands; exports `add_common_flags()`/`add_notes_flags()` for plugins.
 - `src/config.py` — language registry, `load_professor_config()`, `get_api_key()` (primary key with backup-key fallback).
-- `src/services/` — `BaseService` (all AI services extend this): PortKey client init, `_create_completion()` (handles `max_tokens` vs `max_completion_tokens` for reasoning models), `_run_with_retry()` (exponential backoff, transient/content-filter retry), `_record_response_usage()`.
+- `src/services/` — `BaseService` (all AI services extend this): PortKey client init, `_create_completion()` (handles `max_tokens` vs `max_completion_tokens` for reasoning models), `_run_with_retry()` (flat delay between retries, transient/content-filter retry), `_record_response_usage()`.
 - `src/processors/` — converts source files to lists of text pages: `PdfProcessor` (CJK LAParams; `--scanned` routes through vision), `DocxProcessor`, `TxtProcessor` (splits by `default_page_size`), `MarkdownProcessor`, `JsonProcessor` (recursively flattened), `ExcelProcessor` (requires `openpyxl`), `ImageProcessor` (base64 + blank-page detection).
 - `src/output/` — writes results based on the `-o` extension (`.txt/.md/.pdf/.docx/.xlsx/.json`); Markdown tables become real tables in PDF/DOCX/XLSX; unsupported extensions and rich-format failures silently fall back to `.txt`.
 - `src/tracking/token_tracker.py` — per-professor, per-calendar-month token accounting, thread-safe (`threading.Lock` around `record_usage()`).

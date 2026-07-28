@@ -102,7 +102,28 @@ PROMPT_MAX_TOKENS: int = _s["prompt"]["max_tokens"]
 # ── Retry / rate limiting ──────────────────────────────────────────────────────
 PAGE_DELAY_SECONDS: float = _s["retry"]["page_delay_seconds"]
 MAX_RETRIES: int = _s["retry"]["max_retries"]
-BASE_RETRY_DELAY: float = _s["retry"]["base_retry_delay"]
+
+# How long to wait between retries, in seconds. The same every time — this
+# used to double after each attempt, which at the shipped ten retries meant
+# a failing call could sit for the better part of an hour before giving up.
+#
+# The key was called `base_retry_delay` when it was the base of that
+# doubling. An installation that still sets the old name keeps working and
+# is told to rename it, rather than having its setting quietly ignored and
+# its waiting time changed without explanation.
+if "retry_delay_seconds" in _s["retry"]:
+    RETRY_DELAY_SECONDS: float = _s["retry"]["retry_delay_seconds"]
+elif "base_retry_delay" in _s["retry"]:
+    RETRY_DELAY_SECONDS = float(_s["retry"]["base_retry_delay"])
+    logging.warning(
+        "Your settings file sets 'base_retry_delay', which has been renamed to "
+        "'retry_delay_seconds' now that the wait between retries is the same "
+        "every time instead of doubling. Your value (%.1fs) is still being "
+        "used as that flat wait. Rename the setting to silence this message.",
+        RETRY_DELAY_SECONDS,
+    )
+else:
+    RETRY_DELAY_SECONDS = 5.0
 
 # ── Parallelism & document processing ─────────────────────────────────────────
 DEFAULT_PARALLEL_WORKERS: int = _s["processing"]["default_parallel_workers"]

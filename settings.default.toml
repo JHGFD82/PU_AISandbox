@@ -19,7 +19,7 @@ default_system_prompt = "You are a helpful assistant."
 [retry]
 page_delay_seconds = 3.0   # Seconds to pause between pages in sequential mode
 max_retries = 10           # Maximum retry attempts on transient errors or content filter
-base_retry_delay = 3.0     # Base seconds for exponential backoff (delay = base * 2^attempt)
+retry_delay_seconds = 5.0  # Flat seconds to wait between retries (not doubled each time)
 
 [processing]
 default_parallel_workers = 1  # Default -w/--workers value; 1 = sequential (safe default)

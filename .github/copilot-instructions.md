@@ -92,7 +92,7 @@ For translate, transcribe, and transcription_review command examples, see the RE
 ## Critical Implementation Details
 
 ### Error Handling Pattern
-- **API Failures**: Automatic retries with exponential backoff in `TranslationService`
+- **API Failures**: Automatic retries with a flat delay in `TranslationService`
 - **Graceful Degradation**: If an individual unit of work (e.g., a document page or a single file in a batch) fails during processing, an error message is logged for that unit and processing continues with the remaining units.
 
 ### Thread Safety

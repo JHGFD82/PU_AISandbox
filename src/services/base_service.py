@@ -22,7 +22,7 @@ from ..models import (
 )
 from ..tracking.token_tracker import TokenTracker, TokenUsage
 from .api_errors import APISignal, classify_api_error, is_transient_error
-from .constants import MAX_RETRIES, BASE_RETRY_DELAY
+from .constants import MAX_RETRIES, RETRY_DELAY_SECONDS
 
 
 class BaseService:
@@ -443,10 +443,17 @@ class BaseService:
     ) -> Any:
         """Run a request and automatically retry it if the API returns a temporary error.
 
-        On each failure the method waits before trying again, doubling the wait
-        time after each attempt (exponential backoff). Errors that are likely
-        permanent (such as an invalid API key) are re-raised immediately rather
-        than retried.
+        Waits the same short pause between attempts (``retry_delay_seconds``
+        in the settings file) and gives up after ``max_retries``. Errors that
+        are likely permanent — an invalid API key, a model this installation
+        can't reach — are re-raised immediately rather than retried, since
+        waiting doesn't make those come right.
+
+        The wait used to double after every attempt, which meant a call that
+        kept failing could sit for the better part of an hour before saying
+        so. Someone watching a command run is better served by a clear
+        failure in under a minute than by a success they've stopped waiting
+        for.
 
         Args:
             body_fn: The function containing the actual API call, called once
@@ -485,24 +492,28 @@ class BaseService:
 
         for attempt in range(MAX_RETRIES):
             try:
+                # The one place this loop waits. The transient-error handler
+                # below used to sleep as well before continuing, so a
+                # transient failure paid the wait twice per attempt — with
+                # the old doubling delay that was 26 wasted minutes out of a
+                # 77-minute total. Letting the top of the loop own the wait
+                # means every path through it waits exactly once.
                 if attempt > 0:
-                    delay = BASE_RETRY_DELAY * (2 ** attempt) + (0.1 * attempt)
                     logging.info(
                         f"Retrying {operation} "
-                        f"(attempt {attempt + 1}/{MAX_RETRIES}) after {delay:.1f}s..."
+                        f"(attempt {attempt + 1}/{MAX_RETRIES}) after {RETRY_DELAY_SECONDS:.1f}s..."
                     )
-                    time.sleep(delay)
+                    time.sleep(RETRY_DELAY_SECONDS)
                 result = body_fn(attempt)
                 if result is not None:
                     return result
             except Exception as e:
                 if is_transient_error(e) and attempt < MAX_RETRIES - 1:
-                    delay = BASE_RETRY_DELAY * (2 ** attempt) + (0.1 * attempt)
                     logging.warning(
                         f"Transient server error on {operation} "
-                        f"(attempt {attempt + 1}/{MAX_RETRIES}), retrying in {delay:.1f}s: {e}"
+                        f"(attempt {attempt + 1}/{MAX_RETRIES}), retrying in "
+                        f"{RETRY_DELAY_SECONDS:.1f}s: {e}"
                     )
-                    time.sleep(delay)
                     continue
                 signal = classify_api_error(e, model)
                 if signal == APISignal.CONTENT_FILTER and attempt < MAX_RETRIES - 1:

@@ -263,7 +263,7 @@ class TestRunWithRetry:
         """body_fn returning None on every attempt → RuntimeError after MAX_RETRIES."""
         svc = _make_svc(monkeypatch)
         monkeypatch.setattr("src.services.base_service.MAX_RETRIES", 2)
-        monkeypatch.setattr("src.services.base_service.BASE_RETRY_DELAY", 0)
+        monkeypatch.setattr("src.services.base_service.RETRY_DELAY_SECONDS", 0)
         monkeypatch.setattr("src.services.base_service.time.sleep", lambda _: None)
         body = MagicMock(return_value=None)
         with pytest.raises(RuntimeError, match="returned no content"):
@@ -273,7 +273,7 @@ class TestRunWithRetry:
     def test_retries_on_transient_error(self, monkeypatch):
         svc = _make_svc(monkeypatch)
         monkeypatch.setattr("src.services.base_service.MAX_RETRIES", 3)
-        monkeypatch.setattr("src.services.base_service.BASE_RETRY_DELAY", 0)
+        monkeypatch.setattr("src.services.base_service.RETRY_DELAY_SECONDS", 0)
         monkeypatch.setattr("src.services.base_service.time.sleep", lambda _: None)
         monkeypatch.setattr("src.services.base_service.is_transient_error", lambda e: True)
         calls = []
@@ -286,10 +286,50 @@ class TestRunWithRetry:
         assert result == "ok"
         assert len(calls) == 3
 
+    def test_waits_once_per_retry_at_a_flat_delay(self, monkeypatch):
+        """Each retry waits exactly once, for the same length of time.
+
+        Two things used to go wrong together here. The wait doubled after
+        every attempt, and the transient-error handler slept before
+        ``continue`` on top of the sleep at the top of the loop — so a
+        transient failure paid the wait twice per attempt. At the shipped ten
+        retries that came to about 77 minutes before the call gave up, 26 of
+        them purely the double count. Someone watching a command run is
+        better served by a clear failure in under a minute.
+        """
+        svc = _make_svc(monkeypatch)
+        slept: list[float] = []
+        monkeypatch.setattr("src.services.base_service.MAX_RETRIES", 4)
+        monkeypatch.setattr("src.services.base_service.RETRY_DELAY_SECONDS", 5.0)
+        monkeypatch.setattr("src.services.base_service.time.sleep", slept.append)
+        monkeypatch.setattr("src.services.base_service.is_transient_error", lambda e: True)
+
+        def body(attempt):
+            raise Exception("503 unavailable")
+
+        with pytest.raises(Exception, match="503 unavailable"):
+            svc._run_with_retry(body, "gpt-4o")
+
+        # Four attempts means three gaps between them, not six.
+        assert slept == [5.0, 5.0, 5.0]
+
+    def test_flat_delay_also_applies_to_empty_responses(self, monkeypatch):
+        """The other retry path — a response with no content — waits the same way."""
+        svc = _make_svc(monkeypatch)
+        slept: list[float] = []
+        monkeypatch.setattr("src.services.base_service.MAX_RETRIES", 3)
+        monkeypatch.setattr("src.services.base_service.RETRY_DELAY_SECONDS", 5.0)
+        monkeypatch.setattr("src.services.base_service.time.sleep", slept.append)
+
+        with pytest.raises(RuntimeError, match="returned no content"):
+            svc._run_with_retry(MagicMock(return_value=None), "gpt-4o")
+
+        assert slept == [5.0, 5.0]
+
     def test_raises_non_retryable_error(self, monkeypatch):
         svc = _make_svc(monkeypatch)
         monkeypatch.setattr("src.services.base_service.MAX_RETRIES", 3)
-        monkeypatch.setattr("src.services.base_service.BASE_RETRY_DELAY", 0)
+        monkeypatch.setattr("src.services.base_service.RETRY_DELAY_SECONDS", 0)
         monkeypatch.setattr("src.services.base_service.time.sleep", lambda _: None)
         monkeypatch.setattr("src.services.base_service.is_transient_error", lambda e: False)
         monkeypatch.setattr("src.services.base_service.classify_api_error",
@@ -302,7 +342,7 @@ class TestRunWithRetry:
     def test_return_signal_on_error_true_returns_signal(self, monkeypatch):
         svc = _make_svc(monkeypatch)
         monkeypatch.setattr("src.services.base_service.MAX_RETRIES", 2)
-        monkeypatch.setattr("src.services.base_service.BASE_RETRY_DELAY", 0)
+        monkeypatch.setattr("src.services.base_service.RETRY_DELAY_SECONDS", 0)
         monkeypatch.setattr("src.services.base_service.time.sleep", lambda _: None)
         monkeypatch.setattr("src.services.base_service.is_transient_error", lambda e: False)
         monkeypatch.setattr("src.services.base_service.classify_api_error",
@@ -350,7 +390,7 @@ class TestImageContentBlock:
     def test_return_signal_on_none_exhaustion(self, monkeypatch):
         svc = _make_svc(monkeypatch)
         monkeypatch.setattr("src.services.base_service.MAX_RETRIES", 2)
-        monkeypatch.setattr("src.services.base_service.BASE_RETRY_DELAY", 0)
+        monkeypatch.setattr("src.services.base_service.RETRY_DELAY_SECONDS", 0)
         monkeypatch.setattr("src.services.base_service.time.sleep", lambda _: None)
         body = MagicMock(return_value=None)
         result = svc._run_with_retry(body, "gpt-4o", return_signal_on_error=True)
@@ -359,7 +399,7 @@ class TestImageContentBlock:
     def test_custom_timeout_msg(self, monkeypatch):
         svc = _make_svc(monkeypatch)
         monkeypatch.setattr("src.services.base_service.MAX_RETRIES", 1)
-        monkeypatch.setattr("src.services.base_service.BASE_RETRY_DELAY", 0)
+        monkeypatch.setattr("src.services.base_service.RETRY_DELAY_SECONDS", 0)
         monkeypatch.setattr("src.services.base_service.time.sleep", lambda _: None)
         body = MagicMock(return_value=None)
         with pytest.raises(RuntimeError, match="my custom msg"):
@@ -368,7 +408,7 @@ class TestImageContentBlock:
     def test_content_filter_retries_then_exhausts(self, monkeypatch):
         svc = _make_svc(monkeypatch)
         monkeypatch.setattr("src.services.base_service.MAX_RETRIES", 3)
-        monkeypatch.setattr("src.services.base_service.BASE_RETRY_DELAY", 0)
+        monkeypatch.setattr("src.services.base_service.RETRY_DELAY_SECONDS", 0)
         monkeypatch.setattr("src.services.base_service.time.sleep", lambda _: None)
         monkeypatch.setattr("src.services.base_service.is_transient_error", lambda e: False)
         monkeypatch.setattr("src.services.base_service.classify_api_error",

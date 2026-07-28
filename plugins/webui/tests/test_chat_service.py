@@ -165,7 +165,7 @@ class TestSendMessage:
 
     def test_retries_until_content_returned(self, svc, monkeypatch):
         """_create_completion returning empty content should trigger a retry, not a crash."""
-        monkeypatch.setattr("src.services.base_service.BASE_RETRY_DELAY", 0)
+        monkeypatch.setattr("src.services.base_service.RETRY_DELAY_SECONDS", 0)
         calls = {"n": 0}
 
         def flaky(model, messages, max_tokens, **kw):

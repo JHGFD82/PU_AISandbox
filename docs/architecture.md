@@ -99,7 +99,7 @@ When two plugins share a command (e.g., `translate` is handled by both `translat
 All AI services extend `BaseService`, which provides:
 - PortKey client initialization
 - `_create_completion()` — handles the `max_tokens` vs `max_completion_tokens` API difference for reasoning models
-- `_run_with_retry()` — exponential backoff, transient error detection, content-filter retry
+- `_run_with_retry()` — flat delay between retries, transient error detection, content-filter retry
 - `_record_response_usage()` — extracts token counts and calls `TokenTracker.record_usage()`
 - `_get_model()` — resolves the model name and syncs pricing if the model is new
 

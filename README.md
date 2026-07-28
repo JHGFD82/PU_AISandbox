@@ -280,7 +280,7 @@ Prices are per 1,000,000 tokens (default `pricing_unit`). Set `"supports_vision"
 | `[prompt]` | `default_system_prompt` | `"You are a helpful assistant."` | System prompt used when `-s` is not passed |
 | `[retry]` | `page_delay_seconds` | `3.0` | Pause between pages in sequential mode |
 | `[retry]` | `max_retries` | `10` | Max retry attempts on transient errors |
-| `[retry]` | `base_retry_delay` | `3.0` | Base seconds for exponential backoff (`delay = base × 2^attempt`) |
+| `[retry]` | `retry_delay_seconds` | `5.0` | Seconds to wait between retries (the same every time) |
 | `[processing]` | `default_parallel_workers` | `1` | Default `-w` value (1 = sequential) |
 | `[processing]` | `default_ocr_passes` | `1` | Default `-P` value for EA OCR; > 1 enables multi-pass refinement |
 | `[processing]` | `default_page_size` | `2000` | Target characters per page when splitting DOCX/TXT |
