@@ -64,7 +64,7 @@ python3 start.py
 
 That's it. `start.py` does everything else: finds a Python new enough to run the sandbox, installs what it needs, asks where to keep your files, and opens the web interface in your browser.
 
-The first time, it asks whether you'd rather answer its couple of questions in the terminal window or in your browser — the same questions either way, so pick whichever you find easier.
+The first time, a page opens asking where to keep your files. Answer it and the same window moves straight on to the sandbox. (If you would rather answer at the command line, `python main.py settings setup` asks the same thing — but nothing makes you.)
 
 The first run takes a few minutes — about 200 MB of software is downloaded. Every run after that reaches the web interface in about a second, so this is also the normal way to open the sandbox day to day.
 
@@ -124,18 +124,20 @@ If you would rather start from a clean copy — or you downloaded a ZIP rather t
 
 1. Delete the whole `PU_AISandbox` folder.
 2. Get a fresh one (clone or download again).
-3. Run `python3 start.py`. It rebuilds the environment, then finds your existing files and asks you to confirm:
+3. Run `python3 start.py`. It rebuilds the environment, then opens a page that has already found your existing files and asks you to confirm:
 
 ```
-Found your files already at /Users/you/PU_AISandbox_data:
-    your settings and API keys   (2 people configured)
+Your files are already here
+    /Users/you/PU_AISandbox_data
+
+    your settings and API keys (2 people configured)
     your model catalogue
-    your usage history           (11 months)
+    your usage history (11 months)
 
-Use these? [Y/n]
+    [ Use these files ]
 ```
 
-Press Enter and you're done — nothing to copy, nothing to re-enter.
+One click and you're done — nothing to copy, nothing to re-enter.
 
 ---
 

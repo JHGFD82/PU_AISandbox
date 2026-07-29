@@ -1,10 +1,14 @@
-"""First-time setup, in a browser, for people who would rather not use a terminal.
+"""First-time setup, in a browser. The route ``start.py`` takes.
 
-The same three questions ``src/setup_prompts.py`` asks at the command line,
-asked as a web page instead. Both are only ever a way of putting the
-questions: the answers go to ``src/first_run.py``, which is the one place
-that decides anything. Neither can drift from the other about what counts as
-an existing setup, or about what must never be overwritten.
+The same questions ``src/setup_prompts.py`` asks at the command line, asked
+as a web page instead. Both are only ever a way of putting the questions:
+the answers go to ``src/first_run.py``, which is the one place that decides
+anything. Neither can drift from the other about what counts as an existing
+setup, or about what must never be overwritten.
+
+Neither route is the lesser one. Someone working at the command line has
+``python main.py settings setup``; someone who ran ``start.py`` gets this,
+without being asked to choose between them first.
 
 This runs as its own short-lived server, separate from the sandbox's real
 web interface, and stops as soon as setup is done. That separation is not
@@ -156,7 +160,22 @@ _DONE = """<!doctype html>
 <h1>All set</h1>
 <p>Your files are in <code>{where}</code>.</p>
 <p>The sandbox is starting now — this page will move to it in a moment.</p>
-<script>setTimeout(function () {{ location.href = "/"; }}, 3500);</script>
+<script>
+// This page outlives the server that sent it: answering the question stops
+// setup, and the sandbox proper starts on the same address a second or two
+// later. How long that takes depends on the computer, so the page asks
+// until someone answers rather than guessing a number and landing on an
+// error page when the guess is short. The first wait is for the setup
+// server to finish going away — while it is still up it would answer, and
+// the answer would be this same page again.
+setTimeout(function () {{
+  (function ask() {{
+    fetch("/", {{ method: "HEAD", cache: "no-store" }})
+      .then(function () {{ location.href = "/"; }})
+      .catch(function () {{ setTimeout(ask, 500); }});
+  }})();
+}}, 2000);
+</script>
 </body></html>
 """
 

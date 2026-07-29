@@ -197,10 +197,10 @@ def _is_loopback_host(host: str) -> bool:
 def _serve_setup(args: argparse.Namespace) -> None:
     """Ask where a person's files should go, in a browser, then stop.
 
-    A short-lived server on loopback only, serving one page. It exists so
-    that someone who would rather not answer questions in a terminal can
-    answer them in a form instead; the answers go to the same place either
-    way.
+    A short-lived server on loopback only, serving one page. This is the
+    route ``start.py`` takes; ``python main.py settings setup`` asks the
+    same thing at the command line, and the answers go to the same place
+    either way.
 
     It stops as soon as setup is done, and the sandbox's real web interface
     starts afterwards as a fresh process. Continuing in this one would mean
