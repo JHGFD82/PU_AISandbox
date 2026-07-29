@@ -90,6 +90,7 @@ data/webui_memory/*
 # feature).
 plugins/*
 !plugins/.gitkeep
+!plugins/CLAUDE.md
 !plugins/prompt/
 !plugins/translation/
 !plugins/transcription/
