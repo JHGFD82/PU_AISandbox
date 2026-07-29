@@ -117,6 +117,46 @@ class TestCarryingForwardAnExistingSetup:
         assert resp.status_code == 200
         assert (elsewhere / paths.SETTINGS_FILENAME).read_bytes() == before
 
+    def test_somewhere_else_is_offered_alongside_what_was_found(self, client_and_result):
+        """Files found in the usual place aren't proof they're the ones wanted.
+
+        The command line asks "Use these? [Y/n]" and falls through to asking
+        where when the answer is no. Without this the browser had only the
+        yes — someone whose real files sit on an external drive, with a
+        stale folder left in the usual place, was stuck.
+        """
+        _make_setup(paths.DEFAULT_EXTRAS_ROOT, people=1)
+        client, _ = client_and_result
+        page = client.get("/").text
+        assert "somewhere else" in page
+        assert 'name="folder"' in page
+        # Two answers, so two forms — one submitting the found folder, one
+        # submitting whatever gets typed.
+        assert page.count("<form") == 2
+
+    def test_choosing_a_different_folder_carries_that_one_forward(
+        self, client_and_result, tmp_path
+    ):
+        _make_setup(paths.DEFAULT_EXTRAS_ROOT, people=1)
+        real = _make_setup(tmp_path / "external drive", people=4)
+        before = (real / paths.SETTINGS_FILENAME).read_bytes()
+        client, _ = client_and_result
+        resp = client.post("/", data={"folder": str(real)})
+        assert resp.status_code == 200
+        assert "All set" in resp.text
+        assert paths.read_install_marker() == real
+        assert (real / paths.SETTINGS_FILENAME).read_bytes() == before
+
+    def test_an_empty_folder_box_is_not_read_as_the_current_directory(
+        self, client_and_result
+    ):
+        """Submitting the alternative form untouched must not settle on anything."""
+        _make_setup(paths.DEFAULT_EXTRAS_ROOT, people=1)
+        client, _ = client_and_result
+        resp = client.post("/", data={"folder": "   "})
+        assert "No folder was given" in resp.text
+        assert paths.is_installed() is False
+
 
 class TestRejectingBadAnswers:
     def test_a_relative_path_is_refused_with_a_reason(self, client_and_result):
@@ -144,6 +184,61 @@ class TestCloudSyncWarning:
         page = client.get("/").text
         assert "Dropbox" in page
         assert "API keys" in page
+
+    def test_taking_the_suggestion_does_not_ask_twice(
+        self, client_and_result, tmp_path, monkeypatch
+    ):
+        """The warning was beside the button; pressing it read it."""
+        synced = tmp_path / "home" / "Dropbox" / "sandbox"
+        monkeypatch.setattr(paths, "DEFAULT_EXTRAS_ROOT", synced)
+        client, _ = client_and_result
+        resp = client.post("/", data={"folder": str(synced), "acknowledged": str(synced)})
+        assert "All set" in resp.text
+        assert paths.read_install_marker() == synced
+
+    def test_a_synced_folder_someone_chose_themselves_is_queried(
+        self, client_and_result, tmp_path
+    ):
+        """Nothing warned about this one — it was typed, or reached via Browse."""
+        synced = tmp_path / "home" / "Dropbox" / "my documents"
+        client, _ = client_and_result
+        resp = client.post("/", data={"folder": str(synced)})
+        assert resp.status_code == 200
+        assert "Dropbox" in resp.text
+        assert "Use it anyway" in resp.text
+        # Nothing has happened yet — this is a question, not a refusal.
+        assert paths.is_installed() is False
+        assert not synced.exists()
+
+    def test_saying_use_it_anyway_goes_ahead(self, client_and_result, tmp_path):
+        synced = tmp_path / "home" / "Dropbox" / "my documents"
+        client, _ = client_and_result
+        client.post("/", data={"folder": str(synced)})
+        resp = client.post(
+            "/", data={"folder": str(synced), "acknowledged": str(synced)}
+        )
+        assert "All set" in resp.text
+        assert paths.read_install_marker() == synced
+        assert (synced / paths.SETTINGS_FILENAME).is_file()
+
+    def test_an_acknowledgement_for_a_different_folder_does_not_count(
+        self, client_and_result, tmp_path
+    ):
+        """The hidden field names the folder it was shown for, so it can't be reused."""
+        synced = tmp_path / "home" / "Dropbox" / "my documents"
+        client, _ = client_and_result
+        resp = client.post(
+            "/", data={"folder": str(synced), "acknowledged": str(tmp_path / "elsewhere")}
+        )
+        assert "Use it anyway" in resp.text
+        assert paths.is_installed() is False
+
+    def test_an_ordinary_folder_is_never_queried(self, client_and_result, tmp_path):
+        plain = tmp_path / "somewhere ordinary"
+        client, _ = client_and_result
+        resp = client.post("/", data={"folder": str(plain)})
+        assert "All set" in resp.text
+        assert paths.read_install_marker() == plain
 
 
 class TestBrowseButton:

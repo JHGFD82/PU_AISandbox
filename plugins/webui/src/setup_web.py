@@ -67,9 +67,12 @@ _PAGE = """<!doctype html>
   .error {{ background: #ffeaea; border: 1px solid #d98080; border-radius: 8px; padding: .9rem 1.1rem; margin: 1.25rem 0; }}
   button {{ font: inherit; padding: .6rem 1.4rem; border-radius: 6px; border: 0; background: #2b6cb0; color: #fff; cursor: pointer; }}
   button:disabled {{ opacity: .55; cursor: default; }}
-  button.browse {{ background: transparent; color: inherit; border: 1px solid #999; padding: .5rem 1rem; }}
+  button.browse, button.secondary {{ background: transparent; color: inherit; border: 1px solid #999; padding: .5rem 1rem; }}
   .field-row {{ display: flex; gap: .5rem; align-items: center; }}
   .field-row input[type=text] {{ flex: 1; }}
+  details {{ margin: 1.5rem 0; }}
+  details summary {{ cursor: pointer; color: #2b6cb0; }}
+  @media (prefers-color-scheme: dark) {{ details summary {{ color: #7aa7dd; }} }}
   ul {{ margin: .4rem 0; padding-left: 1.2rem; }}
   code {{ background: rgba(128,128,128,.15); padding: .1rem .3rem; border-radius: 4px; }}
   @media (prefers-color-scheme: dark) {{
@@ -85,13 +88,9 @@ _PAGE = """<!doctype html>
 </head>
 <body>
 <h1>Set up the PU AI Sandbox</h1>
-<p class="lede">One question, then you're done.</p>
+<p class="lede">{lede}</p>
 {error}
-<form method="post" action="/">
 {body}
-{warning}
-  <button type="submit">{button}</button>
-</form>
 {script}
 </body>
 </html>
@@ -145,64 +144,129 @@ def _describe(candidate: first_run.ExtrasCandidate) -> str:
     return "<ul>" + "".join(f"<li>{i}</li>" for i in items) + "</ul>"
 
 
+def _sync_note(path: Path) -> str:
+    """Return the "this folder is being copied to the cloud" note, or nothing."""
+    warning = paths.cloud_sync_warning(path)
+    if not warning:
+        return ""
+    # quote=False because this lands in element content, not an attribute —
+    # escaping apostrophes there only makes the sentence harder to read for
+    # no gain in safety.
+    return f'<div class="note">{html.escape(warning, quote=False)}</div>'
+
+
+def _folder_field(value: str) -> str:
+    """Return the box someone types a folder into, with its "Browse…" button.
+
+    The button is left off entirely where there is no chooser to open, which
+    leaves the box exactly as it was — typeable — rather than adding
+    something that would do nothing when pressed.
+    """
+    browse = (
+        '<button type="button" class="browse" id="browse-btn">Browse…</button>'
+        if file_picker.available() else ""
+    )
+    return (
+        '<label for="folder">Folder</label>'
+        '<div class="field-row">'
+        f'<input type="text" id="folder" name="folder" '
+        f'value="{html.escape(value)}" spellcheck="false">'
+        f"{browse}"
+        "</div>"
+    )
+
+
 def _render(error: str = "") -> str:
     """Build the setup page, offering an existing folder if there is one."""
-    script = ""
     found = first_run.find_existing()
     if found:
         candidate = found[0]
+        safe_path = html.escape(str(candidate.path))
+        # Two forms rather than one, because there are genuinely two answers
+        # here and they submit different folders. The recommended one is a
+        # single button with nothing to fill in; the other is folded away
+        # behind a summary, since wanting it is the rare case.
         body = (
+            '<form method="post" action="/">'
             '<fieldset class="found"><legend>Your files are already here</legend>'
-            f"<p><code>{html.escape(str(candidate.path))}</code></p>"
+            f"<p><code>{safe_path}</code></p>"
             f"{_describe(candidate)}"
-            f'<input type="hidden" name="folder" value="{html.escape(str(candidate.path))}">'
+            f'<input type="hidden" name="folder" value="{safe_path}">'
+            f'<input type="hidden" name="acknowledged" value="{safe_path}">'
             "</fieldset>"
+            f"{_sync_note(candidate.path)}"
+            "<button type=\"submit\">Use these files</button>"
+            "</form>"
+            "<details><summary>My files are somewhere else</summary>"
+            '<form method="post" action="/">'
+            "<fieldset>"
+            "<p>If you keep your files somewhere other than the folder above — "
+            "on an external drive, say, or in a folder you chose yourself last "
+            "time — point the sandbox at it here. Whatever is already in it is "
+            "used as it is: nothing is overwritten, and no settings or usage "
+            "history are lost.</p>"
+            f"{_folder_field('')}"
+            "</fieldset>"
+            '<button type="submit" class="secondary">Use this folder instead</button>'
+            "</form></details>"
         )
-        button = "Use these files"
-        target = candidate.path
+        lede = "One button, then you're done."
     else:
         default = paths.DEFAULT_EXTRAS_ROOT
-        can_browse = file_picker.available()
-        browse = (
-            '<button type="button" class="browse" id="browse-btn">Browse…</button>'
-            if can_browse else ""
-        )
         body = (
+            '<form method="post" action="/">'
             "<fieldset><legend>Where should your files be kept?</legend>"
             "<p>Your API keys, your usage history and your saved conversations "
             "will live here. Keeping them outside the sandbox folder is what "
             "lets you replace the sandbox with a newer version later without "
             "losing any of it.</p>"
-            '<label for="folder">Folder</label>'
-            '<div class="field-row">'
-            f'<input type="text" id="folder" name="folder" '
-            f'value="{html.escape(str(default))}" spellcheck="false">'
-            f"{browse}"
-            "</div>"
+            f"{_folder_field(str(default))}"
             "<p>The suggestion above is a good one — press the button below to "
             "take it. Choose somewhere else only if you have a reason to.</p>"
             "</fieldset>"
+            f"{_sync_note(default)}"
+            f'<input type="hidden" name="acknowledged" value="{html.escape(str(default))}">'
+            '<button type="submit">Create these files</button>'
+            "</form>"
         )
-        button = "Create these files"
-        target = default
-        script = _BROWSE_SCRIPT if can_browse else ""
-
-    warning = ""
-    sync = paths.cloud_sync_warning(target)
-    if sync:
-        warning = f'<div class="note">{html.escape(sync, quote=False)}</div>'
+        lede = "One question, then you're done."
 
     return _PAGE.format(
         body=body,
-        button=button,
-        warning=warning,
-        script=script,
-        # quote=False because this lands in element content, not an
-        # attribute — escaping apostrophes there only makes the sentence
-        # harder to read for no gain in safety.
+        lede=lede,
+        script=_BROWSE_SCRIPT if file_picker.available() else "",
         error=(f'<div class="error">{html.escape(error, quote=False)}</div>'
                if error else ""),
     )
+
+
+def _render_sync_confirm(chosen: Path, warning: str) -> str:
+    """Ask once more about a folder that is being copied to a cloud service.
+
+    Reached only for a folder somebody typed or browsed to themselves — the
+    folder the page suggested carries its warning next to the button, where
+    it was read before pressing it. This is for the one that didn't: a
+    Dropbox or iCloud folder chosen because that is where their documents
+    live, without the API keys and months of history that are about to be
+    put there having been part of the thought.
+
+    Nothing is refused. It is their computer and their files, and there are
+    reasons to want this. It is only made deliberate.
+    """
+    safe_path = html.escape(str(chosen))
+    body = (
+        f'<div class="note">{html.escape(warning, quote=False)}</div>'
+        '<form method="post" action="/">'
+        # Nothing restated here that the warning above already says — one
+        # copy of that reasoning, in paths.cloud_sync_warning().
+        f"<fieldset><p>You chose <code>{safe_path}</code>.</p></fieldset>"
+        f'<input type="hidden" name="folder" value="{safe_path}">'
+        f'<input type="hidden" name="acknowledged" value="{safe_path}">'
+        '<button type="submit">Use it anyway</button>'
+        "</form>"
+        '<p><a href="/">Choose somewhere else</a></p>'
+    )
+    return _PAGE.format(body=body, lede="One thing to check first.", script="", error="")
 
 
 _DONE = """<!doctype html>
@@ -282,8 +346,18 @@ def create_setup_app(on_complete) -> FastAPI:
         return JSONResponse({"path": str(chosen) if chosen else None})
 
     @app.post("/", response_class=HTMLResponse)
-    async def submit(request: Request, folder: str = Form(...)) -> str:
-        chosen = Path(folder.strip()).expanduser()
+    async def submit(
+        request: Request,
+        folder: str = Form(...),
+        acknowledged: str = Form(""),
+    ) -> str:
+        typed = folder.strip()
+        if not typed:
+            return _render(
+                "No folder was given. Type where your files should be kept, or "
+                "use the Browse button to find it."
+            )
+        chosen = Path(typed).expanduser()
         if not chosen.is_absolute():
             return _render(
                 f"'{folder}' isn't a full path. It needs to start with a / so "
@@ -291,6 +365,15 @@ def create_setup_app(on_complete) -> FastAPI:
             )
         if chosen.exists() and not chosen.is_dir():
             return _render(f"{chosen} is a file, not a folder. Please choose another.")
+
+        # The page shows this warning beside the folder it suggests, and says
+        # so in the hidden field when it does. A folder somebody typed or
+        # browsed to instead has had no such warning attached to it, so it
+        # gets one now — the API keys are the point, and "my documents are in
+        # Dropbox" is a perfectly ordinary reason to have picked it.
+        sync_warning = paths.cloud_sync_warning(chosen)
+        if sync_warning and acknowledged.strip() != str(chosen):
+            return _render_sync_confirm(chosen, sync_warning)
 
         try:
             # Never initialises over a settings file — see first_run's module

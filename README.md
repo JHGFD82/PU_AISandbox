@@ -145,9 +145,13 @@ Your files are already here
     your usage history (11 months)
 
     [ Use these files ]
+
+  › My files are somewhere else
 ```
 
 One click and you're done — nothing to copy, nothing to re-enter.
+
+If your files live somewhere other than the folder it found — on an external drive, or wherever you chose the first time — open **My files are somewhere else** and point it there, typing the folder or pressing *Browse…* to find it. Whatever is in that folder is used exactly as it is: nothing is overwritten, and nothing is lost.
 
 ---
 
