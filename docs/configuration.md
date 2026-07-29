@@ -171,10 +171,11 @@ This lives in your files folder rather than in `settings.toml` for a practical r
 | `supports_vision` | bool | — | `true` for models that can read images (default `false`) |
 | `portkey_id` | string | — | PortKey routing identifier, e.g. `"openai/gpt-4o"` |
 | `last_sync` | string | — | Timestamp, set automatically after a pricing sync |
-| `uses_max_completion_tokens` | bool | — | `true` for reasoning models that expect `max_completion_tokens` rather than `max_tokens` |
-| `fixed_parameters` | bool | — | `true` for models that reject `temperature` and `top_p` |
+| `use_max_completion_tokens` | bool | — | `true` for reasoning models that expect `max_completion_tokens` rather than `max_tokens`. Note the key is `use_`, not `uses_`. |
+| `fixed_parameters` | bool | — | `true` for models that reject `temperature` and `top_p` outright |
+| `omit_sampling_params` | bool | — | `true` for models that accept `temperature` and `top_p` but do nothing useful with them, so they're left out. Milder than `fixed_parameters`; either one causes them to be dropped. |
 | `max_completion_tokens` | int | — | Per-model cap on response length |
-| `system_role` | string | — | Override the system message's role (defaults to `"system"`) |
+| `system_role` | string | — | Override the system message's role (defaults to `"system"`; some newer models want `"developer"`) |
 
 ### Adding models
 
