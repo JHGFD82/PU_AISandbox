@@ -17,7 +17,13 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 MODEL_CATALOG_FILE = "model_catalog.json"
-DEFAULT_FALLBACK_MODEL = "gpt-4o-mini"
+
+# What each role needs from a model beyond simply being in the catalog. Kept in
+# code rather than in the catalog file because it describes what the role *is*
+# — a chat question in the web interface can carry a document, so the model
+# answering it has to be able to read one — rather than a preference anyone
+# should be able to misconfigure into a broken state.
+_ROLES_REQUIRING_VISION: frozenset = frozenset({"chat", "ocr", "image_translation"})
 
 # In-memory cache: populated on first load, invalidated whenever the catalog
 # is written.  Eliminates repeated file-descriptor opens during parallel
@@ -211,22 +217,29 @@ def get_model_pricing(model: str) -> Dict[str, float]:
         values are the cost per pricing unit (see ``get_pricing_unit()``).
 
     Raises:
-        ValueError: If the model is not found and the fallback model is also
-                    absent from the catalog.
+        ValueError: If the model is not in the catalog and no other model there
+                    carries a price that could stand in for it.
     """
     config = load_model_catalog()
     models = config["models"]
 
     if model not in models:
-        if DEFAULT_FALLBACK_MODEL in models:
+        # Priced against the cheapest model rather than a named stand-in, so
+        # this keeps working when whichever model used to be named here is
+        # retired. It is a guess either way — the point is only that a call
+        # already made gets recorded rather than lost.
+        stand_in = cheapest_model()
+        if stand_in is not None:
             logging.warning(
-                f"Model {model} not found in pricing config. Using {DEFAULT_FALLBACK_MODEL} rates."
+                f"Model {model} is not in the catalog, so its cost cannot be worked out "
+                f"exactly. Recording it at {stand_in}'s rates instead; add {model} to "
+                "model_catalog.json for accurate figures."
             )
-            return models[DEFAULT_FALLBACK_MODEL]
+            return models[stand_in]
         available_models = list(models.keys())
         error_msg = (
-            f"Model '{model}' not found in model catalog and no fallback model "
-            f"'{DEFAULT_FALLBACK_MODEL}' available. "
+            f"Model '{model}' is not in the model catalog, and no other model there has "
+            f"a price to stand in for it. "
             f"Available models: {available_models}. "
             "Please update your model catalog file."
         )
@@ -457,25 +470,116 @@ def get_model_max_completion_tokens(model: str, default: int) -> int:
     return config["models"].get(model, {}).get("max_completion_tokens", default)
 
 
-def get_default_model(role: str) -> Optional[str]:
-    """Return the default model name configured for a specific role, if one is set.
+def get_role_preferences(role: str) -> list[str]:
+    """Return the models configured for a role, in the order they should be tried.
 
-    Different commands use different default models — OCR uses a vision-capable
-    model while translation may use a different one. These defaults are set in
-    the ``config.defaults`` section of ``model_catalog.json`` and can be
-    changed there without touching any code.
+    A role's entry in the catalog's ``config.defaults`` may be a single model
+    name or a list of them. A list is the useful form: providers retire models,
+    and naming a second and third choice means that when the first disappears
+    the sandbox carries on with the next one instead of stopping to be
+    reconfigured by hand.
 
     Args:
-        role: The command role to look up. Recognised values are
-              ``'translation'``, ``'ocr'``, and ``'image_translation'``.
+        role: The job the model is for — ``'chat'``, ``'title'``,
+              ``'translation'``, ``'ocr'``, ``'image_translation'``,
+              ``'transcription_review'``.
 
     Returns:
-        The model name string if a default is configured for that role
-        (e.g. ``'gpt-4o-mini'``), or ``None`` if the role is absent from the
-        catalog. Callers apply their own fallback when ``None`` is returned.
+        The model names in preference order, or an empty list if this role
+        isn't configured. A single configured name comes back as a one-item
+        list, so callers never have to care which form was written.
     """
-    config = load_model_catalog()
-    return config.get("config", {}).get("defaults", {}).get(role)
+    configured = load_model_catalog().get("config", {}).get("defaults", {}).get(role)
+    if isinstance(configured, str):
+        return [configured] if configured else []
+    if isinstance(configured, list):
+        return [name for name in configured if isinstance(name, str) and name]
+    return []
+
+
+def get_default_model(role: str) -> Optional[str]:
+    """Return the model to use for a role: its first choice that is still available.
+
+    Walks the role's preference list (see ``get_role_preferences()``) and
+    returns the first model that is actually in the catalog and can do what the
+    role needs — reading images, for the roles that require it. Falling past
+    the first choice is logged, because a quietly-substituted model changes
+    both what a request costs and how good the answer is, and someone watching
+    output they didn't expect deserves to know why.
+
+    Args:
+        role: The job the model is for (e.g. ``'chat'``).
+
+    Returns:
+        A model name, or ``None`` if nothing configured for this role remains.
+        ``None`` means "no preference survived" — callers hand it to
+        ``resolve_model()``, which falls back to the cheapest capable model
+        rather than giving up.
+    """
+    models = load_model_catalog()["models"]
+    needs_vision = role in _ROLES_REQUIRING_VISION
+    preferences = get_role_preferences(role)
+
+    for position, name in enumerate(preferences):
+        entry = models.get(name)
+        if entry is None:
+            continue
+        if needs_vision and not entry.get("supports_vision", False):
+            continue
+        if position > 0:
+            logging.warning(
+                f"The preferred model for '{role}' ({preferences[0]}) is no longer in the "
+                f"catalog{' or cannot read images' if needs_vision else ''} — using "
+                f"'{name}' instead. Edit config.defaults in model_catalog.json to change this."
+            )
+        return name
+
+    if preferences:
+        logging.warning(
+            f"None of the models configured for '{role}' ({', '.join(preferences)}) are "
+            "available; falling back to the cheapest model that can do the job."
+        )
+    return None
+
+
+def cheapest_model(require_vision: bool = False) -> Optional[str]:
+    """Return the least expensive model in the catalog that can do the job.
+
+    The last resort when nothing a role asked for is left. Cost is the sum of
+    what a model charges to read and to write one pricing unit of text (see
+    ``get_pricing_unit()``) — a rough ranking rather than a real forecast,
+    since the balance of reading to writing differs by task, but enough to
+    avoid landing on the most expensive model by accident.
+
+    Args:
+        require_vision: Whether the model has to be able to read images.
+
+    Returns:
+        The cheapest qualifying model's name, or ``None`` if none qualifies.
+
+    Notes:
+        A model whose input and output prices are both zero is treated as
+        having no known price and skipped, not as free: that pairing is what an
+        unpriced placeholder looks like (the shipped catalog template contains
+        one), and letting it win this comparison would quietly make an
+        unpriced model the default for everything.
+    """
+    priced: list[tuple[float, str]] = []
+    for name, entry in load_model_catalog()["models"].items():
+        if require_vision and not entry.get("supports_vision", False):
+            continue
+        read, write = entry.get("input"), entry.get("output")
+        if not isinstance(read, (int, float)) or not isinstance(write, (int, float)):
+            continue
+        if read == 0 and write == 0:
+            continue
+        priced.append((read + write, name))
+    if not priced:
+        return None
+    # Sorted on the name as well as the price so that two equally-priced models
+    # always resolve the same way, rather than by whatever order the file
+    # happened to be written in.
+    return min(priced, key=lambda pair: (pair[0], pair[1]))[1]
 
 
 def remove_model_from_catalog(model_name: str) -> bool:

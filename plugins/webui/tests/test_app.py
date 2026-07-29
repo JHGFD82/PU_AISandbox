@@ -259,6 +259,8 @@ class TestModelsEndpoint:
         monkeypatch.setattr(app_module, "model_supports_vision", lambda m: m == "gpt-4o")
         monkeypatch.setattr(app_module, "model_has_fixed_parameters", lambda m: m == "o3-mini")
         monkeypatch.setattr(app_module, "model_omit_sampling_params", lambda m: False)
+        monkeypatch.setattr(app_module, "get_default_model", lambda role: "gpt-4o")
+        monkeypatch.setattr(app_module, "resolve_model", lambda **kw: "gpt-4o")
 
         resp = unlocked_client.get("/api/models", params={"professor": "heller"})
         assert resp.status_code == 200
@@ -275,6 +277,8 @@ class TestModelsEndpoint:
         monkeypatch.setattr(app_module, "model_supports_vision", lambda m: False)
         monkeypatch.setattr(app_module, "model_has_fixed_parameters", lambda m: False)
         monkeypatch.setattr(app_module, "model_omit_sampling_params", lambda m: True)
+        monkeypatch.setattr(app_module, "get_default_model", lambda role: "some-model")
+        monkeypatch.setattr(app_module, "resolve_model", lambda **kw: "some-model")
 
         resp = unlocked_client.get("/api/models", params={"professor": "heller"})
         assert resp.json()["models"][0]["accepts_sampling_params"] is False

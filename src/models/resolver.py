@@ -97,17 +97,31 @@ def resolve_model(
             )
         return requested_model
 
-    # 2) prefer_model (if provided and valid)
-    # 3) DEFAULT_FALLBACK_MODEL (neutral, role-agnostic)
-    priority_candidates = [candidate for candidate in (prefer_model, _catalog.DEFAULT_FALLBACK_MODEL) if candidate]
-    for candidate in priority_candidates:
-        resolved = resolve_candidate(candidate)
+    # 2) the mode's own preferred model, if it is still usable
+    if prefer_model:
+        resolved = resolve_candidate(prefer_model)
         if resolved:
             return resolved
 
-    # 4) first available compatible model from pricing config
+    # 3) the cheapest model that can do the job. No model name is written down
+    #    here on purpose: a hard-coded fallback stops working the day its
+    #    provider retires it, and then every mode that relied on it has to be
+    #    reconfigured by hand. Ranking by price instead means the sandbox keeps
+    #    working, and errs towards the least expensive option rather than
+    #    whichever model happens to sort first.
+    cheapest = _catalog.cheapest_model(require_vision=require_vision)
+    if cheapest and cheapest != prefer_model:
+        logging.warning(
+            f"No preferred model was available, so '{cheapest}' was chosen as the cheapest "
+            f"{compatibility_label} model in the catalog. Set config.defaults in "
+            "model_catalog.json to choose deliberately."
+        )
+        return cheapest
+
+    # 4) anything at all that fits — reached only when no model in the catalog
+    #    carries a usable price, so the ranking above had nothing to sort.
     for model in available_models:
-        if model in priority_candidates:
+        if model == prefer_model:
             continue
         resolved = resolve_candidate(model)
         if resolved:

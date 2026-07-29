@@ -9,9 +9,10 @@ from unittest.mock import patch
 import src.models.catalog as catalog_module
 import src.models.pricing as pricing_module
 from src.models import (
-    DEFAULT_FALLBACK_MODEL,
+    cheapest_model,
     get_available_models,
     get_default_model,
+    get_role_preferences,
     get_model_catalog_path,
     get_model_max_completion_tokens,
     get_model_pricing,
@@ -175,18 +176,24 @@ class TestGetModelPricing:
         assert pricing["input"] == 2.75
         assert pricing["output"] == 11.0
 
-    def test_unknown_model_falls_back_to_gpt4o_mini(self, mock_catalog):
-        # DEFAULT_FALLBACK_MODEL = "gpt-4o-mini" which is in SAMPLE_CATALOG
-        pricing = get_model_pricing("unknown-model")
-        assert pricing["input"] == pytest.approx(0.165)
+    def test_unknown_model_is_priced_at_the_cheapest_models_rates(self, mock_catalog):
+        """An uncatalogued model is recorded rather than lost, at the cheapest rates.
 
-    def test_unknown_model_no_fallback_raises(self, monkeypatch):
-        catalog_no_mini = {
+        Deliberately not a named stand-in: whichever model were named here
+        would one day be retired, and then this path would raise instead of
+        recording anything.
+        """
+        pricing = get_model_pricing("unknown-model")
+        assert pricing["input"] == pytest.approx(0.1)   # text-only-model, cheapest in SAMPLE_CATALOG
+
+    def test_unknown_model_raises_when_nothing_has_a_price(self, monkeypatch):
+        """With no priced model to stand in, there is nothing honest to return."""
+        catalog_unpriced = {
             "config": {"pricing_unit": 1_000_000, "monthly_limit": 250.0},
-            "models": {"gpt-4o": {"input": 2.75, "output": 11.0, "supports_vision": True}},
+            "models": {"placeholder": {"input": 0.0, "output": 0.0, "supports_vision": True}},
         }
-        monkeypatch.setattr(catalog_module, "load_model_catalog", lambda: catalog_no_mini)
-        with pytest.raises(ValueError, match="not found in model catalog"):
+        monkeypatch.setattr(catalog_module, "load_model_catalog", lambda: catalog_unpriced)
+        with pytest.raises(ValueError, match="not in the model catalog"):
             get_model_pricing("mystery-model")
 
 
@@ -336,11 +343,14 @@ class TestGetModelMaxCompletionTokens:
 
 class TestResolveModel:
 
-    def test_no_args_returns_fallback_model(self, mock_catalog):
-        # resolve_model() no longer looks up any role-specific default itself —
-        # role-specific defaults are the caller's responsibility via prefer_model.
-        # With no prefer_model, it resolves straight to DEFAULT_FALLBACK_MODEL.
-        assert resolve_model() == DEFAULT_FALLBACK_MODEL
+    def test_no_args_returns_the_cheapest_model(self, mock_catalog):
+        """Role defaults are the caller's job via prefer_model.
+
+        With none given, resolution lands on the cheapest model rather than a
+        model named in code — nothing here goes stale when a provider retires
+        something.
+        """
+        assert resolve_model() == "text-only-model"   # 0.4 vs gpt-4o-mini's 0.825
 
     def test_requested_model_returned(self, mock_catalog):
         assert resolve_model(requested_model="gpt-5") == "gpt-5"
@@ -354,29 +364,29 @@ class TestResolveModel:
             resolve_model(requested_model="text-only-model", require_vision=True)
 
     def test_prefer_model_used_over_fallback(self, mock_catalog):
-        # prefer_model is checked before DEFAULT_FALLBACK_MODEL.
+        # prefer_model is checked before the price-ranked fallback.
         assert resolve_model(prefer_model="gpt-5") == "gpt-5"
 
     def test_prefer_model_ignored_if_not_vision_capable(self, mock_catalog):
-        # prefer_model has no vision → skipped; DEFAULT_FALLBACK_MODEL
-        # ("gpt-4o-mini") does support vision in SAMPLE_CATALOG, so it wins.
-        assert resolve_model(prefer_model="text-only-model", require_vision=True) == DEFAULT_FALLBACK_MODEL
+        """Skipped for lacking vision, so the cheapest model that HAS it wins.
+
+        Note this is not the cheapest model overall — text-only-model is — so
+        the capability filter is being applied before the price ranking.
+        """
+        assert resolve_model(prefer_model="text-only-model", require_vision=True) == "gpt-4o-mini"
 
     def test_require_vision_skips_non_vision_models(self, mock_catalog):
         result = resolve_model(require_vision=True)
         assert result in {"gpt-5", "gpt-4o", "gpt-4o-mini"}
 
-    def test_falls_through_to_first_available_when_fallback_missing(self, monkeypatch):
-        # Remove the fallback model from the catalog so resolution must reach
-        # step 4 (first available compatible model) instead of stopping at
-        # DEFAULT_FALLBACK_MODEL.
-        catalog_without_fallback = {
+    def test_falls_through_to_anything_usable_when_nothing_is_priced(self, monkeypatch):
+        """Reached only when no model carries a price, so the ranking has nothing to sort."""
+        catalog_unpriced = {
             **SAMPLE_CATALOG,
-            "models": {k: v for k, v in SAMPLE_CATALOG["models"].items() if k != DEFAULT_FALLBACK_MODEL},
+            "models": {k: {**v, "input": 0.0, "output": 0.0} for k, v in SAMPLE_CATALOG["models"].items()},
         }
-        monkeypatch.setattr(catalog_module, "load_model_catalog", lambda: catalog_without_fallback)
-        result = resolve_model()
-        assert result in {"gpt-5", "gpt-4o", "text-only-model"}
+        monkeypatch.setattr(catalog_module, "load_model_catalog", lambda: catalog_unpriced)
+        assert resolve_model() in set(catalog_unpriced["models"])
 
     def test_no_compatible_models_raises(self, monkeypatch):
         all_text_catalog = {
@@ -1070,3 +1080,121 @@ class TestRecordRejectedField:
         _cat, saved = self._catalog(monkeypatch)
         assert record_rejected_field("never-heard-of-it", "stream_options", "nope") is False
         assert saved == {}
+
+
+# ---------------------------------------------------------------------------
+# Role preference lists — surviving a retired model without being reconfigured
+# ---------------------------------------------------------------------------
+
+class TestGetRolePreferences:
+
+    def _with_defaults(self, monkeypatch, defaults):
+        import copy
+        cat = copy.deepcopy(SAMPLE_CATALOG)
+        cat["config"]["defaults"] = defaults
+        monkeypatch.setattr(catalog_module, "load_model_catalog", lambda: cat)
+
+    def test_a_list_comes_back_in_order(self, monkeypatch):
+        self._with_defaults(monkeypatch, {"chat": ["gpt-4o-mini", "gpt-4o"]})
+        assert get_role_preferences("chat") == ["gpt-4o-mini", "gpt-4o"]
+
+    def test_a_single_name_comes_back_as_a_one_item_list(self, monkeypatch):
+        """Writing one name is a reasonable thing to do by hand, so it must work."""
+        self._with_defaults(monkeypatch, {"chat": "gpt-4o"})
+        assert get_role_preferences("chat") == ["gpt-4o"]
+
+    def test_unconfigured_role_is_empty(self, mock_catalog):
+        assert get_role_preferences("no-such-role") == []
+
+    @pytest.mark.parametrize("junk", [None, 42, {}, "", ["", None, "gpt-4o", 7]])
+    def test_junk_is_filtered_rather_than_raising(self, monkeypatch, junk):
+        """This file is hand-edited, so a wrong type must not break every request."""
+        self._with_defaults(monkeypatch, {"chat": junk})
+        assert get_role_preferences("chat") in ([], ["gpt-4o"])
+
+
+class TestGetDefaultModelFallsForward:
+
+    def _with(self, monkeypatch, defaults, drop=()):
+        import copy
+        cat = copy.deepcopy(SAMPLE_CATALOG)
+        cat["config"]["defaults"] = defaults
+        for name in drop:
+            cat["models"].pop(name, None)
+        monkeypatch.setattr(catalog_module, "load_model_catalog", lambda: cat)
+
+    def test_first_choice_wins_when_present(self, monkeypatch):
+        self._with(monkeypatch, {"chat": ["gpt-4o-mini", "gpt-4o"]})
+        assert get_default_model("chat") == "gpt-4o-mini"
+
+    def test_moves_to_the_next_choice_when_the_first_is_retired(self, monkeypatch, caplog):
+        """The whole point: a provider drops a model and nobody has to intervene."""
+        self._with(monkeypatch, {"chat": ["gpt-4o-mini", "gpt-4o"]}, drop=["gpt-4o-mini"])
+        with caplog.at_level(logging.WARNING):
+            assert get_default_model("chat") == "gpt-4o"
+        # Substituting quietly would change both cost and answer quality.
+        assert "gpt-4o-mini" in caplog.text and "gpt-4o" in caplog.text
+
+    def test_skips_a_choice_that_cannot_read_images_for_a_role_that_needs_to(self, monkeypatch):
+        """'chat' can carry a document, so a text-only first choice is not usable."""
+        self._with(monkeypatch, {"chat": ["text-only-model", "gpt-4o"]})
+        assert get_default_model("chat") == "gpt-4o"
+
+    def test_a_role_without_a_vision_requirement_accepts_a_text_only_model(self, monkeypatch):
+        self._with(monkeypatch, {"title": ["text-only-model", "gpt-4o"]})
+        assert get_default_model("title") == "text-only-model"
+
+    def test_returns_none_and_says_so_when_the_whole_list_is_gone(self, monkeypatch, caplog):
+        self._with(monkeypatch, {"chat": ["gpt-4o-mini"]}, drop=["gpt-4o-mini"])
+        with caplog.at_level(logging.WARNING):
+            assert get_default_model("chat") is None
+        assert "cheapest" in caplog.text.lower()
+
+    def test_unconfigured_role_returns_none_quietly(self, mock_catalog, caplog):
+        """Nothing was asked for, so there is nothing to warn about."""
+        with caplog.at_level(logging.WARNING):
+            assert get_default_model("no-such-role") is None
+        assert caplog.text == ""
+
+
+class TestCheapestModel:
+
+    def test_picks_the_lowest_combined_price(self, mock_catalog):
+        assert cheapest_model() == "text-only-model"   # 0.1 + 0.3
+
+    def test_vision_requirement_narrows_the_field(self, mock_catalog):
+        assert cheapest_model(require_vision=True) == "gpt-4o-mini"   # 0.165 + 0.66
+
+    def test_an_unpriced_model_is_skipped_not_treated_as_free(self, monkeypatch):
+        """Both prices at zero is what a placeholder looks like, not a free model.
+
+        The shipped catalog template contains exactly such an entry, so letting
+        it win would quietly make an unpriced model the default for everything.
+        """
+        import copy
+        cat = copy.deepcopy(SAMPLE_CATALOG)
+        cat["models"]["placeholder"] = {"input": 0.0, "output": 0.0, "supports_vision": True}
+        monkeypatch.setattr(catalog_module, "load_model_catalog", lambda: cat)
+        assert cheapest_model() == "text-only-model"
+        assert cheapest_model(require_vision=True) == "gpt-4o-mini"
+
+    def test_a_missing_price_field_is_skipped(self, monkeypatch):
+        import copy
+        cat = copy.deepcopy(SAMPLE_CATALOG)
+        cat["models"]["half-priced"] = {"input": 0.01, "supports_vision": True}
+        monkeypatch.setattr(catalog_module, "load_model_catalog", lambda: cat)
+        assert cheapest_model() == "text-only-model"
+
+    def test_none_when_nothing_qualifies(self, monkeypatch):
+        cat = {"config": {}, "models": {"p": {"input": 0.0, "output": 0.0}}}
+        monkeypatch.setattr(catalog_module, "load_model_catalog", lambda: cat)
+        assert cheapest_model() is None
+
+    def test_a_tie_resolves_the_same_way_every_time(self, monkeypatch):
+        """Otherwise the answer depends on the order the file happened to be written in."""
+        cat = {"config": {}, "models": {
+            "zebra": {"input": 0.1, "output": 0.1, "supports_vision": True},
+            "alpha": {"input": 0.1, "output": 0.1, "supports_vision": True},
+        }}
+        monkeypatch.setattr(catalog_module, "load_model_catalog", lambda: cat)
+        assert cheapest_model() == "alpha"

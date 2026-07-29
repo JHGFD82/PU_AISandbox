@@ -130,9 +130,12 @@ This lives in your files folder rather than in `settings.toml` for a practical r
     "pricing_unit": 1000000,
     "monthly_limit": 250.0,
     "defaults": {
-      "translation": "gpt-4o",
-      "ocr": "gpt-4o",
-      "image_translation": "gpt-5"
+      "chat": ["gpt-4o-mini", "gemini-2.5-flash-lite", "gpt-4o"],
+      "title": ["gpt-4o-mini", "gpt-4.1-nano", "gemini-2.5-flash-lite"],
+      "translation": ["gpt-4o", "gemini-2.5-pro", "gpt-4o-mini"],
+      "ocr": ["gpt-4o", "gemini-2.5-flash", "gpt-4o-mini"],
+      "image_translation": ["gpt-5", "gpt-4o", "gemini-2.5-pro"],
+      "transcription_review": ["gpt-4o", "gpt-4o-mini"]
     },
     "provider_map": {
       "google": "vertex-ai",
@@ -157,10 +160,29 @@ This lives in your files folder rather than in `settings.toml` for a practical r
 |-----|------|-------------|
 | `pricing_unit` | int | What the prices are per — `1000000` means prices are per 1M tokens |
 | `monthly_limit` | float | Monthly spending limit in dollars, shown in usage reports. Advisory: see [Token Usage Guide](token-usage-guide.md#what-the-budget-does-and-doesnt-do) |
-| `defaults.translation` | string | Default model for `translate` |
-| `defaults.ocr` | string | Default model for `transcribe` |
-| `defaults.image_translation` | string | Default model for image translation |
+| `defaults.<role>` | list of strings | Which model does which job — see [Choosing the model for each job](#choosing-the-model-for-each-job) |
 | `provider_map` | object | Maps a provider shorthand to the name PortKey uses |
+
+### Choosing the model for each job
+
+Each entry under `defaults` names a **role** — a job the sandbox needs a model for — and lists the models to use for it, best first:
+
+| Role | Used for | Must be able to read images |
+|------|----------|------------------------------|
+| `chat` | New conversations in the web interface | Yes — a question there can carry a document |
+| `title` | Writing the short title for a conversation | No |
+| `translation` | `translate` | No |
+| `ocr` | `transcribe` | Yes |
+| `image_translation` | Translating a scan or an image | Yes |
+| `transcription_review` | `transcription_review` | No |
+
+**Why a list rather than one name.** Providers retire models. Naming a second and third choice means that when the first one goes, the sandbox moves to the next by itself instead of stopping until someone edits this file. A warning says which model it fell back to, because a quiet substitution changes both what a request costs and how good the answer is.
+
+A single name still works if you'd rather write one — `"translation": "gpt-4o"` is read as a list of one. You just lose the self-healing.
+
+**If a whole list runs out**, the sandbox uses the cheapest model in the catalog that can do the job, and says so. That's a safety net, not a preference: it keeps things working, but it picks on price alone, so the model it lands on may not be one you'd have chosen. A model whose input and output prices are both zero is treated as unpriced and skipped rather than counted as free.
+
+**A role that isn't listed at all** goes straight to that safety net. Adding the roles above to an older catalog is worth doing for that reason — otherwise the choice is made by price rather than by you.
 
 #### `models` entries
 

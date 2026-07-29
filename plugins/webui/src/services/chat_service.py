@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Optional
 
-from src.models import DEFAULT_FALLBACK_MODEL, get_available_models, get_model_system_role
+from src.models import cheapest_model, get_default_model, get_model_system_role
 from src.services.api_errors import handle_api_errors
 from src.services.base_service import BaseService
 from src.settings import PROMPT_MAX_TOKENS, PROMPT_TEMPERATURE, PROMPT_TOP_P
@@ -227,10 +227,13 @@ class ChatService(BaseService):
         reads oddly once the conversation moves past it, the same reason
         most chat products generate one instead.
 
-        Deliberately hardcoded to the catalog's cheap fallback model rather
-        than whatever (possibly expensive) model the conversation itself is
-        using — writing a five-word title doesn't need a frontier model, and
-        professors are billed per token for every call this service makes.
+        Uses the catalog's ``title`` role rather than whatever (possibly
+        expensive) model the conversation itself is using — writing a five-word
+        title doesn't need a frontier model, and professors are billed per
+        token for every call this service makes. The role is a list of choices
+        in ``config.defaults``, so a retired model costs nothing more than
+        moving to the next one; if none of them survive, this falls back to
+        whatever the conversation's own model is.
 
         Args:
             messages: The conversation so far, in the same ``{'role',
@@ -245,7 +248,12 @@ class ChatService(BaseService):
             fatal error — a working conversation matters far more than a
             clever title for it.
         """
-        model = DEFAULT_FALLBACK_MODEL if DEFAULT_FALLBACK_MODEL in get_available_models() else self._get_model()
+        # Cheapest model rather than the conversation's own if the title role
+        # isn't configured (or nothing in it survives): a catalog that predates
+        # this role must not end up writing five-word titles with a frontier
+        # model. Only if the catalog has no priced model at all does the
+        # conversation's own model get used.
+        model = get_default_model("title") or cheapest_model() or self._get_model()
         excerpt = "\n\n".join(f"{m['role']}: {m['content']}" for m in messages[:4])
         prompt = (
             "Write a short, descriptive title for the conversation below — four to eight words, "

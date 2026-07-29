@@ -7,10 +7,11 @@ Re-exports every symbol from the three submodules so callers can use either
 from .doc_block import ParagraphBlock, TableBlock
 from .embedded_media import EmbeddedMedia
 from .catalog import (
-    DEFAULT_FALLBACK_MODEL,
     MODEL_CATALOG_FILE,
     get_available_models,
+    cheapest_model,
     get_default_model,
+    get_role_preferences,
     get_model_catalog_path,
     get_model_max_completion_tokens,
     get_model_pricing,
@@ -42,12 +43,13 @@ from .resolver import resolve_model
 __all__ = [
     # catalog
     "MODEL_CATALOG_FILE",
-    "DEFAULT_FALLBACK_MODEL",
     "get_model_catalog_path",
     "load_model_catalog",
     "save_model_catalog",
     "get_available_models",
+    "cheapest_model",
     "get_default_model",
+    "get_role_preferences",
     "get_model_pricing",
     "get_pricing_unit",
     "get_monthly_limit",
