@@ -18,11 +18,26 @@ from collections.abc import Iterator as ABCIterator
 
 from ..models import (
     model_uses_max_completion_tokens, model_has_fixed_parameters, model_omit_sampling_params,
+    model_rejected_fields, record_rejected_field,
     resolve_model, maybe_sync_model_pricing, get_model_max_completion_tokens,
 )
 from ..tracking.token_tracker import TokenTracker, TokenUsage
-from .api_errors import APISignal, classify_api_error, is_transient_error
+from .api_errors import (
+    APISignal, classify_api_error, is_transient_error, rejected_request_field,
+)
 from .constants import MAX_RETRIES, RETRY_DELAY_SECONDS
+
+# Parts of a request that can never be dropped, however a provider phrases its
+# objection. Without this, one badly-worded error could talk the sandbox into
+# sending a request with no model or no conversation in it.
+_REQUIRED_REQUEST_FIELDS = frozenset({"model", "messages", "stream"})
+
+# How many times one request may be trimmed and re-sent because the provider
+# named a field it won't accept. More than one because a request can carry
+# several fields a given model dislikes and providers report them one at a
+# time; capped so a provider that objects to everything can't turn a single
+# message into an unbounded run of API calls.
+_MAX_FIELD_REFUSALS = 3
 
 
 class BaseService:
@@ -267,7 +282,65 @@ class BaseService:
                 )
 
         kwargs["max_completion_tokens" if use_completion_tokens else "max_tokens"] = max_tokens
+
+        # Anything this model has already refused once is left out from the
+        # start, rather than sent again and refused again. The list is built
+        # from the provider's own error messages — see
+        # model_rejected_fields()'s docstring.
+        for field in model_rejected_fields(model):
+            if field in _REQUIRED_REQUEST_FIELDS:
+                continue
+            kwargs.pop(field, None)
         return kwargs
+
+    def _send_completion(self, kwargs: dict[str, Any], model: str) -> Any:
+        """Make one chat request, learning from the provider if it refuses a field.
+
+        Providers disagree about which optional parts of a request they
+        accept, and there is no way to know in advance. When one replies that
+        a particular field isn't allowed, this records that against the model
+        (so later requests leave it out) and sends the request again without
+        it — the person gets their answer instead of an error, and the same
+        refusal doesn't happen twice.
+
+        Retrying is safe here in a way that a mid-stream failure is not: a
+        refusal like this is the provider rejecting the request outright, so
+        nothing has been generated or shown to anyone yet. See
+        ``_create_completion_stream()``'s note on why a stream that has
+        already delivered text can't be restarted.
+
+        Args:
+            kwargs: The request, as built by ``_build_completion_kwargs()``.
+            model: The model being called, used to record what it refused.
+
+        Returns:
+            Whatever the API returns — a finished response, or an iterator of
+            chunks if this request asked to stream.
+
+        Raises:
+            Exception: Whatever the API raised, if it isn't a refusal of one
+                       named field, or if leaving that field out doesn't
+                       help. Callers classify it as they always have.
+        """
+        # Bounded rather than a single retry: a request can carry more than
+        # one field a given model dislikes, and providers report them one at
+        # a time. Bounded rather than open-ended so a provider that keeps
+        # objecting can't turn one message into an endless run of API calls.
+        for _ in range(_MAX_FIELD_REFUSALS):
+            try:
+                return self.client.chat.completions.create(**kwargs)  # type: ignore[misc]
+            except Exception as error:
+                field = rejected_request_field(str(error))
+                # Only act on a field this request actually sent. A pattern
+                # that reads the wrong word out of an unfamiliar error would
+                # otherwise record nonsense against the model, and dropping
+                # something that was never there would leave the real problem
+                # untouched while looking like it had been handled.
+                if field is None or field not in kwargs or field in _REQUIRED_REQUEST_FIELDS:
+                    raise
+                record_rejected_field(model, field, str(error)[:200])
+                kwargs.pop(field, None)
+        return self.client.chat.completions.create(**kwargs)  # type: ignore[misc]
 
     def _create_completion(
         self,
@@ -305,7 +378,7 @@ class BaseService:
         kwargs = self._build_completion_kwargs(
             model, messages, max_tokens, temperature, top_p, stream=False, extra_kwargs=extra_kwargs,
         )
-        return self.client.chat.completions.create(**kwargs)  # type: ignore[misc]
+        return self._send_completion(kwargs, model)
 
     def _create_completion_stream(
         self,
@@ -352,7 +425,7 @@ class BaseService:
         kwargs = self._build_completion_kwargs(
             model, messages, max_tokens, temperature, top_p, stream=True, extra_kwargs=extra_kwargs,
         )
-        return self.client.chat.completions.create(**kwargs)  # type: ignore[misc]
+        return self._send_completion(kwargs, model)
 
     def _record_response_usage(self, response: Any, model: str, critical: bool = False) -> Optional[TokenUsage]:
         """Record token usage from an API response and log a summary.

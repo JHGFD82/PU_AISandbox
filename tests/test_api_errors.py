@@ -18,6 +18,7 @@ from src.services.api_errors import (
     is_transient_error,
     raise_for_deprecated_sampling_params,
     raise_for_model_access_error,
+    rejected_request_field,
 )
 
 
@@ -299,3 +300,63 @@ class TestClassifyApiError:
         with self._no_access():
             result = classify_api_error(Exception("CONTEXT_LENGTH_EXCEEDED"), "gpt-4o")
             assert result is APISignal.CONTEXT_LENGTH_EXCEEDED
+
+
+# ---------------------------------------------------------------------------
+# Reading a refused field name out of the provider's own error
+# ---------------------------------------------------------------------------
+
+class TestRejectedRequestField:
+    """The one mechanism here that needs no code change for a new quirk.
+
+    A provider refusing one field of a request usually names it. Reading the
+    name out of the error is what lets a field nobody has met before be
+    handled like one we already know about.
+    """
+
+    # The real error text this was built from: mistral-small-2503 routed
+    # through azure-ai, which rejects unknown body keys outright.
+    AZURE_AI_422 = (
+        "Error code: 422 - {'error': {'message': 'azure-ai error: "
+        '{"detail":[{"type":"extra_forbidden","loc":["body","stream_options",'
+        '"include_usage"],"msg":"Extra inputs are not permitted","input":true}]}\', '
+        "'code': 'Invalid input'}, 'provider': 'azure-ai'}"
+    )
+
+    def test_reads_the_field_from_a_validation_error_path(self):
+        assert rejected_request_field(self.AZURE_AI_422) == "stream_options"
+
+    def test_reads_the_field_from_a_param_key(self):
+        msg = ("Error code: 400 - {'error': {'message': 'Unknown parameter.', "
+               "'param': 'stream_options', 'code': 'unknown_parameter'}}")
+        assert rejected_request_field(msg) == "stream_options"
+
+    def test_reads_the_field_from_a_sentence(self):
+        msg = "Error code: 400 - Unrecognized request argument supplied: stream_options"
+        assert rejected_request_field(msg) == "stream_options"
+
+    def test_reads_the_field_from_an_unsupported_parameter_message(self):
+        msg = ("Error code: 400 - {'error': {'message': \"Unsupported parameter: "
+               "'temperature' is not supported with this model.\"}}")
+        assert rejected_request_field(msg) == "temperature"
+
+    def test_refusal_with_no_field_named_gives_no_answer(self):
+        assert rejected_request_field("Error code: 400 - extra inputs are not permitted") is None
+
+    @pytest.mark.parametrize("msg", [
+        "Error code: 400 - {'status': 'failure', 'message': "
+        "'Invalid target name found in the query router: unknown-model'}",
+        "Error code: 429 - rate_limit exceeded, please retry",
+        "Error code: 500 - internal server error",
+        "Error code: 400 - `temperature` is deprecated for this model",
+        "context_length_exceeded",
+        "",
+    ])
+    def test_unrelated_errors_give_no_answer(self, msg):
+        """None means "no conclusion", so the caller handles the error as before.
+
+        Guessing here would be worse than not answering: a wrong field name
+        gets recorded against the model permanently, and dropping a field that
+        was never the problem hides the real one.
+        """
+        assert rejected_request_field(msg) is None

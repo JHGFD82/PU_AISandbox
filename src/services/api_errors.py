@@ -2,7 +2,9 @@
 
 import logging
 import os
+import re
 from enum import Enum
+from typing import Optional
 
 from ..errors import CLIError
 from ..models import (
@@ -11,6 +13,70 @@ from ..models import (
     remove_model_from_catalog,
     set_model_fixed_parameters,
 )
+
+# Phrases a provider uses when it is refusing one particular field of the
+# request rather than objecting to the request as a whole. Checked before any
+# field name is read out of the error, so that an unrelated failure that
+# happens to mention a field name isn't mistaken for one of these.
+_FIELD_REFUSAL_PHRASES = (
+    "extra inputs are not permitted",
+    "extra_forbidden",
+    "unrecognized request argument",
+    "unknown_parameter",
+    "unsupported parameter",
+    "unsupported_parameter",
+    "is not supported with this model",
+)
+
+# Where the field name sits, in each of the shapes seen in the wild. Tried in
+# order; the first pattern that matches wins.
+#
+#   1. A validation error listing the path to the offending key, e.g.
+#      '"loc":["body","stream_options","include_usage"]' — the leading
+#      "body" is the request itself, so the field is whatever follows it.
+#   2. The field named on its own key, e.g. "'param': 'stream_options'".
+#   3. The field named in the sentence, e.g.
+#      "Unrecognized request argument supplied: stream_options".
+_FIELD_PATTERNS = (
+    re.compile(r"""["']loc["']\s*:\s*\[\s*["']body["']\s*,\s*["'](\w+)["']""", re.I),
+    re.compile(r"""["']param["']\s*:\s*["'](\w+)["']""", re.I),
+    re.compile(
+        r"""(?:unrecognized request argument|unsupported parameter)"""
+        r"""(?:\s+supplied)?\s*[:=]\s*["']?(\w+)""",
+        re.I,
+    ),
+)
+
+
+def rejected_request_field(error_message: str) -> Optional[str]:
+    """Return the name of the request field a provider has refused, if it named one.
+
+    Providers disagree about which optional parts of a request they accept,
+    and there is no list to consult ahead of time — an image-capable model on
+    one route rejects a field its neighbour allows. What makes this tractable
+    is that a provider refusing a field usually says which one, in the error
+    itself. Reading the name out of the error means a field nobody has met
+    before is handled the same way as one we already know about, with no code
+    change: see ``record_rejected_field()`` in ``src/models/catalog.py`` for
+    where the answer is kept.
+
+    Args:
+        error_message: The text of the error the provider returned.
+
+    Returns:
+        The field's name (e.g. ``'stream_options'``), or ``None`` if this
+        error isn't a refusal of one particular field, or is one that doesn't
+        say which. ``None`` means "no conclusion" — the caller should treat
+        the error as it would have anyway.
+    """
+    lowered = error_message.lower()
+    if not any(phrase in lowered for phrase in _FIELD_REFUSAL_PHRASES):
+        return None
+    for pattern in _FIELD_PATTERNS:
+        match = pattern.search(error_message)
+        if match:
+            return match.group(1)
+    return None
 
 
 def _log_raw_error_payload(error: Exception) -> None:

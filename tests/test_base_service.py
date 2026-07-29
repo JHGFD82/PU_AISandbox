@@ -461,3 +461,140 @@ class TestResolveSamplingParams:
         assert top_p == 0.95
         assert max_tok == 500  # _make_svc patches get_model_max_completion_tokens to return default
 
+
+
+# ---------------------------------------------------------------------------
+# Learning which request fields a model refuses
+# ---------------------------------------------------------------------------
+
+# The error that prompted all of this: mistral-small-2503 routed through
+# azure-ai, which rejects unknown keys in the request body outright. The web
+# interface always asks for streamed usage totals, so every chat turn with
+# that model failed — with a generic "something went wrong", because nothing
+# recognised the error.
+AZURE_AI_REFUSES_STREAM_OPTIONS = (
+    "Error code: 422 - {'error': {'message': 'azure-ai error: "
+    '{"detail":[{"type":"extra_forbidden","loc":["body","stream_options",'
+    '"include_usage"],"msg":"Extra inputs are not permitted"}]}\', '
+    "'code': 'Invalid input'}, 'provider': 'azure-ai'}"
+)
+
+
+class TestLearningRefusedFields:
+
+    def _svc(self, monkeypatch, *, already_rejected=None):
+        svc = _make_svc(monkeypatch)
+        monkeypatch.setattr("src.services.base_service.model_uses_max_completion_tokens", lambda m: False)
+        monkeypatch.setattr("src.services.base_service.model_has_fixed_parameters", lambda m: False)
+        monkeypatch.setattr(
+            "src.services.base_service.model_rejected_fields",
+            lambda m: dict(already_rejected or {}),
+        )
+        return svc
+
+    def test_refused_field_is_recorded_dropped_and_the_request_retried(self, monkeypatch):
+        recorded = []
+        monkeypatch.setattr(
+            "src.services.base_service.record_rejected_field",
+            lambda model, field, reason: recorded.append((model, field)) or True,
+        )
+        svc = self._svc(monkeypatch)
+        svc.client.chat.completions.create.side_effect = [
+            Exception(AZURE_AI_REFUSES_STREAM_OPTIONS),
+            "the reply",
+        ]
+
+        result = svc._create_completion_stream("mistral-small-2503", [{"role": "user", "content": "hi"}], 100)
+
+        assert result == "the reply"
+        assert recorded == [("mistral-small-2503", "stream_options")]
+        # First attempt carried the field; the retry did not.
+        first, second = svc.client.chat.completions.create.call_args_list
+        assert "stream_options" in first.kwargs
+        assert "stream_options" not in second.kwargs
+
+    def test_a_field_already_known_to_be_refused_is_never_sent(self, monkeypatch):
+        svc = self._svc(monkeypatch, already_rejected={"stream_options": "2026-07-29: nope"})
+        svc.client.chat.completions.create.return_value = "the reply"
+
+        svc._create_completion_stream("mistral-small-2503", [{"role": "user", "content": "hi"}], 100)
+
+        kwargs = svc.client.chat.completions.create.call_args.kwargs
+        assert "stream_options" not in kwargs
+        assert svc.client.chat.completions.create.call_count == 1  # no failed first try
+
+    def test_an_unrelated_error_is_raised_unchanged(self, monkeypatch):
+        """A failure that isn't a field refusal must reach the caller untouched.
+
+        Everything downstream — the retry loop, the model-access cleanup, the
+        user-facing messages — depends on seeing the original error.
+        """
+        svc = self._svc(monkeypatch)
+        svc.client.chat.completions.create.side_effect = Exception("rate_limit exceeded")
+        with pytest.raises(Exception, match="rate_limit"):
+            svc._create_completion("gpt-4o", [{"role": "user", "content": "hi"}], 100)
+        assert svc.client.chat.completions.create.call_count == 1
+
+    def test_a_field_the_request_never_sent_is_not_recorded(self, monkeypatch):
+        """Guards against a pattern reading the wrong word out of a new error.
+
+        Recording a field that wasn't in the request would put nonsense in the
+        catalog for good, and dropping it would change nothing — so the real
+        failure would look handled while still happening.
+        """
+        recorded = []
+        monkeypatch.setattr(
+            "src.services.base_service.record_rejected_field",
+            lambda model, field, reason: recorded.append(field) or True,
+        )
+        svc = self._svc(monkeypatch)
+        svc.client.chat.completions.create.side_effect = Exception(
+            "Error code: 400 - Unrecognized request argument supplied: nonesuch"
+        )
+        with pytest.raises(Exception, match="nonesuch"):
+            svc._create_completion("gpt-4o", [{"role": "user", "content": "hi"}], 100)
+        assert recorded == []
+
+    @pytest.mark.parametrize("field", ["model", "messages", "stream"])
+    def test_the_request_essentials_are_never_dropped(self, monkeypatch, field):
+        """However a provider phrases it, a request still needs these.
+
+        Both halves are checked: a catalog that already names one of them, and
+        an error asking for one to be dropped.
+        """
+        svc = self._svc(monkeypatch, already_rejected={field: "somehow recorded"})
+        svc.client.chat.completions.create.return_value = "the reply"
+        svc._create_completion_stream("m", [{"role": "user", "content": "hi"}], 100)
+        assert field in svc.client.chat.completions.create.call_args.kwargs
+
+        svc2 = self._svc(monkeypatch)
+        svc2.client.chat.completions.create.side_effect = Exception(
+            f"Error code: 400 - {{'error': {{'message': 'Unknown parameter.', 'param': '{field}'}}}}"
+        )
+        with pytest.raises(Exception, match="Unknown parameter"):
+            svc2._create_completion("m", [{"role": "user", "content": "hi"}], 100)
+
+    def test_two_refused_fields_are_learned_one_after_the_other(self, monkeypatch):
+        """Providers report one objection at a time, so one turn may need two passes."""
+        monkeypatch.setattr("src.services.base_service.record_rejected_field", lambda *a: True)
+        svc = self._svc(monkeypatch)
+        svc.client.chat.completions.create.side_effect = [
+            Exception(AZURE_AI_REFUSES_STREAM_OPTIONS),
+            Exception("Error code: 400 - {'error': {'param': 'presence_penalty'}, "
+                      "'message': 'unsupported parameter'}"),
+            "the reply",
+        ]
+        result = svc._create_completion_stream(
+            "m", [{"role": "user", "content": "hi"}], 100, presence_penalty=0.3,
+        )
+        assert result == "the reply"
+        final = svc.client.chat.completions.create.call_args.kwargs
+        assert "stream_options" not in final and "presence_penalty" not in final
+
+    def test_a_provider_that_objects_endlessly_does_not_loop_forever(self, monkeypatch):
+        monkeypatch.setattr("src.services.base_service.record_rejected_field", lambda *a: True)
+        svc = self._svc(monkeypatch)
+        svc.client.chat.completions.create.side_effect = Exception(AZURE_AI_REFUSES_STREAM_OPTIONS)
+        with pytest.raises(Exception, match="Extra inputs"):
+            svc._create_completion_stream("m", [{"role": "user", "content": "hi"}], 100)
+        assert svc.client.chat.completions.create.call_count <= 4

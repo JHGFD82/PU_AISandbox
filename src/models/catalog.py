@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import tempfile
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -363,6 +364,75 @@ def model_omit_sampling_params(model: str) -> bool:
     config = load_model_catalog()
     models = config["models"]
     return models.get(model, {}).get("omit_sampling_params", False)
+
+
+def model_rejected_fields(model: str) -> dict[str, str]:
+    """Return the request fields this model has told us it will not accept.
+
+    Providers differ over which optional pieces of a request they allow, and
+    there is no way to know in advance — one route accepts a field another
+    refuses outright. Rather than keep a hand-written list of every quirk,
+    the sandbox learns each one the first time a provider objects and records
+    it here, so later requests leave that field out from the start.
+
+    Args:
+        model: The model name to check (e.g. ``'mistral-small-2503'``).
+
+    Returns:
+        A dictionary of field name to the note recorded when it was learned
+        (e.g. ``{'stream_options': 'azure-ai, 2026-07-29: Extra inputs are
+        not permitted'}``). Empty for a model with nothing known against it,
+        which is the normal case.
+    """
+    entry = load_model_catalog()["models"].get(model, {})
+    rejected = entry.get("rejects")
+    return dict(rejected) if isinstance(rejected, dict) else {}
+
+
+def record_rejected_field(model_name: str, field: str, reason: str) -> bool:
+    """Remember that a model refuses one of the optional fields in a request.
+
+    Called when a provider replies that a particular field is not allowed —
+    see ``rejected_request_field()`` in ``src/services/api_errors.py``, which
+    reads the field name out of the error. Once recorded, every later request
+    for this model leaves that field out (see
+    ``BaseService._build_completion_kwargs()``), so the same refusal doesn't
+    happen twice.
+
+    The reason is stored alongside the field, dated, so that anyone reading
+    ``model_catalog.json`` later can tell what was learned automatically from
+    what was set by hand, and judge whether it is still true. Nothing expires
+    on its own: if a provider starts accepting the field again, delete the
+    entry to have it learned afresh.
+
+    Args:
+        model_name: The model's catalog key (e.g. ``'mistral-small-2503'``).
+        field: The request field the provider refused (e.g.
+               ``'stream_options'``).
+        reason: A short description of what the provider said, for the record.
+
+    Returns:
+        ``True`` if this is newly recorded, ``False`` if the model isn't in
+        the catalog or already had this field recorded (no changes are made
+        in either case).
+    """
+    catalog = load_model_catalog()
+    entry = catalog["models"].get(model_name)
+    if entry is None:
+        return False
+    rejected = entry.get("rejects")
+    if not isinstance(rejected, dict):
+        rejected = {}
+    if field in rejected:
+        return False
+    rejected[field] = f"{datetime.now().strftime('%Y-%m-%d')}: {reason}"
+    entry["rejects"] = rejected
+    save_model_catalog(catalog)
+    logging.warning(
+        f"Model '{model_name}' does not accept '{field}' — recorded in the catalog "
+        f"so later requests leave it out. Reason given: {reason}"
+    )
+    return True
 
 
 def get_model_max_completion_tokens(model: str, default: int) -> int:

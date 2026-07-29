@@ -23,7 +23,9 @@ from src.models import (
     load_model_catalog,
     model_has_fixed_parameters,
     model_supports_vision,
+    model_rejected_fields,
     model_uses_max_completion_tokens,
+    record_rejected_field,
     remove_model_from_catalog,
     resolve_model,
     save_model_catalog,
@@ -975,3 +977,96 @@ class TestIsSamplingParamDeprecatedError:
         msg = "the `functions` field is deprecated for this model."
         assert is_sampling_param_deprecated_error(msg) is False
 
+
+
+# ---------------------------------------------------------------------------
+# Learned per-model request quirks: "rejects"
+# ---------------------------------------------------------------------------
+
+class TestModelRejectedFields:
+
+    def test_absent_means_nothing_rejected(self, monkeypatch):
+        import copy
+        cat = copy.deepcopy(SAMPLE_CATALOG)
+        monkeypatch.setattr(catalog_module, "load_model_catalog", lambda: cat)
+        assert model_rejected_fields("gpt-4o") == {}
+
+    def test_unknown_model_means_nothing_rejected(self, monkeypatch):
+        import copy
+        cat = copy.deepcopy(SAMPLE_CATALOG)
+        monkeypatch.setattr(catalog_module, "load_model_catalog", lambda: cat)
+        assert model_rejected_fields("never-heard-of-it") == {}
+
+    def test_returns_recorded_fields(self, monkeypatch):
+        import copy
+        cat = copy.deepcopy(SAMPLE_CATALOG)
+        cat["models"]["gpt-4o"]["rejects"] = {"stream_options": "2026-07-29: nope"}
+        monkeypatch.setattr(catalog_module, "load_model_catalog", lambda: cat)
+        assert model_rejected_fields("gpt-4o") == {"stream_options": "2026-07-29: nope"}
+
+    def test_a_malformed_rejects_value_is_ignored_not_raised(self, monkeypatch):
+        """Someone hand-editing the catalog could write a list, or a string.
+
+        A wrong type here must not stop every request for that model: the
+        field is an optimisation, and the provider will say so again anyway.
+        """
+        import copy
+        cat = copy.deepcopy(SAMPLE_CATALOG)
+        cat["models"]["gpt-4o"]["rejects"] = ["stream_options"]
+        monkeypatch.setattr(catalog_module, "load_model_catalog", lambda: cat)
+        assert model_rejected_fields("gpt-4o") == {}
+
+
+class TestRecordRejectedField:
+
+    def _catalog(self, monkeypatch):
+        import copy
+        cat = copy.deepcopy(SAMPLE_CATALOG)
+        monkeypatch.setattr(catalog_module, "load_model_catalog", lambda: cat)
+        saved = {}
+        monkeypatch.setattr(catalog_module, "save_model_catalog", lambda c: saved.update(c))
+        return cat, saved
+
+    def test_records_field_with_a_dated_reason(self, monkeypatch):
+        _cat, saved = self._catalog(monkeypatch)
+        assert record_rejected_field("gpt-4o", "stream_options", "Extra inputs are not permitted") is True
+        note = saved["models"]["gpt-4o"]["rejects"]["stream_options"]
+        assert "Extra inputs are not permitted" in note
+        # Dated so a reader can judge how old the belief is.
+        from datetime import datetime
+        assert note.startswith(datetime.now().strftime("%Y-%m-%d"))
+
+    def test_leaves_other_fields_untouched(self, monkeypatch):
+        _cat, saved = self._catalog(monkeypatch)
+        record_rejected_field("gpt-4o", "stream_options", "nope")
+        assert saved["models"]["gpt-4o"]["input"] == 2.75
+        assert saved["models"]["gpt-4o"]["supports_vision"] is True
+
+    def test_second_field_joins_the_first(self, monkeypatch):
+        cat, saved = self._catalog(monkeypatch)
+        record_rejected_field("gpt-4o", "stream_options", "nope")
+        cat["models"]["gpt-4o"]["rejects"] = saved["models"]["gpt-4o"]["rejects"]
+        record_rejected_field("gpt-4o", "presence_penalty", "also nope")
+        assert set(saved["models"]["gpt-4o"]["rejects"]) == {"stream_options", "presence_penalty"}
+
+    def test_already_recorded_returns_false_and_does_not_rewrite(self, monkeypatch):
+        import copy
+        cat = copy.deepcopy(SAMPLE_CATALOG)
+        cat["models"]["gpt-4o"]["rejects"] = {"stream_options": "2026-01-01: earlier note"}
+        monkeypatch.setattr(catalog_module, "load_model_catalog", lambda: cat)
+        save_called = False
+
+        def fake_save(_c):
+            nonlocal save_called
+            save_called = True
+
+        monkeypatch.setattr(catalog_module, "save_model_catalog", fake_save)
+        assert record_rejected_field("gpt-4o", "stream_options", "a newer note") is False
+        assert save_called is False
+        # The original note survives — it records when this was first learned.
+        assert cat["models"]["gpt-4o"]["rejects"]["stream_options"] == "2026-01-01: earlier note"
+
+    def test_unknown_model_returns_false(self, monkeypatch):
+        _cat, saved = self._catalog(monkeypatch)
+        assert record_rejected_field("never-heard-of-it", "stream_options", "nope") is False
+        assert saved == {}
