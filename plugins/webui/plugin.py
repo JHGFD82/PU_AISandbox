@@ -64,13 +64,15 @@ def _register(module_name: str, rel_path: str) -> None:
 
 
 # Registered in dependency order: settings first (nothing depends on
-# anything), then auth, conversation, attachments, and export (app.py needs
-# all four; none of them depend on each other), then jobs (depends on
-# conversation, registered just above it), then the AI service (a normal
+# anything), then the file chooser (nothing does either, and both the setup
+# page and app.py want it), then auth, conversation, attachments, and export
+# (app.py needs all four; none of them depend on each other), then jobs
+# (depends on conversation, registered just above it), then the AI service (a normal
 # src.services.* registration, needed by app.py's chat route via
 # SandboxProcessor rather than imported directly), then app.py itself last
 # since it's the only file that needs everything else already in place.
 _register("pu_plugin.webui.settings", "src/settings.py")
+_register("_pu_webui_file_picker", "src/file_picker.py")
 _register("_pu_webui_auth", "src/auth.py")
 _register("_pu_webui_conversation", "src/conversation.py")
 _register("_pu_webui_attachments", "src/attachments.py")

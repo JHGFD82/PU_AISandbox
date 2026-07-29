@@ -26,13 +26,23 @@ docstring for why.
 from __future__ import annotations
 
 import html
+import sys
 import threading
 from pathlib import Path
 
 from fastapi import FastAPI, Form, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
+from pydantic import BaseModel
 
 from src import first_run, paths
+
+file_picker = sys.modules["_pu_webui_file_picker"]
+
+
+class PickFolderBody(BaseModel):
+    """What the "Browse…" button sends: where the chooser should open."""
+
+    start: str | None = None
 
 _PAGE = """<!doctype html>
 <html lang="en">
@@ -56,6 +66,10 @@ _PAGE = """<!doctype html>
   .note {{ background: #fff8e6; border: 1px solid #e0c169; border-radius: 8px; padding: .9rem 1.1rem; margin: 1.25rem 0; }}
   .error {{ background: #ffeaea; border: 1px solid #d98080; border-radius: 8px; padding: .9rem 1.1rem; margin: 1.25rem 0; }}
   button {{ font: inherit; padding: .6rem 1.4rem; border-radius: 6px; border: 0; background: #2b6cb0; color: #fff; cursor: pointer; }}
+  button:disabled {{ opacity: .55; cursor: default; }}
+  button.browse {{ background: transparent; color: inherit; border: 1px solid #999; padding: .5rem 1rem; }}
+  .field-row {{ display: flex; gap: .5rem; align-items: center; }}
+  .field-row input[type=text] {{ flex: 1; }}
   ul {{ margin: .4rem 0; padding-left: 1.2rem; }}
   code {{ background: rgba(128,128,128,.15); padding: .1rem .3rem; border-radius: 4px; }}
   @media (prefers-color-scheme: dark) {{
@@ -78,9 +92,41 @@ _PAGE = """<!doctype html>
 {warning}
   <button type="submit">{button}</button>
 </form>
+{script}
 </body>
 </html>
 """
+
+# Added to the page only when this computer has a file chooser to open, and
+# only on the question that asks for a folder. The button asks the server —
+# which is this same computer — to open its own Finder or Explorer window,
+# because a browser's file box hands back a file's contents and never its
+# location. See ``file_picker.py``.
+_BROWSE_SCRIPT = """<script>
+document.getElementById("browse-btn").addEventListener("click", async function () {
+  var field = document.getElementById("folder");
+  var button = this;
+  button.disabled = true;
+  var wording = button.textContent;
+  button.textContent = "Choosing\\u2026";
+  try {
+    var res = await fetch("/pick", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ start: field.value })
+    });
+    var data = await res.json();
+    // A window closed without choosing leaves what was already typed alone.
+    if (data.path) { field.value = data.path; }
+    else if (data.error) { alert(data.error); }
+  } catch (e) {
+    alert("The file chooser could not be opened. Type the folder instead.");
+  } finally {
+    button.disabled = false;
+    button.textContent = wording;
+  }
+});
+</script>"""
 
 
 def _describe(candidate: first_run.ExtrasCandidate) -> str:
@@ -101,6 +147,7 @@ def _describe(candidate: first_run.ExtrasCandidate) -> str:
 
 def _render(error: str = "") -> str:
     """Build the setup page, offering an existing folder if there is one."""
+    script = ""
     found = first_run.find_existing()
     if found:
         candidate = found[0]
@@ -115,6 +162,11 @@ def _render(error: str = "") -> str:
         target = candidate.path
     else:
         default = paths.DEFAULT_EXTRAS_ROOT
+        can_browse = file_picker.available()
+        browse = (
+            '<button type="button" class="browse" id="browse-btn">Browse…</button>'
+            if can_browse else ""
+        )
         body = (
             "<fieldset><legend>Where should your files be kept?</legend>"
             "<p>Your API keys, your usage history and your saved conversations "
@@ -122,12 +174,18 @@ def _render(error: str = "") -> str:
             "lets you replace the sandbox with a newer version later without "
             "losing any of it.</p>"
             '<label for="folder">Folder</label>'
+            '<div class="field-row">'
             f'<input type="text" id="folder" name="folder" '
             f'value="{html.escape(str(default))}" spellcheck="false">'
+            f"{browse}"
+            "</div>"
+            "<p>The suggestion above is a good one — press the button below to "
+            "take it. Choose somewhere else only if you have a reason to.</p>"
             "</fieldset>"
         )
         button = "Create these files"
         target = default
+        script = _BROWSE_SCRIPT if can_browse else ""
 
     warning = ""
     sync = paths.cloud_sync_warning(target)
@@ -138,6 +196,7 @@ def _render(error: str = "") -> str:
         body=body,
         button=button,
         warning=warning,
+        script=script,
         # quote=False because this lands in element content, not an
         # attribute — escaping apostrophes there only makes the sentence
         # harder to read for no gain in safety.
@@ -196,6 +255,31 @@ def create_setup_app(on_complete) -> FastAPI:
     @app.get("/", response_class=HTMLResponse)
     async def show_form() -> str:
         return _render()
+
+    # Not `async`: the chooser waits for a person to finish looking through
+    # their files, and FastAPI gives an ordinary function its own thread to
+    # wait on, leaving the page itself responsive.
+    @app.post("/pick")
+    def pick_folder(request: Request, body: PickFolderBody) -> JSONResponse:
+        """Open this computer's folder chooser and report back what was picked."""
+        # This server only ever listens on 127.0.0.1, so this can't normally
+        # be reached from elsewhere. Checked anyway, because what's behind it
+        # opens a window on the screen of whoever is running the sandbox.
+        client = request.client.host if request.client else None
+        if client not in ("127.0.0.1", "::1", "localhost"):
+            return JSONResponse(
+                {"path": None, "error": "The Browse button only works on this computer."},
+                status_code=403,
+            )
+        try:
+            chosen = file_picker.choose(
+                kind="folder",
+                start=body.start,
+                prompt="Choose where the sandbox should keep your files",
+            )
+        except file_picker.PickerUnavailable as e:
+            return JSONResponse({"path": None, "error": str(e)}, status_code=503)
+        return JSONResponse({"path": str(chosen) if chosen else None})
 
     @app.post("/", response_class=HTMLResponse)
     async def submit(request: Request, folder: str = Form(...)) -> str:

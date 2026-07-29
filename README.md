@@ -78,13 +78,23 @@ If it does, it will tell you exactly what to do: install Python from [python.org
 
 ### Adding people
 
-Once the sandbox is running, add whoever will be using it:
+Once the sandbox is running, add whoever will be using it. When there is nobody configured yet, the web interface opens straight onto its Settings page for exactly this reason — fill in the **Professors** panel and press *Add professor*.
+
+The same thing at the command line:
 
 ```bash
 python main.py settings add-professor
 ```
 
-It asks for their netID, their display name, and their API keys — the keys are typed hidden, never as a command-line flag. Princeton faculty obtain API keys through OIT; each person registers independently.
+Either way it asks for three things:
+
+| | |
+|---|---|
+| **NetID** | The university username they sign in with — `jh43`. Letters and digits only, not their name and not an email address. This is how the sandbox tells one person from another: it picks their API key, names their usage file, and is what you type to run a command as them. It can't be changed later without removing them and adding them again. |
+| **Display name** | `Jeff Heller`. Only ever shown to people — in reports and in the person picker — so write it however reads best. |
+| **API key** | Princeton faculty obtain these through OIT; each person registers independently. A backup key is optional, and gets used automatically if the primary one ever stops working. |
+
+Keys are never displayed once saved — the settings page shows only whether one is set. At the command line they're typed hidden, never as a flag.
 
 ### Using it from the command line instead
 

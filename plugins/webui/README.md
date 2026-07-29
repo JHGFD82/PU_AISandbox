@@ -22,4 +22,6 @@ Adds the `webui` command: a browser interface for people who would rather not wo
 
 **Job state is deliberately in memory only.** Restarting the server ends any job that was mid-run, and the conversation says so rather than sitting there looking busy. There's no resume — the escape valve is the page-range field on every job form.
 
+**Its "Browse…" buttons open this computer's own file chooser, not the browser's.** A browser deliberately hands a page a file's contents and never its location, which would leave people typing paths by hand. This works around it the only honest way there is: the server is running on the same computer as the browser, so it opens the real Finder or Explorer window *there* and the path comes back genuine. See [`src/file_picker.py`](src/file_picker.py). It is refused outright for a browser on any other computer, and where there's no chooser to open the button simply isn't drawn.
+
 **One gate, not per-person login.** A single passphrase unlocks the whole local server. Serving on anything other than `127.0.0.1` requires one to be set; the server refuses to start otherwise, because opening the port without it would let anyone who can reach it read every conversation and spend every configured budget.
