@@ -8,8 +8,6 @@ no real network calls or file I/O are triggered during tests.
 import importlib.util
 import sys
 from pathlib import Path
-from unittest.mock import patch
-
 import pytest
 
 import src.models.catalog as _catalog_module
@@ -79,10 +77,23 @@ def _use_template_catalog(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def _no_sleep():
-    """Patch time.sleep globally so retry-backoff tests don't actually wait."""
-    with patch("time.sleep"):
-        yield
+def _no_sleep(monkeypatch):
+    """Make time.sleep do nothing, so retry-backoff tests don't actually wait.
+
+    Uses monkeypatch rather than ``mock.patch`` deliberately. This replaces an
+    attribute on the real ``time`` module, and several tests replace the very
+    same attribute themselves (``src.services.base_service`` does a plain
+    ``import time``, so ``base_service.time`` *is* the ``time`` module).
+    Two different undo mechanisms unwinding the same attribute only restore it
+    correctly if they happen to finish in the right order — and which order
+    that is depends on when pytest first had to build the ``monkeypatch``
+    fixture, which changes the moment anyone adds a fixture above this one.
+    Get it wrong and ``time.sleep`` stays stubbed for the rest of the session,
+    so every later test that waits for a background thread sees its polling
+    loop spin instantly and fail for reasons having nothing to do with it.
+    Going through monkeypatch for both puts every change on one undo stack.
+    """
+    monkeypatch.setattr("time.sleep", lambda _: None)
 
 
 @pytest.fixture(autouse=True)

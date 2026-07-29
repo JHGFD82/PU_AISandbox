@@ -26,9 +26,11 @@ from src.tracking.token_tracker import get_configured_data_roots, load_usage_tre
 # The report is written into the folder the data actually lives in,
 # wherever this installation keeps it — not next to this script, which
 # is part of the package and gets replaced on upgrade.
+#
+# Asked for when it's needed rather than when this file is imported: on a
+# copy that hasn't been set up there is no answer yet, and working that out
+# at import time would mean nothing in this file could even be loaded.
 from src.paths import data_root
-
-DATA_DIR = data_root()
 
 # --- Color palettes -----------------------------------------------------------
 
@@ -535,11 +537,13 @@ def generate_html(summary: dict, charts_data: dict) -> str:
 def main():
     no_open = "--no-open" in sys.argv
 
+    data_dir = data_root()
+
     print("Loading usage data...")
     all_data = load_all_data()
 
     if not all_data:
-        print("No usage data found in", DATA_DIR)
+        print("No usage data found in", data_dir)
         sys.exit(1)
 
     professors = sorted(all_data.keys())
@@ -551,7 +555,7 @@ def main():
     charts_data = build_charts_data(all_data)
     html = generate_html(summary, charts_data)
 
-    out_path = DATA_DIR / "usage_report.html"
+    out_path = data_dir / "usage_report.html"
     out_path.write_text(html, encoding="utf-8")
     print(f"  Report written to: {out_path}")
 
