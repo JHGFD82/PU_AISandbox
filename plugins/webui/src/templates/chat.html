@@ -671,6 +671,14 @@ async function loadModels() {
   renderModelList();
   const field = document.getElementById("model-field");
   if (!field.value) field.value = data.default || "";
+  // If whatever is selected has since gone from the catalog — a model the
+  // gateway stopped allowing, dropped automatically on the failed request —
+  // fall back to the default rather than leaving a name in the box that
+  // cannot work, which invites sending the same doomed message again.
+  else if (!state.models.some(m => m.name === field.value)) {
+    field.value = data.default || "";
+    applySamplingVisibility();
+  }
 }
 
 function renderModelList() {
@@ -1818,7 +1826,15 @@ async function sendMessage() {
     // The user's message was already saved server-side before streaming
     // began, so resync from the server instead of leaving a stranded
     // "waiting..." or partial assistant bubble on screen.
-    await openConversation(state.conversationId);
+    //
+    // The model list is reloaded too, because one thing a failed turn can
+    // mean is that this model is no longer available at all and has just
+    // been dropped from the catalog. Until this happened the picker went on
+    // offering it — so the message said it had been removed while the list
+    // said otherwise, and the obvious conclusion was that nothing had been
+    // removed. Reloading unconditionally rather than only on that one error:
+    // it costs a single small request, and it can't be wrong.
+    await Promise.all([openConversation(state.conversationId), loadModels()]);
   } finally {
     sendBtn.disabled = false;
   }
