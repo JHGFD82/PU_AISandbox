@@ -10,7 +10,7 @@ A plugin is a self-contained directory under `plugins/` that adds a command to t
 
 **Standalone plugins** own a command outright. They implement `register_subparsers()` to create the command's parser, and the CLI router calls their `run()` directly. `prompt`, `translation`, `transcription` and `webui` are all standalone.
 
-**Extension plugins** add languages or options to a command another plugin already owns. Instead of registering a command, they declare `handles` (the source-language codes they own) and implement `register_command_flags()` to append their flags to the base plugin's parser. When two plugins claim the same command and both declare `handles`, `src/runtime/dispatch_plugin.py` merges them into a `DispatchPlugin` that routes each request to whichever plugin owns that language. `translation-ea` and `transcription-ea` are extension plugins.
+**Extension plugins** add languages or options to a command another plugin already owns. Instead of registering a command, they declare `handles` (the languages they own) and implement `register_command_flags()` to append their flags to the base plugin's parser. When two plugins claim the same command and both declare `handles`, `src/runtime/dispatch_plugin.py` merges them into a `DispatchPlugin` that routes each request to whichever plugin owns that language. `translation-ea` and `transcription-ea` are extension plugins.
 
 > **An extension plugin must not implement `register_subparsers()`.** The command already exists, so registering it a second time is a conflict and the plugin loader will silently skip your plugin.
 
@@ -80,7 +80,7 @@ plugin = MyPlugin()
 | Member | Default | Effect |
 |--------|---------|--------|
 | `requires_professor: bool` | `True` | Set `False` if your command doesn't spend one person's API budget, so it can be run without a netID first. `webui` sets this, because which professor is active is chosen later, in the browser. |
-| `handles: list[str]` | absent | Extension plugins only — the source-language codes you own. |
+| `handles: list[str]` | absent | Extension plugins only — the languages you own. Match the base command's own form: short codes for `translate`, full names for `transcribe` (see [Writing an extension plugin](#writing-an-extension-plugin)). |
 | `register_command_flags(parser)` | absent | Extension plugins only — appends your flags to the base plugin's parser. |
 | `get_peer_guidance(token)` | absent | Extension plugins only — contributes destination-side prompt guidance when your language is the *target*. |
 | `ui_action` / `run_ui_action` / `preview_ui_action` | absent | Gives your command a form in the web interface — see [A button in the web interface](#a-button-in-the-web-interface). |
@@ -257,13 +257,22 @@ This fills in `LANGUAGE_MAP`, which the argparse type-hooks (`parse_language_cod
 
 To add languages to an existing command like `translate`:
 
-1. **Declare `handles`** — the source-language codes you own:
+1. **Declare `handles`** — the languages you own:
 
    ```python
    class MyTranslationPlugin:
        commands: list[str] = ["translate"]      # same as the base plugin's
-       handles: list[str] = ["jp", "zh"]        # codes you own
+       handles: list[str] = ["jp", "zh"]        # what you own
    ```
+
+   `DispatchPlugin` routes on `args.language_code[0]`, so `handles` has to
+   hold whatever that argument parses to — and that differs by command.
+   `translate` takes a pair and parses to **short codes** (`"jp"`), while
+   `transcribe` takes one language and parses to a **full name**
+   (`"Japanese"`). Compare `plugins/translation/plugin.py`'s
+   `handles = ["en"]` with `plugins/transcription/plugin.py`'s
+   `handles = ["English"]`. Get this wrong and nothing errors — your plugin
+   simply never gets asked to do anything.
 
 2. **Implement `register_command_flags(parser)`, not `register_subparsers()`.** The loader calls it to append your flags to the shared parser. Don't re-add `language_code` or anything the base plugin already defines.
 
@@ -471,7 +480,7 @@ The people using this sandbox are Princeton faculty from non-CS disciplines. Wri
 
 **Extension plugins**
 
-- [ ] `handles` declared with the source-language codes you own
+- [ ] `handles` declared in the form the base command parses to — short codes for `translate`, full names for `transcribe`
 - [ ] `register_command_flags()` implemented — **not** `register_subparsers()`
 - [ ] No `_register()` calls — the base plugin handles those
 - [ ] `run()` delegates to the base plugin's shared executor (e.g. `_execute_translate`)

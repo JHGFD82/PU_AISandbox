@@ -131,3 +131,4 @@ The package (the code, replaced on upgrade) and the person's own files are kept 
 - [`docs/token-usage-guide.md`](docs/token-usage-guide.md) — token tracking and budget troubleshooting
 - [`docs/plugin-authoring-guide.md`](docs/plugin-authoring-guide.md) — step-by-step new-plugin guide
 - [`templates/plugin.py.template`](templates/plugin.py.template) — annotated skeleton to copy for a new plugin
+- `plugins/*/README.md` — signposts only. Each names what is genuinely particular to that plugin and points at the docs above for everything else. Keep them that way: a fact repeated there is a fact that will drift.
