@@ -228,12 +228,7 @@ def ask_where_to_set_up():
     say("  2. In your web browser")
     say("")
     try:
-        answer = raw_input("Choose 1 or 2 [1]: ").strip()  # noqa: F821
-    except NameError:
-        try:
-            answer = input("Choose 1 or 2 [1]: ").strip()
-        except (EOFError, KeyboardInterrupt):
-            return "terminal"
+        answer = input("Choose 1 or 2 [1]: ").strip()
     except (EOFError, KeyboardInterrupt):
         return "terminal"
     return "browser" if answer == "2" else "terminal"
