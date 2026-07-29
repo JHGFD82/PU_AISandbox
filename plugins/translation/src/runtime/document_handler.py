@@ -265,8 +265,7 @@ class Mixin:
                          sequential or parallel path. ``None`` (the default,
                          and what every CLI call passes) means no progress
                          reporting — only the webui's background job runner
-                         passes one (see ``docs/webui-plugin-plan.md``
-                         section 10). Ignored by the single-image path (one
+                         passes one. Ignored by the single-image path (one
                          image has nothing to report progress *between*).
             on_page_text: Called with ``(page_number, translated_text)``
                           right after each page finishes — a sibling to

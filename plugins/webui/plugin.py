@@ -3,7 +3,7 @@
 Implements the ``webui`` command: ``webui serve`` starts a local FastAPI
 server (conversation history, model switching, a live spend sidebar) and
 ``webui set-passphrase`` sets the unlock-gate passphrase, writing its hash
-to ``settings.toml``. See ``docs/webui-plugin-plan.md`` for the full design.
+to ``settings.toml``.
 
 Unlike every other plugin, ``webui`` sets ``requires_professor = False`` —
 its command doesn't belong to one professor at CLI-invocation time (you run

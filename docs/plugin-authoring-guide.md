@@ -1,47 +1,58 @@
 # Plugin Authoring Guide
 
-Plugins are self-contained directories under `plugins/`. The core never needs to change when you add one.
+A plugin is a self-contained directory under `plugins/` that adds a command to the sandbox. `translate`, `transcribe`, `prompt` and the web interface are all plugins; the core knows nothing about any of them. At startup it looks in `plugins/`, loads every `plugin.py` it finds, and asks each one what commands it provides.
+
+**Adding a plugin never requires editing anything in `src/`.** If you find yourself needing to change core code to make a plugin work, that is a gap in the plugin contract — please open an issue rather than working around it, because other people will hit it too.
 
 ---
 
-## Plugin Types
+## Two kinds of plugin
 
-There are two kinds of plugins:
+**Standalone plugins** own a command outright. They implement `register_subparsers()` to create the command's parser, and the CLI router calls their `run()` directly. `prompt`, `translation`, `transcription` and `webui` are all standalone.
 
-**Standalone plugins** introduce a new, independent CLI command. They implement `register_subparsers()` to create the command parser, and their `run()` is called directly by the CLI router. The built-in `prompt`, `translation`, and `transcription` plugins are all standalone plugins.
+**Extension plugins** add languages or options to a command another plugin already owns. Instead of registering a command, they declare `handles` (the source-language codes they own) and implement `register_command_flags()` to append their flags to the base plugin's parser. When two plugins claim the same command and both declare `handles`, `src/runtime/dispatch_plugin.py` merges them into a `DispatchPlugin` that routes each request to whichever plugin owns that language. `translation-ea` and `transcription-ea` are extension plugins.
 
-**Extension plugins** extend an existing command with additional language or domain support. Instead of introducing a new command, they declare `handles` (the source-language shortcodes they own) and implement `register_command_flags()` to append their flags to the base plugin's shared parser. The plugin loader detects the `handles` overlap and automatically merges them into a `DispatchPlugin` at startup. `translation-ea` and `transcription-ea` are examples of extension plugins.
-
-> **Extension plugins must not call `register_subparsers()`.** They hook into the base standalone plugin's parser — they must never register a parallel command. Doing so would cause the plugin to conflict with the base plugin and be silently skipped.
+> **An extension plugin must not implement `register_subparsers()`.** The command already exists, so registering it a second time is a conflict and the plugin loader will silently skip your plugin.
 
 ---
 
-## Quick Start
+## Quick start
 
 ```bash
-cp -r plugins/prompt plugins/myplugin
-# edit plugins/myplugin/plugin.py
+mkdir -p plugins/myplugin
+cp templates/plugin.py.template plugins/myplugin/plugin.py
+python main.py --help          # your command should now appear
 ```
 
-The plugin loader discovers `plugins/*/plugin.py` at startup. There is no registration step.
+`templates/plugin.py.template` is an annotated skeleton — it explains every decision inline, and you delete whatever you don't need. For a complete *working* plugin written to be read as a reference, see `plugins/prompt/plugin.py`.
+
+There is no registration step anywhere. The loader (`src/runtime/plugin_loader.py`) discovers `plugins/*/plugin.py` on its own, in alphabetical order.
 
 ---
 
-## Minimal Plugin Structure
+## What a plugin directory looks like
 
 ```
 plugins/myplugin/
-├── plugin.py          # required — loader entry point
-└── src/
-    └── services/
-        └── my_service.py   # optional — inject via sys.modules
+├── plugin.py                      # required — the loader's entry point
+├── settings.toml                  # optional — your own tuneable defaults
+├── conftest.py                    # optional — registers your modules for pytest
+├── src/
+│   ├── settings.py                # optional — reads settings.toml
+│   ├── runtime/
+│   │   └── my_handler.py          # optional — multi-step methods on the sandbox
+│   └── services/
+│       └── my_service.py          # optional — the class that calls the AI model
+└── tests/
 ```
+
+Only `plugin.py` is required; a working plugin can be about thirty lines.
 
 ---
 
-## The Plugin Contract
+## The contract
 
-Your `plugin.py` must expose a module-level attribute named `plugin` that is an instance of a class with three members:
+`plugin.py` must define a module-level object named `plugin`. There is no base class to inherit from — the loader just checks that your object has the right attributes. `src/runtime/plugin.py` holds the formal description.
 
 ```python
 class MyPlugin:
@@ -58,36 +69,31 @@ class MyPlugin:
 plugin = MyPlugin()
 ```
 
-The loader checks for `commands`, `register_subparsers`, and `run`. Anything else is optional.
+| Member | Type | Purpose |
+|--------|------|---------|
+| `commands` | `list[str]` | The command names this plugin owns |
+| `register_subparsers(subparsers)` | method | Adds your command and its flags to the shared parser |
+| `run(args, professor, model, temperature, top_p, max_tokens)` | method | Does the work |
+
+### Optional members
+
+| Member | Default | Effect |
+|--------|---------|--------|
+| `requires_professor: bool` | `True` | Set `False` if your command doesn't spend one person's API budget, so it can be run without a netID first. `webui` sets this, because which professor is active is chosen later, in the browser. |
+| `handles: list[str]` | absent | Extension plugins only — the source-language codes you own. |
+| `register_command_flags(parser)` | absent | Extension plugins only — appends your flags to the base plugin's parser. |
+| `get_peer_guidance(token)` | absent | Extension plugins only — contributes destination-side prompt guidance when your language is the *target*. |
+| `ui_action` / `run_ui_action` / `preview_ui_action` | absent | Gives your command a form in the web interface — see [A button in the web interface](#a-button-in-the-web-interface). |
+
+None of the optional members are part of the `ModePlugin` protocol. Each is read with `getattr(plugin, "...", None)`, so declaring none of them leaves your plugin command-line only.
 
 ---
 
-## Token Tracking (via SandboxProcessor)
+## Making your own files findable: `_register()`
 
-Every plugin that makes API calls **must** use `SandboxProcessor`. It handles API key resolution, `TokenTracker` creation, alternate-endpoint wiring (`[endpoints.<name>]` in the merged `settings.*.toml` layers, credentialed via `settings.toml`), and lazy service instantiation — all in one place. Token tracking is then structural rather than a convention that can be forgotten.
+Your plugin lives in `plugins/myplugin/`, but core looks for the pieces it wires up under fixed import paths in `src.*`. `_register()` loads one of your files from disk and files it under the name core expects — which is what lets `SandboxProcessor` find your code without core containing a single line about your plugin.
 
-```python
-from src.runtime.sandbox_processor import SandboxProcessor
-
-def run(self, args, professor, model, temperature, top_p, max_tokens):
-    sandbox = SandboxProcessor(
-        professor,
-        model=model,
-        temperature=temperature,
-        top_p=top_p,
-        max_tokens=max_tokens,
-    )
-    svc = sandbox.my_service   # lazily wired; requires sys.modules injection below
-    ...
-```
-
-`SandboxProcessor.__init__` creates the `TokenTracker` internally. If `model` contains a colon (e.g. `"my_cluster:llama-3-70b"`), `SandboxProcessor` automatically loads the matching `[endpoints.<name>]` entry (plus its credential from `settings.toml`), points the client at the alternate `base_url`, and bypasses the model catalog — you get correct alternate-API routing for free.
-
----
-
-## Adding a Service
-
-If your plugin has its own service class, inject it into `sys.modules` at the top of `plugin.py`, before any imports that need it:
+Copy this verbatim from `templates/plugin.py.template`:
 
 ```python
 import importlib.util, sys
@@ -95,62 +101,203 @@ from pathlib import Path
 
 _PLUGIN_DIR = Path(__file__).parent
 
-def _register(module_name: str, rel_path: str) -> None:
-    if module_name in sys.modules:
+
+def _register(module_name: str, rel_path: str, override: bool = False) -> None:
+    """Make one of this plugin's files importable under the name core expects.
+
+    Args:
+        module_name: The name to register under (e.g.
+                     ``'src.services.myplugin_service'``).
+        rel_path: Where the file really is, relative to this plugin's own
+                  directory.
+        override: Normally ``False``: if another plugin already registered
+                  this name, leave theirs alone. Pass ``True`` only if your
+                  plugin is deliberately replacing another's module.
+    """
+    if module_name in sys.modules and not override:
         return
     path = _PLUGIN_DIR / rel_path
+    if not path.exists():
+        return
     spec = importlib.util.spec_from_file_location(module_name, path)
     if spec and spec.loader:
         mod = importlib.util.module_from_spec(spec)
         sys.modules[module_name] = mod
         spec.loader.exec_module(mod)
+    # Hang the module off its parent package too, so attribute-style access
+    # (and pytest's monkeypatch) resolves it correctly.
+    parts = module_name.rsplit(".", 1)
+    if len(parts) == 2:
+        parent = sys.modules.get(parts[0])
+        if parent is not None:
+            setattr(parent, parts[1], sys.modules[module_name])
+```
 
-_register("src.services.my_service", "src/services/my_service.py")
+**Call `_register()` at import time**, at the top of `plugin.py` before any import that needs the module — never inside `run()`. Core inspects what has been registered while it is being imported, and anything registered later is missed.
+
+Register in dependency order (prompt fragments before the specs that use them, specs before services). `plugins/translation/plugin.py` is the worked example.
+
+### The three names core looks for
+
+| Register under | Core uses it for | Naming rule |
+|----------------|------------------|-------------|
+| `src.services.<name>` | Services `SandboxProcessor` instantiates on demand | `src.services.my_service` → attribute `sandbox.my_service` → class `MyService` inside it. Underscores become capitals: `foo_bar_service` → `FooBarService`. |
+| `src.runtime.<name>` | Multi-step orchestration methods on the sandbox itself | The module must export a class named exactly `Mixin`. Every registered `Mixin` becomes a `SandboxProcessor` base class. |
+| `pu_plugin.<name>.settings` | Your plugin's own settings constants | Any constant in it becomes importable as `from src.settings import YOUR_CONSTANT`. |
+
+```python
+_register("pu_plugin.myplugin.settings",   "src/settings.py")
+_register("src.services.my_service",       "src/services/my_service.py")
+_register("src.runtime.my_handler",        "src/runtime/my_handler.py")
+
 from src.services.my_service import MyService   # now safe to import
 ```
 
-`SandboxProcessor.__getattr__` will also auto-instantiate the service on first attribute access, following the naming convention `my_service` → `MyService`. So you can also do:
-
-```python
-sandbox = SandboxProcessor(professor, model=model, ...)
-sandbox.my_service.do_something(...)   # lazily instantiated
-```
+Prefer a module name that includes your plugin's own name. Two plugins that register the same name without meaning to will silently get whichever loaded first.
 
 ---
 
-## Writing an Extension Plugin (DispatchPlugin)
+## Using `SandboxProcessor`
 
-To add language support to an existing command like `translate`, write an **extension plugin** — one that hooks into the existing `translate` command rather than registering a new one:
+Every plugin that makes API calls **must** go through `SandboxProcessor`. It resolves the professor's API key, creates the `TokenTracker`, wires up any alternate endpoint, and instantiates your service on first use — all in one place, so token tracking is structural rather than a convention someone can forget.
 
-1. **Declare `handles`** — the shortcodes your plugin owns as source languages:
+```python
+def run(self, args, professor, model, temperature, top_p, max_tokens):
+    # Imported here, not at the top of the file — see the note below.
+    from src.runtime.sandbox_processor import SandboxProcessor
+
+    sandbox = SandboxProcessor(
+        professor,
+        model=model,
+        temperature=temperature,
+        top_p=top_p,
+        max_tokens=max_tokens,
+    )
+    result = sandbox.my_service.do_the_thing(...)
+```
+
+> **Import `SandboxProcessor` inside `run()`, never at module scope.** `SandboxProcessor`'s class statement discovers plugin-registered `Mixin` classes at the moment it is first imported. Importing it at the top of a plugin file would run that discovery while plugins are still loading, and any plugin that hadn't loaded yet would lose its orchestration methods. Nothing in `src/` imports it at module scope either, for the same reason.
+
+If `model` contains a colon (e.g. `"my_cluster:llama-3-70b"`), `SandboxProcessor` loads the matching `[endpoints.<name>]` definition plus its credential from `settings.toml`, points the client at that `base_url`, and bypasses the model catalog. You get alternate-endpoint routing without writing anything for it.
+
+---
+
+## Plugin settings
+
+Put your tuneable defaults in `plugins/myplugin/settings.toml` under sections named after your plugin:
+
+```toml
+# plugins/myplugin/settings.toml
+[myplugin]
+temperature = 0.5
+max_tokens = 4000
+```
+
+Read them in `src/settings.py` by walking up from `__file__` to the nearest `settings.toml` that contains one of your sections, and expose each value as a module-level constant:
+
+```python
+# plugins/myplugin/src/settings.py
+"""My plugin's settings — loaded from the nearest settings.toml with our sections."""
+
+import tomllib
+from pathlib import Path
+
+_PLUGIN_SECTIONS = ("myplugin",)
+
+
+def _load_settings() -> dict:
+    p = Path(__file__).resolve().parent
+    while p != p.parent:
+        candidate = p / "settings.toml"
+        if candidate.exists():
+            with candidate.open("rb") as f:
+                data = tomllib.load(f)
+            if any(k in data for k in _PLUGIN_SECTIONS):
+                return data
+        p = p.parent
+    return {}
+
+
+_s = _load_settings().get("myplugin", {})
+
+MYPLUGIN_TEMPERATURE: float = _s.get("temperature", 0.5)
+MYPLUGIN_MAX_TOKENS: int = _s.get("max_tokens", 4000)
+```
+
+Register it as `pu_plugin.myplugin.settings` and your constants become importable from `src.settings` — `src/settings.py`'s `__getattr__` searches every registered `pu_plugin.*.settings` module:
+
+```python
+_register("pu_plugin.myplugin.settings", "src/settings.py")
+
+from src.settings import MYPLUGIN_TEMPERATURE   # works anywhere in the project
+```
+
+Give every constant a name that includes your plugin's. If two plugins define the same constant name, the first one found wins and a warning names both — which one that is depends on load order rather than anything meaningful.
+
+Plugin settings have no personal-override file. Unlike the root `settings.default.toml`, which a person can override in `preferences.toml`, a plugin's `settings.toml` is edited directly.
+
+---
+
+## Registering languages
+
+Call `register_language()` at module import time — at the top level of `plugin.py`, not inside a class or function:
+
+```python
+from src.config import register_language
+
+register_language("jp", "Japanese")
+register_language("zh", "Chinese")
+```
+
+This fills in `LANGUAGE_MAP`, which the argparse type-hooks (`parse_language_code`, `parse_single_language_code`) validate against. Plugins are guaranteed to load before the parser is built, so every registered code is available by the time a command line is parsed.
+
+---
+
+## Writing an extension plugin
+
+To add languages to an existing command like `translate`:
+
+1. **Declare `handles`** — the source-language codes you own:
 
    ```python
    class MyTranslationPlugin:
-       commands: list[str] = ["translate"]
-       handles: list[str] = ["jp", "zh"]   # shortcodes you own
+       commands: list[str] = ["translate"]      # same as the base plugin's
+       handles: list[str] = ["jp", "zh"]        # codes you own
    ```
 
-2. **Do not implement `register_subparsers()`.** Extension plugins must implement `register_command_flags(parser)` instead. The loader calls this to append your flags to the shared parser. Implementing `register_subparsers()` would create a command conflict and your plugin would be silently dropped.
+2. **Implement `register_command_flags(parser)`, not `register_subparsers()`.** The loader calls it to append your flags to the shared parser. Don't re-add `language_code` or anything the base plugin already defines.
 
    ```python
    def register_command_flags(self, parser: argparse.ArgumentParser) -> None:
-       parser.add_argument("--my-option", ...)
+       parser.add_argument("--my-option", action="store_true", help="...")
    ```
 
-3. **Skip the sys.modules injection block.** The base translation plugin registers shared service modules. Load order is alphabetical, so `translation` always loads before `translation-ea`.
+3. **Skip the `_register()` block.** The base plugin registers the shared service modules, and plugins load alphabetically, so `translation` is always loaded before `translation-ea`. You can write a plain `import src.services.translation_service`.
 
-4. **Delegate to the shared executor:**
+4. **Delegate to the base plugin's shared executor:**
 
    ```python
    def run(self, args, professor, model, temperature, top_p, max_tokens):
        import sys
-       _base = sys.modules.get("pu_plugin.translation.plugin")
-       source_language = src.config.LANGUAGE_MAP[args.language_code[0]]
-       target_language = src.config.LANGUAGE_MAP[args.language_code[1]]
-       _base._execute_translate(sandbox, args, source_language, target_language)
+       from src.runtime.sandbox_processor import SandboxProcessor
+       from src.config import LANGUAGE_MAP
+
+       sandbox = SandboxProcessor(professor, model=model, temperature=temperature,
+                                  top_p=top_p, max_tokens=max_tokens)
+       if getattr(args, "my_option", False):
+           sandbox.translation_service.variant_notes.append(MY_NOTE)
+
+       _base = sys.modules["pu_plugin.translation.plugin"]
+       _base._execute_translate(
+           sandbox, args,
+           LANGUAGE_MAP[args.language_code[0]],
+           LANGUAGE_MAP[args.language_code[1]],
+       )
    ```
 
-5. **Optionally implement `get_peer_guidance(token)`** to contribute destination-side conventions when your language appears as a translation target. Return a string or `None`:
+   Each entry in `variant_notes` is a plain string appended to the model's system prompt as its own additional-instructions block. Order is preserved.
+
+5. **Optionally implement `get_peer_guidance(token)`** to contribute destination-side conventions when your language is the *target* rather than the source. Return a string or `None`:
 
    ```python
    def get_peer_guidance(self, token: str) -> Optional[str]:
@@ -161,112 +308,133 @@ To add language support to an existing command like `translate`, write an **exte
 
 ---
 
-## Registering Languages
+## A button in the web interface
 
-Call `register_language()` at module import time (not inside a class or function):
+The web interface's chat composer can offer your command as a one-click background job: a button next to the message box that opens a small form, runs the job in the background, shows per-page progress, and posts a download link into the conversation when it finishes.
 
-```python
-from src.config import register_language
+This is entirely optional and changes nothing about your command's behaviour at the command line. Declare it only if your command is the kind of page-by-page job that suits it and produces **one finished file** — `translate` and `transcribe` are the two worked examples.
 
-register_language("jp", "Japanese")
-register_language("zh", "Chinese")
-```
-
-This populates `LANGUAGE_MAP` before argparse validates language codes. Because plugins load before the argument parser is built, all registered codes are available to the parser.
-
----
-
-## Plugin Settings
-
-Add a `settings.toml` to your plugin directory. Your plugin's `src/settings.py` can load it by walking up from `__file__`:
-
-```toml
-# plugins/myplugin/settings.toml
-[myplugin]
-default_passes = 2
-```
+### 1. Declare the action
 
 ```python
-# plugins/myplugin/src/settings.py
-from pathlib import Path
-import tomllib
-
-_settings_file = Path(__file__).parent.parent / "settings.toml"
-
-def _load():
-    if _settings_file.exists():
-        with open(_settings_file, "rb") as f:
-            return tomllib.load(f)
-    return {}
-
-_data = _load()
-
-def get(section: str, key: str, default=None):
-    return _data.get(section, {}).get(key, default)
-```
-
----
-
-## Optional: Web UI Composer Entry
-
-The `webui` plugin's chat composer can offer your command as a one-click background job — a button next to the message box that pops open a small form and runs the job without the professor touching a terminal. This is entirely optional and doesn't change anything about your plugin's CLI behavior; declare it only if your command is the kind of page-by-page, form-driven job this suits (`translate` and `transcribe` are the two worked examples).
-
-Like `requires_professor`, this is undeclared by default and discovered with `getattr(plugin, "ui_action", None)` — there's no registration step, and skipping it leaves your plugin exactly as it is today: CLI-only.
-
-Two things to add to `plugin.py`:
-
-```python
-from src.runtime.ui_action import UiAction, UiField
+from src.runtime.ui_action import UiAction, UiField, UiJobResult
 
 ui_action = UiAction(
-    id="mycommand",
-    label="Do the thing",       # shown in the composer's action picker
-    command="mycommand",         # informational only — the webui calls run_ui_action()
-                                  # directly, never your argparse run()
+    id="mycommand",              # unique; routes a job-start request back to you
+    label="Do the thing",        # shown in the composer's action picker
+    command="mycommand",         # informational only — the webui calls
+                                 # run_ui_action() directly, never argparse
+    progress_verb="Processing",  # "Processing... 3 of 12 done."
     fields=[
         UiField(name="target_language", label="Target language", kind="language"),
         UiField(name="file", label="Document", kind="file"),
-        UiField(name="notes", label="Notes", kind="text", required=False),
+        UiField(name="notes", label="Notes", kind="text", required=False,
+                group="Options"),
     ],
+)
+plugin.ui_action = ui_action
+```
+
+`progress_verb` is a plain string rather than something derived from `label`, because English gerunds aren't a mechanical transformation (`"translate" + "ing"` gives "Translateing"). It defaults to `"Processing"`.
+
+**`UiField` kinds:** `language` (a select populated from the language registry), `file`, `checkbox`, `text` (single- or multi-line), `select` (populated from `choices`, each `{"value": ..., "label": ...}`). The web interface renders purely off `kind` — it never needs plugin-specific knowledge to build a form.
+
+**Other `UiField` options:** `required` (default `True`), `group` (a section heading printed above this field when it differs from the previous field's — purely cosmetic, but it turns a long list into readable sections), and `allow_folder` (for `kind="file"` only: lets someone pick a whole folder, the same way pointing the CLI's `-i` at a folder of images processes every image in it). Files chosen that way arrive together in one scratch folder whose path reaches `fields["file_path"]`; read from it, don't expect it to outlive the job.
+
+### 2. Implement `run_ui_action`
+
+```python
+def run_ui_action(self, fields, professor, model, on_progress, output_dir,
+                  on_page_text=None) -> UiJobResult:
+    """Run this action as a background job instead of a CLI invocation.
+
+    Args:
+        fields: The submitted form values, keyed by each UiField's ``name``.
+        professor: Whose API key and budget this job spends.
+        model: The model chosen in the composer, or ``None``.
+        on_progress: ``Callable[[completed, total], None]`` or ``None`` — call
+                     it as each page or image finishes so the composer can
+                     show live progress.
+        output_dir: A directory the webui has created and guarantees is
+                    writable. Your one output file must be written under it;
+                    the webui owns naming and cleanup for that directory.
+        on_page_text: ``Callable[[page_number, text], None]`` or ``None`` —
+                      call it with each page's finished text (1-indexed) so
+                      the conversation can show output as it arrives. This is
+                      what the CLI prints straight to the terminal.
+    """
+    ...
+    return UiJobResult(
+        output_path=...,           # absolute path to the one finished file
+        output_filename=...,       # the name to present on download
+        summary="Translated 12 pages, Japanese -> English",
+        prompt_tokens=..., completion_tokens=..., cost=...,   # all optional
+    )
+```
+
+The token and cost fields are optional but worth filling in: they let someone see that a job used its full response budget on some page, which the summary text alone can't show. `SandboxProcessor`'s tracker exposes `get_session_usage()` for exactly this — a running total scoped to one instance's lifetime.
+
+There is no resume. If a job is interrupted, the escape valve is a page-range field, which is why `translate` includes one.
+
+### 3. Optionally implement `preview_ui_action`
+
+```python
+def preview_ui_action(self, fields, professor, model) -> UiPromptPreview:
+    ...
+    return UiPromptPreview(system_prompt=..., user_prompt=..., model=...,
+                           note="Image content would be attached to the user message")
+```
+
+This is `--dry-run` made interactive: the composer calls it after **every** change to the form and shows the result in a live prompt preview pane. So it must be cheap, must never make an API call, and must tolerate blank or half-filled forms — fall back to placeholder text rather than raising. It's fully independent of the pair above; a plugin can declare `ui_action` and skip the preview.
+
+### 4. Extension plugins: contributing fields to someone else's action
+
+An extension plugin never gets its own composer entry — only the base plugin's `ui_action` is exposed. It can still add fields to the base plugin's form, shown as a subsection that appears once the professor picks a language the extension owns:
+
+```python
+from src.runtime.ui_action import UiField, register_extension_ui_hooks
+
+
+def _apply_kanbun(sandbox, fields):
+    if str(fields.get("kanbun", "")).strip().lower() in ("true", "1", "on", "yes"):
+        sandbox.translation_service.variant_notes.append(KANBUN_NOTE)
+
+
+register_extension_ui_hooks(
+    action_id="translate",     # must match the owning UiAction's id
+    token="jp",                # a code from your own `handles`
+    fields=[UiField(name="kanbun", label="Use Kanbun reading conventions",
+                    kind="checkbox", required=False, group="Japanese (kanbun)")],
+    apply=_apply_kanbun,
 )
 ```
 
-```python
-class MyPlugin:
-    ...
-    def run_ui_action(self, fields, professor, model, on_progress=None, output_dir=None):
-        """Run this action as a webui background job instead of a CLI invocation.
+Call it once at import time, the same way you call `register_language()`. `apply(sandbox, fields)` runs just before the job starts, with the fully-constructed `SandboxProcessor` — so it can do anything `_execute_translate` can. It must not raise on a blank or default value: it is called on every job for that action and language, not only when something was changed.
 
-        Args:
-            fields: The submitted form values, keyed by each UiField's ``name``.
-            on_progress: Optional ``Callable[[int, int], None]`` — call it with
-                         (completed, total) as each unit of work finishes, so the
-                         composer can show live progress. Only meaningful for
-                         sequential (single-worker) execution; leave unused
-                         otherwise.
-            output_dir: Where to write the job's output file.
+`action_id` is required alongside `token` because two different actions can legitimately register the same language code for unrelated fields (`translate`'s Kanbun checkbox and `transcribe`'s vertical-text options both apply to `jp`). Keying by token alone would let whichever plugin imported last silently overwrite the other.
 
-        Returns:
-            A ``UiJobResult(output_path, output_filename, summary)`` describing
-            the one finished file this job produced — see
-            ``src/runtime/ui_action.py`` for the full field docs.
-        """
-        ...
-        return UiJobResult(output_path=..., output_filename=..., summary=...)
-```
-
-See `plugins/translation/plugin.py` and `plugins/transcription/plugin.py` for complete examples, and `docs/webui-plugin-plan.md` section 10 for the full composer design (execution model, job locking, whole-file export).
+Which side of the job `token` refers to depends on the action: the *destination* language for `translate`, the OCR language for `transcribe`.
 
 ---
 
 ## Testing
 
-Place tests in `plugins/myplugin/tests/`. The root `pytest.ini` auto-discovers them. Use the `_use_template_catalog` fixture from the core `conftest.py` to avoid touching the real `model_catalog.json`:
+Put tests in `plugins/myplugin/tests/` and **add that path to `testpaths` in the root `pytest.ini`** — discovery is by explicit list, not automatic:
+
+```ini
+[pytest]
+testpaths = tests plugins/translation/tests plugins/prompt/tests plugins/transcription/tests plugins/webui/tests plugins/myplugin/tests
+```
+
+`plugin.py` itself is not pre-registered for tests, so a test that needs it loads it the same way `_register()` does. Add a `plugins/myplugin/conftest.py` mirroring your plugin's own registrations if your tests import your service or handler modules directly — `plugins/translation/conftest.py` is the pattern.
+
+Use the core `conftest.py`'s `_use_template_catalog` fixture so tests never touch the real model catalog:
 
 ```python
 # plugins/myplugin/tests/conftest.py
 import pytest
-from tests.conftest import _use_template_catalog  # re-export from core
+from tests.conftest import _use_template_catalog   # re-export from core
+
 
 @pytest.fixture(autouse=True)
 def use_template_catalog(_use_template_catalog):
@@ -275,24 +443,43 @@ def use_template_catalog(_use_template_catalog):
 
 ---
 
+## Documentation
+
+The people using this sandbox are Princeton faculty from non-CS disciplines. Write your docstrings for a colleague in your own department, not for a programmer: open with one plain-English sentence on *what* the function does rather than how, explain each parameter in terms the caller cares about, and define technical terms inline. The "Documentation & docstring standard" section of `CLAUDE.md` has the full standard and a worked example.
+
+---
+
 ## Checklist
 
-**All plugins:**
-- [ ] `plugin.py` at `plugins/myplugin/plugin.py`
-- [ ] Module-level `plugin = MyPlugin()` at the bottom of `plugin.py`
-- [ ] `commands` list declared on the class
-- [ ] `SandboxProcessor` used in `run()` — never create `TokenTracker` or services manually
-- [ ] Service module injected into `sys.modules` at import time (see "Adding a Service")
-- [ ] Languages registered via `register_language()` at module level
-- [ ] Tests in `plugins/myplugin/tests/`
-- [ ] (Optional) `ui_action` + `run_ui_action()` declared if this command should appear in the webui composer — see "Optional: Web UI Composer Entry" above
+**Every plugin**
 
-**Standalone plugins** (new independent command):
+- [ ] `plugins/myplugin/plugin.py` exists, with `plugin = MyPlugin()` at module level
+- [ ] `commands` declared on the class
+- [ ] Every owned module registered with `_register()` at import time, in dependency order
+- [ ] `SandboxProcessor` used in `run()` — never create a `TokenTracker` or a service by hand
+- [ ] `SandboxProcessor` imported *inside* `run()`, not at module scope
+- [ ] Languages registered with `register_language()` at module level
+- [ ] Nothing in `src/` had to change
+- [ ] Tests in `plugins/myplugin/tests/`, and that path added to `pytest.ini`
+- [ ] `python main.py --help` lists your command, and `python main.py <netid> mycommand --dry-run` runs without spending anything
+
+**Standalone plugins**
+
 - [ ] `register_subparsers()` implemented
-- [ ] Do *not* declare `handles` unless this plugin is also intended as a dispatch primary
+- [ ] `handles` *not* declared, unless this plugin is also the dispatch primary
+- [ ] (Optional) `requires_professor = False` if the command doesn't spend one person's budget
 
-**Extension plugins** (extending an existing command):
-- [ ] `handles` declared with the source-language shortcodes this plugin owns
+**Extension plugins**
+
+- [ ] `handles` declared with the source-language codes you own
 - [ ] `register_command_flags()` implemented — **not** `register_subparsers()`
-- [ ] No additional `sys.modules` injection — the standalone plugin handles that
+- [ ] No `_register()` calls — the base plugin handles those
 - [ ] `run()` delegates to the base plugin's shared executor (e.g. `_execute_translate`)
+- [ ] (Optional) `get_peer_guidance()` and `register_extension_ui_hooks()` for destination-side behaviour
+
+**Web interface entry (optional)**
+
+- [ ] `ui_action` declared and assigned to the plugin object
+- [ ] `run_ui_action()` returns a `UiJobResult` pointing at one file under `output_dir`
+- [ ] `on_progress` and `on_page_text` called if your execution path already supports them
+- [ ] (Optional) `preview_ui_action()` — cheap, no API calls, tolerant of blank fields

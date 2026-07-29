@@ -1,7 +1,7 @@
 """Authentication for the webui plugin: one shared local unlock gate.
 
-There is no per-professor login here — see docs/webui-plugin-plan.md section 4
-for the full reasoning. This module defines the pluggable ``AuthBackend``
+There is no per-professor login here: one gate covers the whole local
+server, whoever is using it. This module defines the pluggable ``AuthBackend``
 contract and ships one working implementation, ``PassphraseBackend``. A
 second implementation, backed by Princeton's Central Authentication Service
 (CAS), is documented in the plan but intentionally not built yet — CAS
@@ -143,7 +143,7 @@ class PassphraseBackend:
     (set by running ``python main.py webui set-passphrase``). If that value
     is unset or empty, this backend treats every request as already
     authenticated — this is the documented "no gate" mode meant for a
-    strictly ``127.0.0.1``-only setup (see docs/webui-plugin-plan.md section 8).
+    strictly ``127.0.0.1``-only setup.
     """
 
     def __init__(self, passphrase_hash: str | None = None) -> None:
@@ -211,7 +211,6 @@ def get_configured_backend() -> PassphraseBackend:
 
     Always returns a ``PassphraseBackend`` today. This is the one place that
     will need to change to select ``CasBackend`` instead once it's built
-    (e.g. based on a ``[webui] auth_backend`` setting) — see
-    docs/webui-plugin-plan.md section 4.
+    (e.g. based on a ``[webui] auth_backend`` setting).
     """
     return PassphraseBackend()

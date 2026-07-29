@@ -157,7 +157,7 @@
 
     <div class="card" id="section-shared" data-section="shared">
       <h2>Shared settings &amp; alternate endpoints</h2>
-      <p class="hint">A shared settings file lets a group of installations (e.g. everyone you manage) use the same tuned runtime defaults. Alternate-endpoint credentials are the API keys for any non-default AI endpoints defined in settings.default.toml / settings.local.toml.</p>
+      <p class="hint">A shared settings file lets a group of installations (e.g. everyone you manage) use the same tuned runtime defaults. Alternate-endpoint credentials are the API keys for any non-default AI endpoints defined in settings.default.toml or preferences.toml.</p>
 
       <label for="shared-path">Shared settings file path</label>
       <form class="inline" id="shared-path-form">
@@ -167,13 +167,13 @@
       </form>
 
       <div id="endpoints-list" style="margin-top:1rem"></div>
-      <div class="snippet" id="endpoints-guidance"># settings.local.toml
+      <div class="snippet" id="endpoints-guidance"># preferences.toml
 [endpoints.my_cluster]
 name = "My HPC Cluster"
 base_url = "http://my-cluster.internal:8000/v1"
 openai_compatible = true
 default_model = "llama-3-70b-instruct"</div>
-      <p class="hint" style="margin-top:0.5rem">Endpoint definitions (base URL, timeout, etc.) aren't edited from here — add or change them by hand in settings.default.toml or settings.local.toml, following the snippet above, then set the matching credential below. See docs/configuration.md for the full field reference.</p>
+      <p class="hint" style="margin-top:0.5rem">Endpoint definitions (base URL, timeout, etc.) aren't edited from here — add or change them by hand in settings.default.toml or preferences.toml, following the snippet above, then set the matching credential below. See docs/configuration.md for the full field reference.</p>
     </div>
 
     <div class="card" id="section-external_sources" data-section="external_sources">
@@ -267,7 +267,7 @@ function renderProfessors(data) {
 
   list.querySelectorAll("button[data-remove]").forEach(btn => {
     btn.addEventListener("click", async () => {
-      if (!confirm(`Remove this professor? This deletes their API key(s) from .settings.`)) return;
+      if (!confirm(`Remove this professor? This deletes their API key(s) from settings.toml.`)) return;
       try {
         await api(`/api/settings/professors/${encodeURIComponent(btn.dataset.remove)}`, { method: "DELETE" });
         await loadSettings();

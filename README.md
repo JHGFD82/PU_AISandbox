@@ -12,8 +12,10 @@ Modular AI platform for Princeton University faculty. Commands are implemented a
 ```text
 main.py
   → src/cli.py            controller + argument parser; loads plugins, routes commands
-    → src/config.py       language registry, professor lookup, safe-filename helpers
-    → src/settings.py     layered settings (defaults → shared → local → plugin → flags)
+    → src/config.py       language registry, netID lookup, optional-setting registry
+    → src/settings.py     layered settings (defaults → shared → preferences → plugin → flags)
+    → src/paths.py        where this person's own files live
+    → src/first_run.py    what setup creates, and what it must never overwrite
   → src/runtime/
       plugin_loader.py    discovers plugins/*/plugin.py at startup
       info_commands.py    built-in: --list-models, usage subcommands
@@ -44,7 +46,7 @@ For deeper documentation, see the `docs/` folder:
 
 - [`docs/architecture.md`](docs/architecture.md) — request lifecycle, component descriptions, data-flow diagrams
 - [`docs/cli-reference.md`](docs/cli-reference.md) — full flag reference for all commands
-- [`docs/configuration.md`](docs/configuration.md) — `settings.toml`, `model_catalog.json`, `settings.default.toml` template and schema reference
+- [`docs/configuration.md`](docs/configuration.md) — where your files live, and the schema for `settings.toml`, `model_catalog.json` and `settings.default.toml`
 - [`docs/token-usage-guide.md`](docs/token-usage-guide.md) — token tracking, usage commands, budget settings, and troubleshooting
 - [`docs/plugin-authoring-guide.md`](docs/plugin-authoring-guide.md) — step-by-step guide to writing new plugins
 
@@ -135,8 +137,6 @@ Use these? [Y/n]
 
 Press Enter and you're done — nothing to copy, nothing to re-enter.
 
-> **Upgrading from a version before this change?** If your files are still inside the sandbox folder, setup notices that too and offers to move them out first, so this is the last time you have to think about it. Nothing is deleted.
-
 ---
 
 ## Usage
@@ -190,7 +190,7 @@ python main.py jh43 transcribe en -i scan.png -o result.txt             # single
 python main.py jh43 transcribe en -i scans/                             # folder of images
 ```
 
-To use an alternate AI endpoint (HPC cluster or third-party provider), use colon syntax with a key from an `[endpoints.<name>]` table (defined in `settings.default.toml`, a shared file, or `settings.local.toml`; credentialed via `settings.toml`):
+To use an alternate AI endpoint (an HPC cluster, or a provider's own API), use colon syntax with the name of an `[endpoints.<name>]` table — defined in `settings.default.toml`, a shared file, or your `preferences.toml`, with its API key in `settings.toml`:
 
 ```bash
 python main.py jh43 translate jp-en -i paper.pdf -m my_cluster:llama-3-70b
@@ -242,23 +242,25 @@ Jobs run in memory, so restarting the server ends any job that was mid-run. The 
 
 ## Token Usage Tracking
 
-Each professor has isolated, month-scoped tracking:
+Everyone is tracked separately, one calendar month at a time. The files live in the `data` folder of the folder you chose during setup:
 
-- **Active file**: `data/token_usage_{name}.json` — current calendar month only
-- **Archives**: `data/archives/{name}/{YYYY-MM}.json` — one file per past month; written automatically on the first use of a new month
-- All totals in each file cover that month only — no file grows indefinitely
-- Monthly budget limits and warning threshold are configurable in `settings.default.toml` and `src/model_catalog.json`
-- All-time totals are computed on demand by aggregating the active file with all archives (`usage report --all-time`)
+- **Active file**: `token_usage_{netid}.json` — the current month only
+- **Archives**: `archives/{netid}/{YYYY-MM}.json` — one file per past month, written automatically on the first use of a new month
+- Every total in a file covers that month alone, so no file grows without end
+- All-time totals are worked out on demand by adding up the active file and all the archives (`usage report --all-time`)
+- The monthly limit lives in `model_catalog.json`; the warning threshold in `settings.default.toml`
+
+**The monthly limit is advisory.** Passing it prints warnings; it never stops a command. See [`docs/token-usage-guide.md`](docs/token-usage-guide.md#what-the-budget-does-and-doesnt-do).
 
 ---
 
 ## Model Catalog
 
-`src/model_catalog.json` is the local pricing and capabilities registry (git-ignored; each installation has its own copy).
+`model_catalog.json`, in your files folder, holds the price and capabilities of every model this installation knows about.
 
 **Adding models:**
-- **OpenAI or Google**: Use `openai/model-name` or `google/model-name` with `-m` on the first invocation — pricing is fetched automatically from [PortKey](https://api.portkey.ai) and saved.
-- **All other providers**: Edit `src/model_catalog.json` directly. Minimal entry format:
+- **OpenAI or Google**: use `openai/model-name` or `google/model-name` with `-m` the first time — the price is fetched from [PortKey](https://api.portkey.ai) and saved automatically.
+- **Any other provider**: edit `model_catalog.json` directly. The minimum an entry needs:
 
 ```json
 {
@@ -280,7 +282,7 @@ Prices are per 1,000,000 tokens (default `pricing_unit`). Set `"supports_vision"
 
 `settings.default.toml` in the sandbox folder holds the defaults for everything below. To change any of them, put just the lines you want to change into `preferences.toml` in your own files folder — setup creates it for you, already commented with examples. Because it lives outside the sandbox folder, your adjustments survive upgrading.
 
-A group can also share a settings file between installations, sitting between the two (pointed at by `shared_settings.path` in `settings.toml`). See [`docs/configuration.md`](docs/configuration.md#local-overrides) for how the layers merge.
+A group can also share a settings file between installations, sitting between the two (pointed at by `shared_settings.path` in `settings.toml`). See [`docs/configuration.md`](docs/configuration.md#how-settings-layer) for how the layers merge.
 
 | Section | Key | Default | Effect |
 |---------|-----|---------|--------|
@@ -304,13 +306,14 @@ See [`docs/configuration.md`](docs/configuration.md) for plugin-level settings (
 
 ## Writing a New Plugin
 
-1. Copy the template:
+1. Copy the annotated template:
    ```bash
-   mkdir plugins/myplugin
+   mkdir -p plugins/myplugin
    cp templates/plugin.py.template plugins/myplugin/plugin.py
+   python main.py --help          # your command should now appear
    ```
 2. Edit `plugin.py`: rename `MyPlugin`, set `commands`, implement `register_subparsers` and `run`.
-3. Inside `run()`, pass `professor` to services that need it — they handle token tracking internally.
-4. No changes to `src/` are needed — the plugin is discovered automatically at startup.
+3. Build a `SandboxProcessor` inside `run()` — it resolves the API key, tracks tokens and costs, and creates your service on first use.
+4. Nothing in `src/` needs to change. The plugin is discovered at startup on its own.
 
-See `plugins/prompt/plugin.py` for the canonical working example.
+`plugins/prompt/plugin.py` is a complete working example written to be read as a reference, and [`docs/plugin-authoring-guide.md`](docs/plugin-authoring-guide.md) is the full walkthrough — including how to add languages to an existing command, and how to give your command a form in the web interface.

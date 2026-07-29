@@ -212,8 +212,8 @@
   /* Attachment chips: a small "📎 filename" read-only pill rendered inside a
      message bubble for a turn that already has an attachment on it (from
      conversation history, or produced by a future dedicated document
-     workflow) — see docs/webui-plugin-plan.md for why the general-purpose
-     chat composer no longer offers a way to add new ones. */
+     workflow). The general-purpose chat composer itself offers no way to
+     add new ones. */
   .attachment-chip {
     display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.25rem 0.55rem;
     border-radius: 999px; font-size: 0.78rem; white-space: nowrap;
@@ -263,7 +263,7 @@
   .modal-header h2 { margin: 0; }
   #settings-iframe { flex: 1; border: none; width: 100%; background: var(--panel-bg); }
 
-  /* ── Composer plugin actions (docs/webui-plugin-plan.md section 10) ──── */
+  /* ── Composer plugin actions ─────────────────────────────────────────── */
   .plugin-action-wrap { position: relative; flex: none; }
   .action-picker {
     position: absolute; bottom: calc(100% + 6px); left: 0; min-width: 220px;
@@ -494,8 +494,7 @@
       <div class="plugin-action-wrap" id="plugin-action-wrap">
         <button type="button" class="icon-btn plugin-action-btn" id="plugin-action-btn"
                 title="Run a plugin action" aria-label="Run a plugin action">
-          <!-- Puzzle piece, standing in for "installed plugin capability" —
-               see docs/webui-plugin-plan.md section 10. -->
+          <!-- Puzzle piece, standing in for "installed plugin capability". -->
           <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round">
             <path d="M7.3 2.6h3a1.2 1.2 0 011.2 1.2c0 .35-.14.62-.35.85a1.05 1.05 0 000 1.6c.21.23.35.5.35.85a1.2 1.2 0 01-1.2 1.2h-1.5v1.5a1.2 1.2 0 01-1.2 1.2c-.35 0-.62-.14-.85-.35a1.05 1.05 0 00-1.6 0c-.23.21-.5.35-.85.35a1.2 1.2 0 01-1.2-1.2v-3a1.2 1.2 0 011.2-1.2h1.5V5.75a1.2 1.2 0 011.3-1.15z"/>
           </svg>
@@ -507,7 +506,7 @@
     </div>
     <!-- Background job progress: hidden unless a job is running in the
          open conversation. Lives below the composer rather than as a
-         chat bubble — see docs/webui-plugin-plan.md section 10. -->
+         chat bubble. -->
     <div id="job-progress-box" hidden>
       <div class="job-progress-track"><div class="job-progress-fill" id="job-progress-fill"></div></div>
       <div class="job-progress-label" id="job-progress-label"></div>
@@ -538,8 +537,8 @@
   </div>
 
   <!-- Plugin action job modal: options on the left, a live two-pane prompt
-       preview (system prompt above, user prompt below) on the right — see
-       docs/webui-plugin-plan.md section 10. This is --dry-run made
+       preview (system prompt above, user prompt below) on the right.
+       This is --dry-run made
        interactive: the right side re-renders after every change to a field
        on the left, without ever making a real API call. -->
   <div id="job-modal-backdrop" class="modal-backdrop" hidden>
@@ -820,7 +819,7 @@ function exportConversation(id, format) {
   window.open(url, "_blank");
 }
 
-// ── Plugin composer actions (docs/webui-plugin-plan.md section 10) ─────────
+// ── Plugin composer actions ───────────────────────────────────────────────
 // The puzzle-piece button next to the message box lists every installed
 // plugin's declared ui_action; picking one opens a two-pane job modal
 // (options on the left, a live prompt preview on the right) instead of
@@ -879,7 +878,7 @@ document.getElementById("plugin-action-btn").addEventListener("click", (e) => {
 // This is --dry-run made interactive: the right-hand preview panes
 // re-render after every change to a field on the left, without ever making
 // a real API call — see UiPromptPreview's docstring in
-// src/runtime/ui_action.py and docs/webui-plugin-plan.md section 10.
+// src/runtime/ui_action.py.
 
 let jobPreviewDebounce = null;
 

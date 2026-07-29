@@ -1,7 +1,6 @@
 """Tests for the plain UiField/UiAction/UiJobResult dataclasses.
 
-See docs/webui-plugin-plan.md section 10 — these are the optional,
-plugin-declared contract behind the webui composer's plugin-action picker.
+These are the optional, plugin-declared contract behind the webui composer's plugin-action picker.
 Deliberately lightweight: there's no behavior here beyond plain dataclass
 construction, so these tests just pin the shape down.
 """

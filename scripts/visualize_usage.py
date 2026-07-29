@@ -57,7 +57,6 @@ def load_all_data() -> dict:
     "Every configured data root" means this installation's own local
     ``data/`` folder plus any external sources registered via
     ``python main.py <professor> usage sources add`` (see
-    ``docs/webui-plugin-plan.md`` section 1 and
     ``src/tracking/token_tracker.py::load_usage_tree``). If the same
     professor+month somehow appears in more than one root (e.g. stale
     local data left over from before a professor switched to a
@@ -192,8 +191,7 @@ def build_charts_data(all_data: dict) -> dict:
     model_labels = sorted(model_totals.keys())
     model_values = [round(model_totals[k], 4) for k in model_labels]
 
-    # 5. Activity by source — who made each call (see docs/webui-plugin-plan.md
-    # section 1). Only meaningful for professors tracked via a shared-write
+    # 5. Activity by source — who made each call. Only meaningful for professors tracked via a shared-write
     # source; calls with no source tag (older, pre-migration records) are
     # grouped under "unspecified" rather than dropped.
     source_totals: dict = defaultdict(float)

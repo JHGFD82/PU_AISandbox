@@ -128,8 +128,7 @@ class DispatchPlugin:
     # registered globally via register_language() (including ones an
     # extension plugin added), since the CLI-level language-specific flags
     # a real translate/transcribe invocation might apply simply aren't part
-    # of the composer's v1 field set — see docs/webui-plugin-plan.md
-    # section 10.
+    # of the composer's field set.
 
     _PROXIED_UI_ATTRS = ("ui_action", "run_ui_action", "preview_ui_action")
 

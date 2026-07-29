@@ -499,9 +499,7 @@ class TranslationService(BaseService):
                          job runner passes one. Previously silently
                          unsupported on this parallel path (only the local
                          console ``tqdm`` bar reported anything, invisible to
-                         a caller running this in a background thread) — see
-                         docs/webui-plugin-plan.md section 10's "progress bar
-                         frozen with workers > 1" fix.
+                         a caller running this in a background thread).
 
         Returns:
             The translated text for every page, in original page order

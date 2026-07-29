@@ -1,32 +1,53 @@
-# Configuration & Templates
+# Configuration
 
-Three files control how PU_AISandbox is configured. One is git-ignored (you create it from a template, or the migration script creates it for you); the others are TOML layers, one tracked and two optional/git-ignored.
+The sandbox keeps two things apart:
 
-| File | Tracked | Template | Purpose |
-|------|---------|----------|---------|
-| `settings.toml` | ❌ git-ignored | `templates/settings.template` | Professor names/keys, endpoint credentials, webui secrets, external usage-data sources — this installation's own private configuration |
-| `src/model_catalog.json` | ❌ git-ignored | `templates/model_catalog.template.json` | Model pricing and capabilities |
-| `settings.default.toml` | ✅ tracked | — | Runtime defaults (edit freely) and alternate-endpoint *definitions* |
-| A shared file (optional, any path) | ❌ not part of this repo | — | Runtime defaults a group wants to share (e.g. via Dropbox) |
-| `settings.local.toml` | ❌ git-ignored | — | This machine's personal overrides, highest precedence |
+- **The package** — the code, which is what you replace when you upgrade.
+- **Your files** — settings, API keys, the model catalogue, usage history and conversations. These live in a folder of your own, outside the package, so replacing the package can never take them with it.
 
-For a quick reference on every one of these — where each can live (this machine only, or a synced/shared external location), whether a personal override exists, and how it can be edited today — see [Settings at a Glance](#settings-at-a-glance) near the end of this document.
+Setup asks where your folder should go, offering `PU_AISandbox_data` in your home folder. A small marker file (`.installation`) inside the package records the answer; its absence is what tells the sandbox this copy hasn't been set up yet.
+
+| File | Where it lives | Purpose |
+|------|----------------|---------|
+| `settings.toml` | your files folder | API keys, endpoint credentials, web UI secrets, external usage-data sources — this installation's own private configuration |
+| `model_catalog.json` | your files folder | Model pricing and capabilities |
+| `preferences.toml` | your files folder | Your own adjustments to how the sandbox behaves |
+| `data/` | your files folder | Usage history, archives, conversations |
+| `settings.default.toml` | the package, tracked by git | The defaults everyone starts from, plus alternate-endpoint definitions |
+| A shared file | anywhere (optional) | Defaults a group wants to share, e.g. via Dropbox |
+| `plugins/*/settings.toml` | the package, tracked by git | Each plugin's own defaults |
+
+For a one-screen summary of every one of these — where it can live, whether a personal override exists, and how it's edited — see [Settings at a glance](#settings-at-a-glance) near the end.
 
 ---
 
-## `settings.toml` — This Installation's Private Configuration
-
-`settings.toml` is a TOML file at the repository root holding everything that is specific to this one installation and should never be synced or shared: professor names and API keys, the web UI's passphrase hash and session secret, alternate-endpoint credentials, and the list of external usage-data sources this installation reads from. It replaces four things that used to be separate files (`.env`, the credential half of `apis.json`, and `data_sources.json`).
-
-Editing it programmatically (via the `settings` command below) is safe specifically because every edit happens locally, driven by a command typed at this machine's own keyboard — never over a network call, never as part of syncing files between machines. That reasoning does not extend to placing `settings.toml` itself in a synced folder (Dropbox, iCloud, etc.) — never do that.
-
-### Setup
+## First-run checklist
 
 ```bash
+# 1. Choose where your files live, and create them. This makes
+#    settings.toml, model_catalog.json and preferences.toml in the
+#    folder you pick. Nothing to copy by hand.
 python main.py settings setup
+
+# 2. Add whoever will be using it (prompts for netID, name and keys)
+python main.py settings add-professor
+
+# 3. Check it
+python main.py --show-config    # who is configured — makes no API calls
+python main.py --list-models    # the model catalogue
 ```
 
-Then either hand-edit `settings.toml`, or use the `settings` command below to add your first professor.
+Setup runs on its own the first time you use a copy that hasn't been set up, so you can also just run the command you actually wanted and answer its questions. `python3 start.py` does the same thing and then opens the web interface; it offers to ask the setup questions in a browser instead of the terminal.
+
+If your files already exist — because you replaced the package with a newer copy — setup finds them, shows you what it found, and offers to carry them forward unchanged.
+
+---
+
+## `settings.toml` — this installation's private configuration
+
+Everything specific to this one installation, and never to be synced or shared: API keys, the web UI's passphrase hash and session secret, alternate-endpoint credentials, and the list of external usage-data sources this installation reads.
+
+Editing it programmatically (with the `settings` command below) is safe precisely because every edit happens locally, driven by a command typed at this machine's own keyboard — never over a network call, never as part of syncing files between machines. That reasoning does not extend to putting `settings.toml` in a synced folder (Dropbox, iCloud, OneDrive). Setup warns if the folder you choose looks synced, and re-checks at startup, because turning on Desktop & Documents syncing is one checkbox that retroactively uploads what is already there.
 
 ### Format
 
@@ -41,72 +62,65 @@ name = "Alice Smith"
 key = "sk-...primary_key..."
 ```
 
-- The table name (`jh43`, `as12`) is the person's **netID** — the university username they sign in with. This is what identifies them everywhere: it selects their API key, names their usage file, and is what you type on the command line.
-- `name` — their display name. Shown in reports and in the web interface's person picker, and nowhere else, so write it however reads best.
-- `key` — primary PortKey API key (obtained through Princeton OIT).
-- `backup_key` — fallback if the primary key fails. The application prints a warning when the backup is used.
+- The table name (`jh43`, `as12`) is the person's **netID** — the university username they sign in with. It selects their API key, names their usage file, and is what you type on the command line.
+- `name` — their display name. Shown in reports and in the web interface's person picker and nowhere else, so write it however reads best.
+- `key` — primary PortKey API key, obtained through Princeton OIT.
+- `backup_key` — used if the primary key fails. A warning is printed when it is.
 
 ### Why netIDs
 
-A netID is letters and digits only, which means it can be used as a filename exactly as typed. That is the whole reason it is the identifier.
+A netID is letters and digits only, which means it can be used as a filename exactly as typed. That is the whole reason it is the identifier — there is nothing to make safe about `jh43`, so there is nothing for two parts of the code to disagree about.
 
-The sandbox used to identify people by their display name, made filename-safe. Two parts of the code did that in two different ways — `Jeff Heller` became `jeff heller` in one place and `jeff_heller` in another — so one person's spending could be recorded as two people's, and an aggregate report would show them twice. There is nothing to make safe about `jh43`, so there is nothing for two parts of the code to disagree about.
-
-Capitalisation doesn't matter when you type it: `JH43` and `jh43` are the same person. Anything that isn't a letter or a digit is rejected with an error, since the usual cause is a display name typed where a netID was wanted.
+Capitalisation doesn't matter when you type it. Anything that isn't a letter or a digit is rejected with an error, since the usual cause is a display name typed where a netID was wanted.
 
 ```bash
 python main.py jh43 usage report
-python main.py JH43 usage report     # same person
+python main.py JH43 usage report            # same person
 python main.py "Jeff Heller" usage report   # error: that's a display name
 ```
 
-### Verifying the Configuration
+### Editing it from the command line
+
+Rather than hand-editing the file, the built-in `settings` command adds and removes people and sets any dotted-path value. Unlike every other command, `settings` never needs a netID first — you need it precisely when nobody is configured yet:
+
+```bash
+python main.py settings setup                    # choose where your files live
+python main.py settings add-professor            # prompts for netID, name and keys
+python main.py settings remove-professor jh43    # asks to confirm first
+python main.py settings list                     # the optional-settings list
+python main.py settings set webui.session_secret            # prompts for a value
+python main.py settings set webui.session_secret --generate  # or generate one
+python main.py settings unset webui.session_secret
+```
+
+Secrets are always entered at a hidden prompt, never accepted as a command-line flag, so they can't end up in shell history or be seen by another process listing running commands.
+
+### Optional values
+
+A plugin can declare its own optional dotted-path setting with `register_setting()` (`src/config.py`, the same mechanism a plugin uses to add a language), so it appears automatically in `--show-config` and `settings list`. Currently registered:
+
+| Dotted path | Set by | Purpose |
+|-------------|--------|---------|
+| `webui.passphrase_hash` | `webui set-passphrase` | Unlock-gate passphrase for the web interface |
+| `webui.session_secret` | `settings set webui.session_secret` (or `--generate`) | Keeps browser sessions signed in across server restarts |
+| `shared_settings.path` | `settings set shared_settings.path` | Path to a shared settings file — see [How settings layer](#how-settings-layer) |
+| `endpoints.<name>.key` | `settings set endpoints.my_cluster.key` | API key for an alternate endpoint — see [Alternate AI endpoints](#alternate-ai-endpoints) |
+
+All are optional. Leaving them unset means no unlock gate, a fresh session secret each restart, no shared settings, and no alternate endpoints.
+
+### Checking the configuration
 
 ```bash
 python main.py --show-config
 ```
 
-This prints all configured professors, their data-file paths, whether those files exist, and every optional setting registered below (and whether each is currently set — never the value itself).
-
-### Editing `settings.toml` from the command line
-
-Rather than hand-editing `settings.toml`, the built-in `settings` command can add/remove professors and set any dotted-path value directly. Unlike every other command, `settings` never needs a netID first (you need it precisely when nobody is configured yet):
-
-```bash
-python main.py settings add-professor            # prompts for netID, display name + keys (keys hidden, never a flag)
-python main.py settings remove-professor jh43    # asks to confirm before deleting
-python main.py settings list                     # same optional-settings list as --show-config
-python main.py settings set webui.session_secret             # prompts for a value (hidden, since it's a secret)
-python main.py settings set webui.session_secret --generate   # or auto-generate a random one
-python main.py settings unset webui.session_secret
-```
-
-Secrets are always entered at a hidden prompt — never accepted as a command-line flag — so they can't end up in shell history or be seen by another process listing running commands.
-
-### Optional `settings.toml` values
-
-Beyond professor keys, a plugin can declare its own optional dotted-path setting (via `register_setting()` in `src/config.py`, the same mechanism a plugin uses to add a language) so it shows up automatically in `--show-config` and `settings list`. Currently registered:
-
-| Dotted path | Set by | Purpose |
-|----------|--------|---------|
-| `webui.passphrase_hash` | `python main.py webui set-passphrase` (writes the hash directly to `settings.toml`) | Unlock-gate passphrase for the web UI |
-| `webui.session_secret` | `settings set webui.session_secret` (or `--generate`) | Keeps browser sessions signed in across server restarts |
-| `shared_settings.path` | `settings set shared_settings.path` | Path to a shared settings file — see [Local overrides](#local-overrides) |
-| `endpoints.<name>.key` (one per `[endpoints.<name>]` table in `settings.*.toml`) | `settings set endpoints.my_cluster.key` | API key for an alternate endpoint — see [Endpoint definitions](#endpoint-definitions-alternate-ai-api-connections) |
-
-All of these are optional — leaving them unset falls back to documented default behavior (no unlock gate, a fresh session secret each restart, no shared settings, no alternate endpoints).
+Prints everyone configured, their data-file paths and whether those files exist, and every optional setting registered above — including whether each is set, never the value itself.
 
 ---
 
-## `src/model_catalog.json` — Model Pricing and Capabilities
+## `model_catalog.json` — model pricing and capabilities
 
-### Setup
-
-```bash
-python main.py settings setup
-```
-
-This file is git-ignored so each installation can maintain its own model list and pricing without conflicting with other users. It's kept as its own file rather than folded into `settings.toml` for a practical reason: the package updates it on its own (auto-registering pricing the first time you use `-m provider/model-name`), and that kind of frequent, automatic write is exactly the kind of thing that causes conflicts if it ever ends up in a synced or shared file. Runtime settings and shared defaults change rarely enough that sharing them is safe; model pricing can change every time someone tries a new model.
+This lives in your files folder rather than in `settings.toml` for a practical reason: the sandbox writes to it on its own, registering pricing the first time you use `-m provider/model-name`. That kind of frequent automatic write is exactly what causes conflicts in a shared or synced file. Runtime settings change rarely enough to be safe to share; model pricing can change every time someone tries a new model.
 
 ### Schema
 
@@ -137,41 +151,41 @@ This file is git-ignored so each installation can maintain its own model list an
 }
 ```
 
-#### `config` section
+#### `config`
 
 | Key | Type | Description |
 |-----|------|-------------|
-| `pricing_unit` | int | Token denominator for prices — `1000000` means prices are per 1M tokens |
-| `monthly_limit` | float | Monthly spending limit in USD shown in usage reports |
-| `defaults.translation` | string | Default model for `translate` command |
-| `defaults.ocr` | string | Default model for `transcribe` command |
+| `pricing_unit` | int | What the prices are per — `1000000` means prices are per 1M tokens |
+| `monthly_limit` | float | Monthly spending limit in dollars, shown in usage reports. Advisory: see [Token Usage Guide](token-usage-guide.md#what-the-budget-does-and-doesnt-do) |
+| `defaults.translation` | string | Default model for `translate` |
+| `defaults.ocr` | string | Default model for `transcribe` |
 | `defaults.image_translation` | string | Default model for image translation |
-| `provider_map` | object | Maps provider shorthand to PortKey virtual key names |
+| `provider_map` | object | Maps a provider shorthand to the name PortKey uses |
 
 #### `models` entries
 
 | Key | Type | Required | Description |
 |-----|------|----------|-------------|
-| `input` | float | ✅ | Input token price per `pricing_unit` tokens |
-| `output` | float | ✅ | Output token price per `pricing_unit` tokens |
-| `supports_vision` | bool | — | Set `true` for vision-capable models (default: `false`) |
-| `portkey_id` | string | — | PortKey routing identifier (e.g. `"openai/gpt-4o"`) |
-| `last_sync` | string | — | ISO timestamp set automatically after a pricing sync |
-| `uses_max_completion_tokens` | bool | — | Set `true` for reasoning/o-series models that use `max_completion_tokens` instead of `max_tokens` |
-| `fixed_parameters` | bool | — | Set `true` for models that reject `temperature` and `top_p` (e.g. `o1`) |
-| `max_completion_tokens` | int | — | Per-model token cap override |
-| `system_role` | string | — | Override the system message role (defaults to `"system"`) |
+| `input` | float | ✅ | Price to read one `pricing_unit` of tokens |
+| `output` | float | ✅ | Price to generate one `pricing_unit` of tokens |
+| `supports_vision` | bool | — | `true` for models that can read images (default `false`) |
+| `portkey_id` | string | — | PortKey routing identifier, e.g. `"openai/gpt-4o"` |
+| `last_sync` | string | — | Timestamp, set automatically after a pricing sync |
+| `uses_max_completion_tokens` | bool | — | `true` for reasoning models that expect `max_completion_tokens` rather than `max_tokens` |
+| `fixed_parameters` | bool | — | `true` for models that reject `temperature` and `top_p` |
+| `max_completion_tokens` | int | — | Per-model cap on response length |
+| `system_role` | string | — | Override the system message's role (defaults to `"system"`) |
 
-### Adding Models
+### Adding models
 
-**OpenAI or Google** — use `provider/model-name` with `-m` on any command. Pricing is fetched from PortKey and saved automatically:
+**OpenAI or Google** — use `provider/model-name` with `-m` on any command. The price is fetched from PortKey and saved automatically:
 
 ```bash
 python main.py jh43 prompt -m openai/gpt-4o-new
 python main.py jh43 prompt -m google/gemini-2.5-pro
 ```
 
-**All other providers** — add an entry manually:
+**Any other provider** — add the entry by hand. There is no CLI for managing the catalogue:
 
 ```json
 "mistral-small": {
@@ -181,19 +195,17 @@ python main.py jh43 prompt -m google/gemini-2.5-pro
 }
 ```
 
-### Viewing the Catalog
+### Viewing it
 
 ```bash
 python main.py --list-models
 ```
 
-Prints all models with their pricing, vision support, and any special flags.
-
 ---
 
-## `settings.default.toml` — Runtime Defaults and Endpoint Definitions
+## `settings.default.toml` — runtime defaults
 
-This file is tracked by git. Edit it freely — changes take effect on the next run without touching any Python code.
+Tracked by git and shipped with the package. It holds the defaults for everyone; to change any of them for yourself, copy the lines you want into `preferences.toml` in your own files folder.
 
 ```toml
 [prompt]
@@ -220,78 +232,78 @@ default_font_size = 9
 warning_threshold_pct = 80
 ```
 
-### Reference
-
-#### `[prompt]`
+### `[prompt]`
 
 | Key | Default | Effect |
 |-----|---------|--------|
-| `temperature` | `0.7` | Sampling temperature for the `prompt` command |
-| `top_p` | `1.0` | Nucleus sampling top-p for the `prompt` command |
-| `max_tokens` | `4000` | Maximum response tokens for the `prompt` command |
-| `default_system_prompt` | `"You are a helpful assistant."` | System prompt used when `-s` is not passed |
+| `temperature` | `0.7` | How varied the wording is, for the `prompt` command |
+| `top_p` | `1.0` | Another way of controlling variety, for the `prompt` command |
+| `max_tokens` | `4000` | Longest response the `prompt` command will accept |
+| `default_system_prompt` | `"You are a helpful assistant."` | Used when `-s` isn't passed |
 
-#### `[retry]`
-
-| Key | Default | Effect |
-|-----|---------|--------|
-| `page_delay_seconds` | `3.0` | Pause between pages in sequential processing mode |
-| `max_retries` | `10` | Maximum retry attempts on transient errors or content filter hits |
-| `retry_delay_seconds` | `5.0` | Seconds to wait between retries (the same every time) |
-
-#### `[processing]`
+### `[retry]`
 
 | Key | Default | Effect |
 |-----|---------|--------|
-| `default_parallel_workers` | `1` | Default `-w` value; `1` = sequential (safe default) |
-| `default_ocr_passes` | `1` | Default `-P` value; values > 1 enable multi-pass OCR refinement |
-| `default_page_size` | `2000` | Target characters per logical page when splitting DOCX/TXT files |
-| `max_parallel_workers` | `50` | Hard cap on concurrent workers to avoid OS file-descriptor exhaustion |
+| `page_delay_seconds` | `3.0` | Pause between pages when processing one at a time |
+| `max_retries` | `10` | How many times to retry after a temporary failure or a content-filter refusal |
+| `retry_delay_seconds` | `5.0` | How long to wait between those attempts — the same every time |
 
-#### `[output]`
-
-| Key | Default | Effect |
-|-----|---------|--------|
-| `default_font_size` | `9` | Body font size (points) for PDF and Word output |
-
-#### `[budget]`
+### `[processing]`
 
 | Key | Default | Effect |
 |-----|---------|--------|
-| `warning_threshold_pct` | `80` | Print a budget warning when monthly spend exceeds this percentage of `monthly_limit` |
+| `default_parallel_workers` | `1` | Default `-w` value; `1` means one page at a time |
+| `default_ocr_passes` | `1` | Default `-P` value; more than one enables multi-pass OCR refinement |
+| `default_page_size` | `2000` | Characters per page when splitting a `.docx` or `.txt` into pages |
+| `max_parallel_workers` | `50` | Hard cap on how many pages can be in flight at once |
 
-CLI flags (`-t`, `-T`, `-M`, `-w`, etc.) always override these defaults for the current run only.
+### `[output]`
 
-### Local overrides
+| Key | Default | Effect |
+|-----|---------|--------|
+| `default_font_size` | `9` | Body text size, in points, for PDF and Word output |
 
-Settings merge from up to three layers, each optional and each overriding only the keys it mentions:
+### `[budget]`
 
-1. **`settings.default.toml`** (tracked) — the repo's defaults, same for everyone.
-2. **A shared file** (optional, any path) — set `shared_settings.path` in `settings.toml` to the path of a `settings.default.toml`-format file, e.g. one synced across a group with Dropbox. Lets a group share defaults (a cluster's worker count, a group-wide font size, even a shared alternate-endpoint definition) without anyone hand-editing their own copy. Nothing changes unless this value is set.
-3. **`settings.local.toml`** (git-ignored, at the repository root) — this machine's personal overrides. Still the last word: even with a shared file in play, a setting placed here wins, so one person can override just their own quirk without touching the file everyone else reads.
+| Key | Default | Effect |
+|-----|---------|--------|
+| `warning_threshold_pct` | `80` | Print a warning once spending passes this share of `monthly_limit` |
+
+Command-line flags (`-t`, `-T`, `-M`, `-w` and the rest) override all of these, for that one run.
+
+---
+
+## How settings layer
+
+Settings merge from up to three layers. Each is optional, and each overrides only the keys it actually mentions — a layer that doesn't name a section, or a key inside one, leaves the layer below untouched.
+
+1. **`settings.default.toml`** in the package — the defaults, the same for everyone.
+2. **A shared file**, if `shared_settings.path` is set in `settings.toml`. Any path, in the same format as `settings.default.toml` — for example one synced across a research group with Dropbox. This lets a group share a cluster's worker count, a group-wide font size, even a shared endpoint definition, without anyone hand-editing their own copy. Nothing changes unless the pointer is set.
+3. **`preferences.toml`** in your files folder — your own adjustments, and the last word. Even with a shared file in play, a setting placed here wins, so one person can override just their own quirk without touching the file everyone else reads. Setup creates it already commented with examples, and because it sits outside the package it survives upgrading.
 
 ```toml
-# settings.local.toml — machine-specific overrides (not committed)
+# preferences.toml
 [processing]
 default_parallel_workers = 4
 ```
 
-Note this local-override mechanism is specific to the *root* `settings.default.toml` — a plugin's own `settings.toml` (see [Plugin Settings](#plugin-settings) below) has no equivalent personal-override file today; it's edited directly.
+`settings.toml` itself is never layered — it is this installation's own private configuration, not a set of defaults.
 
-### Endpoint definitions (alternate AI API connections)
+Plugin settings are separate. A plugin's `settings.toml` (see [Plugin settings](#plugin-settings)) has no personal-override file; it's edited directly.
 
-The `[endpoints.<name>]` tables in `settings.default.toml` (or a shared file, or `settings.local.toml` — they merge through the same three layers as everything else) list any AI endpoints you want to reach in addition to (or instead of) the built-in service.
+---
 
-#### Why use this?
+## Alternate AI endpoints
 
-Use an `[endpoints]` table when you need to call an AI endpoint that isn't the built-in service — for example:
+An `[endpoints.<name>]` table describes an AI endpoint other than the built-in service — a model running on an HPC cluster or other self-hosted inference server, or a provider's direct API (many expose an OpenAI-compatible interface reachable with just a URL and a key).
 
-- A model running on an **HPC cluster** or other self-hosted inference server
-- An **AI service provider's direct API** (many providers expose an OpenAI-compatible REST interface you can reach with just a URL and an API key)
+Definitions merge through the same three layers as every other setting. Only the credential is kept apart, in `settings.toml`, because credentials are never meant to be shared or layered.
 
-#### Definition format
+### Defining one
 
 ```toml
+# settings.default.toml, or a shared file, or preferences.toml
 [endpoints.my_cluster]
 name = "My HPC Cluster"
 base_url = "http://my-cluster.internal:8000/v1"
@@ -301,22 +313,18 @@ timeout = 30
 verify_ssl = false
 ```
 
-#### Endpoint fields
-
 | Field | Required | Default | Description |
 |-------|----------|---------|-------------|
-| `name` | No | table name | Human-readable label shown in logs |
-| `base_url` | **Yes** | — | Root URL of the API (e.g. `http://cluster:8000/v1`) |
-| `openai_compatible` | No | `false` | When `true`, uses the OpenAI SDK with `base_url` for LLM calls |
-| `default_model` | No | `null` | Model used when none is specified in the colon syntax |
+| `name` | No | table name | Label shown in logs |
+| `base_url` | **Yes** | — | Root URL of the API |
+| `openai_compatible` | No | `false` | When `true`, uses the OpenAI SDK pointed at `base_url` |
+| `default_model` | No | none | Model used when the colon syntax names none |
 | `timeout` | No | `30` | Request timeout in seconds |
-| `verify_ssl` | No | `true` | Whether to verify SSL certificates (set `false` for internal clusters) |
+| `verify_ssl` | No | `true` | Set `false` for an internal cluster with a self-signed certificate |
 
-Because `settings.default.toml` is tracked by git, put endpoint *definitions* you're comfortable committing there or in a shared file; anything installation-specific belongs in `settings.local.toml` instead (git-ignored).
+`settings.default.toml` is tracked by git, so put definitions you're comfortable committing there or in a shared file, and anything specific to this installation in `preferences.toml`.
 
-#### API keys
-
-Each endpoint's credential is kept separately, in `settings.toml` — never alongside the definition, since credentials are never meant to be shared or layered the way definitions are:
+### Its API key
 
 ```toml
 # settings.toml
@@ -324,126 +332,119 @@ Each endpoint's credential is kept separately, in `settings.toml` — never alon
 key = "sk-..."
 ```
 
-Set it with:
-
 ```bash
 python main.py settings set endpoints.my_cluster.key
 ```
 
-#### Setting a default endpoint
-
-Set `[config] default_endpoint` to an endpoint name to route **all** bare model strings there instead of the built-in service:
-
-```toml
-[config]
-default_endpoint = "my_cluster"
-
-[endpoints.my_cluster]
-name = "My HPC Cluster"
-base_url = "http://my-cluster.internal:8000/v1"
-openai_compatible = true
-```
-
-When `default_endpoint` is unset (the default), bare model strings are handled by the built-in service as before.
-
-#### Using a configured endpoint
-
-Once an endpoint is defined, use it on the command line with colon syntax:
+### Using it
 
 ```bash
 python main.py jh43 prompt -m my_cluster:llama-3-70b
 ```
 
-See [CLI Reference → Specifying Models](cli-reference.md#specifying-models) for the full syntax.
+The part before the colon names the `[endpoints.<name>]` table; everything after is passed to that endpoint as the model name. The model catalogue is bypassed entirely. Token usage is still recorded.
+
+### Sending everything there
+
+Set `default_endpoint` to route every bare model name to an endpoint instead of the built-in service:
+
+```toml
+[config]
+default_endpoint = "my_cluster"
+```
+
+Unset — the default — bare model names go to the built-in service.
+
+See [CLI Reference → Specifying models](cli-reference.md#specifying-models) for the full syntax.
 
 ---
 
-## External/Remote Usage-Data Sources
+## External usage-data sources
 
-The `[usage_sources]` table and `[[usage_sources.external]]` array in `settings.toml` list this installation's own external/remote usage-data sources. This is git-ignored, per-installation configuration — it's not hand-edited; it's managed entirely through `usage sources` commands.
+`[usage_sources]` in `settings.toml` lists other installations whose usage data this one should include when building reports. It's managed entirely through `usage sources` commands rather than hand-edited.
 
-### Why use this?
-
-Lets one installation of this tool include another installation's usage data when building reports. For example: a professor runs their own copy of this tool and points it at a folder synced with Dropbox; the person who manages several professors' accounts registers that folder as a source on their own installation, so a single report shows everyone's spending without anyone copying files around by hand.
+This lets one installation report on another's spending. For example: a professor runs their own copy pointed at a Dropbox-synced folder, and whoever manages several people's accounts registers that folder as a source on their own installation, so one report covers everyone without anyone copying files around.
 
 Two modes:
-- **`read-only`** (default) — only the other installation ever writes there; this one just reads it.
-- **`shared-write`** — both installations record usage there, one-file-per-call, so a dumb file-sync service like Dropbox never sees two conflicting edits to the same file.
 
-### Commands
+- **`read-only`** (the default) — only the other installation writes there; this one just reads.
+- **`shared-write`** — both installations record usage there, one file per call, so a file-sync service never sees two conflicting edits to the same file.
 
 ```bash
 python main.py jh43 usage sources list
 python main.py jh43 usage sources add --label "Prof. Smith" --path /path/to/shared/data --mode read-only
-python main.py jh43 usage sources add --label "This installation" --path /path/to/shared/data --mode shared-write --for-professor heller
+python main.py jh43 usage sources add --label "This installation" --path /path/to/shared/data --mode shared-write --for-professor jh43
 python main.py jh43 usage sources remove "Prof. Smith"
 ```
 
-`add` prompts interactively for anything not passed as a flag. A professor name is still required on the command line for these commands for consistency with every other `usage` subcommand, even though the source configuration itself isn't scoped to that professor — see `src/settings_store.py` and `docs/webui-plugin-plan.md` (§1) for the full design.
+`add` prompts for anything you don't pass as a flag. A netID is required on the command line for consistency with every other `usage` subcommand, even though the source list itself isn't scoped to one person — see `src/settings_store.py`.
 
 ---
 
-## Plugin Settings
+## Plugin settings
 
-Each bundled plugin ships its own `settings.toml` in its plugin directory. The plugin's `src/settings.py` locates it by walking up from `__file__`. These files are tracked alongside their plugin (or, if the plugin is in a separate repo, tracked there).
+Each bundled plugin ships its own `settings.toml` in its plugin directory, tracked alongside the plugin. The plugin's `src/settings.py` finds it by walking up from its own file to the nearest `settings.toml` containing one of its sections. Plugin settings never collide with the root `settings.default.toml` — they have no section names in common.
 
-Plugin settings are isolated from the root `settings.default.toml` — they have no overlap in section names. See [`plugin-authoring-guide.md`](plugin-authoring-guide.md) for how to add settings to a new plugin.
+See [`plugin-authoring-guide.md`](plugin-authoring-guide.md#plugin-settings) for how to add settings to a new plugin.
 
-### `translation` plugin — `plugins/translation/settings.toml`
+### `translation` — `plugins/translation/settings.toml`
 
-Also used by `translation-ea` (which ships an identical file).
+Also used by `translation-ea`, which ships an identical file.
 
-#### `[translation]`
-
-| Key | Default | Effect |
-|-----|---------|--------|
-| `temperature` | `0.5` | Sampling temperature for text-based translation |
-| `top_p` | `0.5` | Nucleus sampling top-p for text-based translation |
-| `max_tokens` | `4000` | Maximum response tokens per page |
-| `context_percentage` | `0.65` | Fraction of the previous page passed as rolling context (0.0–1.0) |
-
-#### `[image_translation]`
-
-Used when `--scanned` or an image file is the input.
+**`[translation]`**
 
 | Key | Default | Effect |
 |-----|---------|--------|
-| `temperature` | `0.3` | Slightly creative to handle ambiguous characters from context |
-| `max_tokens` | `8000` | Higher budget: output includes both transcript and translation |
+| `temperature` | `0.5` | How varied the wording is |
+| `top_p` | `0.5` | Another way of controlling variety |
+| `max_tokens` | `4000` | Longest response per page |
+| `context_percentage` | `0.65` | How much of the previous page is carried forward as context (0.0–1.0) |
 
-### `transcription` plugin — `plugins/transcription/settings.toml`
+**`[image_translation]`** — used with `--scanned` or an image input.
+
+| Key | Default | Effect |
+|-----|---------|--------|
+| `temperature` | `0.3` | Slightly varied, to read ambiguous characters from context |
+| `max_tokens` | `8000` | Higher, because the output holds both a transcript and a translation |
+
+### `transcription` — `plugins/transcription/settings.toml`
 
 Also used by `transcription-ea`.
 
-#### `[ocr]`
+**`[ocr]`**
 
 | Key | Default | Effect |
 |-----|---------|--------|
-| `temperature` | `0.0` | Fully deterministic — minimises hallucination |
-| `top_p` | `0.1` | Very low to prevent the model from inventing characters |
-| `max_tokens` | `4000` | Maximum response tokens per image |
-| `frequency_penalty` | `0.5` | Penalises repeated tokens |
-| `presence_penalty` | `0.3` | Encourages output diversity |
+| `temperature` | `0.0` | Completely predictable — the best defence against invented text |
+| `top_p` | `0.1` | Very low, to stop the model inventing characters |
+| `max_tokens` | `4000` | Longest response per image |
+| `frequency_penalty` | `0.5` | Discourages repeating the same words |
+| `presence_penalty` | `0.3` | Encourages variety |
 
-#### `[transcription_review]`
+**`[transcription_review]`**
 
 | Key | Default | Effect |
 |-----|---------|--------|
-| `temperature` | `0.1` | Low temperature for precise, analytical error detection |
-| `top_p` | `0.5` | Focused nucleus sampling |
-| `max_tokens` | `4000` | JSON output; increase for very long transcriptions |
+| `temperature` | `0.1` | Low, for precise error detection |
+| `top_p` | `0.5` | Focused |
+| `max_tokens` | `4000` | Longest report; raise it for very long transcriptions |
+
+### `webui` — `plugins/webui/settings.toml`
+
+| Key | Effect |
+|-----|--------|
+| `session_cookie_name` | Name of the browser cookie that keeps you signed in |
+| `compaction_threshold` | How full a model's context window has to get before a conversation is summarised on the next turn |
 
 ---
 
-## Optional Dependencies
+## Optional dependencies
 
-Some output and input formats require packages not listed in the core `requirements.txt`. These degrade gracefully if missing.
+Some formats need a package that isn't in the core `requirements.txt`. Their absence degrades gracefully.
 
-| Package | Required for | Fallback |
-|---------|-------------|---------|
-| `openpyxl` | `.xlsx` output (Excel) and `.xlsx`/`.xls` input | Falls back to `.txt` output; input raises an error |
-
-Install as needed:
+| Package | Needed for | Without it |
+|---------|-----------|------------|
+| `openpyxl` | `.xlsx` output, and `.xlsx`/`.xls` input | Output falls back to `.txt`; input raises an error |
 
 ```bash
 pip install openpyxl
@@ -451,53 +452,20 @@ pip install openpyxl
 
 ---
 
-## Settings at a Glance
+## Settings at a glance
 
-Every configuration surface in the project, where it can live, whether a personal override exists on top of it, and how it's edited today.
-
-| Setting | Where it's stored | External/shared location allowed? | Personal override on top? | Edit via CLI | Edit via web UI |
+| Setting | Where it's stored | Can it live somewhere shared? | Personal override? | Command line | Web interface |
 |---|---|---|---|---|---|
-| Professor name/keys | `settings.toml`, repo root, git-ignored | No — never sync `settings.toml` itself | N/A (this *is* the per-installation value) | ✅ `settings add-professor` / `settings remove-professor` | ✅ `/settings` page — add, remove, replace primary/backup key |
-| Webui passphrase hash | `settings.toml` (`webui.passphrase_hash`) | No | N/A | ✅ `webui set-passphrase` (writes directly to `settings.toml`) | ✅ `/settings` page — hashed server-side, never stored or shown in plaintext |
-| Webui session secret | `settings.toml` (`webui.session_secret`) | No | N/A | ✅ `settings set` / `settings set --generate` | ✅ `/settings` page — manual value or "generate" |
-| Shared settings pointer | `settings.toml` (`shared_settings.path`) | No (it's just a path) | N/A | ✅ `settings set` / `settings unset` | ✅ `/settings` page |
-| Alternate-endpoint API keys | `settings.toml` (`endpoints.<name>.key`) | No | N/A | ✅ `settings set` / `settings unset` | ✅ `/settings` page — one field per endpoint already defined in a settings layer |
-| Endpoint definitions (URL, timeout, etc.) | `settings.default.toml` (or shared file, or `settings.local.toml`), repo root | Definitions may live in the tracked file or a shared file | ✅ `settings.local.toml` can override a definition | ❌ hand-edit TOML only | ❌ Read-only on the `/settings` page (shown for reference, with a copyable snippet) — deliberately not editable there; see [Endpoint definitions](#endpoint-definitions-alternate-ai-api-connections) |
-| Model pricing/capabilities | `src/model_catalog.json`, git-ignored | Not designed for this — per-installation by convention, deliberately kept separate to avoid concurrent-write conflicts | N/A (whole file is the "local" copy) | Indirectly — using `-m provider/model` auto-registers pricing | Not planned |
-| Runtime defaults (temperature, retries, etc.) | `settings.default.toml`, repo root, tracked by git | N/A — this is the shared baseline | ✅ `settings.local.toml` | ❌ hand-edit TOML only | Not planned |
-| Shared runtime defaults | Wherever `shared_settings.path` points | **Yes — this is the point** (e.g. a Dropbox-synced `.toml` file) | ✅ `settings.local.toml` still wins over it | Pointer is CLI-editable (`settings set shared_settings.path`); file contents are hand-edited TOML | Pointer only, via `/settings` page (see above); file contents still hand-edited TOML |
-| Plugin defaults (e.g. `plugins/webui/settings.toml`) | Inside each plugin's own directory, tracked by git (or in the EA plugin's separate repo) | N/A | **No** — no per-plugin local-override file exists today | ❌ hand-edit TOML only | Not planned |
-| External usage-data sources | `settings.toml` (`[usage_sources]`), repo root, git-ignored | **Yes — the whole point** (points at another installation's `data/` folder, e.g. via Dropbox) | N/A (flat list, no layering) | ✅ `usage sources add/list/remove` | ✅ `/settings` page — add/remove sources |
+| Names and API keys | `settings.toml`, your files folder | No — never sync `settings.toml` | N/A | ✅ `settings add-professor` / `remove-professor` | ✅ `/settings` — add, remove, replace primary or backup key |
+| Web UI passphrase | `settings.toml` (`webui.passphrase_hash`) | No | N/A | ✅ `webui set-passphrase` | ✅ `/settings` — hashed server-side, never shown |
+| Web UI session secret | `settings.toml` (`webui.session_secret`) | No | N/A | ✅ `settings set` / `--generate` | ✅ `/settings` |
+| Shared-settings pointer | `settings.toml` (`shared_settings.path`) | No — it's just a path | N/A | ✅ `settings set` / `unset` | ✅ `/settings` |
+| Endpoint API keys | `settings.toml` (`endpoints.<name>.key`) | No | N/A | ✅ `settings set` / `unset` | ✅ `/settings` — one field per endpoint already defined |
+| Endpoint definitions | `settings.default.toml`, a shared file, or `preferences.toml` | ✅ definitions may live in the tracked file or a shared one | ✅ `preferences.toml` wins | ❌ hand-edit TOML | ❌ read-only on `/settings`, with a copyable snippet |
+| Model pricing | `model_catalog.json`, your files folder | Not designed for it — kept separate precisely to avoid concurrent-write conflicts | N/A | Indirectly: `-m provider/model` registers pricing | ❌ |
+| Runtime defaults | `settings.default.toml`, in the package | N/A — this is the shared baseline | ✅ `preferences.toml` | ❌ hand-edit TOML | ❌ |
+| Shared runtime defaults | Wherever `shared_settings.path` points | ✅ that's the point | ✅ `preferences.toml` still wins | Pointer only (`settings set shared_settings.path`) | Pointer only, via `/settings` |
+| Plugin defaults | Each plugin's own directory, tracked by git | N/A | ❌ no per-plugin override file | ❌ hand-edit TOML | ❌ |
+| External usage sources | `settings.toml` (`[usage_sources]`) | ✅ that's the point — it points at another installation's `data/` folder | N/A | ✅ `usage sources add/list/remove` | ✅ `/settings` |
 
-Every "✅ `/settings` page" row above is served by the webui plugin's `/settings` route (`plugins/webui/src/templates/settings.html` and the `/api/settings/*` routes in `plugins/webui/src/app.py`), gated behind the same unlock passphrase as the rest of the web UI. A first-time visitor with no professors configured yet is redirected straight there instead of an empty chat screen; the section order on the page itself flips depending on whether any professor is already configured (professors-first on a genuinely empty installation, shared-settings-first once there's at least one professor, since that's the more likely thing someone returns to tweak).
-
----
-
-## First-Run Checklist
-
-```bash
-# 1. Choose where your own files live, and create them.
-#    Creates settings.toml, model_catalog.json and preferences.toml
-#    in the folder you pick. Nothing to copy by hand.
-python main.py settings setup
-
-# 2. Add whoever will be using it (prompts for netID, name and keys)
-python main.py settings add-professor
-
-# 3. Verify everything
-python main.py --show-config    # checks who is configured (no API call)
-python main.py --list-models    # checks the model catalogue
-```
-
-Setup runs on its own the first time you use an un-set-up copy of the sandbox, so you can also just run whatever command you wanted and answer its questions.
-
-## Migrating an Existing Installation
-
-If you have an existing installation with the older `.env` / `apis.json` / `data_sources.json` files, run the one-time migration script instead of starting from scratch:
-
-```bash
-python scripts/migrate_config_to_settings.py            # writes settings.toml and settings.local.toml
-python scripts/migrate_config_to_settings.py --dry-run   # preview without writing anything
-```
-
-It reads your existing `.env`, `apis.json`, and `data_sources.json`, writes the equivalent `settings.toml` and `settings.local.toml` content, and renames the old files to `.bak` (it never deletes anything). Refuses to overwrite an existing `settings.toml` unless `--force` is passed.
+Every "✅ `/settings`" row is served by the web interface's `/settings` route (`plugins/webui/src/templates/settings.html` and the `/api/settings/*` routes in `plugins/webui/src/app.py`), behind the same unlock passphrase as the rest of it. A first-time visitor with nobody configured is sent straight there rather than to an empty chat screen, and the section order flips depending on whether anyone is configured yet — people first on an empty installation, shared settings first once there's at least one person, since that's the more likely thing to come back and adjust.

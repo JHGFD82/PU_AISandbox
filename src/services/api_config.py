@@ -3,7 +3,7 @@
 Endpoint *definitions* (base URL, timeout, whether it's OpenAI-compatible,
 etc.) live in the ``settings.*.toml`` layering — see ``src/settings.py``'s
 ``ENDPOINTS`` (merged from ``settings.default.toml`` -> an optional
-shared file -> ``settings.local.toml``, same as every other setting).
+shared file -> ``preferences.toml``, same as every other setting).
 Each key under ``ENDPOINTS`` becomes the identifier used in colon syntax on
 the CLI (e.g. ``-m hpc_cluster:llama-3-70b``).
 
@@ -14,7 +14,7 @@ never meant to be shared or layered the way definitions are.
 Set ``[config] default_endpoint`` in any settings layer to route bare model
 names to a specific endpoint instead of the built-in Portkey service::
 
-    # settings.local.toml
+    # preferences.toml
     [config]
     default_endpoint = "hpc_cluster"
 
@@ -103,7 +103,7 @@ def load_api_config(api_name: str) -> APIConfig:
             f"API endpoint '{api_name}' is not configured.\n"
             f"{hint}\n"
             "Add an [endpoints.<name>] table to settings.default.toml, a shared "
-            "settings file, or settings.local.toml to register an endpoint."
+            "settings file, or your preferences.toml to register an endpoint."
         )
 
     raw: dict = endpoints[api_name]

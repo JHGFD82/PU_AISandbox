@@ -3,10 +3,9 @@ own credentials and local identity (professors, secrets, endpoint keys, and
 which other installations' usage data to include in reports).
 
 This is the one file in the project that is never meant to be shared or
-synced — everything else configurable (``settings.default.toml``,
-``settings.shared.toml``, ``settings.local.toml``) is designed to be shared
-or layered; ``settings.toml`` deliberately is not. See the project's July 2026
-configuration-consolidation discussion for the full reasoning: editing this
+synced — everything else configurable (``settings.default.toml``, a shared
+settings file, ``preferences.toml``) is designed to be shared or layered;
+``settings.toml`` deliberately is not. Editing this
 file programmatically is safe specifically because every edit happens
 locally, driven by a command the person types at their own keyboard — never
 over a network call, never as part of syncing files between machines. That

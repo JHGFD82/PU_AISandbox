@@ -44,7 +44,7 @@ def list_optional_settings() -> list[tuple[str, str, str, bool]]:
     for api_name in list_apis():
         fields.append((
             credential_path_for_endpoint(api_name),
-            f"API key for the '{api_name}' endpoint (see settings.default.toml/settings.local.toml)",
+            f"API key for the '{api_name}' endpoint (see settings.default.toml or preferences.toml)",
             "Alternate API endpoints",
             True,
         ))
@@ -390,7 +390,7 @@ def _settings_unset_value(args: argparse.Namespace) -> None:
 
 
 def _handle_usage_sources(args: argparse.Namespace) -> None:
-    """Handle 'usage sources list/add/remove'. See docs/webui-plugin-plan.md section 1.
+    """Handle 'usage sources list/add/remove'.
 
     Note that the external-source configuration itself (in ``settings.toml``)
     isn't scoped to the professor named on the command line — every usage

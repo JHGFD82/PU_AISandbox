@@ -1,6 +1,5 @@
 """
-Tests for the shared-write side of src/tracking/token_tracker.py (plan
-docs/webui-plugin-plan.md section 1):
+Tests for the shared-write side of src/tracking/token_tracker.py:
   - fold_usage_records / _accumulate_stats_dict
   - load_usage_tree (mutable files + archives + event files)
   - get_configured_data_roots
@@ -12,7 +11,7 @@ TokenTracker's shared-write path is only reached when data_file is left as
 None (matching real usage) and a shared-write source is configured for the
 professor being tracked — every test here patches
 src.tracking.token_tracker.get_shared_write_source directly rather than
-touching the real .settings.
+touching the real settings.toml.
 """
 
 import json

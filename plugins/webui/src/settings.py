@@ -6,7 +6,7 @@ settings.toml is found that has a [webui] section, and read defaults from
 there. This lets the plugin ship its own settings.toml (plugins/webui/settings.toml)
 without needing any change to the repository-root settings.toml, while still
 letting a person override individual values in the repo root's
-settings.local.toml under a [webui] section, exactly like every other
+preferences.toml under a [webui] section, exactly like every other
 plugin's settings already work.
 """
 

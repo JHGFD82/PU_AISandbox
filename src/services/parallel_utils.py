@@ -112,12 +112,10 @@ def run_folder_parallel(
                      soon as any item finishes, regardless of which one).
                      ``None`` (the default, and what every CLI call passes)
                      means no such reporting — only the webui's background
-                     job runner passes one. This was previously silently
-                     unsupported here: the only progress signal was the
-                     local console ``tqdm`` bar below, invisible to a caller
-                     running this in a background thread (see
-                     docs/webui-plugin-plan.md section 10's "progress bar
-                     frozen with workers > 1" fix).
+                     job runner passes one. Without it the only progress
+                     signal is the local console ``tqdm`` bar below, which
+                     a caller running this in a background thread never
+                     sees.
 
     Returns:
         A ``dict[index → (filename, *payload)]``.

@@ -39,7 +39,7 @@
 
 # ── Alternate API endpoint keys ────────────────────────────────────────────────
 # For each [endpoints.<name>] entry you define in settings.default.toml,
-# settings.local.toml, or a shared settings file, set its key here.
+# preferences.toml, or a shared settings file, set its key here.
 # Example:
 # [endpoints.my_cluster]
 # key = "your_cluster_key_here"
@@ -62,7 +62,7 @@
 # installations (e.g. via Dropbox) to share runtime defaults between them —
 # handy if you manage several professors' installations yourself, or if a
 # research group wants everyone using the same tuned settings. Merges
-# between settings.default.toml (repo defaults) and settings.local.toml
+# between settings.default.toml (the package's defaults) and preferences.toml
 # (still this machine's personal overrides, which still win). See
 # src/settings.py for the full merge order.
 # [shared_settings]
@@ -71,9 +71,8 @@
 # ── External/remote usage-data sources (optional) ──────────────────────────────
 # Lets this installation include another installation's usage data when
 # building reports (e.g. a folder synced with Dropbox). See
-# `python main.py <netid> usage sources --help` and
-# docs/webui-plugin-plan.md section 1 for the full explanation — this
-# section is normally managed via that command rather than hand-edited.
+# `python main.py <netid> usage sources --help` for the full explanation.
+# This section is normally managed via that command rather than hand-edited.
 # [usage_sources]
 # source_id = ""
 #

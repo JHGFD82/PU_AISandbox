@@ -87,7 +87,7 @@ data/webui_memory/*
 # clone; the contents of each plugin repo are not tracked by the main repo.
 # plugins/prompt/ and plugins/webui/ are the exceptions: they ship with this
 # repo (prompt as a reference implementation/template, webui as a built-in
-# feature — see docs/webui-plugin-plan.md).
+# feature).
 plugins/*
 !plugins/.gitkeep
 !plugins/prompt/

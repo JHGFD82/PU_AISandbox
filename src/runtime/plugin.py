@@ -57,8 +57,7 @@ class ModePlugin(Protocol):
         ``src/runtime/ui_action.py``) a plugin declares to appear as a
         background-job trigger in the webui plugin's composer (e.g.
         "Translate a document"). Absent by default — a plugin that doesn't
-        set this simply doesn't show up there; every existing plugin is
-        unaffected. See ``docs/webui-plugin-plan.md`` section 10.
+        set this simply doesn't show up there and stays command-line only.
 
         ``run_ui_action(fields, professor, model, on_progress, output_dir)``
         — required alongside ``ui_action`` (and only then): runs that
@@ -86,8 +85,7 @@ class ModePlugin(Protocol):
         call, and must tolerate incomplete/blank fields gracefully (e.g. a
         language field that hasn't been chosen yet) rather than raising.
         This is ``--dry-run`` made interactive — see
-        ``docs/webui-plugin-plan.md`` section 10's two-pane preview panel,
-        and the translation/transcription plugins for reference
+        the translation and transcription plugins for reference
         implementations built on their existing ``build_prompts()``
         methods.
     """

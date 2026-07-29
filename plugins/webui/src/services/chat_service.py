@@ -25,9 +25,8 @@ class ChatService(BaseService):
     reply out), ``ChatService`` sends the *whole* conversation history on
     every turn, the way a browser-based chat client needs to — the model has
     no memory between requests, so each turn resends everything the model
-    should still remember. See ``docs/webui-plugin-plan.md`` section 6 for
-    how the web UI keeps that history from growing without bound
-    (conversation compaction).
+    should still remember. ``conversation.py`` is what keeps that history
+    from growing without bound (conversation compaction).
     """
 
     def send_message(

@@ -1,10 +1,9 @@
 """FastAPI application for the webui plugin: the browser-based chat interface.
 
 Built by ``create_app()`` and started by ``run_server()``, both called from
-``plugin.py``. See ``docs/webui-plugin-plan.md`` sections 2-7 for the full
-design (one shared unlock gate, a professor switcher instead of per-professor
-login, and the model/conversation/usage endpoints the front-end in
-``templates/chat.html`` calls).
+``plugin.py``. One shared unlock gate, a professor switcher rather than
+per-professor login, and the model/conversation/usage endpoints the
+front-end in ``templates/chat.html`` calls.
 
 This module is registered into ``sys.modules`` under the flat, dot-free name
 ``_pu_webui_app`` by ``plugin.py`` — not a real dotted package path — the
@@ -89,7 +88,7 @@ _attempt_limiter = auth.AttemptLimiter()
 
 # One JobStore for the life of the process, same lifetime reasoning as
 # _auth_backend above — see jobs.py's module docstring for why this is
-# deliberately in-memory only (docs/webui-plugin-plan.md section 10).
+# deliberately in-memory only.
 _job_store = jobs.JobStore()
 
 # Plugins are loaded once, lazily, on first use rather than at import time —
@@ -701,7 +700,7 @@ def create_app() -> FastAPI:
 
         return {"filename": doc.filename, "text": doc.text, "char_count": doc.char_count}
 
-    # ── Plugin composer actions (docs/webui-plugin-plan.md section 10) ────────
+    # ── Plugin composer actions ──────────────────────────────────────────────
     # Background jobs (translate/transcribe/...) triggered from a
     # conversation's composer, distinct from the ordinary chat turn above —
     # see jobs.py's module docstring for the full design.
@@ -734,9 +733,8 @@ def create_app() -> FastAPI:
     async def api_plugin_action_extension_fields(request: Request, action_id: str, target_language: str = ""):
         """List any extra composer fields a language-extension plugin contributes for one destination language.
 
-        See ``ExtensionUiHooks``'s docstring (``src/runtime/ui_action.py``)
-        and ``docs/webui-plugin-plan.md`` section 10: a language-extension
-        plugin (e.g. an East-Asian translation or transcription extension)
+        See ``ExtensionUiHooks``'s docstring (``src/runtime/ui_action.py``):
+        a language-extension plugin (e.g. an East-Asian translation or transcription extension)
         never gets its own composer entry, but can still register extra
         fields that appear as a subsection once its language is picked —
         this is the endpoint the composer polls (on every relevant-language
@@ -1076,7 +1074,7 @@ def create_app() -> FastAPI:
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
 
-    # Startup sweep (docs/webui-plugin-plan.md section 10): a fresh process
+    # Startup sweep: a fresh process
     # always starts with an empty _job_store, so any conversation whose
     # active_job_id is still set from before this process started is
     # unambiguously orphaned — clear it now rather than leaving that
@@ -1094,9 +1092,8 @@ def run_server(host: str, port: int) -> None:
 
     Args:
         host: The network address to listen on. ``127.0.0.1`` (the default)
-              means only this computer can reach it — see
-              docs/webui-plugin-plan.md section 8 for what changes if this
-              needs to be reachable from another device.
+              means only this computer can reach it; anything else requires a
+              passphrase to be set first (``webui set-passphrase``).
         port: The port to listen on.
     """
     import uvicorn

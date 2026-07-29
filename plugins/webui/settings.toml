@@ -1,14 +1,14 @@
 # plugins/webui/settings.toml — defaults for the local web interface.
 # Edit values directly here to change behavior (matches how
 # plugins/translation/settings.toml works — there is no separate
-# settings.local.toml override for plugin-owned settings).
+# personal-override file for plugin-owned settings).
 
 [webui]
 host = "127.0.0.1"
 port = 8000
 session_cookie_name = "pu_sandbox_session"
 # Fraction of a model's context window that triggers conversation
-# compaction on the *next* turn (see docs/webui-plugin-plan.md section 6).
+# compaction on the *next* turn.
 compaction_threshold = 0.70
 # Model used for the cheap summarization call that compaction performs.
 compaction_model = "gpt-4o-mini"

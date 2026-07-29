@@ -1,70 +1,84 @@
 # Token Usage Guide
 
-PU_AISandbox tracks every API call automatically. Each professor's usage is isolated per calendar month so the active file stays small and the monthly budget limit is always front-and-center.
+Every call the sandbox makes to an AI model is recorded automatically: how much text went in, how much came back, and what it cost. Each person's record is kept separately and split by calendar month, so no file grows without end and the current month's spending is always the first thing you see.
+
+Tokens are roughly words — a little smaller, so a page of English is usually 400–600 of them. Models are priced per token in each direction: what you send costs one rate, what comes back costs another, usually higher.
 
 ---
 
-## How Tracking Works
+## What the budget does, and doesn't, do
 
-- Every service call records prompt tokens, completion tokens, total tokens, and cost
-- Each professor has their own active data file for the current month
-- At the start of a new month the previous file is automatically archived and a fresh file begins
-- No manual steps are required — tracking is wired into `BaseService._record_response_usage()`
+**The monthly limit is a number to watch, not a barrier.** Nothing in the sandbox stops working when you pass it. Reports print `⚠️ MONTHLY LIMIT EXCEEDED!`, warnings appear once you cross the warning threshold, and the web interface's spending sidebar shows the same — but every command still runs and still spends.
+
+This is deliberate: a translation that stops halfway through a book because a number was crossed is worse than one that finishes and tells you. The only way to actually stop spending on a key is to have that key revoked, which happens outside this tool.
+
+So: check `usage report` when you want to know where you stand. Don't rely on the limit to hold you there.
 
 ---
 
-## Usage Commands
+## What gets recorded
 
-### Current month report
+- Every call records tokens in, tokens out, the total, and the cost
+- Each person has their own file for the current month
+- The first time a call happens in a new month, the previous month's file is archived and a fresh one starts
+- There are no manual steps — recording happens inside the shared service layer every AI call passes through
+
+---
+
+## Commands
+
+### This month
 
 ```bash
 python main.py jh43 usage report
 ```
 
-Prints token counts, model breakdown, daily breakdown, and budget status for the current calendar month.
+Token counts, a breakdown by model, a breakdown by day, and budget status for the current calendar month.
 
-### Current month + all-time totals
+### This month plus everything before it
 
 ```bash
 python main.py jh43 usage report --all-time
 ```
 
-Prints the current month report, then aggregates all archived months on demand.
+Prints the current month, then adds up every archived month. The archives are read only when you ask for this, so it costs nothing on an ordinary report.
 
-### Specific archived month
+### One past month
 
 ```bash
 python main.py jh43 usage report 2025-07
 ```
 
-### List archived months
+### Which months exist
 
 ```bash
 python main.py jh43 usage months
 ```
 
-### Daily usage
+### One day
 
 ```bash
 python main.py jh43 usage daily              # today
-python main.py jh43 usage daily 2026-02-14   # specific date
+python main.py jh43 usage daily 2026-02-14   # a particular date
 ```
 
 ---
 
-## File Layout
+## Where the files are
+
+Inside the `data` folder of the folder you chose during setup — `~/PU_AISandbox_data/data` unless you picked somewhere else:
 
 ```
 data/
-  token_usage_{name}.json        ← active file, current month only
+  token_usage_jh43.json          ← the active file: this month only
   archives/
-    {name}/
-      2026-02.json               ← one file per past month (auto-created)
+    jh43/
+      2026-02.json               ← one file per past month, written automatically
       2026-03.json
       ...
 ```
 
-Each file (active or archive) covers exactly one calendar month:
+Each file, active or archived, covers exactly one month:
 
 ```json
 {
@@ -76,36 +90,28 @@ Each file (active or archive) covers exactly one calendar month:
 }
 ```
 
-Files grow only within a month, then are archived and replaced. No single file accumulates indefinitely.
+The file is named with the person's netID, which is why netIDs are the identifier — they need no cleaning up to be used as a filename.
+
+Don't edit these by hand. If two installations share a folder like this (see [Configuration → External usage-data sources](configuration.md#external-usage-data-sources)), the sandbox writes one small file per call there instead of rewriting a shared one, so a sync service never has two conflicting edits to merge.
 
 ---
 
-## Model Catalog
+## Where the prices come from
 
-`src/model_catalog.json` is the pricing and capabilities registry. The application will not run without it. It is git-ignored — each installation maintains its own copy.
-
-### Setup
-
-Copy the tracked template on first install:
+`model_catalog.json`, in the same folder, holds the price of every model the sandbox knows about. The sandbox will not run without it; setup creates it for you.
 
 ```bash
 python main.py settings setup
 ```
 
-See [`configuration.md`](configuration.md) for the full schema and customization options.
-
-### Keeping Pricing Current
-
-**OpenAI and Google models** — pricing is fetched automatically from PortKey on first use of a new model name. Use the `provider/model` syntax:
+**OpenAI and Google models** — the price is fetched and saved the first time you name a model this way:
 
 ```bash
 python main.py jh43 prompt -m openai/gpt-4o-new
 python main.py jh43 prompt -m google/gemini-2.5-pro
 ```
 
-The fetched price is saved to `src/model_catalog.json` automatically.
-
-**All other providers** — edit `src/model_catalog.json` directly. Minimal entry:
+**Everything else** — add the entry by hand:
 
 ```json
 {
@@ -119,28 +125,24 @@ The fetched price is saved to `src/model_catalog.json` automatically.
 }
 ```
 
-Prices are per 1,000,000 tokens (the default `pricing_unit`).
+Prices are per 1,000,000 tokens by default. See [Configuration](configuration.md#model_catalogjson--model-pricing-and-capabilities) for the full schema.
+
+### The two budget settings
+
+| Setting | Where | Default | Effect |
+|---------|-------|---------|--------|
+| `monthly_limit` | `model_catalog.json`, under `config` | `250.0` | The figure reports measure spending against |
+| `warning_threshold_pct` | `settings.default.toml`, under `[budget]` | `80` | Start warning at this share of the limit |
 
 ---
 
-## Budget Settings
+## What a report looks like
 
-The monthly spending limit and warning threshold are configured in two places:
-
-| Setting | Location | Default | Effect |
-|---------|----------|---------|--------|
-| `monthly_limit` | `src/model_catalog.json` → `config` | `250.0` | Hard limit shown in usage reports |
-| `warning_threshold_pct` | `settings.default.toml` → `[budget]` | `80` | Warn when spend exceeds this % of the limit |
-
----
-
-## Sample Output
-
-### Current month report
+### This month
 
 ```
 ============================================================
-TOKEN USAGE REPORT - PROFESSOR HELLER
+TOKEN USAGE REPORT - PROFESSOR JH43
 ============================================================
 
 Current Month (2026-03):
@@ -165,11 +167,11 @@ Remaining:     $249.98
 ============================================================
 ```
 
-### Archived month report
+### A past month
 
 ```
 ============================================================
-TOKEN USAGE REPORT - PROFESSOR HELLER
+TOKEN USAGE REPORT - PROFESSOR JH43
 ============================================================
 
 Archived Month (2026-02):
@@ -196,29 +198,26 @@ Daily Breakdown:
 
 ---
 
-## Troubleshooting
+## When something goes wrong
 
-### Application won't start
+### It won't start
 
-1. Confirm `src/model_catalog.json` exists — copy from the template if needed:
-   ```bash
-   python main.py settings setup
-   ```
-2. Validate the JSON (no syntax errors)
-3. Confirm the file contains both a `"config"` section and a non-empty `"models"` section
+1. Check `model_catalog.json` exists in your files folder. If it doesn't, run `python main.py settings setup`.
+2. Check the file is valid JSON — a missing comma or bracket is the usual cause.
+3. Check it has both a `config` section and a `models` section with at least one model in it.
 
-### Usage tracking gaps
+### Usage isn't being recorded
 
-1. Verify `data/` is writable
-2. Check that the model name in `model_catalog.json` matches the name returned by the API (inspect `src/model_catalog.json` keys vs. the model name logged during a run)
-3. Confirm `monthly_limit` is set in the catalog `config` section
+1. Check the `data` folder can be written to.
+2. Check the model name in `model_catalog.json` matches the name the API reports back. Run with `--verbose` to see the model name used on each call, and compare it with the keys in the catalogue.
+3. Check `monthly_limit` is set in the catalogue's `config` section.
 
-### Common error messages
+### Error messages
 
-| Message | Fix |
-|---------|-----|
+| Message | What to do |
+|---------|------------|
 | `Model catalog file not found` | `python main.py settings setup` |
-| `Invalid JSON in model catalog file` | Fix syntax errors in `src/model_catalog.json` |
-| `Missing required 'models' section` | Add a `"models"` key to the catalog |
-| `No models configured` | Add at least one model entry to `"models"` |
-| `No archive found for YYYY-MM` | That month has no data — run `usage months` to see available archives |
+| `Invalid JSON in model catalog file` | Fix the syntax error in `model_catalog.json` |
+| `Missing required 'models' section` | Add a `"models"` key to the catalogue |
+| `No models configured` | Add at least one model to `"models"` |
+| `No archive found for YYYY-MM` | Nothing was recorded that month — `usage months` lists the ones that exist |

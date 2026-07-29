@@ -171,8 +171,7 @@ class TestConversationAttachmentRoundTrip:
 
 
 class TestJobFields:
-    """Conversation.active_job_id + Message.kind/job_id/output_* —
-    docs/webui-plugin-plan.md section 10."""
+    """Conversation.active_job_id + Message.kind/job_id/output_*."""
 
     def test_message_defaults_to_kind_message_with_no_job_fields(self):
         m = Message(role="user", content="hi", timestamp="t")

@@ -68,7 +68,7 @@ _register("src.runtime.image_handler", "src/runtime/image_handler.py", _REPO_ROO
 def _use_template_catalog(monkeypatch):
     """Redirect get_model_catalog_path to the template file for all tests.
 
-    This allows tests to run in CI where src/model_catalog.json is git-ignored.
+    This lets tests run in CI, where no real model_catalog.json exists.
     Tests that need a specific catalog (tmp_path or SAMPLE_CATALOG) override
     get_model_catalog_path or load_model_catalog themselves — the last
     monkeypatch.setattr call wins within the same test.

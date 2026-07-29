@@ -97,7 +97,7 @@ _register(
 def _use_template_catalog(monkeypatch):
     """Redirect get_model_catalog_path to the template file for all tests.
 
-    This allows tests to run in CI where src/model_catalog.json is git-ignored.
+    This lets tests run in CI, where no real model_catalog.json exists.
     """
     monkeypatch.setattr(_catalog_module, "get_model_catalog_path", lambda: _TEMPLATE_PATH)
 

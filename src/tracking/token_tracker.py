@@ -3,19 +3,16 @@
 Every professor is tracked in one of two ways, chosen automatically and
 invisibly to callers:
 
-- **local** (the default, unchanged from before): one mutable JSON file per
-  month, rewritten in place on every call, exactly as this module has
-  always worked.
-- **shared-write**: for a professor configured in ``.settings``
+- **local** (the default): one JSON file per month, rewritten in place on
+  every call.
+- **shared-write**: for a professor configured in ``settings.toml``
   (see ``src/settings_store.py``) as sharing usage tracking with
   another installation over a synced folder like Dropbox. Instead of
   rewriting one file — unsafe once two machines might do it near-
   simultaneously, since a plain file-sync service like Dropbox has no way
   to merge two conflicting edits — every API call writes its own small,
   uniquely-named file that's never edited again. Monthly/daily/model
-  totals are computed by summing whatever event files exist. See
-  ``docs/webui-plugin-plan.md`` section 1 for the full design and the
-  reasoning behind it.
+  totals are computed by summing whatever event files exist.
 
 Every public method on ``TokenTracker`` (``record_usage``,
 ``get_daily_usage``, ``get_monthly_usage``, ``get_all_time_usage``,
@@ -121,10 +118,9 @@ def get_configured_data_roots() -> list[tuple[str, Path]]:
     """Return every data-shaped directory that should be scanned when building an aggregate usage report.
 
     This is this installation's own local ``data/`` folder plus every
-    external source configured in ``.settings`` — see
-    ``src/settings_store.py`` and ``docs/webui-plugin-plan.md``
-    section 1. Used by ``scripts/visualize_usage.py`` and, eventually, the web
-    UI's spend sidebar, so that logic to combine multiple installations'
+    external source configured in ``settings.toml`` — see
+    ``src/settings_store.py``. Used by ``scripts/visualize_usage.py`` and
+    the web UI's spend sidebar, so that logic to combine multiple installations'
     usage history lives in exactly one place.
 
     Returns:
@@ -273,13 +269,12 @@ def load_usage_tree(base_dir: Path) -> dict[str, dict[str, Any]]:
     """Read one data-shaped directory into ``{professor: {month: month_data}}``.
 
     Understands every on-disk shape this project produces: a current-month
-    mutable file (``token_usage_{professor}.json``), closed-month archive
+    mutable file (``token_usage_{netid}.json``), closed-month archive
     files (``archives/{professor}/{month}.json``), and still-open
     shared-write event files (``events/{professor}/{month}/*.json``,
     folded into the same shape on the fly via ``fold_usage_records()``).
     This is the one place this logic lives, reused by
-    ``scripts/visualize_usage.py`` and, eventually, the web UI's spend
-    sidebar — see ``docs/webui-plugin-plan.md`` section 1.
+    ``scripts/visualize_usage.py`` and the web UI's spend sidebar.
 
     Args:
         base_dir: A directory shaped like this project's ``data/`` folder —
@@ -413,7 +408,7 @@ class TokenTracker:
         When *data_file* is left as ``None`` (normal operation — every real
         caller in this project does this), this also checks whether
         *professor* is configured for shared-write tracking in
-        ``.settings`` (see ``src/settings_store.py``). If so,
+        ``settings.toml`` (see ``src/settings_store.py``). If so,
         this tracker records usage as individual event files in the shared
         location instead of the local mutable file — see the module
         docstring for why. Tests that pass an explicit *data_file* always get
@@ -423,7 +418,7 @@ class TokenTracker:
         Args:
             professor: The professor's safe-filename identifier, used to locate
                        and name the usage file (e.g. ``'heller'`` maps to
-                       ``data/token_usage_heller.json``).
+                       ``data/token_usage_jh43.json``).
             data_file: Full path to an alternative usage file. ``None`` in
                        normal operation, which causes the path to be derived
                        automatically from the professor's safe filename.

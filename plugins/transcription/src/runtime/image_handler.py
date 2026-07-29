@@ -114,8 +114,7 @@ class Mixin:
                          each image finishes, on *either* path — sequential
                          or parallel. ``None`` (the default, and what every
                          CLI call passes) means no progress reporting — only
-                         the webui's background job runner passes one (see
-                         docs/webui-plugin-plan.md section 10). Unlike
+                         the webui's background job runner passes one. Unlike
                          ``on_page_text`` below, a plain count is safe to
                          report the moment *any* image finishes, regardless
                          of completion order, so this works the same on the

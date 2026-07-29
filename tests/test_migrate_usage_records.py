@@ -1,7 +1,6 @@
 """
 Tests for scripts/migrate_usage_records.py — the one-time backfill of the
-'source' field onto pre-existing usage records (docs/webui-plugin-plan.md
-section 1).
+'source' field onto pre-existing usage records.
 
 Every test redirects DATA_DIR/BACKUP_DIR to a tmp_path location so the real
 repository data/ folder is never touched.

@@ -3,7 +3,7 @@
 Importing this module discovers all installed plugins and builds the
 argument parser. The ``main()`` function at the bottom is what runs when you
 type ``python main.py ...``. Credentials and other per-installation settings
-are read on demand from ``.settings`` (see ``src/settings_store.py``) rather
+are read on demand from ``settings.toml`` (see ``src/settings_store.py``) rather
 than being loaded into the process environment up front.
 """
 
@@ -38,8 +38,8 @@ def _add_debug_flags(parser: argparse.ArgumentParser) -> None:
     """Add --verbose and --debug-api flags to *parser*.
 
     These are offered in two places — before the professor name
-    (``main.py --verbose heller translate ...``) and after the command
-    (``main.py heller translate ... --verbose``) — because both read
+    (``main.py --verbose jh43 translate ...``) and after the command
+    (``main.py jh43 translate ... --verbose``) — because both read
     naturally and the tool's own usage line advertises the first one.
 
     Neither flag has a default here, which is the point. Adding the same
@@ -180,8 +180,7 @@ def _build_usage_sources_subparser(usage_subparsers: argparse._SubParsersAction)
     Lets one installation of this package include another installation's
     usage-tracking data when building reports (e.g. a professor's own copy
     of this tool, synced to a shared Dropbox folder). See
-    ``docs/webui-plugin-plan.md`` section 1 and ``src/tracking/source_config.py``
-    for the full design.
+    ``src/settings_store.py`` for where the list of sources is kept.
     """
     sources_parser = usage_subparsers.add_parser(
         'sources',
@@ -216,7 +215,7 @@ def _build_usage_sources_subparser(usage_subparsers: argparse._SubParsersAction)
 
 
 def _build_settings_subparser(subparsers: argparse._SubParsersAction) -> None:
-    """Register the 'settings' command: add/remove people and manage optional .settings values.
+    """Register the 'settings' command: add/remove people and manage optional settings.toml values.
 
     Named after the file it edits. It was called 'env' until 2026-07, after
     the file it edited had already been replaced: there is no .env any more,
@@ -235,7 +234,7 @@ def _build_settings_subparser(subparsers: argparse._SubParsersAction) -> None:
     shell history or a process listing.
     """
     settings_parser = subparsers.add_parser(
-        'settings', help="Add/remove people and manage optional .settings values"
+        'settings', help="Add/remove people and manage optional settings.toml values"
     )
     _add_debug_flags(settings_parser)
     settings_sub = settings_parser.add_subparsers(
@@ -270,13 +269,13 @@ def _build_settings_subparser(subparsers: argparse._SubParsersAction) -> None:
     )
 
     list_parser = settings_sub.add_parser(
-        'list', help='List optional .settings values and whether each is currently set',
+        'list', help='List optional settings.toml values and whether each is currently set',
     )
     _add_debug_flags(list_parser)
 
     set_parser = settings_sub.add_parser(
         'set',
-        help='Set an optional .settings value (prompts for it; hidden input for secrets)',
+        help='Set an optional settings.toml value (prompts for it; hidden input for secrets)',
     )
     _add_debug_flags(set_parser)
     set_parser.add_argument(
@@ -288,7 +287,7 @@ def _build_settings_subparser(subparsers: argparse._SubParsersAction) -> None:
         help='Auto-generate a random value instead of prompting (secrets only)',
     )
 
-    unset_parser = settings_sub.add_parser('unset', help='Remove an optional .settings value')
+    unset_parser = settings_sub.add_parser('unset', help='Remove an optional settings.toml value')
     _add_debug_flags(unset_parser)
     unset_parser.add_argument('key', type=str, help='The variable to remove')
 
@@ -316,12 +315,12 @@ def create_argument_parser(
         description='Princeton University AI Sandbox — document processing and AI prompt tools',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""\nUsage / reporting:
-  python main.py heller usage report              Current month report + budget status
-  python main.py heller usage report --all-time   Above + all-time totals across all archived months
-  python main.py heller usage report 2025-07      Report for a specific archived month
-  python main.py heller usage months              List all archived month files
-  python main.py heller usage daily               Today's usage
-  python main.py heller usage daily 2026-03-01    Usage for a specific date
+  python main.py jh43 usage report              Current month report + budget status
+  python main.py jh43 usage report --all-time   Above + all-time totals across all archived months
+  python main.py jh43 usage report 2025-07      Report for a specific archived month
+  python main.py jh43 usage months              List all archived month files
+  python main.py jh43 usage daily               Today's usage
+  python main.py jh43 usage daily 2026-03-01    Usage for a specific date
 
 Global commands (no professor required):
   python main.py --show-config
@@ -329,20 +328,20 @@ Global commands (no professor required):
 
 Specifying a model (-m / --model):
   Already in catalog — use the bare model name:
-    python main.py heller prompt -m gpt-4o
-    python main.py heller prompt -m gpt-4o-mini
+    python main.py jh43 prompt -m gpt-4o
+    python main.py jh43 prompt -m gpt-4o-mini
   Not yet in catalog — use 'provider/model' to auto-register from PortKey:
-    python main.py heller prompt -m openai/gpt-4o-new
-    python main.py heller prompt -m google/gemini-2.5-pro
+    python main.py jh43 prompt -m openai/gpt-4o-new
+    python main.py jh43 prompt -m google/gemini-2.5-pro
   Supported auto-register providers: openai, google.
-  For all other providers, add the model directly to src/model_catalog.json.
+  For all other providers, add the model to model_catalog.json by hand.
 
 Custom prompt:
-  python main.py heller prompt                   Interactive user prompt
-  python main.py heller prompt -s                System prompt first, then user prompt
-  python main.py heller prompt -o response.txt   Save response to file
-  python main.py heller prompt -m gpt-4o-mini    Use a specific model
-  python main.py heller prompt --dry-run         Preview prompt without API call
+  python main.py jh43 prompt                   Interactive user prompt
+  python main.py jh43 prompt -s                System prompt first, then user prompt
+  python main.py jh43 prompt -o response.txt   Save response to file
+  python main.py jh43 prompt -m gpt-4o-mini    Use a specific model
+  python main.py jh43 prompt --dry-run         Preview prompt without API call
 
 Plugin commands (e.g. translate, transcribe) are registered by installed plugins.
 Run 'python main.py <professor> <command> --help' for plugin-specific usage.
@@ -373,7 +372,7 @@ Run 'python main.py <professor> <command> --help' for plugin-specific usage.
         'professor',
         type=str,
         nargs='?',
-        help='Professor name for API key lookup',
+        help="Whose API key and budget to use, given as their netID (e.g. 'jh43')",
     )
 
     # Add subparsers for commands (usage, translate, transcribe)
@@ -401,8 +400,8 @@ def _available_commands_hint(plugins: dict[str, ModePlugin]) -> str:
         "  usage daily [YYYY-MM-DD]             Daily usage",
         "  settings add-professor                  Add someone (no netID needed first)",
         "  settings remove-professor <identifier>  Remove someone configured",
-        "  settings list                           List optional .settings values and their status",
-        "  settings set <path> / settings unset <path>   Set or remove an optional .settings value",
+        "  settings list                           List optional settings.toml values and their status",
+        "  settings set <path> / settings unset <path>   Set or remove an optional settings.toml value",
     ]
     if plugins:
         lines.append("\nPlugin commands: " + ", ".join(sorted(plugins)))

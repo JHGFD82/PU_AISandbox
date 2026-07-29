@@ -8,15 +8,18 @@ this directory, rename the class, change ``commands``, and build from there.
 
 Installation
 ------------
-This plugin ships *inside* the main PU_AISandbox repository and is tracked
-by it (unlike ``translation/`` and ``transcription/``, which are separate
-git repos that you clone in).  No extra setup is required.
+This plugin ships inside the main PU_AISandbox repository and is tracked
+by it, alongside ``translation/``, ``transcription/`` and ``webui/``. The
+East Asian language extensions (``translation-ea/``, ``transcription-ea/``)
+are the ones that live in separate repositories. No extra setup is required.
 
 To use it as a starting point for a new plugin::
 
     cp -r plugins/prompt plugins/myplugin
-    cd plugins/myplugin && git init   # optional — only if you want a separate repo
     # then edit plugin.py
+
+See ``templates/plugin.py.template`` for an annotated skeleton, and
+``docs/plugin-authoring-guide.md`` for the full walkthrough.
 
 Plugin contract (three required members)
 -----------------------------------------

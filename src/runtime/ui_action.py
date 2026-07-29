@@ -1,16 +1,16 @@
 """UiAction / UiField / UiJobResult — the optional contract a plugin uses to
 appear as a background-job trigger in the web UI's composer.
 
-See ``docs/webui-plugin-plan.md`` section 10 for the full design and
-reasoning. In short: a plugin that wants a composer entry (translate,
-transcribe, or any future plugin) declares a module-level ``ui_action``
-(one ``UiAction`` instance) alongside its usual ``plugin`` object, and adds
-a ``run_ui_action(fields, professor, model, on_progress)`` method to its
-plugin class. Both are optional and undeclared by default — same spirit as
-the existing optional ``requires_professor`` attribute documented in
-``plugin.py`` — so no existing plugin needs to change, and installing a new
-plugin later that declares these two things gives it a composer entry with
-no changes needed in ``plugins/webui/``.
+See ``docs/plugin-authoring-guide.md`` ("A button in the web interface")
+for the authoring walkthrough. In short: a plugin that wants a composer
+entry declares a module-level ``ui_action`` (one ``UiAction`` instance)
+alongside its usual ``plugin`` object, and adds a
+``run_ui_action(fields, professor, model, on_progress, output_dir)``
+method to its plugin class. Both are optional and undeclared by default —
+same spirit as the optional ``requires_professor`` attribute documented in
+``plugin.py`` — so a plugin that declares neither stays CLI-only, and
+installing a plugin that declares both gives it a composer entry with no
+changes needed in ``plugins/webui/``.
 
 These are plain dataclasses, not a formal part of the ``ModePlugin``
 ``Protocol`` in ``plugin.py`` — the same reasoning that keeps
@@ -28,23 +28,21 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
 # Called with (completed_count, total_count) after each unit of work (a
-# page, an image) finishes, in completion order. Every method in this
-# project that accepts one defaults it to None and behaves exactly like it
-# did before this was added when no callback is passed — the CLI path never
-# passes one; only the webui's background job runner does.
+# page, an image) finishes, in completion order. Every method that accepts
+# one defaults it to None and does nothing extra when none is passed — the
+# CLI path never passes one; only the webui's background job runner does.
 ProgressCallback = Callable[[int, int], None]
 
 # Called with (page_number, translated_text) right after one page/unit's
 # translation finishes — a sibling to ProgressCallback, carrying the actual
-# text instead of just a count. Added specifically because ProgressCallback
-# structurally cannot carry this: it only ever passes two integers, so a
-# CLI run's per-page output (printed straight to the terminal — see
-# translation_service.generate_text's inline print()) had no path to reach
-# the webui's conversation at all. Same optional-everywhere convention as
-# ProgressCallback: every method that accepts one defaults it to None and
-# behaves exactly like it did before this existed when no callback is
-# passed. page_number is 1-indexed, matching the page numbers already used
-# in this project's error messages (e.g. "Translation error on page 7").
+# text instead of just a count. Kept separate because ProgressCallback
+# structurally cannot carry it: that one only ever passes two integers, so
+# a CLI run's per-page output (printed straight to the terminal — see
+# translation_service.generate_text's inline print()) has no other path to
+# reach the webui's conversation. Same optional-everywhere convention as
+# ProgressCallback: every method that accepts one defaults it to None.
+# page_number is 1-indexed, matching the page numbers used in this
+# project's error messages (e.g. "Translation error on page 7").
 PageTextCallback = Callable[[int, str], None]
 
 
@@ -143,8 +141,7 @@ class UiAction:
 class UiPromptPreview:
     """What a plugin's optional ``preview_ui_action`` returns for the composer's live prompt preview.
 
-    See ``docs/webui-plugin-plan.md`` section 10's two-pane preview panel —
-    this is the ``--dry-run`` idea made interactive: as the professor fills
+    This is the ``--dry-run`` idea made interactive: as the professor fills
     in the composer's form, the webui calls ``preview_ui_action`` after
     every change and shows the result in a live-updating system/user prompt
     pane, without ever making a real API call.
@@ -178,9 +175,8 @@ class UiJobResult:
         output_path: Absolute path to the one finished file this job
                      produced (e.g. a translated ``.docx``). The web UI's
                      job runner makes this downloadable from the
-                     conversation it was started in — see
-                     ``docs/webui-plugin-plan.md`` section 10's "your call:
-                     whole-file export, not page by page."
+                     conversation it was started in — one finished file at
+                     the end, not a stream of pages.
         output_filename: The filename to present to the browser on
                          download (may differ from ``output_path``'s own
                          basename, which typically lives under a temporary
@@ -331,10 +327,9 @@ def get_extension_ui_fields(action_id: str, token: Optional[str]) -> list[UiFiel
 def apply_extension_ui_hooks(action_id: str, token: Optional[str], sandbox: Any, fields: dict) -> None:
     """Apply a registered extension's fields to *sandbox*, if this action/token pair has one registered.
 
-    A no-op (not an error) when *token* is blank or nothing is registered
-    for this action/token pair — the normal case for any installation
-    without that extension plugin installed, which must behave identically
-    to before this existed.
+    Does nothing (rather than raising) when *token* is blank or nothing is
+    registered for this action/token pair — the normal case for any
+    installation that doesn't have that extension plugin.
 
     Args:
         action_id: The composer action this job is running (e.g.

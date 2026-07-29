@@ -3,8 +3,7 @@
 
 Why this exists
 ----------------
-The external/remote usage-data sources feature (see
-``docs/webui-plugin-plan.md`` section 1) tags every usage record with a
+The external/remote usage-data sources feature tags every usage record with a
 ``source`` field — which installation/machine made that API call — so a
 shared-write report can tell "your activity on this account" apart from
 "theirs." Every usage record written from now on always has this field.
@@ -33,7 +32,7 @@ hand first if you want a new one.
 
 Note: this only touches this installation's own local data/ folder. If a
 professor's usage tracking has already been switched to a shared-write
-external source (configured in .settings), that professor's records live
+external source (configured in settings.toml), that professor's records live
 under the external source's own path instead and aren't touched by this
 script — run it there too if that installation also has old-format records
 to convert.

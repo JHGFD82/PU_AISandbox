@@ -1,7 +1,5 @@
 """Tests for plugins/webui/src/jobs.py (registered as _pu_webui_jobs) —
 the background job runner behind the composer's plugin actions.
-
-See docs/webui-plugin-plan.md section 10.
 """
 
 from __future__ import annotations

@@ -1,7 +1,7 @@
 """
 Tests for src/settings.py:
   - _merge_layer (the pure merge logic used for both the shared layer
-    and settings.local.toml)
+    and preferences.toml)
   - the full three-layer load order, exercised via importlib.reload with
     settings_store's shared_settings.path pointed at a tmp_path file
 
@@ -51,22 +51,22 @@ class TestMergeLayer:
 class TestLayeredLoadOrder:
 
     def _point_shared_settings_at(self, tmp_path, monkeypatch, path):
-        """Redirect settings_store's .settings file to a tmp one with shared_settings.path set."""
+        """Redirect settings_store's settings.toml to a tmp one with shared_settings.path set."""
         settings_file = tmp_path / ".settings"
         settings_file.write_text(f'[shared_settings]\npath = "{path}"\n')
         monkeypatch.setattr(settings_store_mod, "SETTINGS_PATH", settings_file)
 
-    def test_shared_settings_path_applies_and_local_still_wins(self, tmp_path, monkeypatch):
-        """settings.default.toml -> shared file -> settings.local.toml, each overriding the last."""
+    def test_shared_settings_path_applies_and_preferences_still_win(self, tmp_path, monkeypatch):
+        """settings.default.toml -> shared file -> preferences.toml, each overriding the last."""
         shared_file = tmp_path / "shared.toml"
         shared_file.write_text("[budget]\nwarning_threshold_pct = 95\n")
         self._point_shared_settings_at(tmp_path, monkeypatch, str(shared_file))
 
         try:
             importlib.reload(settings_mod)
-            # Repo's settings.local.toml (if present) still wins over the shared file
+            # preferences.toml (if present) still wins over the shared file
             # for any key it mentions; but the shared file's value applies for keys
-            # settings.local.toml doesn't touch. We only assert the mechanism ran
+            # preferences.toml doesn't touch. We only assert the mechanism ran
             # without error and produced *some* integer threshold.
             assert isinstance(settings_mod.BUDGET_WARNING_THRESHOLD, int)
         finally:

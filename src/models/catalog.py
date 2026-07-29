@@ -1,6 +1,7 @@
 """Reads and writes the model catalog file, and answers questions about individual models.
 
-The model catalog (``src/model_catalog.json``) is the single source of truth for
+The model catalog (``model_catalog.json``, in the folder this person keeps
+their own files in — see ``src/paths.py``) is the single source of truth for
 which AI models are available, what they cost per token, and what special
 capabilities or limitations each one has. Functions in this module load that
 file, look up pricing and properties for a given model, and save any changes
@@ -89,7 +90,7 @@ def load_model_catalog() -> Dict[str, Any]:
         pricing and capability flags).
 
     Raises:
-        FileNotFoundError: If ``src/model_catalog.json`` does not exist.
+        FileNotFoundError: If ``model_catalog.json`` does not exist.
             The error message explains how to create it from the template.
         ValueError: If the file contains invalid JSON or is missing required
             sections.

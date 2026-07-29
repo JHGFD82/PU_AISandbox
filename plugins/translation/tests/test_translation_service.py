@@ -1044,8 +1044,8 @@ class TestTranslateTextPagesExtended:
 
 
 # ---------------------------------------------------------------------------
-# TranslationService — on_progress callback (docs/webui-plugin-plan.md §10:
-# the webui's background job runner is the only real caller of this)
+# TranslationService — on_progress callback (the webui's background job
+# runner is the only real caller of this)
 # ---------------------------------------------------------------------------
 
 class TestTranslateTextPagesProgress:

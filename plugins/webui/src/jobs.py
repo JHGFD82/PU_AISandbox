@@ -1,7 +1,6 @@
 """Background job runner for plugin actions started from the webui composer.
 
-See ``docs/webui-plugin-plan.md`` section 10 for the full design. In short:
-a plugin that declares a module-level ``ui_action`` (``src/runtime/ui_action.py``)
+A plugin that declares a module-level ``ui_action`` (``src/runtime/ui_action.py``)
 and implements ``run_ui_action`` can be triggered from a conversation's
 composer (translate, transcribe, and any future plugin that opts in the
 same way). Running it is a multi-minute, many-page operation, so it always
@@ -17,8 +16,7 @@ the same reason: see ``app.py``'s module docstring for why a real relative
 import doesn't work here.
 
 Job state (the ``JobStore`` below) is deliberately **in-memory only, not
-persisted to disk** — your call, recorded in docs/webui-plugin-plan.md
-section 10: a webui restart mid-job loses that job's thread and its
+persisted to disk**: a webui restart mid-job loses that job's thread and its
 tracking entry together, and there's no attempt to resume a job from where
 it left off. What restart behavior *does* guarantee: ``create_app()``'s
 startup sweep (in ``app.py``) clears any conversation whose

@@ -1,7 +1,7 @@
 """Tests for TranslationPlugin.run_ui_action and its module-level ui_action
 declaration — the webui composer's "Translate a document" action.
 
-See docs/webui-plugin-plan.md section 10. plugin.py isn't pre-registered
+plugin.py isn't pre-registered
 by conftest.py (only its supporting service/runtime modules are), so it's
 loaded here the same way plugins/webui/plugin.py's own tests load app.py:
 directly from its file path under the fabricated module name the real

@@ -1,8 +1,8 @@
 """Tests for TranscriptionPlugin.run_ui_action and its module-level ui_action
 declaration — the webui composer's "Transcribe an image" action.
 
-See docs/webui-plugin-plan.md section 10, and
-plugins/translation/tests/test_plugin_ui_action.py for the same pattern
+See plugins/translation/tests/test_translation_plugin_ui_action.py
+for the same pattern
 applied to the translate action.
 """
 

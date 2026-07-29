@@ -17,10 +17,10 @@ settings it wants to change):
    hand-editing their own copy. Absent by default; nothing changes unless
    this is set. A common case: one person manages several professors'
    installations and wants them all to use the same tuned settings.
-3. ``preferences.toml`` in the extras folder — this person's own
-   Still the last word: even with a shared file in play, a setting
-   placed here wins, so one person can override just their own quirk
-   without touching the file everyone else reads.
+3. ``preferences.toml`` in this person's own files folder — their own
+   adjustments, and the last word. Even with a shared file in play, a
+   setting placed here wins, so one person can override just their own
+   quirk without touching the file everyone else reads.
 
 The ``[endpoints]`` section (alternate AI API endpoint *definitions* — base
 URL, timeout, etc.) merges through these same three layers exactly like

@@ -419,7 +419,7 @@ class TranscriptionPlugin:
             output_file_r = sandbox._resolve_output_path(args)
             _run_transcription_review(sandbox, text, language, output_file=output_file_r)
 
-    # ── Webui composer action (docs/webui-plugin-plan.md section 10) ───────────
+    # ── Webui composer action ────────────────────────────────────────────────
 
     def run_ui_action(
         self,
@@ -689,9 +689,9 @@ class TranscriptionPlugin:
 
 plugin = TranscriptionPlugin()
 
-# ── Webui composer action declaration (docs/webui-plugin-plan.md section 10) ──
+# ── Webui composer action declaration ────────────────────────────────────
 # v1 core-subset fields — transcription_review is deliberately left out of
-# the composer (see section 10): it consumes the *output* of a prior
+# the composer: it consumes the *output* of a prior
 # transcription as text, which is a less natural composer action than
 # "process this document."
 ui_action = UiAction(

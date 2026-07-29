@@ -1,12 +1,12 @@
 # settings.default.toml — Repo-shipped runtime defaults for PU AI Sandbox.
 # Edit this file only if you're changing the default for everyone who clones
-# this repo. For your own machine, use settings.local.toml instead (see
-# docs/configuration.md) — it overrides just the keys you put in it, without
-# touching this file. Default models are in src/model_catalog.json under
-# [config.defaults].
+# this repo. For your own machine, use preferences.toml in your own files
+# folder instead (see docs/configuration.md) — it overrides just the keys you
+# put in it, without touching this file. Default models are in
+# model_catalog.json, alongside preferences.toml, under [config.defaults].
 #
 # [endpoints.<name>] and [config].default_endpoint are also supported here
-# (or, more commonly, in settings.local.toml / a shared file) — see
+# (or, more commonly, in preferences.toml or a shared file) — see
 # "Alternate AI Endpoint Connections" in docs/configuration.md. The
 # credential for each endpoint is never stored here; it lives in settings.toml.
 

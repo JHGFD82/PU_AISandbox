@@ -90,10 +90,9 @@ directory and adapt it as follows:
      alongside ``token`` so a *different* action (e.g. ``"transcribe"``)
      registering the same language token doesn't silently overwrite this
      one's fields; see ``ExtensionUiHooks``'s docstring in
-     ``src/runtime/ui_action.py`` for the exact shape, and
-     ``docs/webui-plugin-plan.md`` section 10 for the full design and
-     reasoning (a plain global registry, not routed through
-     ``DispatchPlugin`` — see that section for why). Example::
+     ``src/runtime/ui_action.py`` for the exact shape, and for why this
+     is a plain global registry rather than something routed through
+     ``DispatchPlugin``. Example::
 
          from src.runtime.ui_action import UiField, register_extension_ui_hooks
 
@@ -746,7 +745,7 @@ class TranslationPlugin:
 
         _execute_translate(sandbox, args, source_language, target_language)
 
-    # ── Webui composer action (docs/webui-plugin-plan.md section 10) ───────────
+    # ── Webui composer action ────────────────────────────────────────────────
 
     def run_ui_action(
         self,
@@ -782,9 +781,9 @@ class TranslationPlugin:
           (case-insensitive) enables ``--scanned``-equivalent behavior.
         - ``page_nums``: optional page-range string (e.g. ``'8-12'``) —
           this is deliberately in the v1 field set specifically as the
-          answer to an interrupted job: see docs/webui-plugin-plan.md
-          section 10's "no resume — the escape valve is the page-range
-          field."
+          answer to an interrupted job. There is no resume, so the escape
+          valve is starting a fresh job from the page the last one
+          stopped at.
         - ``notes``: optional free text, applied to both the system and
           user prompts (the same effect as the CLI's ``-nb``/note-both flag).
         - ``output_format``: optional, one of ``'same'`` (default —
@@ -1066,7 +1065,7 @@ class TranslationPlugin:
 
 plugin = TranslationPlugin()
 
-# ── Webui composer action declaration (docs/webui-plugin-plan.md section 10) ──
+# ── Webui composer action declaration ────────────────────────────────────
 # v1 core-subset fields — see run_ui_action's docstring above for exactly
 # what each one means and how it's read out of the submitted `fields` dict.
 # `page_nums` is deliberately in this v1 set (not deferred like other CLI

@@ -1,12 +1,11 @@
 """Conversation data model and on-disk storage for the webui plugin.
 
 Each professor's conversations live as one JSON file per conversation under
-``data/conversations/{professor_netid}/{conversation_id}.json`` — see
-docs/webui-plugin-plan.md section 6 for the full shape and reasoning
-(one file per conversation, not one shared file, for the same
-safe-to-sync-over-Dropbox reasons behind the external usage-data sources in
-section 1, even though nothing about this data is expected to be shared
-between installations today).
+``data/conversations/{professor_netid}/{conversation_id}.json`` — one
+file per conversation rather than one shared file, for the same
+safe-to-sync-over-Dropbox reasons behind the external usage-data sources,
+even though nothing about this data is expected to be shared between
+installations.
 """
 
 from __future__ import annotations
@@ -115,8 +114,7 @@ class Message:
               per-page previews are off because it's running with more than
               one worker — informational, not an error), ``'job_result'``
               (the job's one finished output file, ready to download), or
-              ``'job_error'`` (the job failed or was interrupted). See
-              docs/webui-plugin-plan.md section 10 — job messages are
+              ``'job_error'`` (the job failed or was interrupted). Job messages are
               deliberately excluded from ``api_messages()`` and
               ``display_messages()`` below, since they aren't real dialogue
               for the model to reason over. The webui's own chat transcript
@@ -221,11 +219,10 @@ class Conversation:
         messages: Every message exchanged so far, oldest first.
         compacted_summary: A condensed stand-in for older messages once the
                            conversation has grown past the model's context
-                           window (see docs/webui-plugin-plan.md section 6).
+                           window.
                            ``None`` until compaction has happened at least once.
         active_job_id: The id of a plugin background job currently running
-                       in this conversation (see docs/webui-plugin-plan.md
-                       section 10), or ``None`` if no job is running. While
+                       in this conversation, or ``None`` if no job is running. While
                        set, ``POST /api/chat`` on this conversation is
                        rejected and the composer is shown locked — a
                        conversation can only run one job at a time.
