@@ -1700,3 +1700,49 @@ class TestSharedSettingsDraftDownload:
         unlocked_client.get("/api/settings/shared-draft")
         assert not (tmp_path / "shared-settings.toml").exists()
         assert list(tmp_path.glob("*.toml")) == []
+
+
+class TestFileOrFolderPicker:
+    """A file field that accepts folders must still accept a single file.
+
+    `webkitdirectory` does not add folder selection, it replaces file selection:
+    an input carrying it can only pick a directory. Setting it unconditionally
+    is what stopped anyone choosing one document to translate, so the page must
+    offer the choice instead of assuming.
+    """
+
+    def _page(self):
+        from pathlib import Path
+
+        from fastapi.templating import Jinja2Templates
+
+        directory = Path(__file__).resolve().parents[1] / "src" / "templates"
+        return Jinja2Templates(directory=str(directory)).get_template("chat.html").render(request=None)
+
+    def test_the_page_offers_both_modes(self):
+        page = self._page()
+        assert "A single file" in page
+        assert "A whole folder" in page
+
+    def test_webkitdirectory_is_never_set_unconditionally(self):
+        """The regression itself: set outside a mode choice, folders are all you get."""
+        import re
+
+        page = self._page()
+        for match in re.finditer(r"webkitdirectory = true", page):
+            before = page[max(0, match.start() - 400):match.start()]
+            assert "if (folder)" in before, (
+                "webkitdirectory must only be set for the folder mode; setting it "
+                "on every file field is what removed single-file selection"
+            )
+
+    def test_the_choice_defaults_to_a_single_file(self):
+        """The commoner case, and the one that broke."""
+        page = self._page()
+        assert "radio.checked = index === 0" in page
+        assert '[["file", "A single file", false], ["folder", "A whole folder", true]]' in page
+
+    def test_the_rebuilt_input_keeps_the_field_id(self):
+        """collect, restore and submit all look the field up by this id."""
+        page = self._page()
+        assert "replacement.id = input.id" in page

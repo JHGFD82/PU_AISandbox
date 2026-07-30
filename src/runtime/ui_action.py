@@ -58,7 +58,7 @@ class UiField:
         kind: What kind of control to render — ``'language'`` (a select
               populated from this project's language registry),
               ``'file'`` (a file upload — a single file by default, or a
-              whole folder at once if ``allow_folder`` is set), ``'checkbox'``,
+              whole folder instead, if ``allow_folder`` is set), ``'checkbox'``,
               ``'text'`` (a single- or multi-line text field, e.g. notes or a
               page-range string like ``'8-12'``), or ``'select'`` (a
               dropdown populated from ``choices``, for a fixed set of
@@ -76,10 +76,13 @@ class UiField:
                read as organized sections instead of one dense block.
                ``None`` fields render with no heading at all.
         allow_folder: For ``kind='file'`` only — when ``True``, the web UI
-                      lets the professor pick a whole folder (or several
-                      individual files) instead of exactly one file, the
-                      same way pointing the CLI's ``-i`` at a folder of
-                      images processes every image inside it in order. The
+                      asks which the professor wants, one file or a whole
+                      folder, and offers both. A folder works the same way
+                      pointing the CLI's ``-i`` at a folder of images
+                      processes every image inside it in order. Note this
+                      *adds* the folder option rather than replacing the
+                      single-file one: a browser file input can do one or the
+                      other, never both, so the choice has to be asked. The
                       selected files arrive together in one folder, whose
                       path reaches ``run_ui_action``'s
                       ``fields['file_path']`` — the same shape a plugin

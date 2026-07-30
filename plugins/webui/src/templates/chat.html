@@ -341,6 +341,14 @@
   .job-options { flex: 0 0 300px; overflow-y: auto; padding: 1.1rem 1.2rem; border-right: 1px solid var(--border); }
   .job-field { margin-bottom: 1.15rem; }
   .job-field label { display: block; font-size: 0.8rem; font-weight: 600; margin-bottom: 0.35rem; }
+  /* The file-or-folder choice: inline, and quieter than the field's own label,
+     because it qualifies that label rather than competing with it. */
+  .file-mode { display: flex; align-items: center; gap: 0.3rem; margin-bottom: 0.4rem; }
+  .file-mode input[type="radio"] { margin: 0; }
+  .file-mode label {
+    display: inline; font-size: 0.76rem; font-weight: 400;
+    margin: 0 0.9rem 0 0.15rem; cursor: pointer;
+  }
   .job-field-checkbox { display: flex; align-items: center; gap: 0.5rem; }
   .job-field-checkbox label { margin: 0; font-weight: 400; }
   /* A group label reads as a section break in what would otherwise be one
@@ -1088,6 +1096,54 @@ function resetJobModalFields() {
   scheduleJobPreview();
 }
 
+// A file field that also accepts a folder has to offer both, because one input
+// cannot do both: webkitdirectory turns an input into a directory picker
+// outright, so setting it unconditionally is what stopped anyone choosing a
+// single document to translate. Two radio buttons pick the mode and the input is
+// rebuilt to match. Defaults to a single file — the commoner case, and the one
+// that broke.
+function buildFileModeToggle(field, input) {
+  const box = document.createElement("div");
+  box.className = "file-mode";
+  const name = jobFieldControlId(field.name) + "-mode";
+
+  const apply = (folder) => {
+    // Rebuilt rather than toggled in place: browsers are inconsistent about
+    // honouring webkitdirectory once an input exists, and anything chosen in one
+    // mode means nothing in the other, so clearing it is the honest behaviour.
+    const current = document.getElementById(input.id);
+    if (!current || !current.parentNode) return;
+    const replacement = document.createElement("input");
+    replacement.type = "file";
+    replacement.id = input.id;
+    replacement.required = current.required;
+    if (folder) {
+      replacement.multiple = true;
+      replacement.webkitdirectory = true;
+    }
+    current.parentNode.replaceChild(replacement, current);
+  };
+
+  [["file", "A single file", false], ["folder", "A whole folder", true]].forEach(
+    ([value, text, folder], index) => {
+      const id = `${name}-${value}`;
+      const radio = document.createElement("input");
+      radio.type = "radio";
+      radio.name = name;
+      radio.id = id;
+      radio.value = value;
+      radio.checked = index === 0;
+      radio.addEventListener("change", () => { if (radio.checked) apply(folder); });
+      const label = document.createElement("label");
+      label.setAttribute("for", id);
+      label.textContent = text;
+      box.appendChild(radio);
+      box.appendChild(label);
+    },
+  );
+  return box;
+}
+
 function buildJobFieldControl(field) {
   const wrap = document.createElement("div");
   wrap.className = "job-field" + (field.kind === "checkbox" ? " job-field-checkbox" : "");
@@ -1140,13 +1196,13 @@ function buildJobFieldControl(field) {
     input.type = "file";
     input.id = jobFieldControlId(field.name);
     if (field.allow_folder) {
-      // Lets a professor pick several images at once, or an entire folder
-      // in one go — mirrors pointing the CLI's -i at a folder of scans.
-      // webkitdirectory is ignored (not an error) by browsers that don't
-      // support it, which just falls back to plain multi-file selection —
-      // still strictly more useful than the single-file-only default.
-      input.multiple = true;
-      input.webkitdirectory = true;
+      // webkitdirectory does not *add* folder selection, it replaces file
+      // selection: an input carrying it can only ever pick a directory. Setting
+      // it unconditionally is what stopped anyone choosing a single document to
+      // translate. So the choice is offered explicitly instead, and the input is
+      // rebuilt for whichever mode is picked — a mode is a property of the
+      // control, not something one input can do both of.
+      wrap.appendChild(buildFileModeToggle(field, input));
     }
   } else {
     input = document.createElement("textarea");

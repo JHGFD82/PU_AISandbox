@@ -403,7 +403,7 @@ plugin.ui_action = ui_action
 
 **`UiField` kinds:** `language` (a select populated from the language registry), `file`, `checkbox`, `text` (single- or multi-line), `select` (populated from `choices`, each `{"value": ..., "label": ...}`). The web interface renders purely off `kind` — it never needs plugin-specific knowledge to build a form.
 
-**Other `UiField` options:** `required` (default `True`), `group` (a section heading printed above this field when it differs from the previous field's — purely cosmetic, but it turns a long list into readable sections), and `allow_folder` (for `kind="file"` only: lets someone pick a whole folder, the same way pointing the CLI's `-i` at a folder of images processes every image in it). Files chosen that way arrive together in one scratch folder whose path reaches `fields["file_path"]`; read from it, don't expect it to outlive the job.
+**Other `UiField` options:** `required` (default `True`), `group` (a section heading printed above this field when it differs from the previous field's — purely cosmetic, but it turns a long list into readable sections), and `allow_folder` (for `kind="file"` only: adds a folder option beside the single-file one, the same way pointing the CLI's `-i` at a folder of images processes every image in it — the browser asks which they want, since one file input cannot do both). Files chosen that way arrive together in one scratch folder whose path reaches `fields["file_path"]`; read from it, don't expect it to outlive the job.
 
 ### 2. Implement `run_ui_action`
 
