@@ -293,6 +293,8 @@ That writes `shared-settings.toml` into their own files folder. It lists **every
 python main.py settings set shared_settings.path /path/to/shared-settings.toml
 ```
 
+**The filename doesn't matter.** Each installation stores the full path you give it, so call the file whatever suits the group — `nurikabe-settings.toml`, `lab-defaults.toml`, anything. `shared-settings.toml` is only what `export-shared` writes its draft as, and you can rename it when you put it in place. What each member points at is a path, not a name.
+
 **Keeping it current.** Settings appear as plugins are updated. A member who needs one that the shared file doesn't mention will see the plugin's own value in their `preferences.toml` rather than a `# currently set by your group's shared settings` label — that's their cue to ask. Whoever looks after the file then runs the command again:
 
 ```bash

@@ -89,11 +89,26 @@ class TestSharedSettingsPath:
         assert settings_store.get_shared_settings_path() is None
 
     def test_returns_expanded_path(self):
-        settings_store.set_value("shared_settings.path", "~/shared/settings.shared.toml")
+        settings_store.set_value("shared_settings.path", "~/shared/shared-settings.toml")
         result = settings_store.get_shared_settings_path()
         assert result is not None
         assert "~" not in str(result)
-        assert str(result).endswith("settings.shared.toml")
+        assert str(result).endswith("shared-settings.toml")
+
+    @pytest.mark.parametrize("name", [
+        "shared-settings.toml",
+        "nurikabe-lab.toml",
+        "our group's rules.toml",   # spaces are fine
+        "settings",                 # so is no extension at all
+    ])
+    def test_the_filename_is_not_special(self, name):
+        """A path is stored and read back; nothing looks for a particular name.
+
+        Worth pinning because the docs necessarily use *some* example name, and
+        an example is easy to read as a requirement.
+        """
+        settings_store.set_value("shared_settings.path", f"/somewhere/{name}")
+        assert str(settings_store.get_shared_settings_path()) == f"/somewhere/{name}"
 
 
 # ---------------------------------------------------------------------------

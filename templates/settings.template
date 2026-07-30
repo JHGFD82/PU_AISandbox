@@ -66,7 +66,9 @@
 # (still this machine's personal overrides, which still win). See
 # src/settings.py for the full merge order.
 # [shared_settings]
-# path = "/path/to/shared/settings.shared.toml"
+# path = "/path/to/shared-settings.toml"
+# The name is up to you — the sandbox reads whatever path you give here,
+# so call it after your group if that reads better.
 
 # ── External/remote usage-data sources (optional) ──────────────────────────────
 # Lets this installation include another installation's usage data when

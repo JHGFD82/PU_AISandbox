@@ -62,7 +62,7 @@ python main.py settings set webui.session_secret            # prompts for a valu
 python main.py settings set webui.session_secret --generate  # or generate one
 python main.py settings unset webui.session_secret
 python main.py settings export-shared            # draft a settings file for a group
-python main.py settings export-shared --from /path/to/current-shared.toml
+python main.py settings export-shared --from /path/to/shared-settings.toml
 ```
 
 | Subcommand | What it does |

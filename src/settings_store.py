@@ -44,7 +44,7 @@ Schema::
                                      # live in settings.*.toml instead
 
     [shared_settings]
-    path = "/path/to/settings.shared.toml"
+    path = "/path/to/shared-settings.toml"   # any path; the name is not special
 
     [usage_sources]
     source_id = "toms-mac"
