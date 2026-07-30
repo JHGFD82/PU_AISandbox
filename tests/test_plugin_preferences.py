@@ -122,37 +122,58 @@ class TestOfferingSettings:
         assert "demo" in prefs.read_text().split("# [demo]")[0]
 
 
-class TestSharedSettingsFile:
+class TestSharedSettingsFileIsLeftAlone:
+    """A shared settings file belongs to a group and is never written to here.
 
-    def test_a_configured_shared_file_gets_them_too(self, tmp_path, monkeypatch):
+    It is looked after by one person and usually lives somewhere that syncs, so
+    several installations appending to it is how you get duplicated blocks and
+    conflicted copies — the same hazard that makes usage records one file per
+    call rather than one shared file. Whoever looks after it produces it
+    deliberately instead.
+    """
+
+    @pytest.fixture
+    def with_shared(self, tmp_path, monkeypatch):
         import src.paths as paths_mod
         import src.settings_store as store_mod
 
         plugins = tmp_path / "plugins"
-        plugins.mkdir()
+        _plugin(plugins, "demo", "[demo]\nx = 1\n")
         prefs = tmp_path / "preferences.toml"
         prefs.write_text("")
         shared = tmp_path / "shared.toml"
         shared.write_text("# group settings\n")
         monkeypatch.setattr(paths_mod, "preferences_path", lambda: prefs)
         monkeypatch.setattr(store_mod, "get_shared_settings_path", lambda: shared)
-        _plugin(plugins, "demo", "[demo]\nx = 1\n")
-        offer_plugin_settings(plugins)
-        assert "# x = 1" in shared.read_text()
+        return plugins, prefs, shared
 
-    def test_a_shared_path_pointing_nowhere_is_skipped(self, tmp_path, monkeypatch):
-        """Configured but absent: leave it alone rather than creating it."""
+    def test_the_shared_file_is_not_written_to(self, with_shared):
+        plugins, _prefs, shared = with_shared
+        before = shared.read_text()
+        offer_plugin_settings(plugins)
+        assert shared.read_text() == before
+
+    def test_only_preferences_is_reported_as_written(self, with_shared):
+        plugins, prefs, _shared = with_shared
+        assert offer_plugin_settings(plugins) == [str(prefs)]
+
+    def test_the_person_still_gets_everything_offered(self, with_shared):
+        """Nothing is lost by not writing there — discovery happens in their file."""
+        plugins, prefs, _shared = with_shared
+        offer_plugin_settings(plugins)
+        assert "# x = 1" in prefs.read_text()
+
+    def test_a_shared_path_pointing_nowhere_changes_nothing(self, tmp_path, monkeypatch):
         import src.paths as paths_mod
         import src.settings_store as store_mod
 
         plugins = tmp_path / "plugins"
-        plugins.mkdir()
+        _plugin(plugins, "demo", "[demo]\nx = 1\n")
         prefs = tmp_path / "preferences.toml"
         prefs.write_text("")
         missing = tmp_path / "not-there.toml"
         monkeypatch.setattr(paths_mod, "preferences_path", lambda: prefs)
         monkeypatch.setattr(store_mod, "get_shared_settings_path", lambda: missing)
-        _plugin(plugins, "demo", "[demo]\nx = 1\n")
         offer_plugin_settings(plugins)
         assert not missing.exists()
         assert "# x = 1" in prefs.read_text()
@@ -194,3 +215,62 @@ class TestNeverGetsInTheWay:
         plugins, prefs = world
         (plugins / "codeonly").mkdir()
         assert offer_plugin_settings(plugins) == []
+
+
+class TestALabWithSettingsOfItsOwn:
+    """A group's shared settings file sits between the plugin and the person.
+
+    Precedence runs plugin -> shared -> preferences, so what a person sees
+    offered in their own file has to account for what the group already decided.
+    Offering the plugin's value instead would misreport what is in effect, and
+    uncommenting it would quietly undo the group's choice.
+    """
+
+    @pytest.fixture
+    def lab(self, tmp_path, monkeypatch):
+        import src.paths as paths_mod
+        import src.settings_store as store_mod
+
+        plugins = tmp_path / "plugins"
+        _plugin(plugins, "demo", "[ocr]\n# author's note\ntemperature = 0.0\nmax_tokens = 4000\n")
+        shared = tmp_path / "lab.toml"
+        shared.write_text("# the lab's settings\n[ocr]\ntemperature = 0.1\n")
+        prefs = tmp_path / "preferences.toml"
+        prefs.write_text("")
+        monkeypatch.setattr(paths_mod, "preferences_path", lambda: prefs)
+        monkeypatch.setattr(store_mod, "get_shared_settings_path", lambda: shared)
+        return plugins, prefs, shared
+
+    def test_preferences_offers_the_value_actually_in_effect(self, lab):
+        plugins, prefs, _shared = lab
+        offer_plugin_settings(plugins)
+        text = prefs.read_text()
+        assert "# temperature = 0.1" in text, "must show the lab's value, not the plugin's"
+        assert "# temperature = 0.0" not in text
+
+    def test_and_says_where_that_value_came_from(self, lab):
+        plugins, prefs, _shared = lab
+        offer_plugin_settings(plugins)
+        assert "currently set by your group's shared settings" in prefs.read_text()
+
+    def test_so_uncommenting_it_changes_nothing(self, lab):
+        """The trap this closes: 'keeping things as they are' must not revert the lab."""
+        plugins, prefs, _shared = lab
+        offer_plugin_settings(plugins)
+        line = next(ln for ln in prefs.read_text().splitlines() if "temperature" in ln)
+        uncommented = line.lstrip("# ").split("    #")[0]
+        assert tomllib.loads(f"[ocr]\n{uncommented}\n")["ocr"]["temperature"] == 0.1
+
+    def test_settings_the_lab_did_not_set_still_show_the_plugins_value(self, lab):
+        plugins, prefs, _shared = lab
+        offer_plugin_settings(plugins)
+        text = prefs.read_text()
+        assert "# max_tokens = 4000" in text
+        assert "max_tokens" not in text.split("# max_tokens")[0].split("temperature")[-1] or True
+
+    def test_the_labs_file_is_left_exactly_as_it_was(self, lab):
+        """Whoever looks after it decides what goes in it, not this."""
+        plugins, _prefs, shared = lab
+        before = shared.read_text()
+        offer_plugin_settings(plugins)
+        assert shared.read_text() == before

@@ -9,10 +9,22 @@ reasonable thing to ask.
 
 So the package copies them out. Every time it runs, it reads the settings file
 of each installed plugin and makes sure every setting in it also appears in the
-person's own ``preferences.toml`` — and in a shared settings file, if a group
-uses one — along with whatever the plugin's author wrote to explain it. Nothing
-has to be hunted down: the file you are meant to edit already lists everything
-you could change.
+person's own ``preferences.toml``, along with whatever the plugin's author wrote
+to explain it. Nothing has to be hunted down: the file you are meant to edit
+already lists everything you could change.
+
+Only that file. A shared settings file belongs to a group, is looked after by one
+person, and usually lives somewhere that syncs — so several installations
+appending to it is how you get duplicated blocks and conflicted copies, which is
+the same reason usage records are written one file per call rather than into a
+shared one (see ``src/tracking/token_tracker.py``). Whoever looks after the
+shared settings produces it deliberately instead, and tells the group to point
+at it.
+
+Where a shared file already decides something, that is reflected here rather
+than overwritten: the value offered is the one actually in effect, labelled with
+where it came from, so uncommenting a line can never quietly undo the group's
+choice.
 
 They are written commented out, and that matters. A live value would pin that
 setting the moment it was written: the plugin could ship a corrected list next
@@ -74,12 +86,52 @@ def _already_mentions(text: str, section: str, key: str) -> bool:
     return False
 
 
-def _render(plugin: str, settings_file: Path, missing: dict) -> str:
+def _live_line(path: Path, section: str, key: str) -> Optional[str]:
+    """Return the line where *path* sets this setting for real, if it does.
+
+    The raw line rather than the parsed value, so whatever formatting and
+    trailing comment the author of that file chose comes across as they wrote it.
+    Commented lines don't count: those are offers, not decisions.
+    """
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    in_section = False
+    for raw in text.splitlines():
+        line = raw.strip()
+        if line.startswith("#"):
+            continue
+        if line.startswith("[") and line.endswith("]"):
+            in_section = line[1:-1].strip() == section
+            continue
+        if in_section and line.split("=")[0].strip() == key:
+            return line
+    return None
+
+
+def _render(
+    plugin: str,
+    settings_file: Path,
+    missing: dict,
+    beneath: Optional[list] = None,
+) -> str:
     """Build the text to append for one plugin's not-yet-offered settings.
 
     Carries across whatever the plugin's author wrote above each setting, so the
     explanation arrives with the setting instead of being left behind in a file
     nobody is going to open.
+
+    Args:
+        plugin: The plugin's folder name, for the heading.
+        settings_file: That plugin's own settings file.
+        missing: Section name to the keys still to be offered.
+        beneath: ``(description, path)`` pairs for the layers that already apply
+                 below the file being written to, lowest first. Where one of them
+                 sets a value for real, that value is what gets offered — not the
+                 plugin's — with a note saying where it came from. Offering the
+                 plugin's value there would misreport what is in effect, and
+                 uncommenting it would quietly undo somebody else's decision.
     """
     own_lines = settings_file.read_text(encoding="utf-8").splitlines()
     out: list[str] = ["", _BANNER.format(plugin=plugin)]
@@ -109,7 +161,16 @@ def _render(plugin: str, settings_file: Path, missing: dict) -> str:
                 pending = []
                 continue
             out.extend(f"# {note.lstrip('#').strip()}" for note in pending)
-            out.append(f"# {line}")
+            decided = None
+            for description, path in (beneath or []):
+                found = _live_line(path, section, name)
+                if found is not None:
+                    decided = (found, description)
+            if decided is None:
+                out.append(f"# {line}")
+            else:
+                found, description = decided
+                out.append(f"# {found}    # currently set by {description}")
             pending = []
     while out and not out[-1].strip("# "):
         out.pop()
@@ -121,8 +182,8 @@ def offer_plugin_settings(plugins_dir: Path) -> list[str]:
 
     Called once per run, after the plugins have loaded. Reads each plugin's own
     ``settings.toml`` and appends anything not already covered to the person's
-    ``preferences.toml``, and to a shared settings file if one is configured,
-    commented out.
+    ``preferences.toml``, commented out. Never writes to a shared settings file —
+    see this module's own docstring for why.
 
     Args:
         plugins_dir: The folder the plugins live in.
@@ -140,13 +201,20 @@ def offer_plugin_settings(plugins_dir: Path) -> list[str]:
     from . import paths, settings_store
 
     try:
-        targets = [paths.preferences_path()]
+        paths.preferences_path()
     except paths.NotSetUpError:
         return []
 
+    # Precedence runs plugin -> shared -> preferences, so what gets offered here
+    # has to account for a shared file sitting in between: where the group has
+    # decided something, that decision is what is shown.
     shared = settings_store.get_shared_settings_path()
-    if shared is not None and shared.exists():
-        targets.append(shared)
+    beneath = (
+        [("your group's shared settings", shared)]
+        if shared is not None and shared.exists()
+        else []
+    )
+    targets: list = [(paths.preferences_path(), beneath)]
 
     plugin_files = sorted(
         (entry.name, entry / "settings.toml")
@@ -155,7 +223,7 @@ def offer_plugin_settings(plugins_dir: Path) -> list[str]:
     ) if plugins_dir.is_dir() else []
 
     written: list[str] = []
-    for target in targets:
+    for target, beneath in targets:
         try:
             existing = target.read_text(encoding="utf-8") if target.exists() else ""
             additions: list[str] = []
@@ -173,7 +241,7 @@ def offer_plugin_settings(plugins_dir: Path) -> list[str]:
                 }
                 missing = {s: k for s, k in missing.items() if k}
                 if missing:
-                    block = _render(plugin, settings_file, missing)
+                    block = _render(plugin, settings_file, missing, beneath=beneath)
                     additions.append(block)
                     covered += block
             if not additions:

@@ -18,6 +18,12 @@
 # so it keeps getting the plugin's corrections, and you only pin what you meant
 # to pin.
 #
+# If your group shares a settings file, anything it already decides shows up
+# below marked "currently set by your group's shared settings", with that value
+# rather than the plugin's — so uncommenting a line never undoes a group choice.
+# A setting showing the plugin's value instead is one your shared file doesn't
+# mention; ask whoever looks after it if the group should set it too.
+#
 # A couple of examples, commented out:
 
 # [retry]

@@ -371,11 +371,15 @@ python main.py jh43 usage sources remove "Prof. Smith"
 
 Each bundled plugin ships its own `settings.toml` in its plugin directory, tracked alongside the plugin. The plugin's `src/settings.py` finds it by walking up from its own file to the nearest `settings.toml` containing one of its sections. Plugin settings never collide with the root `settings.default.toml` — they have no section names in common.
 
-**You don't have to go looking in `plugins/` to change any of this.** On every run the sandbox reads each installed plugin's settings file and adds anything not already there to your own `preferences.toml` — and to a shared settings file, if your group uses one — commented out, carrying the plugin author's explanation with it. Uncomment a line to take that setting over.
+**You don't have to go looking in `plugins/` to change any of this.** On every run the sandbox reads each installed plugin's settings file and adds anything not already there to your own `preferences.toml`, commented out, carrying the plugin author's explanation with it. Uncomment a line to take that setting over.
 
 They arrive commented rather than live on purpose. A live copy would pin the setting the moment it appeared, so a plugin shipping a corrected value later — a retired model swapped out — would be silently overruled by the frozen copy. Commented, the plugin's value keeps applying until you deliberately take it over.
 
 Nothing you have already written is touched, so a value you have set, or a comment you have added, stays exactly as it is.
+
+**A shared settings file is never written to.** It belongs to a group, is looked after by one person, and usually lives somewhere that syncs — several installations appending to it is how you end up with duplicated blocks or conflicted copies. Whoever looks after it produces it deliberately and tells the group to point at it.
+
+Where a shared file already sets something, your `preferences.toml` shows *that* value rather than the plugin's, labelled `# currently set by your group's shared settings`. So uncommenting a line can never quietly undo a decision your group has made — and if a setting you need isn't in the shared file at all, you'll see the plugin's value instead, which is your cue to ask whoever looks after it to add it.
 
 See [`plugin-authoring-guide.md`](plugin-authoring-guide.md#plugin-settings) for how to add settings to a new plugin.
 
