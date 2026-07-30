@@ -340,7 +340,7 @@ default_parallel_workers = 4
 
 `settings.toml` itself is never layered — it is this installation's own private configuration, not a set of defaults.
 
-Plugin settings are separate. A plugin's `settings.toml` (see [Plugin settings](#plugin-settings)) has no personal-override file; it's edited directly.
+A plugin's own settings layer the same way (see [Plugin settings](#plugin-settings)): the plugin's `settings.toml` first, then the shared file, then `preferences.toml`. So `[translation] temperature = 0.2` in your `preferences.toml` overrides what the translation plugin ships, without editing anything inside `plugins/`.
 
 ---
 

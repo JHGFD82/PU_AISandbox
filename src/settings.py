@@ -99,6 +99,78 @@ if _shared_settings_path:
 if _PREFERENCES_PATH is not None and _PREFERENCES_PATH.exists():
     _merge_layer(_s, _PREFERENCES_PATH)
 
+def plugin_settings(caller_file: str, *sections: str) -> dict:
+    """Return one plugin's settings, with this person's own adjustments applied.
+
+    A plugin ships its defaults in its own ``settings.toml``, next to its code.
+    Those are the starting point, not the last word: the same two layers that
+    override the sandbox's own defaults override a plugin's as well, so a
+    worker count or a font size can be adjusted per group or per person without
+    editing a file that belongs to the plugin's repository.
+
+    The plugin names its own sections and passes its own location; this handles
+    the layering, because where those layers live is the package's business and
+    not something each plugin should have to work out for itself.
+
+    Args:
+        caller_file: The calling module's ``__file__``. Used to find the
+                     plugin's own ``settings.toml`` by walking up from there,
+                     so a plugin doesn't have to know its own path.
+        *sections: The TOML section names this plugin owns (e.g.
+                   ``'translation'``, ``'image_translation'``). Only these are
+                   returned, so one plugin can't read another's settings by
+                   accident.
+
+    Returns:
+        One dictionary per named section, each holding the plugin's own values
+        with any overrides applied on top. A section nobody has configured
+        comes back as an empty dictionary rather than being absent, so callers
+        can use ``.get(key, default)`` without checking first.
+
+    Notes:
+        Order is the same as everywhere else in the sandbox: the plugin's own
+        file, then a shared settings file if one is configured, then
+        ``preferences.toml``, which wins.
+    """
+    merged: dict = {section: {} for section in sections}
+
+    # The plugin's own file: the nearest settings.toml above it that actually
+    # mentions one of its sections. Checking the contents rather than stopping
+    # at the first file found matters — a plugin nested in another directory
+    # that happens to hold a settings.toml would otherwise read the wrong one.
+    directory = Path(caller_file).resolve().parent
+    while directory != directory.parent:
+        candidate = directory / "settings.toml"
+        if candidate.exists():
+            try:
+                with candidate.open("rb") as handle:
+                    own = tomllib.load(handle)
+            except (OSError, tomllib.TOMLDecodeError):
+                own = {}
+            if any(section in own for section in sections):
+                for section in sections:
+                    if isinstance(own.get(section), dict):
+                        merged[section].update(own[section])
+                break
+        directory = directory.parent
+
+    for layer in (_shared_settings_path, _PREFERENCES_PATH):
+        if layer is None or not layer.exists():
+            continue
+        try:
+            with layer.open("rb") as handle:
+                data = tomllib.load(handle)
+        except (OSError, tomllib.TOMLDecodeError):
+            # A layer that can't be read leaves the ones below it standing,
+            # which is the same thing the sandbox's own settings do.
+            continue
+        for section in sections:
+            if isinstance(data.get(section), dict):
+                merged[section].update(data[section])
+
+    return merged
+
+
 # ── Custom prompt ──────────────────────────────────────────────────────────────
 DEFAULT_SYSTEM_PROMPT: str = _s["prompt"]["default_system_prompt"]
 PROMPT_TEMPERATURE: float = _s["prompt"]["temperature"]

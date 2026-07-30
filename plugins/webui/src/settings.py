@@ -1,37 +1,15 @@
-"""webui plugin settings — loaded from the nearest settings.toml containing a [webui] section.
+"""webui plugin settings.
 
-Follows the same walk-up pattern as plugins/translation/src/settings.py:
-starting from this file's own folder, walk up the directory tree until a
-settings.toml is found that has a [webui] section, and read defaults from
-there. This lets the plugin ship its own settings.toml (plugins/webui/settings.toml)
-without needing any change to the repository-root settings.toml, while still
-letting a person override individual values in the repo root's
-preferences.toml under a [webui] section, exactly like every other
-plugin's settings already work.
+Defaults come from this plugin's own ``settings.toml``
+(``plugins/webui/settings.toml``). Anyone can override any of them without
+touching that file — a shared settings file, then ``preferences.toml``, apply
+on top under a ``[webui]`` section, in that order. See ``plugin_settings()`` in
+``src/settings.py``.
 """
 
-import tomllib
-from pathlib import Path
+from src.settings import plugin_settings
 
-_PLUGIN_SECTIONS = ("webui",)
-
-
-def _load_settings() -> dict:
-    """Walk up from this file to find the nearest settings.toml with a [webui] section."""
-    p = Path(__file__).resolve().parent
-    while p != p.parent:
-        candidate = p / "settings.toml"
-        if candidate.exists():
-            with candidate.open("rb") as f:
-                data = tomllib.load(f)
-            if any(k in data for k in _PLUGIN_SECTIONS):
-                return data
-        p = p.parent
-    return {}
-
-
-_s = _load_settings()
-_webui = _s.get("webui", {})
+_webui = plugin_settings(__file__, "webui")["webui"]
 
 WEBUI_HOST: str = _webui.get("host", "127.0.0.1")
 WEBUI_PORT: int = _webui.get("port", 8000)

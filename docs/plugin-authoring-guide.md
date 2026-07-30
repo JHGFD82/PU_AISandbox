@@ -234,7 +234,9 @@ from src.settings import MYPLUGIN_TEMPERATURE   # works anywhere in the project
 
 Give every constant a name that includes your plugin's. If two plugins define the same constant name, the first one found wins and a warning names both — which one that is depends on load order rather than anything meaningful.
 
-Plugin settings have no personal-override file. Unlike the root `settings.default.toml`, which a person can override in `preferences.toml`, a plugin's `settings.toml` is edited directly.
+Your defaults are the starting point, not the last word. They layer the same way everything else does — your `settings.toml`, then a shared settings file if one is configured, then the person's `preferences.toml`, which wins. So someone can raise your worker count on one machine without editing a file that belongs to your repository.
+
+That layering is why the loader takes `__file__` and your section names rather than you reading the file yourself: your plugin knows which sections it owns, and the package knows where the other layers live.
 
 ---
 

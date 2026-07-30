@@ -1,28 +1,16 @@
-"""Translation plugin settings — loaded from the nearest settings.toml containing plugin sections."""
+"""Translation plugin settings.
 
-import tomllib
-from pathlib import Path
+Defaults come from this plugin's own ``settings.toml``. Anyone can override any
+of them without touching that file — a shared settings file, then
+``preferences.toml``, apply on top, in that order. See ``plugin_settings()`` in
+``src/settings.py``.
+"""
 
-_PLUGIN_SECTIONS = ("translation", "image_translation")
+from src.settings import plugin_settings
 
-
-def _load_settings() -> dict:
-    """Walk up from this file to find the nearest settings.toml with plugin sections."""
-    p = Path(__file__).resolve().parent
-    while p != p.parent:
-        candidate = p / "settings.toml"
-        if candidate.exists():
-            with candidate.open("rb") as f:
-                data = tomllib.load(f)
-            if any(k in data for k in _PLUGIN_SECTIONS):
-                return data
-        p = p.parent
-    return {}
-
-
-_s = _load_settings()
-_translation = _s.get("translation", {})
-_image_translation = _s.get("image_translation", {})
+_s = plugin_settings(__file__, "translation", "image_translation")
+_translation = _s["translation"]
+_image_translation = _s["image_translation"]
 
 # ── Translation ────────────────────────────────────────────────────────────────
 TRANSLATION_TEMPERATURE: float = _translation.get("temperature", 0.5)

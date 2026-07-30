@@ -159,3 +159,91 @@ class TestPluginSettingsLookup:
         monkeypatch.delitem(sys.modules, "pu_plugin.zzz_injected.settings", raising=False)
 
         assert settings_mod.RACY_SETTING == 7
+
+
+class TestPluginSettingsLayering:
+    """plugin_settings() — a plugin's own defaults, overridable like everything else.
+
+    Before this existed each plugin walked up to its own settings.toml and read
+    that one file, so a `[translation]` section in someone's preferences.toml
+    was silently ignored — including in a plugin whose docstring promised it
+    worked.
+    """
+
+    def _layers(self, tmp_path, monkeypatch, shared=None, prefs=None):
+        plugin_dir = tmp_path / "plugins" / "demo"
+        (plugin_dir / "src").mkdir(parents=True)
+        (plugin_dir / "settings.toml").write_text(
+            "[demo]\ntemperature = 0.5\nmax_tokens = 4000\n[other]\nkeep = 1\n"
+        )
+        caller = plugin_dir / "src" / "settings.py"
+        caller.write_text("")
+
+        shared_path = None
+        if shared is not None:
+            shared_path = tmp_path / "shared.toml"
+            shared_path.write_text(shared)
+        prefs_path = None
+        if prefs is not None:
+            prefs_path = tmp_path / "preferences.toml"
+            prefs_path.write_text(prefs)
+
+        monkeypatch.setattr(settings_mod, "_shared_settings_path", shared_path)
+        monkeypatch.setattr(settings_mod, "_PREFERENCES_PATH", prefs_path)
+        return str(caller)
+
+    def test_the_plugins_own_values_are_the_starting_point(self, tmp_path, monkeypatch):
+        caller = self._layers(tmp_path, monkeypatch)
+        got = settings_mod.plugin_settings(caller, "demo")
+        assert got["demo"] == {"temperature": 0.5, "max_tokens": 4000}
+
+    def test_preferences_wins_over_everything(self, tmp_path, monkeypatch):
+        caller = self._layers(
+            tmp_path, monkeypatch,
+            shared="[demo]\ntemperature = 0.9\n",
+            prefs="[demo]\ntemperature = 0.25\n",
+        )
+        assert settings_mod.plugin_settings(caller, "demo")["demo"]["temperature"] == 0.25
+
+    def test_shared_applies_where_preferences_is_silent(self, tmp_path, monkeypatch):
+        caller = self._layers(
+            tmp_path, monkeypatch,
+            shared="[demo]\ntemperature = 0.9\nmax_tokens = 111\n",
+            prefs="[demo]\ntemperature = 0.25\n",
+        )
+        got = settings_mod.plugin_settings(caller, "demo")["demo"]
+        assert (got["temperature"], got["max_tokens"]) == (0.25, 111)
+
+    def test_keys_no_layer_mentions_keep_the_plugins_value(self, tmp_path, monkeypatch):
+        caller = self._layers(tmp_path, monkeypatch, prefs="[demo]\ntemperature = 0.1\n")
+        assert settings_mod.plugin_settings(caller, "demo")["demo"]["max_tokens"] == 4000
+
+    def test_only_the_named_sections_come_back(self, tmp_path, monkeypatch):
+        """A plugin must not be able to read another plugin's settings."""
+        caller = self._layers(tmp_path, monkeypatch, prefs="[webui]\nport = 9999\n")
+        got = settings_mod.plugin_settings(caller, "demo")
+        assert set(got) == {"demo"}
+
+    def test_an_unconfigured_section_is_an_empty_dict_not_missing(self, tmp_path, monkeypatch):
+        """So callers can use .get(key, default) without checking first."""
+        caller = self._layers(tmp_path, monkeypatch)
+        assert settings_mod.plugin_settings(caller, "demo", "never_configured") == {
+            "demo": {"temperature": 0.5, "max_tokens": 4000},
+            "never_configured": {},
+        }
+
+    def test_a_settings_file_without_our_sections_is_skipped(self, tmp_path, monkeypatch):
+        """The walk-up must not stop at a settings.toml belonging to something else."""
+        caller = self._layers(tmp_path, monkeypatch)
+        # An unrelated settings.toml sitting between the plugin and its own file.
+        (tmp_path / "plugins" / "settings.toml").write_text("[unrelated]\nx = 1\n")
+        assert settings_mod.plugin_settings(caller, "demo")["demo"]["temperature"] == 0.5
+
+    def test_an_unreadable_layer_leaves_the_others_standing(self, tmp_path, monkeypatch):
+        """A hand-edited file with a typo must not blank out a plugin's settings."""
+        caller = self._layers(tmp_path, monkeypatch, prefs="[demo\nbroken = ")
+        assert settings_mod.plugin_settings(caller, "demo")["demo"]["temperature"] == 0.5
+
+    def test_no_layers_configured_at_all(self, tmp_path, monkeypatch):
+        caller = self._layers(tmp_path, monkeypatch)
+        assert settings_mod.plugin_settings(caller, "demo")["demo"]["temperature"] == 0.5
