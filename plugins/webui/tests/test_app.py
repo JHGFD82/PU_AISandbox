@@ -1770,7 +1770,9 @@ class TestGuidedSharedSettingsEditor:
         assert data["sections"], "no settings offered at all"
         first = data["sections"][0]
         assert {"section", "sources", "settings"} <= set(first)
-        assert {"key", "value", "explanation", "chosen", "new"} <= set(first["settings"][0])
+        assert {"key", "value", "default", "explanation", "chosen", "new"} <= set(
+            first["settings"][0]
+        )
 
     def test_the_inventory_says_where_each_section_comes_from(self, unlocked_client):
         data = unlocked_client.get("/api/settings/shared-inventory").json()
@@ -1798,7 +1800,20 @@ class TestGuidedSharedSettingsEditor:
         assert decided["chosen"] is True
         assert decided["value"] == "3", "should show the group's value, not the shipped one"
         assert decided["new"] is False
+        # Both values have to survive: unticking a setting shows what it falls
+        # back to, and it can only show that if the shipped value came along.
+        assert decided["default"] != "3", "the shipped value was lost"
+        assert decided["default"], "no shipped value to fall back to"
         assert any(s["new"] for s in retry["settings"]), "the rest of the section is new"
+
+    def test_a_setting_nobody_has_decided_reports_the_same_pair(self, unlocked_client, monkeypatch):
+        """With no group file, what a setting is and what it falls back to are one thing."""
+        from src import settings_store as store_mod
+
+        monkeypatch.setattr(store_mod, "get_shared_settings_path", lambda: None)
+        data = unlocked_client.get("/api/settings/shared-inventory").json()
+        every = [s for sec in data["sections"] for s in sec["settings"]]
+        assert all(s["value"] == s["default"] for s in every)
 
     def test_building_from_choices_returns_a_downloadable_file(self, unlocked_client):
         r = unlocked_client.post(
@@ -1926,10 +1941,33 @@ class TestSharedSettingsPagePresentation:
         fits = (rem * 16 - 16) / (0.78 * 16 * 0.6)
         assert fits >= widest, f"a {rem}rem box holds about {fits:.0f} characters, need {widest}"
 
+    def test_every_value_box_can_be_dragged_taller(self):
+        """The field most likely to hold a lot is the one that looks smallest.
+
+        prompt.default_system_prompt ships as a single sentence, so any rule
+        based on how long a value is today would give it the smallest box —
+        which is the opposite of what a group replacing it with paragraphs
+        needs.
+        """
+        page = self._page()
+        assert "resize: vertical" in page
+        assert 'createElement("textarea")' in page
+        assert 'createElement("input")\n      value.type = "text"' not in page
+
+    def test_a_box_opens_at_the_height_of_its_own_text(self):
+        page = self._page()
+        assert "scrollHeight" in page
+
     def test_the_page_is_wide_enough_for_that_box(self):
         """The Settings modal caps at 720px, which squeezes the column back."""
         page = self._page()
         assert "#page { max-width: 1040px; }" in page
+
+    def test_the_page_says_unticking_is_safe(self):
+        """People will not untick to peek unless told their value survives it."""
+        page = self._page()
+        assert "remembered" in page
+        assert "tick it on again" in page
 
     def test_a_narrow_window_gives_the_value_its_own_row(self):
         page = self._page()

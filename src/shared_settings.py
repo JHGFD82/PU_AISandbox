@@ -292,7 +292,9 @@ def inventory(
         * ``sources`` — which files offer it, for showing where it came from.
         * ``settings`` — one entry per setting, with its ``key``, its ``value``
           as TOML text (the group's if they have decided it, otherwise the
-          shipped default), the author's ``explanation``, ``chosen`` for whether
+          shipped default), its ``default`` — always the shipped value, so a
+          form can show what a setting falls back to when the group stops
+          deciding it — the author's ``explanation``, ``chosen`` for whether
           the group's file already sets it, and ``new`` for whether it appeared
           after that file was written.
     """
@@ -304,11 +306,13 @@ def inventory(
         settings: list = []
         for key, (line, comments) in content["keys"].items():
             decided = decisions.get(section, {}).get(key)
-            value, inline = _split_line(decided if decided is not None else line)
+            default, default_inline = _split_line(line)
+            value, inline = _split_line(decided) if decided is not None else (default, default_inline)
             explanation = " ".join([*comments, inline]).strip()
             settings.append({
                 "key": key,
                 "value": value,
+                "default": default,
                 "explanation": explanation,
                 "chosen": decided is not None,
                 "new": existing is not None and decided is None,

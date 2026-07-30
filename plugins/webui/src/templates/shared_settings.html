@@ -97,16 +97,29 @@
   .setting:first-of-type { border-top: none; }
   .setting .name { font-weight: 600; font-size: 0.85rem; }
   .setting .why { font-size: 0.78rem; color: var(--text-muted); margin-top: 0.15rem; line-height: 1.35; }
-  .setting input[type="text"] {
-    width: 100%; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 0.78rem;
+  /* A box rather than a single line, because the setting most likely to hold a
+     lot of text is the one that looks shortest here: the system prompt ships as
+     one sentence and a group may replace it with paragraphs. Sizing by what a
+     value is today would give that field the smallest box. So every box grows
+     to fit its own content and can be dragged taller, and the short ones sit at
+     one line and look no different from a plain field. */
+  .setting textarea {
+    width: 100%; padding: 0.5rem; border: 1px solid var(--border); border-radius: 6px;
+    background: var(--input-bg); color: var(--text);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.78rem; line-height: 1.45;
+    resize: vertical; overflow: hidden; display: block;
   }
+  /* Unticked means the group is not deciding this one, so the box shows what it
+     falls back to. Greyed to say that is not your value — but still typeable,
+     since typing in it is how you take it over. */
+  .setting textarea.following { color: var(--text-muted); background: var(--bg); }
   /* A value cut off mid-way is a value nobody can check. Once the window is too
      narrow to give the value its 34rem, it drops to a full-width row of its own
      rather than being squeezed further. */
   @media (max-width: 1080px) {
     .setting { grid-template-columns: 1.6rem minmax(0, 1fr); }
-    .setting input[type="text"] { grid-column: 2; }
+    .setting textarea { grid-column: 2; }
   }
   .setting.is-new .name::after {
     content: "NEW"; margin-left: 0.5rem; font-size: 0.62rem; font-weight: 700;
@@ -133,10 +146,16 @@
     <div class="card">
       <p class="hint" id="intro">Loading&hellip;</p>
       <p class="hint">
-        Tick a setting to put it in the file your group follows. Anything left
-        unticked keeps following whatever the sandbox or the plugin ships, which
-        is usually what you want — so a file with nothing ticked changes nothing
-        for anybody.
+        You don't have to work through these. Type in a setting's box and it
+        ticks itself — that's the whole of it. Anything left unticked keeps
+        following whatever the sandbox or the plugin ships, which is usually
+        what you want, so a file with nothing ticked changes nothing for
+        anybody.
+      </p>
+      <p class="hint">
+        It is safe to untick one to see what it was originally: the box goes
+        back to showing the shipped value, and yours is remembered and comes
+        straight back if you tick it on again.
       </p>
       <p class="hint" id="new-note" hidden></p>
       <p><label><input type="checkbox" id="only-new"> Show only settings marked NEW</label></p>
@@ -175,6 +194,21 @@ async function api(path, options) {
 
 function controlId(section, key) { return `s-${section}-${key}`; }
 
+function grow(box) {
+  // Opens at whatever height its own text needs, so a long system prompt is
+  // readable without being dragged first, and a number is still one line.
+  box.style.height = "auto";
+  box.style.height = box.scrollHeight + "px";
+}
+
+function showValue(box, setting, ticked) {
+  // Ticked shows this person's value if they have one; unticked always shows
+  // what the setting falls back to, which is the point of unticking it.
+  box.value = ticked && setting.custom !== null ? setting.custom : setting.default;
+  box.classList.toggle("following", !ticked);
+  grow(box);
+}
+
 function render() {
   const onlyNew = document.getElementById("only-new").checked;
   const host = document.getElementById("sections");
@@ -200,7 +234,6 @@ function render() {
       tick.type = "checkbox";
       tick.id = controlId(sec.section, s.key) + "-on";
       tick.checked = s.chosen;
-      tick.addEventListener("change", updateCount);
 
       const middle = document.createElement("div");
       const name = document.createElement("div");
@@ -214,10 +247,47 @@ function render() {
         middle.appendChild(why);
       }
 
-      const value = document.createElement("input");
-      value.type = "text";
+      const value = document.createElement("textarea");
+      value.rows = 1;
       value.id = controlId(sec.section, s.key);
-      value.value = s.value;
+      // Held on the setting rather than in the box, so unticking can show the
+      // shipped value without losing what this person typed. Only a setting the
+      // group already decided starts with one.
+      if (s.custom === undefined) s.custom = s.chosen ? s.value : null;
+      showValue(value, s, tick.checked);
+
+      // Typing is the tick. Working down a list of forty checkboxes is the part
+      // that puts people off, and it carries no information the typing didn't
+      // already give: a value you bothered to change is a value you want.
+      value.addEventListener("input", () => {
+        const flattened = value.value.replace(/[\r\n]+/g, " ");
+        if (flattened !== value.value) value.value = flattened;
+        tick.checked = true;
+        s.chosen = true;
+        s.custom = value.value;
+        value.classList.remove("following");
+        grow(value);
+        updateCount();
+      });
+
+      // A settings file writes a line break as \n inside the quotation marks, so
+      // that is what Enter puts there. Typed into the box directly it would end
+      // the line and the file would not read back — which is the one way a
+      // person writing a long system prompt would find that out.
+      value.addEventListener("keydown", event => {
+        if (event.key !== "Enter") return;
+        event.preventDefault();
+        if (!/^\s*"/.test(value.value)) return;
+        const at = value.selectionStart;
+        value.setRangeText("\\n", at, value.selectionEnd, "end");
+        value.dispatchEvent(new Event("input"));
+      });
+
+      tick.addEventListener("change", () => {
+        s.chosen = tick.checked;
+        showValue(value, s, tick.checked);
+        updateCount();
+      });
 
       row.appendChild(tick);
       row.appendChild(middle);
@@ -226,6 +296,9 @@ function render() {
     });
     host.appendChild(card);
   });
+  // Only now are the boxes on the page; a box that is not cannot measure its
+  // own text, and every one of them would open at no height at all.
+  host.querySelectorAll("textarea").forEach(grow);
   updateCount();
 }
 
