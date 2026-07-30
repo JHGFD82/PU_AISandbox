@@ -240,6 +240,16 @@ class Conversation:
                     ``None`` for the model's default. Same persistence as
                     ``temperature``, but (unlike temperature/top-p) every
                     model accepts a max-tokens cap of some kind.
+        system_prompt: Standing instructions for the model in this conversation
+                       — "answer in French", "you are a palaeographer reading
+                       19th-century German hands" — or ``None`` for none. Sent
+                       ahead of the messages on *every* turn, not just the
+                       first, so it keeps applying however long the
+                       conversation runs; a model is given the whole
+                       conversation afresh each time and remembers nothing on
+                       its own. Kept per conversation, like the settings above,
+                       so two conversations can have different instructions and
+                       neither loses them on reload.
     """
 
     id: str
@@ -253,6 +263,7 @@ class Conversation:
     temperature: Optional[float] = None
     top_p: Optional[float] = None
     max_tokens: Optional[int] = None
+    system_prompt: Optional[str] = None
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
@@ -273,6 +284,7 @@ class Conversation:
             temperature=data.get("temperature"),
             top_p=data.get("top_p"),
             max_tokens=data.get("max_tokens"),
+            system_prompt=data.get("system_prompt"),
         )
 
     def api_messages(self) -> list[dict[str, str]]:
