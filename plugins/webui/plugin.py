@@ -82,6 +82,7 @@ _register("_pu_webui_app", "src/app.py")
 
 from src.config import register_setting
 from src.errors import CLIError
+from src.settings import CHAT_ROLE, TITLE_ROLE  # noqa: E402
 
 # Lets `--show-config` and `python main.py env set/list` discover these two
 # optional values without needing to know anything about the webui plugin
@@ -102,6 +103,13 @@ register_setting(
 
 class WebUiPlugin:
     """Runs the local browser-based chat interface."""
+
+    # Which models this plugin's work should use. Required of every plugin —
+    # see src/runtime/model_role.py and the loader's _declares_model_roles().
+    model_roles = {
+        "chat": CHAT_ROLE,
+        "title": TITLE_ROLE,
+    }
 
     commands: list[str] = ["webui"]
     requires_professor: bool = False

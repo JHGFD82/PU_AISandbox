@@ -9,15 +9,13 @@ import re
 from typing import Any, Optional
 
 from ..models import (
-    get_default_model,
     get_model_system_role,
-    maybe_sync_model_pricing,
-    resolve_model,
 )
 from ..tracking.token_tracker import TokenTracker
 from .base_service import BaseService
 from .prompts import TranscriptionReviewPromptSpec
 from ..settings import (
+    TRANSCRIPTION_REVIEW_ROLE,
     TRANSCRIPTION_REVIEW_TEMPERATURE,
     TRANSCRIPTION_REVIEW_TOP_P,
     TRANSCRIPTION_REVIEW_MAX_TOKENS,
@@ -37,6 +35,10 @@ class TranscriptionReviewService(BaseService):
     parameters for additional scripts or workflows.
     """
 
+    # Which models this service's work should use — see
+    # ``src/runtime/model_role.py``. Read by ``BaseService._get_model()``.
+    model_role = TRANSCRIPTION_REVIEW_ROLE
+
     def __init__(
         self,
         api_key: str,
@@ -48,13 +50,6 @@ class TranscriptionReviewService(BaseService):
         max_tokens: Optional[int] = None,
     ):
         super().__init__(api_key, professor, token_tracker, None, model, temperature, top_p, max_tokens)
-
-    def _get_model(self) -> str:
-        """Get the model to use for transcription review, preferring the catalog's transcription_review default."""
-        review_default = get_default_model("transcription_review")
-        model = resolve_model(requested_model=self.custom_model, prefer_model=review_default)
-        maybe_sync_model_pricing(model)
-        return model
 
     def build_prompts(
         self,

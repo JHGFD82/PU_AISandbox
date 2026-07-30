@@ -130,7 +130,13 @@ class DispatchPlugin:
     # a real translate/transcribe invocation might apply simply aren't part
     # of the composer's field set.
 
-    _PROXIED_UI_ATTRS = ("ui_action", "run_ui_action", "preview_ui_action")
+    # Optional attributes worth forwarding to the primary plugin. The UI three
+    # so a composer action isn't hidden in exactly the installations that have a
+    # language extension; model_roles so that asking a merged command which
+    # models it uses gets the answer the primary declared, rather than nothing.
+    _PROXIED_UI_ATTRS = (
+        "ui_action", "run_ui_action", "preview_ui_action", "model_roles",
+    )
 
     def __getattr__(self, name: str):
         """Forward a small allowlist of optional attributes to the primary plugin.

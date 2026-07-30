@@ -1,0 +1,14 @@
+# settings.toml — Prompt plugin settings.
+#
+# Edit these to change what the `prompt` command does by default. You can also
+# override any of them without touching this file: put a [prompt_command]
+# section in your own preferences.toml (in your files folder) and only the
+# lines you write there change.
+
+[prompt_command]
+# Which models to use, best first. More than one on purpose: providers retire
+# models, and naming a second and third choice means the command carries on
+# working instead of stopping until someone picks a new default. If none of
+# them are left, the sandbox falls back to the cheapest model that fits —
+# which keeps things working, but chooses on price alone.
+models = ["gpt-4o-mini", "gpt-4.1-nano", "gemini-2.5-flash-lite", "gpt-4o"]

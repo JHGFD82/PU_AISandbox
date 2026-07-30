@@ -80,12 +80,63 @@ plugin = MyPlugin()
 | Member | Default | Effect |
 |--------|---------|--------|
 | `requires_professor: bool` | `True` | Set `False` if your command doesn't spend one person's API budget, so it can be run without a netID first. `webui` sets this, because which professor is active is chosen later, in the browser. |
+| `model_roles: dict[str, ModelRole]` | **required** | Which models this plugin's work should use — see [Which models your plugin uses](#which-models-your-plugin-uses). A plugin without it is refused at load. |
 | `handles: list[str]` | absent | Extension plugins only — the languages you own. Match the base command's own form: short codes for `translate`, full names for `transcribe` (see [Writing an extension plugin](#writing-an-extension-plugin)). |
 | `register_command_flags(parser)` | absent | Extension plugins only — appends your flags to the base plugin's parser. |
 | `get_peer_guidance(token)` | absent | Extension plugins only — contributes destination-side prompt guidance when your language is the *target*. |
 | `ui_action` / `run_ui_action` / `preview_ui_action` | absent | Gives your command a form in the web interface — see [A button in the web interface](#a-button-in-the-web-interface). |
 
 None of the optional members are part of the `ModePlugin` protocol. Each is read with `getattr(plugin, "...", None)`, so declaring none of them leaves your plugin command-line only.
+
+---
+
+## Which models your plugin uses
+
+**This is required.** A plugin that doesn't declare it is refused at load, with a message saying what to add.
+
+The reason is not bureaucracy. Without a declaration the sandbox has nothing to go on and falls through to the cheapest model in the catalogue — which keeps working, so nobody notices, and the answers quietly come from whichever model happens to be least expensive. That is how the `translate` command came to default to a four-billion-parameter model with nothing but a line in the terminal to say so.
+
+Declare one **role** per distinct job your plugin does. Translating a document and translating a scan are two jobs: one needs to read text, the other needs to read a picture.
+
+```python
+# plugins/myplugin/src/settings.py
+from src.runtime.model_role import ModelRole
+from src.settings import plugin_settings
+
+_s = plugin_settings(__file__, "myplugin")["myplugin"]
+
+MYPLUGIN_ROLE = ModelRole(
+    models=_s.get("models", ["gpt-4o", "gemini-2.5-pro", "gpt-4o-mini"]),
+)
+MYPLUGIN_SCAN_ROLE = ModelRole(
+    models=_s.get("scan_models", ["gpt-5", "gpt-4o"]),
+    requires_vision=True,      # it is reading a picture
+)
+```
+
+```python
+# plugins/myplugin/plugin.py
+from src.settings import MYPLUGIN_ROLE, MYPLUGIN_SCAN_ROLE
+
+class MyPlugin:
+    model_roles = {"myplugin": MYPLUGIN_ROLE, "myplugin_scan": MYPLUGIN_SCAN_ROLE}
+```
+
+```python
+# plugins/myplugin/src/services/my_service.py
+class MyService(BaseService):
+    model_role = MYPLUGIN_ROLE      # BaseService._get_model() reads this
+```
+
+That is the whole wiring. `BaseService._get_model()` honours a model named on the command line first, then works down your list, and only then falls back to the cheapest model that fits — logging which one it used and why.
+
+**Why a list rather than one name.** Providers retire models. Naming a second and third choice means your command carries on working instead of stopping until someone reconfigures it. Every name should be one you'd be content to see used.
+
+**Why read it from settings** rather than writing it into the code: that's what lets someone change it without editing your repository. See [Plugin settings](#plugin-settings).
+
+**`requires_vision`** is enforced before price, so a job that reads pictures can never be handed a text-only model however cheap it is.
+
+**A plugin that calls no AI model** says so explicitly with `model_roles = {}`. That's accepted — the point is that the decision was made rather than forgotten.
 
 ---
 

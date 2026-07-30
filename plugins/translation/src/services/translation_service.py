@@ -27,9 +27,6 @@ from pdfminer.pdfpage import PDFPage
 from ..models import (
     get_model_system_role,
     OutputOptions,
-    get_default_model,
-    resolve_model,
-    maybe_sync_model_pricing,
 )
 from .api_errors import APISignal
 from .base_service import BaseService
@@ -41,6 +38,7 @@ from ..runtime.ui_action import PageTextCallback, ProgressCallback
 from ..tracking.token_tracker import TokenTracker
 from .constants import PAGE_DELAY_SECONDS, MAX_PARALLEL_WORKERS
 from ..settings import (
+    TRANSLATION_ROLE,
     TRANSLATION_TEMPERATURE,
     TRANSLATION_MAX_TOKENS,
     TRANSLATION_TOP_P,
@@ -63,6 +61,10 @@ class TranslationService(BaseService):
     AI-calling service.
     """
 
+    # Which models this service's work should use — see
+    # ``src/runtime/model_role.py``. Read by ``BaseService._get_model()``.
+    model_role = TRANSLATION_ROLE
+
     def __init__(self, api_key: str, professor: Optional[str] = None, token_tracker: Optional[TokenTracker] = None, token_tracker_file: Optional[str] = None, model: Optional[str] = None, temperature: Optional[float] = None, top_p: Optional[float] = None, max_tokens: Optional[int] = None):
         """Set up a translation service for one professor's request.
 
@@ -81,20 +83,6 @@ class TranslationService(BaseService):
         # Tracks API/connection errors batched for summary in parallel mode
         self._api_error_count: int = 0
         self._api_error_lock = threading.Lock()
-
-    def _get_model(self) -> str:
-        """Decide which AI model to use for this translation, syncing its price if needed.
-
-        Uses the model the user explicitly requested if one was given,
-        otherwise falls back to the catalog's configured translation
-        default. Also makes sure the model's price is up to date before
-        returning it, since pricing feeds directly into per-professor
-        budget tracking.
-        """
-        translation_default = get_default_model("translation")
-        model = resolve_model(requested_model=self.custom_model, prefer_model=translation_default)
-        maybe_sync_model_pricing(model)
-        return model
 
     def _call_translation_api(self, model: str, system_role: str,
                                system_prompt: str, user_prompt: str) -> Any:

@@ -47,6 +47,59 @@ def load_plugins(plugins_dir: Path) -> "dict[str, ModePlugin]":
     return result
 
 
+
+def _declares_model_roles(p: object, plugin_name: str) -> bool:
+    """Check that a plugin has said which models its work should use.
+
+    Required, and deliberately so. Without a declaration the sandbox has
+    nothing to go on and falls through to the cheapest model in the catalog —
+    which keeps working, so nobody notices, and the answers quietly come from
+    whichever model happens to be least expensive. That is how a translation
+    command ended up defaulting to a four-billion-parameter model with only a
+    line in the terminal to say so.
+
+    A plugin that genuinely calls no AI model says so with an empty
+    ``model_roles = {}``. That is accepted: the point is that the decision was
+    made rather than forgotten.
+
+    Args:
+        p: The plugin object being loaded.
+        plugin_name: Its directory name, for the message.
+
+    Returns:
+        ``True`` if the plugin may load. ``False`` if it may not, with the
+        reason and the fix already logged.
+    """
+    roles = getattr(p, "model_roles", None)
+    if roles is None:
+        logger.error(
+            "Plugin '%s': no 'model_roles' declared — skipped. Every plugin must say "
+            "which models its work should use, because without it the sandbox falls "
+            "back to whichever model is cheapest. Add a dict of role name to "
+            "ModelRole (see src/runtime/model_role.py), or 'model_roles = {}' if this "
+            "plugin calls no AI model at all.",
+            plugin_name,
+        )
+        return False
+
+    if not isinstance(roles, dict):
+        logger.error(
+            "Plugin '%s': 'model_roles' must be a dict of role name to ModelRole, "
+            "not %s — skipped.",
+            plugin_name, type(roles).__name__,
+        )
+        return False
+
+    for role_name, role in roles.items():
+        if not hasattr(role, "models") or not getattr(role, "models", None):
+            logger.error(
+                "Plugin '%s': model role '%s' names no models — skipped. Give it a "
+                "ModelRole with at least one model name, best first.",
+                plugin_name, role_name,
+            )
+            return False
+    return True
+
 def _load_one(
     plugin_name: str,
     plugin_file: Path,
@@ -108,6 +161,9 @@ def _load_one(
         logger.warning(
             "Plugin '%s': 'commands' list is empty — skipped.", plugin_name
         )
+        return
+
+    if not _declares_model_roles(p, plugin_name):
         return
 
     for cmd in p.commands:

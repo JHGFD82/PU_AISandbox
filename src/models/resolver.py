@@ -1,16 +1,19 @@
 """Chooses which AI model to use for a request, with a clear order of fallbacks."""
 
 import logging
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from . import catalog as _catalog
 from . import pricing as _pricing
+
+if TYPE_CHECKING:  # pragma: no cover - import only for type checking
+    from ..runtime.model_role import ModelRole
 
 
 def resolve_model(
     requested_model: Optional[str] = None,
     *,
-    prefer_model: Optional[str] = None,
+    role: Optional["ModelRole"] = None,
     require_vision: bool = False,
 ) -> str:
     """Decide which AI model to actually use, given what was requested and what's preferred.
@@ -21,10 +24,9 @@ def resolve_model(
     fixed list of fallbacks until it finds a model that will actually work:
 
     1. The model explicitly requested, if it's valid and usable.
-    2. The mode-specific preferred model (e.g. the translation or OCR
-       default), if valid and usable.
-    3. A neutral, general-purpose fallback model.
-    4. The first usable model found anywhere in the price catalog.
+    2. Each model the calling job asked for, in the order it named them.
+    3. The cheapest model in the catalog that fits.
+    4. Anything at all that fits, reached only when no model carries a price.
 
     Args:
         requested_model: The model name the user asked for, if any (e.g.
@@ -32,12 +34,17 @@ def resolve_model(
                          format (e.g. ``'openai/gpt-4o'``), which triggers
                          automatic price lookup and registration if the model
                          isn't already in the catalog.
-        prefer_model: The mode's own default model to fall back to if no
-                      model was explicitly requested (e.g. the value
-                      configured for OCR or translation).
+        role: What the calling job wants — the models it prefers, best first,
+              and whether they have to be able to read images. Belongs to the
+              plugin doing the work (see ``src/runtime/model_role.py``); this
+              function is told the preference rather than holding one, which is
+              what keeps a new plugin from needing a change here. ``None``
+              means no preference, so resolution goes straight to price.
         require_vision: Whether the chosen model must be able to read images,
-                        not just text. Set to ``True`` for image-based
-                        commands like OCR.
+                        not just text. Usually left alone and taken from
+                        *role*; passed directly only by callers that have no
+                        role, such as the web interface picking a default for a
+                        conversation that may carry a document.
 
     Returns:
         The name of the model to use for this request (e.g. ``'gpt-4o'``).
@@ -47,6 +54,9 @@ def resolve_model(
                     doesn't support image input when required, or if no
                     usable model can be found at all.
     """
+    preferred: list[str] = list(role.models) if role is not None else []
+    require_vision = require_vision or (role.requires_vision if role is not None else False)
+
     available_models = _catalog.get_available_models()
     compatibility_label = "vision-capable" if require_vision else "configured"
     suggestion = (
@@ -97,11 +107,23 @@ def resolve_model(
             )
         return requested_model
 
-    # 2) the mode's own preferred model, if it is still usable
-    if prefer_model:
-        resolved = resolve_candidate(prefer_model)
+    # 2) the models this job asked for, best first. The list belongs to the
+    #    plugin doing the work — this function is told the preference, it does
+    #    not hold one, so a new plugin never means editing anything here.
+    for position, candidate in enumerate(preferred):
+        resolved = resolve_candidate(candidate)
         if resolved:
+            if position > 0:
+                logging.warning(
+                    f"'{preferred[0]}' is no longer available, so '{resolved}' was used "
+                    "instead. Change the list in the plugin's settings to choose differently."
+                )
             return resolved
+    if preferred:
+        logging.warning(
+            f"None of the models asked for ({', '.join(preferred)}) are available; "
+            "falling back to the cheapest one that fits."
+        )
 
     # 3) the cheapest model that can do the job. No model name is written down
     #    here on purpose: a hard-coded fallback stops working the day its
@@ -110,18 +132,18 @@ def resolve_model(
     #    working, and errs towards the least expensive option rather than
     #    whichever model happens to sort first.
     cheapest = _catalog.cheapest_model(require_vision=require_vision)
-    if cheapest and cheapest != prefer_model:
+    if cheapest and cheapest not in preferred:
         logging.warning(
             f"No preferred model was available, so '{cheapest}' was chosen as the cheapest "
-            f"{compatibility_label} model in the catalog. Set config.defaults in "
-            "model_catalog.json to choose deliberately."
+            f"{compatibility_label} model in the catalog. Name the models you want in the "
+            "owning plugin's settings to choose deliberately."
         )
         return cheapest
 
     # 4) anything at all that fits — reached only when no model in the catalog
     #    carries a usable price, so the ranking above had nothing to sort.
     for model in available_models:
-        if model == prefer_model:
+        if model in preferred:
             continue
         resolved = resolve_candidate(model)
         if resolved:

@@ -17,8 +17,7 @@ from typing import Any, Optional
 
 from ..models import (
     get_model_system_role, model_supports_vision, get_vision_capable_models,
-    get_model_max_completion_tokens, resolve_model, get_default_model,
-    maybe_sync_model_pricing,
+    get_model_max_completion_tokens,
 )
 from .base_service import BaseService
 from ..processors.image_processor import ImageProcessor
@@ -26,7 +25,7 @@ from ..tracking.token_tracker import TokenTracker
 from .constants import MAX_RETRIES
 from .prompts import ImageTranslationPromptSpec
 
-from ..settings import IMAGE_TRANSLATION_MAX_TOKENS, IMAGE_TRANSLATION_TEMPERATURE
+from ..settings import IMAGE_TRANSLATION_ROLE, IMAGE_TRANSLATION_MAX_TOKENS, IMAGE_TRANSLATION_TEMPERATURE
 
 
 class ImageTranslationService(BaseService):
@@ -41,6 +40,10 @@ class ImageTranslationService(BaseService):
     Returns both the transcribed original-language text and its translation,
     so the caller can present or save either one, or both.
     """
+
+    # Which models this service's work should use — see
+    # ``src/runtime/model_role.py``. Read by ``BaseService._get_model()``.
+    model_role = IMAGE_TRANSLATION_ROLE
 
     def __init__(
         self,
@@ -62,28 +65,6 @@ class ImageTranslationService(BaseService):
         super().__init__(api_key, professor, token_tracker, token_tracker_file, model, temperature, top_p, max_tokens)
         self.image_processor = ImageProcessor()
         self.tables: bool = False
-
-    def _get_model(self) -> str:
-        """Decide which vision-capable AI model to use, syncing its price if needed.
-
-        Uses the model the user explicitly requested if one was given (as
-        long as it supports reading images), otherwise falls back to the
-        catalog's configured image-translation default. Also makes sure the
-        model's price is up to date before returning it.
-        """
-        img_trans_default = get_default_model("image_translation")
-        model = resolve_model(
-            requested_model=self.custom_model,
-            prefer_model=img_trans_default,
-            require_vision=True,
-        )
-        maybe_sync_model_pricing(model)
-        if not self.custom_model and model != img_trans_default:
-            logging.warning(
-                f"Preferred image translation model '{img_trans_default}' not available. "
-                f"Using '{model}' instead."
-            )
-        return model
 
     def _get_max_tokens(self, model: str) -> int:
         """Decide the maximum response length to request from the model, in tokens.

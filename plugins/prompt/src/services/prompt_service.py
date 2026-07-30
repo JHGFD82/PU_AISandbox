@@ -43,9 +43,14 @@ from .api_errors import handle_api_errors  # type: ignore[import]
 from .base_service import BaseService  # type: ignore[import]
 
 
-from ..settings import (  # type: ignore[import]
+# Absolute rather than ``..settings``: this plugin has a settings module of its
+# own now, and a relative import from this file would mean that one. Four of
+# these five live in the sandbox's own settings; PROMPT_ROLE is this plugin's,
+# and reaches src.settings through its __getattr__ delegation.
+from src.settings import (  # type: ignore[import]
     DEFAULT_SYSTEM_PROMPT,
     PROMPT_MAX_TOKENS,
+    PROMPT_ROLE,
     PROMPT_TEMPERATURE,
     PROMPT_TOP_P,
 )
@@ -53,6 +58,10 @@ from ..settings import (  # type: ignore[import]
 
 class PromptService(BaseService):
     """Sends custom prompts to the AI model and returns the response."""
+
+    # Which models this service's work should use — see
+    # ``src/runtime/model_role.py``. Read by ``BaseService._get_model()``.
+    model_role = PROMPT_ROLE
 
     def __init__(
         self,

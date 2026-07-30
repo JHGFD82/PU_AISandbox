@@ -5,9 +5,8 @@ import os
 from typing import Optional, Any
 
 from ..models import (
-    model_supports_vision, get_vision_capable_models, resolve_model,
-    get_model_system_role,
-    get_model_max_completion_tokens, maybe_sync_model_pricing, get_default_model,
+    model_supports_vision, get_vision_capable_models, get_model_system_role,
+    get_model_max_completion_tokens,
 )
 from .base_service import BaseService
 from ..console import print_pass_result
@@ -17,6 +16,7 @@ from .constants import MAX_RETRIES
 from .prompts import OcrPromptSpec
 
 from ..settings import (
+    OCR_ROLE,
     OCR_TEMPERATURE,
     OCR_MAX_TOKENS,
     OCR_TOP_P,
@@ -32,6 +32,10 @@ class ImageProcessorService(BaseService):
     workflow-specific OCR options.
     """
 
+    # Which models this service's work should use — see
+    # ``src/runtime/model_role.py``. Read by ``BaseService._get_model()``.
+    model_role = OCR_ROLE
+
     def __init__(
         self,
         api_key: str,
@@ -46,19 +50,6 @@ class ImageProcessorService(BaseService):
         super().__init__(api_key, professor, token_tracker, token_tracker_file,
                          model, temperature, top_p, max_tokens)
         self.image_processor = ImageProcessor()
-
-    def _get_model(self) -> str:
-        """Get the model to use for OCR, preferring custom model if specified and supports vision."""
-        ocr_default = get_default_model("ocr")
-        model = resolve_model(
-            requested_model=self.custom_model,
-            prefer_model=ocr_default,
-            require_vision=True,
-        )
-        maybe_sync_model_pricing(model)
-        if not self.custom_model and model != ocr_default:
-            logging.warning(f"OCR default model '{ocr_default}' not available; using '{model}' instead.")
-        return model
 
     def _create_ocr_prompt(
         self,

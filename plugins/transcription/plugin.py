@@ -115,6 +115,7 @@ _register(
 from src.cli import add_common_flags, add_notes_flags           # noqa: E402
 from src.config import parse_single_language_code, register_language, LANGUAGE_MAP  # noqa: E402
 from src.errors import CLIError                                    # noqa: E402
+from src.settings import OCR_ROLE, TRANSCRIPTION_REVIEW_ROLE  # noqa: E402
 from src.runtime.ui_action import (  # noqa: E402
     PageTextCallback, ProgressCallback, UiAction, UiField, UiJobResult, UiPromptPreview,
     apply_extension_ui_hooks,
@@ -189,6 +190,13 @@ class TranscriptionPlugin:
     plugins alongside this one — see the module docstring above for how
     extensions plug into these same two commands.
     """
+
+    # Which models this plugin's work should use. Required of every plugin —
+    # see src/runtime/model_role.py and the loader's _declares_model_roles().
+    model_roles = {
+        "ocr": OCR_ROLE,
+        "transcription_review": TRANSCRIPTION_REVIEW_ROLE,
+    }
 
     commands: list[str] = ["transcribe", "transcription_review"]
 

@@ -12,10 +12,12 @@ from __future__ import annotations
 import logging
 from typing import Any, Optional
 
-from src.models import cheapest_model, get_default_model, get_model_system_role
+from src.models import get_model_system_role, resolve_model
 from src.services.api_errors import handle_api_errors
 from src.services.base_service import BaseService
-from src.settings import PROMPT_MAX_TOKENS, PROMPT_TEMPERATURE, PROMPT_TOP_P
+from src.settings import (
+    CHAT_ROLE, PROMPT_MAX_TOKENS, PROMPT_TEMPERATURE, PROMPT_TOP_P, TITLE_ROLE,
+)
 
 
 class ChatService(BaseService):
@@ -28,6 +30,10 @@ class ChatService(BaseService):
     should still remember. ``conversation.py`` is what keeps that history
     from growing without bound (conversation compaction).
     """
+
+    # Which models this service's work should use — see
+    # ``src/runtime/model_role.py``. Read by ``BaseService._get_model()``.
+    model_role = CHAT_ROLE
 
     def send_message(
         self,
@@ -253,7 +259,7 @@ class ChatService(BaseService):
         # this role must not end up writing five-word titles with a frontier
         # model. Only if the catalog has no priced model at all does the
         # conversation's own model get used.
-        model = get_default_model("title") or cheapest_model() or self._get_model()
+        model = resolve_model(requested_model=None, role=TITLE_ROLE)
         excerpt = "\n\n".join(f"{m['role']}: {m['content']}" for m in messages[:4])
         prompt = (
             "Write a short, descriptive title for the conversation below — four to eight words, "

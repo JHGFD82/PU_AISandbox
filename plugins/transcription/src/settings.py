@@ -6,6 +6,7 @@ of them without touching that file — a shared settings file, then
 ``src/settings.py``.
 """
 
+from src.runtime.model_role import ModelRole
 from src.settings import plugin_settings
 
 _s = plugin_settings(__file__, "ocr", "transcription_review")
@@ -28,3 +29,12 @@ DEFAULT_OCR_PASSES: int = _ocr.get("default_ocr_passes", 1)
 TRANSCRIPTION_REVIEW_TEMPERATURE: float = _transcription_review.get("temperature", 0.1)
 TRANSCRIPTION_REVIEW_TOP_P: float = _transcription_review.get("top_p", 0.5)
 TRANSCRIPTION_REVIEW_MAX_TOKENS: int = _transcription_review.get("max_tokens", 4000)
+
+# ── Which models each job should use ──────────────────────────────────────────
+OCR_ROLE = ModelRole(
+    models=_ocr.get("models", ["gpt-4o", "gemini-2.5-flash", "gpt-4o-mini"]),
+    requires_vision=True,   # it is reading an image
+)
+TRANSCRIPTION_REVIEW_ROLE = ModelRole(
+    models=_transcription_review.get("models", ["gpt-4o", "gpt-4o-mini"]),
+)

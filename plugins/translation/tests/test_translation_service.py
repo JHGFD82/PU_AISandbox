@@ -73,31 +73,33 @@ class TestTranslationServiceModel:
 
     def test_get_model_returns_string(self, monkeypatch):
         monkeypatch.setattr("src.services.base_service.get_model_max_completion_tokens", lambda m, d: d)
-        from src.services import translation_service as ts_mod
-        monkeypatch.setattr(ts_mod, "resolve_model", lambda **_: "gpt-4o")
-        monkeypatch.setattr(ts_mod, "maybe_sync_model_pricing", lambda m: None)
-        monkeypatch.setattr(ts_mod, "get_default_model", lambda _: "gpt-4o")
+        monkeypatch.setattr("src.services.base_service.resolve_model", lambda **_: "gpt-4o")
+        monkeypatch.setattr("src.services.base_service.maybe_sync_model_pricing", lambda m: None)
         svc = TranslationService("fake-key")
         model = svc._get_model()
         assert isinstance(model, str)
         assert len(model) > 0
 
-    def test_get_model_prefers_translation_default(self, monkeypatch):
+    def test_get_model_passes_this_services_declared_role(self, monkeypatch):
+        """The plugin owns the preference; the service hands it to the resolver.
+
+        Nothing in src/ holds a list of what this plugin wants, which is the
+        whole point — so what reaches resolve_model must be the role declared
+        in this plugin's own settings.
+        """
         monkeypatch.setattr("src.services.base_service.get_model_max_completion_tokens", lambda m, d: d)
-        from src.services import translation_service as ts_mod
-        monkeypatch.setattr(ts_mod, "get_default_model", lambda role: "catalog-translation-default")
-        monkeypatch.setattr(ts_mod, "maybe_sync_model_pricing", lambda m: None)
+        monkeypatch.setattr("src.services.base_service.maybe_sync_model_pricing", lambda m: None)
         captured = {}
 
-        def _fake_resolve_model(*, requested_model=None, prefer_model=None, **_):
-            captured["prefer_model"] = prefer_model
-            return prefer_model or "fallback"
+        def _fake_resolve_model(*, requested_model=None, role=None, **_):
+            captured["role"] = role
+            return role.models[0] if role else "fallback"
 
-        monkeypatch.setattr(ts_mod, "resolve_model", _fake_resolve_model)
-        svc = TranslationService("fake-key")
-        model = svc._get_model()
-        assert captured["prefer_model"] == "catalog-translation-default"
-        assert model == "catalog-translation-default"
+        monkeypatch.setattr("src.services.base_service.resolve_model", _fake_resolve_model)
+        model = TranslationService("fake-key")._get_model()
+        assert captured["role"] is TranslationService.model_role
+        assert captured["role"].models, "the declared role must name at least one model"
+        assert model == captured["role"].models[0]
 
 
 # ---------------------------------------------------------------------------
@@ -508,10 +510,8 @@ class TestImageTranslationServiceModel:
 
     def test_get_model_returns_string(self, monkeypatch):
         monkeypatch.setattr("src.services.base_service.get_model_max_completion_tokens", lambda m, d: d)
-        from src.services import image_translation_service as its_mod
-        monkeypatch.setattr(its_mod, "resolve_model", lambda **_: "gpt-4o")
-        monkeypatch.setattr(its_mod, "maybe_sync_model_pricing", lambda m: None)
-        monkeypatch.setattr(its_mod, "get_default_model", lambda _: "gpt-4o")
+        monkeypatch.setattr("src.services.base_service.resolve_model", lambda **_: "gpt-4o")
+        monkeypatch.setattr("src.services.base_service.maybe_sync_model_pricing", lambda m: None)
         svc = ImageTranslationService("fake-key")
         model = svc._get_model()
         assert isinstance(model, str)
@@ -835,10 +835,8 @@ class TestImageGetModelWarning:
         monkeypatch.setattr(
             "src.services.base_service.get_model_max_completion_tokens", lambda m, d: d
         )
-        from src.services import image_translation_service as its_mod
-        monkeypatch.setattr(its_mod, "get_default_model", lambda _: "preferred-model")
-        monkeypatch.setattr(its_mod, "resolve_model", lambda **_: "fallback-model")
-        monkeypatch.setattr(its_mod, "maybe_sync_model_pricing", lambda m: None)
+        monkeypatch.setattr("src.services.base_service.resolve_model", lambda **_: "fallback-model")
+        monkeypatch.setattr("src.services.base_service.maybe_sync_model_pricing", lambda m: None)
         svc = ImageTranslationService("fake-key")
         model = svc._get_model()
         assert model == "fallback-model"
@@ -879,9 +877,8 @@ class TestProcessImageTranslation:
             "src.services.base_service.get_model_max_completion_tokens", lambda m, d: d
         )
         from src.services import image_translation_service as its_mod
-        monkeypatch.setattr(its_mod, "resolve_model", lambda **_: "gpt-4o")
-        monkeypatch.setattr(its_mod, "maybe_sync_model_pricing", lambda m: None)
-        monkeypatch.setattr(its_mod, "get_default_model", lambda _: "gpt-4o")
+        monkeypatch.setattr("src.services.base_service.resolve_model", lambda **_: "gpt-4o")
+        monkeypatch.setattr("src.services.base_service.maybe_sync_model_pricing", lambda m: None)
         monkeypatch.setattr(its_mod, "model_supports_vision", lambda m: True)
         monkeypatch.setattr(its_mod, "get_model_system_role", lambda m: "system")
         svc = ImageTranslationService("fake-key")
@@ -905,9 +902,8 @@ class TestProcessImageTranslation:
             "src.services.base_service.get_model_max_completion_tokens", lambda m, d: d
         )
         from src.services import image_translation_service as its_mod
-        monkeypatch.setattr(its_mod, "resolve_model", lambda **_: "text-only-model")
-        monkeypatch.setattr(its_mod, "maybe_sync_model_pricing", lambda m: None)
-        monkeypatch.setattr(its_mod, "get_default_model", lambda _: "text-only-model")
+        monkeypatch.setattr("src.services.base_service.resolve_model", lambda **_: "text-only-model")
+        monkeypatch.setattr("src.services.base_service.maybe_sync_model_pricing", lambda m: None)
         monkeypatch.setattr(its_mod, "model_supports_vision", lambda m: False)
         monkeypatch.setattr(its_mod, "get_vision_capable_models", lambda: ["gpt-4o"])
         svc = ImageTranslationService("fake-key")
@@ -1299,9 +1295,8 @@ class TestProcessImageTranslationRetryPaths:
             "src.services.base_service.get_model_max_completion_tokens", lambda m, d: d
         )
         from src.services import image_translation_service as its_mod
-        monkeypatch.setattr(its_mod, "resolve_model", lambda **_: "gpt-4o")
-        monkeypatch.setattr(its_mod, "maybe_sync_model_pricing", lambda m: None)
-        monkeypatch.setattr(its_mod, "get_default_model", lambda _: "gpt-4o")
+        monkeypatch.setattr("src.services.base_service.resolve_model", lambda **_: "gpt-4o")
+        monkeypatch.setattr("src.services.base_service.maybe_sync_model_pricing", lambda m: None)
         monkeypatch.setattr(its_mod, "model_supports_vision", lambda m: True)
         monkeypatch.setattr(its_mod, "get_model_system_role", lambda m: "system")
         svc = ImageTranslationService("fake-key")
@@ -1401,9 +1396,8 @@ class TestProcessImageTranslationBlankShortCircuit:
             "src.services.base_service.get_model_max_completion_tokens", lambda m, d: d
         )
         from src.services import image_translation_service as its_mod
-        monkeypatch.setattr(its_mod, "resolve_model", lambda **_: "gpt-4o")
-        monkeypatch.setattr(its_mod, "maybe_sync_model_pricing", lambda m: None)
-        monkeypatch.setattr(its_mod, "get_default_model", lambda _: "gpt-4o")
+        monkeypatch.setattr("src.services.base_service.resolve_model", lambda **_: "gpt-4o")
+        monkeypatch.setattr("src.services.base_service.maybe_sync_model_pricing", lambda m: None)
         monkeypatch.setattr(its_mod, "model_supports_vision", lambda m: True)
         monkeypatch.setattr(its_mod, "get_model_system_role", lambda m: "system")
         svc = ImageTranslationService("fake-key")

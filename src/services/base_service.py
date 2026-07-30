@@ -11,7 +11,7 @@ import logging
 import os
 import re
 import time
-from typing import Any, Callable, Optional
+from typing import TYPE_CHECKING, Any, Callable, Optional
 
 from portkey_ai import Portkey
 from collections.abc import Iterator as ABCIterator
@@ -25,6 +25,9 @@ from .api_errors import (
     APISignal, classify_api_error, is_transient_error, rejected_request_field,
 )
 from .constants import MAX_RETRIES, RETRY_DELAY_SECONDS
+
+if TYPE_CHECKING:  # pragma: no cover - import only for type checking
+    from ..runtime.model_role import ModelRole
 
 # Parts of a request that can never be dropped, however a provider phrases its
 # objection. Without this, one badly-worded error could talk the sandbox into
@@ -48,10 +51,19 @@ class BaseService:
     ``TranslationService``, ``ImageProcessorService``) inherit from this class
     and add their own prompt-construction logic on top.
 
-    Subclasses may override ``_get_model()`` to require a vision-capable model
-    or a different default, and are responsible for constructing their own
-    prompts before calling ``_run_with_retry()``.
+    Subclasses set ``model_role`` to say which models their work should use,
+    and are responsible for constructing their own prompts before calling
+    ``_run_with_retry()``.
     """
+
+    # Which models this service's work should use, in order of preference, and
+    # whether they have to be able to read images. Owned by the plugin that
+    # owns the service (see ``src/runtime/model_role.py``) — the sandbox is told
+    # the preference rather than keeping one, so adding a plugin never means
+    # editing anything here. ``None`` means no preference at all, which sends
+    # resolution straight to the cheapest model that fits; that is rarely what
+    # anyone means, so a service that calls a model should set this.
+    model_role: Optional["ModelRole"] = None
 
     def __init__(
         self,
@@ -149,12 +161,20 @@ class BaseService:
         return temperature, top_p, max_tokens
 
     def _get_model(self) -> str:
-        """Resolve and return the model to use, syncing pricing if needed.
+        """Return the model to use, honouring this service's declared preference.
 
-        Subclasses may override this to require vision support or a specific
-        default (e.g. ImageProcessorService, ImageTranslationService).
+        Uses whatever the caller asked for on the command line if they asked
+        for anything; otherwise works down this service's ``model_role`` list
+        and, failing all of it, the cheapest model that fits. Also makes sure
+        the model's price is current before returning, since pricing feeds
+        straight into per-professor budget tracking.
+
+        Subclasses rarely need to override this — setting ``model_role`` is
+        normally the whole of it. ``resolve_model()`` already says which model
+        it fell back to and why, so an override that only logged that is not
+        worth keeping.
         """
-        model = resolve_model(requested_model=self.custom_model)
+        model = resolve_model(requested_model=self.custom_model, role=self.model_role)
         maybe_sync_model_pricing(model)
         return model
 

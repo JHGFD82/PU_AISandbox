@@ -8,11 +8,10 @@ from unittest.mock import patch
 
 import src.models.catalog as catalog_module
 import src.models.pricing as pricing_module
+from src.runtime.model_role import ModelRole
 from src.models import (
     cheapest_model,
     get_available_models,
-    get_default_model,
-    get_role_preferences,
     get_model_catalog_path,
     get_model_max_completion_tokens,
     get_model_pricing,
@@ -211,33 +210,6 @@ class TestConfigValues:
         assert get_monthly_limit() == pytest.approx(250.0)
 
 
-# ---------------------------------------------------------------------------
-# get_default_model
-# ---------------------------------------------------------------------------
-
-class TestGetDefaultModel:
-
-    def test_translation_default(self, mock_catalog):
-        assert get_default_model("translation") == "gpt-4o"
-
-    def test_ocr_default(self, mock_catalog):
-        assert get_default_model("ocr") == "gpt-4o"
-
-    def test_image_translation_default(self, mock_catalog):
-        assert get_default_model("image_translation") == "gpt-5"
-
-    def test_unknown_role_returns_none(self, mock_catalog):
-        assert get_default_model("nonexistent_role") is None
-
-    def test_missing_defaults_section_returns_none(self, monkeypatch):
-        catalog_without_defaults = {
-            "config": {"pricing_unit": 1_000_000, "monthly_limit": 250.0},
-            "models": {"gpt-4o": {"input": 2.75, "output": 11.0, "supports_vision": True}},
-        }
-        monkeypatch.setattr(catalog_module, "load_model_catalog", lambda: catalog_without_defaults)
-        assert get_default_model("translation") is None
-
-
 
 class TestModelSupportsVision:
 
@@ -345,7 +317,7 @@ class TestGetModelMaxCompletionTokens:
 class TestResolveModel:
 
     def test_no_args_returns_the_cheapest_model(self, mock_catalog):
-        """Role defaults are the caller's job via prefer_model.
+        """What models to prefer is the calling plugin's business, passed as a role.
 
         With none given, resolution lands on the cheapest model rather than a
         model named in code — nothing here goes stale when a provider retires
@@ -364,17 +336,16 @@ class TestResolveModel:
         with pytest.raises(ValueError, match="not vision-capable"):
             resolve_model(requested_model="text-only-model", require_vision=True)
 
-    def test_prefer_model_used_over_fallback(self, mock_catalog):
-        # prefer_model is checked before the price-ranked fallback.
-        assert resolve_model(prefer_model="gpt-5") == "gpt-5"
+    def test_the_role_is_used_before_the_price_ranked_fallback(self, mock_catalog):
+        assert resolve_model(role=ModelRole(["gpt-5"])) == "gpt-5"
 
-    def test_prefer_model_ignored_if_not_vision_capable(self, mock_catalog):
+    def test_a_role_model_without_vision_is_skipped_when_vision_is_needed(self, mock_catalog):
         """Skipped for lacking vision, so the cheapest model that HAS it wins.
 
         Note this is not the cheapest model overall — text-only-model is — so
         the capability filter is being applied before the price ranking.
         """
-        assert resolve_model(prefer_model="text-only-model", require_vision=True) == "gpt-4o-mini"
+        assert resolve_model(role=ModelRole(["text-only-model"], requires_vision=True)) == "gpt-4o-mini"
 
     def test_require_vision_skips_non_vision_models(self, mock_catalog):
         result = resolve_model(require_vision=True)
@@ -402,7 +373,7 @@ class TestResolveModel:
             resolve_model(require_vision=True)
 
     def test_requested_model_takes_precedence_over_prefer(self, mock_catalog):
-        assert resolve_model(requested_model="gpt-5", prefer_model="gpt-4o-mini") == "gpt-5"
+        assert resolve_model(requested_model="gpt-5", role=ModelRole(["gpt-4o-mini"])) == "gpt-5"
 
     # --- provider/model format ---
 
@@ -455,7 +426,7 @@ class TestResolveModel:
             },
         }
         monkeypatch.setattr(catalog_module, "load_model_catalog", lambda: ordered_catalog)
-        result = resolve_model(prefer_model="text-only-model", require_vision=True)
+        result = resolve_model(role=ModelRole(["text-only-model"], requires_vision=True))
         assert result == "vision-model"
 
 
@@ -1074,80 +1045,6 @@ class TestRecordRejectedField:
         assert record_rejected_field("never-heard-of-it", "stream_options", "nope") is False
         assert saved == {}
 
-
-# ---------------------------------------------------------------------------
-# Role preference lists — surviving a retired model without being reconfigured
-# ---------------------------------------------------------------------------
-
-class TestGetRolePreferences:
-
-    def _with_defaults(self, monkeypatch, defaults):
-        import copy
-        cat = copy.deepcopy(SAMPLE_CATALOG)
-        cat["config"]["defaults"] = defaults
-        monkeypatch.setattr(catalog_module, "load_model_catalog", lambda: cat)
-
-    def test_a_list_comes_back_in_order(self, monkeypatch):
-        self._with_defaults(monkeypatch, {"chat": ["gpt-4o-mini", "gpt-4o"]})
-        assert get_role_preferences("chat") == ["gpt-4o-mini", "gpt-4o"]
-
-    def test_a_single_name_comes_back_as_a_one_item_list(self, monkeypatch):
-        """Writing one name is a reasonable thing to do by hand, so it must work."""
-        self._with_defaults(monkeypatch, {"chat": "gpt-4o"})
-        assert get_role_preferences("chat") == ["gpt-4o"]
-
-    def test_unconfigured_role_is_empty(self, mock_catalog):
-        assert get_role_preferences("no-such-role") == []
-
-    @pytest.mark.parametrize("junk", [None, 42, {}, "", ["", None, "gpt-4o", 7]])
-    def test_junk_is_filtered_rather_than_raising(self, monkeypatch, junk):
-        """This file is hand-edited, so a wrong type must not break every request."""
-        self._with_defaults(monkeypatch, {"chat": junk})
-        assert get_role_preferences("chat") in ([], ["gpt-4o"])
-
-
-class TestGetDefaultModelFallsForward:
-
-    def _with(self, monkeypatch, defaults, drop=()):
-        import copy
-        cat = copy.deepcopy(SAMPLE_CATALOG)
-        cat["config"]["defaults"] = defaults
-        for name in drop:
-            cat["models"].pop(name, None)
-        monkeypatch.setattr(catalog_module, "load_model_catalog", lambda: cat)
-
-    def test_first_choice_wins_when_present(self, monkeypatch):
-        self._with(monkeypatch, {"chat": ["gpt-4o-mini", "gpt-4o"]})
-        assert get_default_model("chat") == "gpt-4o-mini"
-
-    def test_moves_to_the_next_choice_when_the_first_is_retired(self, monkeypatch, caplog):
-        """The whole point: a provider drops a model and nobody has to intervene."""
-        self._with(monkeypatch, {"chat": ["gpt-4o-mini", "gpt-4o"]}, drop=["gpt-4o-mini"])
-        with caplog.at_level(logging.WARNING):
-            assert get_default_model("chat") == "gpt-4o"
-        # Substituting quietly would change both cost and answer quality.
-        assert "gpt-4o-mini" in caplog.text and "gpt-4o" in caplog.text
-
-    def test_skips_a_choice_that_cannot_read_images_for_a_role_that_needs_to(self, monkeypatch):
-        """'chat' can carry a document, so a text-only first choice is not usable."""
-        self._with(monkeypatch, {"chat": ["text-only-model", "gpt-4o"]})
-        assert get_default_model("chat") == "gpt-4o"
-
-    def test_a_role_without_a_vision_requirement_accepts_a_text_only_model(self, monkeypatch):
-        self._with(monkeypatch, {"title": ["text-only-model", "gpt-4o"]})
-        assert get_default_model("title") == "text-only-model"
-
-    def test_returns_none_and_says_so_when_the_whole_list_is_gone(self, monkeypatch, caplog):
-        self._with(monkeypatch, {"chat": ["gpt-4o-mini"]}, drop=["gpt-4o-mini"])
-        with caplog.at_level(logging.WARNING):
-            assert get_default_model("chat") is None
-        assert "cheapest" in caplog.text.lower()
-
-    def test_unconfigured_role_returns_none_quietly(self, mock_catalog, caplog):
-        """Nothing was asked for, so there is nothing to warn about."""
-        with caplog.at_level(logging.WARNING):
-            assert get_default_model("no-such-role") is None
-        assert caplog.text == ""
 
 
 class TestCheapestModel:

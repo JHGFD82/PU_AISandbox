@@ -61,10 +61,8 @@ class TestTranscriptionReviewServiceModel:
 
     def test_get_model_returns_string(self, monkeypatch):
         svc = self._make_svc(monkeypatch)
-        from src.services import transcription_review_service as trs_mod
-        monkeypatch.setattr(trs_mod, "resolve_model", lambda **_: "gpt-4o")
-        monkeypatch.setattr(trs_mod, "maybe_sync_model_pricing", lambda m: None)
-        monkeypatch.setattr(trs_mod, "get_default_model", lambda _: "gpt-4o")
+        monkeypatch.setattr("src.services.base_service.resolve_model", lambda **_: "gpt-4o")
+        monkeypatch.setattr("src.services.base_service.maybe_sync_model_pricing", lambda m: None)
         model = svc._get_model()
         assert isinstance(model, str)
         assert len(model) > 0

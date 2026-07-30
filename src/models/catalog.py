@@ -18,13 +18,6 @@ from typing import Any, Dict, List, Optional
 
 MODEL_CATALOG_FILE = "model_catalog.json"
 
-# What each role needs from a model beyond simply being in the catalog. Kept in
-# code rather than in the catalog file because it describes what the role *is*
-# — a chat question in the web interface can carry a document, so the model
-# answering it has to be able to read one — rather than a preference anyone
-# should be able to misconfigure into a broken state.
-_ROLES_REQUIRING_VISION: frozenset = frozenset({"chat", "ocr", "image_translation"})
-
 # The parameters that shape how varied a model's wording is. Grouped because
 # providers treat them as a set: a model that refuses one generally refuses all
 # of them.
@@ -548,76 +541,6 @@ def get_model_max_completion_tokens(model: str, default: int) -> int:
     return config["models"].get(model, {}).get("max_completion_tokens", default)
 
 
-def get_role_preferences(role: str) -> list[str]:
-    """Return the models configured for a role, in the order they should be tried.
-
-    A role's entry in the catalog's ``config.defaults`` may be a single model
-    name or a list of them. A list is the useful form: providers retire models,
-    and naming a second and third choice means that when the first disappears
-    the sandbox carries on with the next one instead of stopping to be
-    reconfigured by hand.
-
-    Args:
-        role: The job the model is for — ``'chat'``, ``'title'``,
-              ``'translation'``, ``'ocr'``, ``'image_translation'``,
-              ``'transcription_review'``.
-
-    Returns:
-        The model names in preference order, or an empty list if this role
-        isn't configured. A single configured name comes back as a one-item
-        list, so callers never have to care which form was written.
-    """
-    configured = load_model_catalog().get("config", {}).get("defaults", {}).get(role)
-    if isinstance(configured, str):
-        return [configured] if configured else []
-    if isinstance(configured, list):
-        return [name for name in configured if isinstance(name, str) and name]
-    return []
-
-
-def get_default_model(role: str) -> Optional[str]:
-    """Return the model to use for a role: its first choice that is still available.
-
-    Walks the role's preference list (see ``get_role_preferences()``) and
-    returns the first model that is actually in the catalog and can do what the
-    role needs — reading images, for the roles that require it. Falling past
-    the first choice is logged, because a quietly-substituted model changes
-    both what a request costs and how good the answer is, and someone watching
-    output they didn't expect deserves to know why.
-
-    Args:
-        role: The job the model is for (e.g. ``'chat'``).
-
-    Returns:
-        A model name, or ``None`` if nothing configured for this role remains.
-        ``None`` means "no preference survived" — callers hand it to
-        ``resolve_model()``, which falls back to the cheapest capable model
-        rather than giving up.
-    """
-    models = load_model_catalog()["models"]
-    needs_vision = role in _ROLES_REQUIRING_VISION
-    preferences = get_role_preferences(role)
-
-    for position, name in enumerate(preferences):
-        entry = models.get(name)
-        if entry is None:
-            continue
-        if needs_vision and not entry.get("supports_vision", False):
-            continue
-        if position > 0:
-            logging.warning(
-                f"The preferred model for '{role}' ({preferences[0]}) is no longer in the "
-                f"catalog{' or cannot read images' if needs_vision else ''} — using "
-                f"'{name}' instead. Edit config.defaults in model_catalog.json to change this."
-            )
-        return name
-
-    if preferences:
-        logging.warning(
-            f"None of the models configured for '{role}' ({', '.join(preferences)}) are "
-            "available; falling back to the cheapest model that can do the job."
-        )
-    return None
 
 
 def cheapest_model(require_vision: bool = False) -> Optional[str]:

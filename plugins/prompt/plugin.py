@@ -96,12 +96,16 @@ def _register(module_name: str, rel_path: str) -> None:
             setattr(parent, parts[1], sys.modules[module_name])
 
 
+# Registered first, so the service module below can import PROMPT_ROLE from it
+# via src.settings — see src/settings.py's __getattr__ delegation.
+_register("pu_plugin.prompt.settings", "src/settings.py")
 _register("src.services.prompt_service", "src/services/prompt_service.py")
 
 # ── Imports from the main repo ────────────────────────────────────────────────
 # These are available because the main repo root is always on sys.path.
 from src.cli import add_common_flags                        # shared flag helper  # noqa: E402
 from src.errors import CLIError                             # standard user-facing error  # noqa: E402
+from src.settings import PROMPT_ROLE  # noqa: E402
 from src.output.file_output import FileOutputHandler        # noqa: E402
 
 logger = logging.getLogger(__name__)
@@ -114,6 +118,10 @@ class PromptPlugin:
     configured AI model and prints the response.  Supports dry-run mode,
     output-to-file, and all standard model/sampling flags.
     """
+
+    # Which models this plugin's work should use. Required of every plugin —
+    # see src/runtime/model_role.py and the loader's _declares_model_roles().
+    model_roles = {"prompt": PROMPT_ROLE}
 
     # ── Plugin identity ───────────────────────────────────────────────────────
     commands: list[str] = ["prompt"]

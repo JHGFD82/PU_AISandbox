@@ -129,14 +129,6 @@ This lives in your files folder rather than in `settings.toml` for a practical r
   "config": {
     "pricing_unit": 1000000,
     "monthly_limit": 250.0,
-    "defaults": {
-      "chat": ["gpt-4o-mini", "gemini-2.5-flash-lite", "gpt-4o"],
-      "title": ["gpt-4o-mini", "gpt-4.1-nano", "gemini-2.5-flash-lite"],
-      "translation": ["gpt-4o", "gemini-2.5-pro", "gpt-4o-mini"],
-      "ocr": ["gpt-4o", "gemini-2.5-flash", "gpt-4o-mini"],
-      "image_translation": ["gpt-5", "gpt-4o", "gemini-2.5-pro"],
-      "transcription_review": ["gpt-4o", "gpt-4o-mini"]
-    },
     "provider_map": {
       "google": "vertex-ai",
       "mistral": "mistral-ai"
@@ -160,71 +152,15 @@ This lives in your files folder rather than in `settings.toml` for a practical r
 |-----|------|-------------|
 | `pricing_unit` | int | What the prices are per — `1000000` means prices are per 1M tokens |
 | `monthly_limit` | float | Monthly spending limit in dollars, shown in usage reports. Advisory: see [Token Usage Guide](token-usage-guide.md#what-the-budget-does-and-doesnt-do) |
-| `defaults.<role>` | list of strings | Which model does which job — see [Choosing the model for each job](#choosing-the-model-for-each-job) |
 | `provider_map` | object | Maps a provider shorthand to the name PortKey uses |
 
-### Choosing the model for each job
+### Which model does which job
 
-Each entry under `defaults` names a **role** — a job the sandbox needs a model for — and lists the models to use for it, best first:
+Not set here. Each plugin declares the models its own work should use, and ships them in its own `settings.toml` — so `translate` names its models in `plugins/translation/settings.toml`, and the sandbox itself keeps no list of what any plugin wants. That is what lets a plugin be added without editing anything in `src/`.
 
-| Role | Used for | Must be able to read images |
-|------|----------|------------------------------|
-| `chat` | New conversations in the web interface | Yes — a question there can carry a document |
-| `title` | Writing the short title for a conversation | No |
-| `translation` | `translate` | No |
-| `ocr` | `transcribe` | Yes |
-| `image_translation` | Translating a scan or an image | Yes |
-| `transcription_review` | `transcription_review` | No |
+To change one, override it the same way as any other plugin setting: put the plugin's section in your `preferences.toml` with a `models` line. See [Plugin settings](#plugin-settings), and [`plugin-authoring-guide.md`](plugin-authoring-guide.md#which-models-your-plugin-uses) for what a plugin declares.
 
-**Why a list rather than one name.** Providers retire models. Naming a second and third choice means that when the first one goes, the sandbox moves to the next by itself instead of stopping until someone edits this file. A warning says which model it fell back to, because a quiet substitution changes both what a request costs and how good the answer is.
-
-A single name still works if you'd rather write one — `"translation": "gpt-4o"` is read as a list of one. You just lose the self-healing.
-
-**If a whole list runs out**, the sandbox uses the cheapest model in the catalog that can do the job, and says so. That's a safety net, not a preference: it keeps things working, but it picks on price alone, so the model it lands on may not be one you'd have chosen. A model whose input and output prices are both zero is treated as unpriced and skipped rather than counted as free.
-
-**A role that isn't listed at all** goes straight to that safety net. Adding the roles above to an older catalog is worth doing for that reason — otherwise the choice is made by price rather than by you.
-
-#### `models` entries
-
-| Key | Type | Required | Description |
-|-----|------|----------|-------------|
-| `input` | float | ✅ | Price to read one `pricing_unit` of tokens |
-| `output` | float | ✅ | Price to generate one `pricing_unit` of tokens |
-| `supports_vision` | bool | — | `true` for models that can read images (default `false`) |
-| `portkey_id` | string | — | PortKey routing identifier, e.g. `"openai/gpt-4o"` |
-| `last_sync` | string | — | Timestamp, set automatically after a pricing sync |
-| `max_completion_tokens` | int | — | Per-model cap on response length |
-| `rejects` | object | — | Request fields this model won't accept — see [When a model is awkward](#when-a-model-is-awkward) |
-| `prefers` | object | — | Fields this model needs a non-default *value* for — same section |
-
-### When a model is awkward
-
-Models disagree about what a request may contain. One refuses `temperature`; another rejects `stream_options` outright; a third wants the response-length cap called `max_completion_tokens` and the system message's role called `"developer"`. Two keys describe all of it:
-
-```json
-"gpt-5": {
-  "input": 1.25,
-  "output": 10.0,
-  "supports_vision": true,
-  "rejects": {
-    "temperature": "2026-05-14: unsupported parameter",
-    "top_p":       "2026-05-14: unsupported parameter"
-  },
-  "prefers": {
-    "system_role": "developer",
-    "max_tokens_field": "max_completion_tokens"
-  }
-}
-```
-
-- **`rejects`** — field name to a short note saying when and why. Anything listed here is left out of every request for this model. The note is there so you can tell what the sandbox learned by itself from what you set by hand, and judge whether it's still true.
-- **`prefers`** — for things that were never yes-or-no. `system_role` and `max_tokens_field` are *values*: the question is which of two names the model wants, so a flag couldn't record the answer.
-
-**You rarely need to write either.** When a provider refuses a field it usually names it, and the sandbox records that itself, then retries without it — so the second attempt succeeds and every later request is right first time. Editing by hand is for a model you already know is awkward.
-
-**Nothing expires.** If a provider starts accepting a field again, delete its line from `rejects` and it will be re-learned only if refused again. The dates are there to help you judge how stale a line looks.
-
-These may also be written as individual flags — `fixed_parameters` or `omit_sampling_params` (either means all of `temperature`, `top_p`, `frequency_penalty`, `presence_penalty` are refused), `use_max_completion_tokens`, and `system_role` at the top level. Both spellings are read and mean the same thing; where they disagree, `rejects`/`prefers` wins, since that's the one the sandbox writes.
+Each list is tried in order, and if none of the models in it are left the sandbox falls back to the cheapest one in the catalogue that can do the job, saying so. That is a safety net, not a preference — it keeps things working but chooses on price alone.
 
 ### Adding models
 

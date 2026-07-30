@@ -59,14 +59,13 @@ from src.config import load_professor_config
 from src.errors import CLIError
 from src.models import (
     get_available_models,
-    get_default_model,
     model_accepts_sampling_params,
     model_supports_vision,
     resolve_model,
 )
 from src.runtime.info_commands import list_optional_settings
 from src.services.api_config import credential_path_for_endpoint
-from src.settings import ENDPOINTS, WEBUI_SESSION_COOKIE_NAME
+from src.settings import CHAT_ROLE, ENDPOINTS, WEBUI_SESSION_COOKIE_NAME
 from src.tracking.token_tracker import TokenTracker
 
 auth = sys.modules["_pu_webui_auth"]
@@ -563,9 +562,7 @@ def create_app() -> FastAPI:
         # the next choice in the list takes over, and failing that the cheapest
         # model that can read an image (a chat question may carry a document).
         try:
-            default = resolve_model(
-                prefer_model=get_default_model("chat"), require_vision=True,
-            )
+            default = resolve_model(role=CHAT_ROLE)
         except ValueError:
             # No vision-capable model in the catalog at all. Better to open on
             # something than to refuse to render the picker.
@@ -608,9 +605,7 @@ def create_app() -> FastAPI:
         _require_unlocked(request)
         professor = _validated_professor(body.professor)
         store = conversation.ConversationStore(professor)
-        model = body.model or resolve_model(
-            prefer_model=get_default_model("chat"), require_vision=True,
-        )
+        model = body.model or resolve_model(role=CHAT_ROLE)
         conv = store.create(model=model)
         return conv.to_dict()
 

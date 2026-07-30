@@ -258,7 +258,6 @@ class TestModelsEndpoint:
         monkeypatch.setattr(app_module, "get_available_models", lambda: ["gpt-4o", "o3-mini"])
         monkeypatch.setattr(app_module, "model_supports_vision", lambda m: m == "gpt-4o")
         monkeypatch.setattr(app_module, "model_accepts_sampling_params", lambda m: m != "o3-mini")
-        monkeypatch.setattr(app_module, "get_default_model", lambda role: "gpt-4o")
         monkeypatch.setattr(app_module, "resolve_model", lambda **kw: "gpt-4o")
 
         resp = unlocked_client.get("/api/models", params={"professor": "heller"})
@@ -275,7 +274,6 @@ class TestModelsEndpoint:
         monkeypatch.setattr(app_module, "get_available_models", lambda: ["some-model"])
         monkeypatch.setattr(app_module, "model_supports_vision", lambda m: False)
         monkeypatch.setattr(app_module, "model_accepts_sampling_params", lambda m: False)
-        monkeypatch.setattr(app_module, "get_default_model", lambda role: "some-model")
         monkeypatch.setattr(app_module, "resolve_model", lambda **kw: "some-model")
 
         resp = unlocked_client.get("/api/models", params={"professor": "heller"})

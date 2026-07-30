@@ -95,6 +95,10 @@ def patch_model(monkeypatch):
     monkeypatch.setattr("src.services.base_service.maybe_sync_model_pricing", lambda m: None)
     monkeypatch.setattr("src.services.base_service.get_model_max_completion_tokens", lambda m, d: d)
     monkeypatch.setattr("src.services.chat_service.get_model_system_role", lambda m: "system")
+    # generate_title() resolves its own model — the title role, deliberately not
+    # the conversation's — so it imports resolve_model itself and needs stubbing
+    # here as well as on base_service.
+    monkeypatch.setattr("src.services.chat_service.resolve_model", lambda **_: "gpt-4o")
 
 
 class TestSendMessage:
@@ -253,89 +257,56 @@ class TestStreamMessage:
 
 class TestGenerateTitle:
     def test_returns_generated_title(self, svc, monkeypatch):
-        monkeypatch.setattr("src.services.chat_service.get_default_model", lambda role: "gpt-4o-mini")
         with patch.object(svc, "_create_completion", return_value=_FakeResponse("Trip Planning For Kyoto")):
             title = svc.generate_title([{"role": "user", "content": "Help me plan a trip to Kyoto"}])
         assert title == "Trip Planning For Kyoto"
 
     def test_uses_the_title_role_not_the_conversations_model(self, svc, monkeypatch):
-        """Title generation should not use the conversation's (possibly
-        expensive) model — see generate_title()'s docstring."""
-        monkeypatch.setattr("src.services.chat_service.get_default_model", lambda role: "gpt-4o-mini")
+        """A five-word title must not be written by the conversation's own model.
+
+        Asserts on the role handed to the resolver rather than the model that
+        came back: with both roles resolving to the same model in a test, only
+        the role proves which of the two was asked for.
+        """
+        from src.settings import CHAT_ROLE, TITLE_ROLE
+
         captured = {}
+        monkeypatch.setattr(
+            "src.services.chat_service.resolve_model",
+            lambda **kw: captured.setdefault("role", kw.get("role")) and "gpt-4o" or "gpt-4o",
+        )
 
         def fake_create(model, messages, max_tokens, **kw):
-            captured["model"] = model
             captured["max_tokens"] = max_tokens
             return _FakeResponse("A Title")
 
-        asked_for = []
-        monkeypatch.setattr("src.services.chat_service.get_default_model",
-                            lambda role: asked_for.append(role) or "gpt-4o-mini")
         with patch.object(svc, "_create_completion", side_effect=fake_create):
             svc.generate_title([{"role": "user", "content": "hi"}])
-        assert captured["model"] == "gpt-4o-mini"
+        assert captured["role"] is TITLE_ROLE
+        assert captured["role"] is not CHAT_ROLE
         assert captured["max_tokens"] == 20
-        assert asked_for == ["title"]
-
-    def test_falls_back_to_the_cheapest_model_when_no_title_model_survives(self, svc, monkeypatch):
-        """A catalog with no title role must still not write titles with a frontier model.
-
-        Existing catalogs predate this role, so this is the path they take —
-        the cheap model, not the conversation's own.
-        """
-        monkeypatch.setattr("src.services.chat_service.get_default_model", lambda role: None)
-        monkeypatch.setattr("src.services.chat_service.cheapest_model", lambda: "gpt-4o-mini")
-        captured = {}
-
-        def fake_create(model, messages, max_tokens, **kw):
-            captured["model"] = model
-            return _FakeResponse("A Title")
-
-        with patch.object(svc, "_create_completion", side_effect=fake_create):
-            svc.generate_title([{"role": "user", "content": "hi"}])
-        assert captured["model"] == "gpt-4o-mini"
-
-    def test_uses_the_conversations_model_only_when_nothing_is_priced(self, svc, monkeypatch):
-        """Last resort: no title role, and no model in the catalog has a price."""
-        monkeypatch.setattr("src.services.chat_service.get_default_model", lambda role: None)
-        monkeypatch.setattr("src.services.chat_service.cheapest_model", lambda: None)
-        captured = {}
-
-        def fake_create(model, messages, max_tokens, **kw):
-            captured["model"] = model
-            return _FakeResponse("A Title")
-
-        with patch.object(svc, "_create_completion", side_effect=fake_create):
-            svc.generate_title([{"role": "user", "content": "hi"}])
-        assert captured["model"] == "gpt-4o"  # the autouse patch_model fixture's resolve_model stub
 
     def test_strips_quotes_and_whitespace(self, svc, monkeypatch):
-        monkeypatch.setattr("src.services.chat_service.get_default_model", lambda role: "gpt-4o-mini")
         with patch.object(svc, "_create_completion", return_value=_FakeResponse('  "Kyoto Trip Planning"  ')):
             title = svc.generate_title([{"role": "user", "content": "hi"}])
         assert title == "Kyoto Trip Planning"
 
     def test_returns_none_on_api_failure(self, svc, monkeypatch):
-        monkeypatch.setattr("src.services.chat_service.get_default_model", lambda role: "gpt-4o-mini")
         with patch.object(svc, "_create_completion", side_effect=Exception("boom")):
             title = svc.generate_title([{"role": "user", "content": "hi"}])
         assert title is None
 
     def test_returns_none_on_empty_content(self, svc, monkeypatch):
-        monkeypatch.setattr("src.services.chat_service.get_default_model", lambda role: "gpt-4o-mini")
         with patch.object(svc, "_create_completion", return_value=_FakeResponse(content=None)):
             title = svc.generate_title([{"role": "user", "content": "hi"}])
         assert title is None
 
     def test_records_usage(self, svc, monkeypatch):
-        monkeypatch.setattr("src.services.chat_service.get_default_model", lambda role: "gpt-4o-mini")
         with patch.object(svc, "_create_completion", return_value=_FakeResponse("A Title")):
             svc.generate_title([{"role": "user", "content": "hi"}])
         svc.token_tracker.record_usage.assert_called_once()
 
     def test_only_uses_first_few_messages(self, svc, monkeypatch):
-        monkeypatch.setattr("src.services.chat_service.get_default_model", lambda role: "gpt-4o-mini")
         captured = {}
 
         def fake_create(model, messages, max_tokens, **kw):

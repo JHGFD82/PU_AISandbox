@@ -43,6 +43,7 @@ class TestLoadPlugins:
         _write_plugin(tmp_path, "myplugin", """
             class _P:
                 commands = ["mycommand"]
+                model_roles = {}
                 handles = []
                 def register_subparsers(self, sp): pass
                 def run(self, *a, **k): pass
@@ -72,6 +73,7 @@ class TestLoadPlugins:
         _write_plugin(tmp_path, "incomplete", """
             class _P:
                 commands = ["cmd"]
+                model_roles = {}
                 # missing register_subparsers and run
             plugin = _P()
         """)
@@ -86,6 +88,7 @@ class TestLoadPlugins:
         _write_plugin(tmp_path, "base", """
             class _P:
                 commands = ["translate"]
+                model_roles = {}
                 handles = ["en"]
                 def register_subparsers(self, sp): pass
                 def run(self, *a, **k): pass
@@ -94,6 +97,7 @@ class TestLoadPlugins:
         _write_plugin(tmp_path, "extension", """
             class _P:
                 commands = ["translate"]
+                model_roles = {}
                 handles = ["jp"]
                 def register_command_flags(self, p): pass
                 def run(self, *a, **k): pass
@@ -112,6 +116,7 @@ class TestLoadPlugins:
         _write_plugin(tmp_path, "broken_ext", """
             class _P:
                 commands = ["translate"]
+                model_roles = {}
                 # has register_command_flags but no handles — invalid
                 def register_command_flags(self, p): pass
                 def run(self, *a, **k): pass
@@ -127,6 +132,7 @@ class TestLoadPlugins:
         _write_plugin(tmp_path, "emptycmds", """
             class _P:
                 commands = []
+                model_roles = {}
                 handles = []
                 def register_subparsers(self, sp): pass
                 def run(self, *a, **k): pass
@@ -149,6 +155,7 @@ class TestLoadPlugins:
             _write_plugin(tmp_path, name, f"""
                 class _P:
                     commands = ["{cmd}"]
+                    model_roles = {{}}
                     handles = []
                     def register_subparsers(self, sp): pass
                     def run(self, *a, **k): pass
@@ -173,6 +180,7 @@ class TestDispatchMerging:
             _write_plugin(tmp_path, name, f"""
                 class _P:
                     commands = ["{cmd}"]
+                    model_roles = {{}}
                     handles = {handles!r}
                     def register_subparsers(self, sp): pass
                     def run(self, *a, **k): pass
@@ -191,6 +199,7 @@ class TestDispatchMerging:
             _write_plugin(tmp_path, name, """
                 class _P:
                     commands = ["translate"]
+                    model_roles = {}
                     # no 'handles' — conflict, not dispatch
                     def register_subparsers(self, sp): pass
                     def run(self, *a, **k): pass
@@ -217,6 +226,7 @@ class TestDispatchMerging:
             _write_plugin(tmp_path, name, f"""
                 class _P:
                     commands = ["translate"]
+                    model_roles = {{}}
                     handles = {handles!r}
                     def register_subparsers(self, sp): pass
                     def run(self, *a, **k): pass
@@ -252,3 +262,82 @@ class TestLoadOneSpecNone:
             result = load_plugins(tmp_path)
         assert result == {}
         assert "could not create import spec" in caplog.text
+
+
+# ---------------------------------------------------------------------------
+# Required: every plugin must say which models its work should use
+# ---------------------------------------------------------------------------
+
+class TestModelRolesRequired:
+    """Without a declaration the sandbox silently uses the cheapest model.
+
+    That is how the translate command came to default to a
+    four-billion-parameter model with nothing but a line in the terminal to say
+    so. Refusing to load is louder, and the message names the fix.
+    """
+
+    _BODY = """
+        class _P:
+            commands = ["cmd"]
+            {roles}
+            def register_subparsers(self, sp): pass
+            def run(self, *a, **k): pass
+        plugin = _P()
+    """
+
+    def _load(self, tmp_path, roles, caplog):
+        import logging
+        _write_plugin(tmp_path, "p", self._BODY.format(roles=roles))
+        with caplog.at_level(logging.ERROR, logger="src.runtime.plugin_loader"):
+            return load_plugins(tmp_path)
+
+    def test_a_plugin_with_no_declaration_is_refused(self, tmp_path, caplog):
+        result = self._load(tmp_path, "", caplog)
+        assert result == {}
+        assert "no 'model_roles' declared" in caplog.text
+
+    def test_the_refusal_names_the_fix(self, tmp_path, caplog):
+        """A contract error is only useful if it says what to write."""
+        self._load(tmp_path, "", caplog)
+        assert "ModelRole" in caplog.text
+        assert "model_roles = {}" in caplog.text
+
+    def test_an_empty_declaration_is_accepted(self, tmp_path, caplog):
+        """A plugin that calls no AI model says so, explicitly.
+
+        The point is that the decision was made rather than forgotten.
+        """
+        result = self._load(tmp_path, "model_roles = {}", caplog)
+        assert "cmd" in result
+
+    def test_a_declaration_of_the_wrong_type_is_refused(self, tmp_path, caplog):
+        result = self._load(tmp_path, 'model_roles = ["translation"]', caplog)
+        assert result == {}
+        assert "must be a dict" in caplog.text
+
+    def test_a_role_naming_no_models_is_refused(self, tmp_path, caplog):
+        """An empty list would resolve to the cheapest model — the thing being prevented."""
+        result = self._load(
+            tmp_path,
+            'model_roles = {"x": type("R", (), {"models": []})()}',
+            caplog,
+        )
+        assert result == {}
+        assert "names no models" in caplog.text
+
+    def test_a_valid_role_loads(self, tmp_path, caplog):
+        result = self._load(
+            tmp_path,
+            'model_roles = {"x": type("R", (), {"models": ["gpt-4o"]})()}',
+            caplog,
+        )
+        assert "cmd" in result
+
+    def test_every_bundled_plugin_declares_one(self):
+        """The rule has to hold for the plugins that ship with the sandbox."""
+        from pathlib import Path as _Path
+        loaded = load_plugins(_Path("plugins"))
+        assert loaded, "no plugins loaded at all — the declaration check may be over-strict"
+        for command, plugin in loaded.items():
+            roles = getattr(plugin, "model_roles", None)
+            assert roles is not None, f"{command} has no model_roles"
