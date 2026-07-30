@@ -158,7 +158,7 @@ This lives in your files folder rather than in `settings.toml` for a practical r
 
 Not set here. Each plugin declares the models its own work should use, and ships them in its own `settings.toml` — so `translate` names its models in `plugins/translation/settings.toml`, and the sandbox itself keeps no list of what any plugin wants. That is what lets a plugin be added without editing anything in `src/`.
 
-To change one, override it the same way as any other plugin setting: put the plugin's section in your `preferences.toml` with a `models` line. See [Plugin settings](#plugin-settings), and [`plugin-authoring-guide.md`](plugin-authoring-guide.md#which-models-your-plugin-uses) for what a plugin declares.
+To change one, edit your own `preferences.toml` — every plugin's model list is already listed there for you, commented out, with the plugin author's note about it. Uncomment the line and edit it. You never need to open anything inside `plugins/`. See [Plugin settings](#plugin-settings), and [`plugin-authoring-guide.md`](plugin-authoring-guide.md#which-models-your-plugin-uses) for what a plugin declares.
 
 Each list is tried in order, and if none of the models in it are left the sandbox falls back to the cheapest one in the catalogue that can do the job, saying so. That is a safety net, not a preference — it keeps things working but chooses on price alone.
 
@@ -370,6 +370,12 @@ python main.py jh43 usage sources remove "Prof. Smith"
 ## Plugin settings
 
 Each bundled plugin ships its own `settings.toml` in its plugin directory, tracked alongside the plugin. The plugin's `src/settings.py` finds it by walking up from its own file to the nearest `settings.toml` containing one of its sections. Plugin settings never collide with the root `settings.default.toml` — they have no section names in common.
+
+**You don't have to go looking in `plugins/` to change any of this.** On every run the sandbox reads each installed plugin's settings file and adds anything not already there to your own `preferences.toml` — and to a shared settings file, if your group uses one — commented out, carrying the plugin author's explanation with it. Uncomment a line to take that setting over.
+
+They arrive commented rather than live on purpose. A live copy would pin the setting the moment it appeared, so a plugin shipping a corrected value later — a retired model swapped out — would be silently overruled by the frozen copy. Commented, the plugin's value keeps applying until you deliberately take it over.
+
+Nothing you have already written is touched, so a value you have set, or a comment you have added, stays exactly as it is.
 
 See [`plugin-authoring-guide.md`](plugin-authoring-guide.md#plugin-settings) for how to add settings to a new plugin.
 

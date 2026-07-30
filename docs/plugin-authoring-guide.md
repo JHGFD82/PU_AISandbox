@@ -289,6 +289,8 @@ Your defaults are the starting point, not the last word. They layer the same way
 
 That layering is why the loader takes `__file__` and your section names rather than you reading the file yourself: your plugin knows which sections it owns, and the package knows where the other layers live.
 
+**Write your comments for the person using the sandbox, not for you.** On every run the package copies each setting in your `settings.toml` into their `preferences.toml`, commented out, *and brings your comments with it*. Whatever you write above or beside a setting is what a Princeton faculty member reads when deciding whether to change it — so `# Fraction of the previous page passed as context (0.0–1.0)` earns its keep, and `# see spec` does not. They never open your file; they read your words in theirs.
+
 ---
 
 ## Registering languages

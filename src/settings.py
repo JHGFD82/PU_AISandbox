@@ -172,22 +172,29 @@ def plugin_settings(caller_file: str, *sections: str) -> dict:
 
 
 def required_models(settings: dict, key: str, *, where: str) -> list[str]:
-    """Return a list of model names that a plugin's settings file must provide.
+    """Return a list of model names that a plugin ships and must therefore have.
 
     Unlike most settings, a list of models has no sensible value to fall back
-    on. Everything else here can carry a default in code — a temperature or a
-    worker count that nobody has set is fine at whatever the code says. A model
-    list is different in two ways: it is the setting most likely to be edited,
-    because providers retire models, and getting it wrong is invisible. So it is
-    written in exactly one place, and its absence is an error rather than a
-    quiet substitution.
+    on. Everything else can carry a default in code — a temperature or a worker
+    count nobody has set is fine at whatever the code says. A model list is
+    different: it is the setting most likely to need changing, because providers
+    retire models, and getting it wrong is invisible. So it lives in exactly one
+    place, the plugin's own settings file, and its absence is an error rather
+    than a quiet substitution.
+
+    Reaching this error is a fault in the plugin, not something the person
+    running the sandbox did or can fix — the file in question ships with the
+    plugin. Anyone wanting to *change* which models are used edits their own
+    ``preferences.toml``, where every plugin's settings are listed for them (see
+    ``src/plugin_preferences.py``); they never need to open the file named here.
 
     Args:
         settings: One section from ``plugin_settings()``.
         key: The setting naming the models (e.g. ``'models'``).
-        where: Where the reader should go to fix it, named plainly — e.g.
-               ``'[ocr] in plugins/transcription/settings.toml'``. This appears
-               in the error, so it is worth writing out in full.
+        where: The file and section the plugin should have supplied, named in
+               full — e.g. ``'[ocr] in plugins/transcription/settings.toml'``.
+               This goes in the error, which is read by whoever maintains the
+               plugin.
 
     Returns:
         The model names, in the order the file gives them.
@@ -206,10 +213,11 @@ def required_models(settings: dict, key: str, *, where: str) -> list[str]:
         or not all(isinstance(name, str) and name.strip() for name in names)
     ):
         raise ValueError(
-            f"{where} must give '{key}' as a list of model names, best first — "
-            f"got {names!r}. This is the only place the models for this job are "
-            "named; without it the sandbox would fall back to whichever model in "
-            "the catalogue happens to be cheapest."
+            f"This plugin is incomplete: {where} should give '{key}' as a list of "
+            f"model names, best first, and gives {names!r} instead. Without it the "
+            "sandbox would fall back to whichever model in the catalogue happens "
+            "to be cheapest. Whoever maintains the plugin needs to fix this — it "
+            "is not something you can correct from your own settings."
         )
     return [name.strip() for name in names]
 

@@ -584,7 +584,15 @@ def main() -> None:
     scripts can detect the failure.
     """
     # Parse args first so logging level can honor --verbose.
-    _plugins = load_plugins(Path(__file__).parent.parent / "plugins")
+    _plugins_dir = Path(__file__).parent.parent / "plugins"
+    _plugins = load_plugins(_plugins_dir)
+
+    # Now that the plugins are known, make sure everything they let people adjust
+    # is listed in the files people actually edit. Their own settings.toml files
+    # sit inside the package, which is no place to send anyone. Appends only what
+    # is missing, commented out, so this is a no-op after the first run.
+    from .plugin_preferences import offer_plugin_settings
+    offer_plugin_settings(_plugins_dir)
 
     try:
         parser = create_argument_parser(_plugins)

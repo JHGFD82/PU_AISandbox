@@ -6,9 +6,14 @@ of them without touching that file — a shared settings file, then
 ``src/settings.py``.
 
 The model lists are the exception to "has a default": there is no fallback for
-them in this file, because a list of models is what gets edited when a provider
-retires something, and a second copy here would drift out of step silently. If
-``settings.toml`` doesn't name them, loading fails and says so.
+them in this file, because a list of models is what needs changing when a
+provider retires something, and a second copy here would drift out of step
+silently. A missing list is a fault in the plugin, reported as such.
+
+Nobody has to open this file, or the plugin's ``settings.toml``, to change any
+of it: every setting below is listed in the person's own ``preferences.toml``
+for them, commented out, ready to uncomment — see
+``src/plugin_preferences.py``.
 """
 
 from src.runtime.model_role import ModelRole

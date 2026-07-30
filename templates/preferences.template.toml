@@ -12,6 +12,12 @@
 # Anything you put here wins over the defaults and over any shared settings
 # file, and it survives replacing the sandbox with a newer version.
 #
+# Each plugin's own adjustable settings are added below this on first run,
+# commented out, with the plugin author's explanation of each one. Uncomment a
+# line to take that setting over. Until you do, the plugin's own value applies —
+# so it keeps getting the plugin's corrections, and you only pin what you meant
+# to pin.
+#
 # A couple of examples, commented out:
 
 # [retry]
