@@ -14,6 +14,7 @@ import json
 import os
 import re
 import secrets
+import shutil
 import threading
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
@@ -346,6 +347,29 @@ class ConversationStore:
         self.professor = professor
         self._dir = (base_dir if base_dir is not None else _conversations_dir()) / professor
         self._dir.mkdir(parents=True, exist_ok=True)
+        self._move_loose_files_into_folders()
+
+    def _move_loose_files_into_folders(self) -> None:
+        """Put each conversation saved as a loose file into a folder of its own.
+
+        Conversations used to be single files sitting side by side. They now
+        each have a folder, so that everything belonging to one — the
+        documents supplied to it, the files a job produced, the settings that
+        produced them — can sit together where a person can find it.
+
+        Done once, in place: the file is moved, not copied, so nothing is
+        duplicated and nothing is left behind to be read by mistake. A
+        conversation whose folder already exists is left alone. Once there
+        are no loose files this costs one directory listing and does nothing.
+        """
+        for loose in self._dir.glob("c_*.json"):
+            if not _CONVERSATION_ID_RE.fullmatch(loose.stem):
+                continue
+            destination = self._dir / loose.stem / "conversation.json"
+            if destination.exists():
+                continue
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            os.replace(loose, destination)
 
     def _path(self, conversation_id: str) -> Path:
         """Return the file this conversation is stored in, refusing anything malformed.
@@ -370,9 +394,45 @@ class ConversationStore:
                         instead, since a malformed id can't name a real
                         conversation anyway.
         """
+        return self.folder(conversation_id) / "conversation.json"
+
+    def folder(self, conversation_id: str) -> Path:
+        """Return the folder holding everything belonging to one conversation.
+
+        Each conversation has a folder of its own, named by its id, holding
+        the conversation itself, a readable note of the settings that
+        produced it, the documents supplied to it, and any files a plugin
+        job produced from it. The point is that the whole of a piece of work
+        sits in one place a person can open, keep, or cite, rather than being
+        spread between a file here and a job folder there.
+
+        The id is checked against the exact shape ``new_conversation_id()``
+        produces before it becomes part of a path. This is a security check,
+        not a tidiness one: an id arrives from the browser and is pasted
+        straight into a path, so without this an id containing ``../`` would
+        walk out of this professor's own folder — letting a request read,
+        overwrite or delete files anywhere the server can reach. It lives
+        here, in the one place every read and write funnels through, so that
+        a route added later inherits the protection rather than having to
+        remember it.
+
+        Raises:
+            ValueError: If *conversation_id* isn't a well-formed id. Callers
+                        simply looking something up (``load``, ``delete``)
+                        catch this and report "not found" instead, since a
+                        malformed id can't name a real conversation anyway.
+        """
         if not _CONVERSATION_ID_RE.fullmatch(conversation_id):
             raise ValueError(f"Malformed conversation id: {conversation_id!r}")
-        return self._dir / f"{conversation_id}.json"
+        return self._dir / conversation_id
+
+    def attachments_dir(self, conversation_id: str) -> Path:
+        """Return the folder for documents supplied to one conversation."""
+        return self.folder(conversation_id) / "attachments"
+
+    def outputs_dir(self, conversation_id: str) -> Path:
+        """Return the folder for files a plugin job produced in one conversation."""
+        return self.folder(conversation_id) / "outputs"
 
     def list_conversations(self) -> list[dict[str, Any]]:
         """Return a short summary of every saved conversation, newest first.
@@ -383,13 +443,13 @@ class ConversationStore:
             corrupted JSON) are skipped rather than raising.
         """
         summaries = []
-        for f in self._dir.glob("*.json"):
+        for f in self._dir.glob("c_*/conversation.json"):
             try:
                 data = json.loads(f.read_text())
             except (json.JSONDecodeError, OSError):
                 continue
             summaries.append({
-                "id": data.get("id", f.stem),
+                "id": data.get("id", f.parent.name),
                 "title": data.get("title", "Untitled conversation"),
                 "updated_at": data.get("updated_at", ""),
                 "model": data.get("model", ""),
@@ -431,9 +491,43 @@ class ConversationStore:
         """
         conversation.updated_at = datetime.now().isoformat()
         path = self._path(conversation.id)
+        path.parent.mkdir(parents=True, exist_ok=True)
         tmp_path = path.with_suffix(f".{os.getpid()}.{threading.get_ident()}.tmp")
         tmp_path.write_text(json.dumps(conversation.to_dict(), indent=2))
         os.replace(tmp_path, path)
+        self._write_settings_note(conversation)
+
+    def _write_settings_note(self, conversation: "Conversation") -> None:
+        """Write a plain readable note of the settings that produced this conversation.
+
+        Beside the conversation itself, so that someone opening the folder —
+        or citing it, or handing it to a colleague — can see which model
+        answered and under what instructions without opening a file meant for
+        the program to read. Written afresh on every save, so it always
+        describes the conversation as it now stands.
+        """
+        def shown(value: Any, default: str = "the model's default") -> str:
+            return default if value is None else str(value)
+
+        lines = [
+            f"Conversation: {conversation.title}",
+            f"Reference:    {conversation.id}",
+            f"Started:      {conversation.created_at}",
+            f"Last updated: {conversation.updated_at}",
+            "",
+            f"Model:                {conversation.model}",
+            f"Temperature:          {shown(conversation.temperature)}",
+            f"Top-p:                {shown(conversation.top_p)}",
+            f"Max response tokens:  {shown(conversation.max_tokens)}",
+            "",
+            "Instructions given for the whole conversation:",
+            conversation.system_prompt or "  (none)",
+            "",
+        ]
+        note = self.folder(conversation.id) / "settings.txt"
+        tmp = note.with_suffix(f".{os.getpid()}.{threading.get_ident()}.tmp")
+        tmp.write_text("\n".join(lines), encoding="utf-8")
+        os.replace(tmp, note)
 
     def create(self, model: str, title: str = "New conversation") -> Conversation:
         """Create, save, and return a brand new empty conversation."""
@@ -452,10 +546,12 @@ class ConversationStore:
         reason ``load()`` returns ``None`` — see its docstring.
         """
         try:
-            path = self._path(conversation_id)
+            folder = self.folder(conversation_id)
         except ValueError:
             return False
-        if path.exists():
-            path.unlink()
+        # The whole folder: deleting a conversation and leaving the documents
+        # supplied to it behind would be a surprise, and an invisible one.
+        if folder.is_dir():
+            shutil.rmtree(folder, ignore_errors=True)
             return True
         return False

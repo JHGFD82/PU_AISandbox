@@ -639,6 +639,9 @@ const state = {
   // shown in the topbar's tune popover and sent with every /api/chat call —
   // see conv.temperature/top_p/max_tokens in conversation.py.
   sampling: { temperature: null, top_p: null, max_tokens: null, system_prompt: null },
+  // Settled by the server when the page is built: whether this computer has a
+  // file browser to open at all. See file_picker.can_reveal().
+  canReveal: {{ can_reveal | default(false) | tojson }},
 };
 
 // ── Dark mode ────────────────────────────────────────────────────────────
@@ -880,6 +883,16 @@ document.getElementById("sampling-options-clear").addEventListener("click", (e) 
 // than as a standalone topbar button, so it's scoped to the conversation
 // it's next to instead of always acting on "whichever conversation happens
 // to be open."
+async function revealConversationFolder(id) {
+  try {
+    await api(`/api/conversations/${id}/reveal?professor=${encodeURIComponent(state.professor)}`,
+              { method: "POST" });
+  } catch (e) {
+    // Says where the folder is, so someone can still get to it by hand.
+    alert(e.message || "Could not open the folder.");
+  }
+}
+
 function exportConversation(id, format) {
   const url = `/api/conversations/${id}/export`
     + `?professor=${encodeURIComponent(state.professor)}&format=${format}`;
@@ -1590,6 +1603,22 @@ async function loadConversations() {
       closeConvMenu();
       startRenaming(titleSpan, c.id, c.title);
     });
+
+    // Only where it can work: the folder opens on the computer running the
+    // sandbox, which is only the person's own computer when the browser is
+    // there too. Drawn from the same answer the Browse buttons use.
+    if (state.canReveal) {
+      const folderBtn = document.createElement("button");
+      folderBtn.type = "button";
+      folderBtn.className = "conv-menu-option";
+      folderBtn.textContent = "Open this conversation's folder";
+      folderBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        closeConvMenu();
+        revealConversationFolder(c.id);
+      });
+      menu.appendChild(folderBtn);
+    }
 
     const divider1 = document.createElement("div");
     divider1.className = "conv-menu-divider";

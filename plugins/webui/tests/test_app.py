@@ -2343,3 +2343,136 @@ class TestSystemPromptPerConversation:
             system_prompt=typed,
         )
         assert Conversation.from_dict(json.loads(json.dumps(conv.to_dict()))).system_prompt == typed
+
+
+class TestOpeningAConversationFolder:
+    """The way in to everything a conversation is made of."""
+
+    def _page(self):
+        from pathlib import Path
+
+        from fastapi.templating import Jinja2Templates
+
+        here = Path(__file__).resolve().parents[1] / "src" / "templates"
+        return (Jinja2Templates(directory=str(here)).env
+                .get_template("chat.html").render(request=None, can_reveal=True))
+
+    def test_the_menu_offers_it(self):
+        page = self._page()
+        assert "Open this conversation's folder" in page
+
+    def test_it_is_not_offered_where_there_is_nothing_to_open_it_with(self):
+        from pathlib import Path
+
+        from fastapi.templating import Jinja2Templates
+
+        here = Path(__file__).resolve().parents[1] / "src" / "templates"
+        page = (Jinja2Templates(directory=str(here)).env
+                .get_template("chat.html").render(request=None, can_reveal=False))
+        assert "canReveal: false" in page
+
+    def test_the_chat_page_is_told_whether_it_can(self, unlocked_client):
+        """The template defaults to false, so a route that forgot would be silent."""
+        page = unlocked_client.get("/").text
+        assert "canReveal: true" in page or "canReveal: false" in page
+
+    def test_it_opens_the_conversations_own_folder(self, unlocked_client, monkeypatch):
+        import sys
+
+        opened = []
+        picker = sys.modules["_pu_webui_file_picker"]
+        monkeypatch.setattr(picker, "reveal", lambda p: opened.append(str(p)) or True)
+        conv_id = unlocked_client.post(
+            "/api/conversations", json={"professor": "heller", "model": "gpt-4o"}
+        ).json()["id"]
+        r = unlocked_client.post(
+            f"/api/conversations/{conv_id}/reveal?professor=heller"
+        )
+        assert r.status_code == 200
+        assert len(opened) == 1
+        assert opened[0].endswith(conv_id)
+
+    def test_a_conversation_that_does_not_exist_is_refused(self, unlocked_client):
+        r = unlocked_client.post(
+            "/api/conversations/c_" + "f" * 16 + "/reveal?professor=heller"
+        )
+        assert r.status_code == 404
+
+    def test_a_malformed_id_is_refused_rather_than_used_as_a_path(self, unlocked_client):
+        r = unlocked_client.post("/api/conversations/..%2F..%2Fetc/reveal?professor=heller")
+        assert r.status_code in (404, 400)
+
+    def test_it_is_behind_the_unlock_gate(self, client):
+        r = client.post("/api/conversations/c_" + "f" * 16 + "/reveal?professor=heller")
+        assert r.status_code in (401, 403, 302, 303)
+
+    def test_a_browser_on_another_computer_cannot_open_a_window_here(
+        self, unlocked_client, monkeypatch
+    ):
+        """It would open on the server's screen, not the person's."""
+        import sys
+
+        app_module = sys.modules["_pu_webui_app"]
+        monkeypatch.setattr(app_module, "_SAME_COMPUTER", frozenset())
+        conv_id = unlocked_client.post(
+            "/api/conversations", json={"professor": "heller", "model": "gpt-4o"}
+        ).json()["id"]
+        r = unlocked_client.post(f"/api/conversations/{conv_id}/reveal?professor=heller")
+        assert r.status_code == 403
+
+
+class TestKeepingSuppliedDocuments:
+    """Off by default; on, the documents sit with the conversation."""
+
+    def _upload(self, client, conversation_id, name=b"source.txt"):
+        return client.post(
+            "/api/attachments",
+            files={"file": (name.decode(), b"hello", "text/plain")},
+            data={"professor": "heller", "conversation_id": conversation_id},
+        )
+
+    def _conv(self, client):
+        return client.post(
+            "/api/conversations", json={"professor": "heller", "model": "gpt-4o"}
+        ).json()["id"]
+
+    def test_nothing_is_kept_unless_it_is_asked_for(self, unlocked_client, monkeypatch):
+        import sys
+
+        app_module = sys.modules["_pu_webui_app"]
+        monkeypatch.setattr(app_module, "WEBUI_KEEP_SUPPLIED_DOCUMENTS", False)
+        conv_id = self._conv(unlocked_client)
+        assert self._upload(unlocked_client, conv_id).json()["saved_as"] is None
+
+    def test_when_asked_for_it_sits_with_the_conversation(self, unlocked_client, monkeypatch):
+        import sys
+
+        app_module = sys.modules["_pu_webui_app"]
+        monkeypatch.setattr(app_module, "WEBUI_KEEP_SUPPLIED_DOCUMENTS", True)
+        conv_id = self._conv(unlocked_client)
+        assert self._upload(unlocked_client, conv_id).json()["saved_as"] == "source.txt"
+        store = sys.modules["_pu_webui_conversation"].ConversationStore("heller")
+        assert (store.attachments_dir(conv_id) / "source.txt").read_bytes() == b"hello"
+
+    def test_a_second_document_of_the_same_name_does_not_replace_the_first(
+        self, unlocked_client, monkeypatch
+    ):
+        import sys
+
+        app_module = sys.modules["_pu_webui_app"]
+        monkeypatch.setattr(app_module, "WEBUI_KEEP_SUPPLIED_DOCUMENTS", True)
+        conv_id = self._conv(unlocked_client)
+        self._upload(unlocked_client, conv_id)
+        second = self._upload(unlocked_client, conv_id)
+        assert second.json()["saved_as"] == "source (2).txt"
+
+    def test_a_name_that_is_a_path_cannot_write_outside_the_folder(
+        self, unlocked_client, monkeypatch
+    ):
+        import sys
+
+        app_module = sys.modules["_pu_webui_app"]
+        monkeypatch.setattr(app_module, "WEBUI_KEEP_SUPPLIED_DOCUMENTS", True)
+        conv_id = self._conv(unlocked_client)
+        saved = self._upload(unlocked_client, conv_id, b"../../escaped.txt").json()["saved_as"]
+        assert saved == "escaped.txt"

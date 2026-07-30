@@ -313,8 +313,9 @@ class TestJobLeavesNoEmptyOutputFolder:
     # which the autouse fixture points at tmp_path/"conversations" — not from
     # the conversation store's base_dir. Asserting against the wrong path here
     # would make "the folder is gone" trivially true and the test worthless.
-    def _output_dir(self, tmp_path, job_id):
-        return tmp_path / "conversations" / "jh43" / "_job_outputs" / job_id
+    def _output_dir(self, tmp_path, job_id, conversation_id):
+        return (tmp_path / "conversations" / "jh43" / conversation_id
+                / "outputs" / job_id)
 
     def test_failed_job_leaves_nothing_behind(self, tmp_path):
         def boom(fields, professor, model, on_progress, output_dir, on_page_text=None):
@@ -330,7 +331,7 @@ class TestJobLeavesNoEmptyOutputFolder:
             conversation_id=conv.id, conversation_store=store, job_store=job_store,
         )
         _wait_until(lambda: job_store.get(job.id).status == "error")
-        assert not (tmp_path / "conversations" / "jh43" / "_job_outputs" / job.id).exists()
+        assert not self._output_dir(tmp_path, job.id, conv.id).exists()
 
     def test_successful_job_that_writes_nothing_leaves_nothing_behind(self, tmp_path):
         def summary_only(fields, professor, model, on_progress, output_dir, on_page_text=None):
@@ -346,7 +347,7 @@ class TestJobLeavesNoEmptyOutputFolder:
             conversation_id=conv.id, conversation_store=store, job_store=job_store,
         )
         _wait_until(lambda: job_store.get(job.id).status == "done")
-        assert not (tmp_path / "conversations" / "jh43" / "_job_outputs" / job.id).exists()
+        assert not self._output_dir(tmp_path, job.id, conv.id).exists()
 
     def test_a_job_that_writes_a_file_keeps_its_folder(self, tmp_path):
         """The property that makes the cleanup safe to do at all."""
@@ -366,8 +367,11 @@ class TestJobLeavesNoEmptyOutputFolder:
             conversation_id=conv.id, conversation_store=store, job_store=job_store,
         )
         _wait_until(lambda: job_store.get(job.id).status == "done")
-        out_dir = tmp_path / "conversations" / "jh43" / "_job_outputs" / job.id
+        out_dir = self._output_dir(tmp_path, job.id, conv.id)
         assert (out_dir / "translated.txt").read_text() == "result"
+        # And it is inside the conversation that asked for it, which is the
+        # whole point of the folder.
+        assert out_dir.is_relative_to(tmp_path / "conversations" / "jh43" / conv.id)
 
 
 class TestStartJob:
