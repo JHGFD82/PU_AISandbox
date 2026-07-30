@@ -65,6 +65,15 @@ class BaseService:
     # anyone means, so a service that calls a model should set this.
     model_role: Optional["ModelRole"] = None
 
+    # Which AI service this one is talking to. Empty means the Princeton
+    # sandbox, which is what nearly every service is on and the only service
+    # with prices the sandbox knows. It is set from outside, by whatever pointed
+    # this service at an alternate endpoint, because a service has no other way
+    # to tell: its network client is swapped after it is built (see
+    # ``SandboxProcessor.__getattr__``), and the swap used to leave usage being
+    # recorded as though the sandbox had answered.
+    endpoint_name: str = ""
+
     def __init__(
         self,
         api_key: str,
@@ -492,6 +501,7 @@ class BaseService:
                 completion_tokens=response.usage.completion_tokens,
                 total_tokens=response.usage.total_tokens,
                 requested_model=model,
+                endpoint=self.endpoint_name,
             )
             # In parallel mode (_suppress_inline_print=True) the tqdm postfix already
             # shows running totals, so demote per-call token info to DEBUG.

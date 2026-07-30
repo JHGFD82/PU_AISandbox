@@ -208,9 +208,8 @@ def fold_usage_records(records: list[dict[str, Any]], month: str) -> dict[str, A
         ``month``, ``total_usage``, ``model_usage``, ``daily_usage``, and
         ``session_history`` (sorted chronologically).
     """
-    total = UsageStats()
-    model_usage: dict[str, Any] = {}
-    daily_usage: dict[str, Any] = {}
+    sandbox = _blank_totals()
+    endpoint_usage: dict[str, Any] = {}
     session_history = sorted(records, key=lambda r: r.get("timestamp", ""))
 
     for rec in session_history:
@@ -218,25 +217,63 @@ def fold_usage_records(records: list[dict[str, Any]], month: str) -> dict[str, A
         completion_tokens = rec.get("completion_tokens", 0)
         total_tokens = rec.get("total_tokens", 0)
         cost = rec.get("total_cost", 0.0)
-
-        total.add_usage(prompt_tokens, completion_tokens, total_tokens, cost)
-
         model = rec.get("model", "unknown")
-        model_usage.setdefault(model, UsageStats().to_dict())
-        _accumulate_stats_dict(model_usage[model], prompt_tokens, completion_tokens, total_tokens, cost)
-
         day = rec.get("timestamp", "")[:10]
-        if day:
-            daily_usage.setdefault(day, UsageStats().to_dict())
-            _accumulate_stats_dict(daily_usage[day], prompt_tokens, completion_tokens, total_tokens, cost)
+
+        # A call to one of this installation's own endpoints is counted on its
+        # own, never mixed into the sandbox's figures — those are what the
+        # university is billed for, and a total that mixed the two would be
+        # neither one thing nor the other.
+        endpoint = rec.get("endpoint", "")
+        if endpoint:
+            totals = endpoint_usage.setdefault(endpoint, _blank_totals())
+            cost = 0.0
+        else:
+            totals = sandbox
+        _accumulate_call(totals, model, day, prompt_tokens, completion_tokens, total_tokens, cost)
 
     return {
         "month": month,
-        "total_usage": total.to_dict(),
-        "model_usage": model_usage,
-        "daily_usage": daily_usage,
+        "total_usage": sandbox["total_usage"],
+        "model_usage": sandbox["model_usage"],
+        "daily_usage": sandbox["daily_usage"],
+        "endpoint_usage": endpoint_usage,
         "session_history": session_history,
     }
+
+
+def _blank_totals() -> dict[str, Any]:
+    """Return an empty set of running totals for one AI service."""
+    return {
+        "total_usage": UsageStats().to_dict(),
+        "model_usage": {},
+        "daily_usage": {},
+    }
+
+
+def _accumulate_call(totals: dict[str, Any], model: str, day: str, prompt_tokens: int,
+                     completion_tokens: int, total_tokens: int, cost: float) -> None:
+    """Add one API call into a set of running totals, in place.
+
+    Args:
+        totals: A dictionary holding ``total_usage``, ``model_usage`` and
+                ``daily_usage`` — either the top level of a usage file (the
+                Princeton sandbox's own figures) or one alternate endpoint's
+                entry within it.
+        model: The model that answered.
+        day: The date of the call as ``YYYY-MM-DD``; skipped if empty.
+        prompt_tokens: Tokens in what was sent.
+        completion_tokens: Tokens in what came back.
+        total_tokens: The two added together, as the service reported it.
+        cost: What the call cost. Always zero for an alternate endpoint, which
+              carries no pricing.
+    """
+    _accumulate_stats_dict(totals["total_usage"], prompt_tokens, completion_tokens, total_tokens, cost)
+    totals["model_usage"].setdefault(model, UsageStats().to_dict())
+    _accumulate_stats_dict(totals["model_usage"][model], prompt_tokens, completion_tokens, total_tokens, cost)
+    if day:
+        totals["daily_usage"].setdefault(day, UsageStats().to_dict())
+        _accumulate_stats_dict(totals["daily_usage"][day], prompt_tokens, completion_tokens, total_tokens, cost)
 
 
 def _accumulate_stats_dict(stats: dict[str, Any], prompt_tokens: int, completion_tokens: int,
@@ -353,6 +390,11 @@ class TokenUsage:
     output_cost: float
     total_cost: float
     source: str = ""  # which installation made this call — see module docstring
+    # Which AI service answered. Empty means the Princeton sandbox, the only one
+    # the university is billed for and so the only one with costs to record.
+    # Any other name is one of this installation's own alternate endpoints,
+    # whose calls carry no cost at all — see ``record_usage()``.
+    endpoint: str = ""
 
 
 @dataclass
@@ -554,6 +596,10 @@ class TokenTracker:
             "total_usage": UsageStats().to_dict(),
             "model_usage": {},
             "daily_usage": {},
+            # One entry per alternate endpoint used, each with its own totals.
+            # Absent from files written before endpoints were tracked, so every
+            # reader asks for it with a default rather than assuming.
+            "endpoint_usage": {},
             "session_history": [],
         }
 
@@ -658,6 +704,32 @@ class TokenTracker:
         """Save the current in-memory usage data."""
         self._save_usage_data_to(self.usage_data)
 
+    def _costs_for(self, endpoint: str, model: str, prompt_tokens: int,
+                   completion_tokens: int) -> tuple[float, float, float]:
+        """Return what this call cost, which is nothing unless it went to the sandbox.
+
+        The sandbox's prices are the university's arrangement with the service
+        it buys through, and they describe nothing else. An alternate endpoint
+        is whatever somebody has set up themselves — a cluster of their own, a
+        subscription of their own — and this program has no way to know what it
+        charges, or whether it charges at all. So its calls are recorded with
+        their tokens and no money, rather than with a figure worked out from a
+        price list that does not apply to them.
+
+        Args:
+            endpoint: The endpoint that answered; empty for the sandbox.
+            model: The model name to price, for a sandbox call.
+            prompt_tokens: Tokens in what was sent.
+            completion_tokens: Tokens in what came back.
+
+        Returns:
+            ``(input_cost, output_cost, total_cost)`` — all zero for an
+            alternate endpoint.
+        """
+        if endpoint:
+            return 0.0, 0.0, 0.0
+        return self._calculate_costs(model, prompt_tokens, completion_tokens)
+
     def _calculate_costs(self, model: str, prompt_tokens: int,
                          completion_tokens: int) -> tuple[float, float, float]:
         """Return (input_cost, output_cost, total_cost) for the given token counts."""
@@ -696,7 +768,8 @@ class TokenTracker:
         self.usage_data = fold_usage_records(records, month)
 
     def _record_usage_shared(self, model: str, prompt_tokens: int, completion_tokens: int,
-                              total_tokens: int, requested_model: str | None = None) -> TokenUsage:
+                              total_tokens: int, requested_model: str | None = None,
+                              endpoint: str = "") -> TokenUsage:
         """Shared-write version of ``record_usage()`` — writes one new event file instead of rewriting a shared file.
 
         No read-modify-write happens here at all: the filename itself
@@ -713,7 +786,9 @@ class TokenTracker:
             if requested_model and requested_model != model:
                 logging.debug(f"Using requested model '{requested_model}' for pricing instead of API model '{model}'")
 
-            input_cost, output_cost, total_cost = self._calculate_costs(pricing_model, prompt_tokens, completion_tokens)
+            input_cost, output_cost, total_cost = self._costs_for(
+                endpoint, pricing_model, prompt_tokens, completion_tokens
+            )
 
             usage = TokenUsage(
                 model=model,
@@ -725,6 +800,7 @@ class TokenTracker:
                 output_cost=output_cost,
                 total_cost=total_cost,
                 source=self._source_id,
+                endpoint=endpoint,
             )
 
             month = self._get_current_month()
@@ -875,7 +951,8 @@ class TokenTracker:
     # ------------------------------------------------------------------
 
     def record_usage(self, model: str, prompt_tokens: int, completion_tokens: int,
-                     total_tokens: int, requested_model: str | None = None) -> TokenUsage:
+                     total_tokens: int, requested_model: str | None = None,
+                     endpoint: str = "") -> TokenUsage:
         """Record that an API call was made and update all running totals in the usage file.
 
         Updates the professor's totals for the current month, today's date, and
@@ -904,13 +981,21 @@ class TokenTracker:
                              (e.g. a dated alias), this value is used for
                              pricing lookup instead. ``None`` when the
                              requested and returned model names are the same.
+            endpoint: The name of the alternate AI service that answered, or
+                      empty for the Princeton sandbox. Only the sandbox has
+                      prices — it is the service the university is billed for.
+                      An alternate endpoint is somebody's own arrangement, so
+                      its calls are recorded with tokens and no money at all,
+                      and kept in their own totals rather than added to the
+                      sandbox's.
 
         Returns:
-            A ``TokenUsage`` record with the full breakdown of tokens and costs
-            for this call.
+            A ``TokenUsage`` record with the tokens for this call, and its cost
+            if it went to the sandbox.
         """
         if self.source_mode == "shared-write":
-            usage = self._record_usage_shared(model, prompt_tokens, completion_tokens, total_tokens, requested_model)
+            usage = self._record_usage_shared(model, prompt_tokens, completion_tokens, total_tokens,
+                                              requested_model, endpoint)
             self._accumulate_session_usage(usage)
             return usage
 
@@ -920,7 +1005,9 @@ class TokenTracker:
             if requested_model and requested_model != model:
                 logging.debug(f"Using requested model '{requested_model}' for pricing instead of API model '{model}'")
 
-            input_cost, output_cost, total_cost = self._calculate_costs(pricing_model, prompt_tokens, completion_tokens)
+            input_cost, output_cost, total_cost = self._costs_for(
+                endpoint, pricing_model, prompt_tokens, completion_tokens
+            )
 
             usage = TokenUsage(
                 model=model,
@@ -932,20 +1019,19 @@ class TokenTracker:
                 output_cost=output_cost,
                 total_cost=total_cost,
                 source=self._source_id,
+                endpoint=endpoint,
             )
 
             self._refresh_from_disk_before_update()
 
-            _accumulate_stats_dict(self.usage_data["total_usage"], prompt_tokens, completion_tokens, total_tokens, total_cost)
-
-            if model not in self.usage_data["model_usage"]:
-                self.usage_data["model_usage"][model] = UsageStats().to_dict()
-            _accumulate_stats_dict(self.usage_data["model_usage"][model], prompt_tokens, completion_tokens, total_tokens, total_cost)
-
-            date_str = self._get_current_date()
-            if date_str not in self.usage_data["daily_usage"]:
-                self.usage_data["daily_usage"][date_str] = UsageStats().to_dict()
-            _accumulate_stats_dict(self.usage_data["daily_usage"][date_str], prompt_tokens, completion_tokens, total_tokens, total_cost)
+            if endpoint:
+                totals = self.usage_data.setdefault("endpoint_usage", {}).setdefault(
+                    endpoint, _blank_totals()
+                )
+            else:
+                totals = self.usage_data
+            _accumulate_call(totals, model, self._get_current_date(),
+                             prompt_tokens, completion_tokens, total_tokens, total_cost)
 
             self.usage_data["session_history"].append(asdict(usage))
             self._save_usage_data()
@@ -1174,6 +1260,38 @@ class TokenTracker:
             "approaching_limit": usage_pct > BUDGET_WARNING_THRESHOLD,
         }
 
+    def _print_endpoint_reports(self, endpoint_usage: dict[str, Any], when: str) -> None:
+        """Print a separate report for each alternate AI service that was used.
+
+        These are kept apart from the sandbox's report rather than added to it.
+        The sandbox is what the university is billed for; an alternate endpoint
+        is somebody's own arrangement, whose charges — if there are any — this
+        program has no sight of. So these report what was used and never what it
+        cost, and no figure here belongs in a budget.
+
+        Args:
+            endpoint_usage: The ``endpoint_usage`` entry from a usage file, one
+                            key per endpoint. Nothing is printed if it is empty,
+                            which is the ordinary case.
+            when: What period this covers, for the heading (e.g. ``'this
+                  month'``).
+        """
+        for name in sorted(endpoint_usage):
+            totals = endpoint_usage[name]
+            summary = totals.get("total_usage", {})
+            print_subsection(f"{name} — separate service, not billed through the sandbox ({when})")
+            print(f"Total Tokens Used: {summary.get('total_tokens', 0):,}")
+            print(f"  • Input Tokens:  {summary.get('total_input_tokens', 0):,}")
+            print(f"  • Output Tokens: {summary.get('total_output_tokens', 0):,}")
+            print(f"API Calls:  {summary.get('call_count', 0)}")
+            for model, data in totals.get("model_usage", {}).items():
+                print(f"{model}:")
+                print(f"  • Calls:  {data.get('call_count', 0)}")
+                print(f"  • Tokens: {data.get('total_tokens', 0):,}")
+            print("No cost is shown: the sandbox's prices are the university's and")
+            print("do not describe this service. Whatever it charges, if anything,")
+            print("is between you and whoever runs it.")
+
     def print_usage_report(self, month: str | None = None, include_all_time: bool = False):
         """Print a formatted usage report to the terminal.
 
@@ -1229,6 +1347,8 @@ class TokenTracker:
                 calls = d.get("call_count", "?")
                 print(f"{day}: {d['total_tokens']:,} tokens  ${d['total_cost']:.4f}  ({calls} calls)")
 
+            self._print_endpoint_reports(arc.get("endpoint_usage", {}), month)
+
             print("=" * 60)
             return
 
@@ -1267,6 +1387,10 @@ class TokenTracker:
             print("⚠️  MONTHLY LIMIT EXCEEDED!")
         elif budget_status["approaching_limit"]:
             print("⚠️  Approaching monthly limit!")
+
+        self._print_endpoint_reports(
+            self.usage_data.get("endpoint_usage", {}), "this month"
+        )
 
         # ── All-time totals (optional) ─────────────────────────────
         if include_all_time:

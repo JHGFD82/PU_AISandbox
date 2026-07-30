@@ -530,6 +530,17 @@
     <div class="spend-figure" id="spend-alltime">$0.00</div>
     <h2>By model (this month)</h2>
     <div id="spend-by-model"></div>
+    <!-- Only for someone using an AI service of their own alongside the
+         sandbox, which is almost nobody — hidden entirely otherwise. It shows
+         tokens and never money: the figures above are Princeton's spending,
+         and nothing here belongs in that. -->
+    <div id="spend-endpoints-section" hidden>
+      <h2>Other services (this month)</h2>
+      <div id="spend-endpoints"></div>
+      <div class="spend-label" id="spend-endpoints-note">
+        Counted, not costed — these are not billed through the sandbox.
+      </div>
+    </div>
   </div>
 
   <div id="settings-modal-backdrop" class="modal-backdrop" hidden>
@@ -1609,6 +1620,27 @@ async function loadUsage() {
     costEl.textContent = fmtMoney(stats.total_cost);
     row.append(nameEl, costEl);
     byModel.appendChild(row);
+  });
+
+  // Anything answered by a service other than the sandbox, kept out of the
+  // figures above rather than folded into them: the sandbox's prices are the
+  // university's and say nothing about what these cost, so they are reported
+  // in tokens only.
+  const endpoints = Object.entries(data.endpoint_usage || {});
+  const section = document.getElementById("spend-endpoints-section");
+  section.hidden = endpoints.length === 0;
+  const list = document.getElementById("spend-endpoints");
+  list.innerHTML = "";
+  endpoints.forEach(([name, totals]) => {
+    const row = document.createElement("div");
+    row.className = "spend-row";
+    const nameEl = document.createElement("span");
+    nameEl.textContent = name;
+    const tokensEl = document.createElement("span");
+    const used = (totals.total_usage || {}).total_tokens || 0;
+    tokensEl.textContent = used.toLocaleString() + " tokens";
+    row.append(nameEl, tokensEl);
+    list.appendChild(row);
   });
 }
 

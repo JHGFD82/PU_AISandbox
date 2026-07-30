@@ -254,3 +254,47 @@ class TestSandboxProcessorGetattr:
             assert fake_cls.call_count == 1
         finally:
             sys.modules.pop("src.services.cached_service", None)
+
+
+class TestServicesKnowWhichEndpointTheyAreOn:
+    """A service pointed at an alternate endpoint has to say so when recording.
+
+    Its network client is swapped after it is built, so nothing about the
+    service itself changes — which is why usage from an alternate endpoint used
+    to be recorded as though the sandbox had answered it, and costed against the
+    university's price list.
+    """
+
+    def _service_from(self, monkeypatch, api_config):
+        import sys
+        import types
+
+        from src.services.base_service import BaseService
+
+        class Chatter(BaseService):
+            def __init__(self, *args, **kwargs):
+                self.client = object()
+
+        module = types.ModuleType("src.services.chatter")
+        module.Chatter = Chatter
+        monkeypatch.setitem(sys.modules, "src.services.chatter", module)
+
+        proc = SandboxProcessor.__new__(SandboxProcessor)
+        object.__setattr__(proc, "_api_key", "k")
+        object.__setattr__(proc, "professor_name", "Dr. Smith")
+        object.__setattr__(proc, "_svc_kwargs", {})
+        object.__setattr__(proc, "_api_config", api_config)
+        return proc.__getattr__("chatter")
+
+    def test_a_service_on_an_endpoint_is_told_its_name(self, monkeypatch):
+        from src.services.api_config import APIConfig
+
+        service = self._service_from(monkeypatch, APIConfig(
+            api_name="hpc_cluster", display_name="HPC Cluster",
+            base_url="https://cluster.example.com/v1", api_key="key",
+        ))
+        assert service.endpoint_name == "hpc_cluster"
+
+    def test_a_service_on_the_sandbox_names_no_endpoint(self, monkeypatch):
+        service = self._service_from(monkeypatch, None)
+        assert service.endpoint_name == ""

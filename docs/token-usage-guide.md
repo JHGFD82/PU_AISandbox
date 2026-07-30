@@ -1,6 +1,8 @@
 # Token Usage Guide
 
-Every call the sandbox makes to an AI model is recorded automatically: how much text went in, how much came back, and what it cost. Each person's record is kept separately and split by calendar month, so no file grows without end and the current month's spending is always the first thing you see.
+Every call the sandbox makes to an AI model is recorded automatically: how much text went in, how much came back, and — for the Princeton sandbox service — what it cost. Each person's record is kept separately and split by calendar month, so no file grows without end and the current month's spending is always the first thing you see.
+
+If you use an [alternate endpoint](#alternate-endpoints-are-counted-but-not-costed) of your own, its calls are counted but carry no cost, and are reported separately.
 
 Tokens are roughly words — a little smaller, so a page of English is usually 400–600 of them. Models are priced per token in each direction: what you send costs one rate, what comes back costs another, usually higher.
 
@@ -18,7 +20,9 @@ So: check `usage report` when you want to know where you stand. Don't rely on th
 
 ## What gets recorded
 
-- Every call records tokens in, tokens out, the total, and the cost
+- Every call records tokens in, tokens out, and the total
+- Calls to the Princeton sandbox also record what they cost
+- Calls to an alternate endpoint record no cost — see [below](#alternate-endpoints-are-counted-but-not-costed)
 - Each person has their own file for the current month
 - The first time a call happens in a new month, the previous month's file is archived and a fresh one starts
 - There are no manual steps — recording happens inside the shared service layer every AI call passes through
@@ -93,6 +97,40 @@ Each file, active or archived, covers exactly one month:
 The file is named with the person's netID, which is why netIDs are the identifier — they need no cleaning up to be used as a filename.
 
 Don't edit these by hand. If two installations share a folder like this (see [Configuration → External usage-data sources](configuration.md#external-usage-data-sources)), the sandbox writes one small file per call there instead of rewriting a shared one, so a sync service never has two conflicting edits to merge.
+
+---
+
+## Alternate endpoints are counted, but not costed
+
+The prices the sandbox knows are Princeton's — the rates the university is charged for the one service it buys through. They describe that service and nothing else.
+
+An alternate endpoint is a different arrangement entirely: a cluster your department runs, a subscription you hold yourself, a colleague's server. It may cost nothing, or it may be billed in a way that has no relation to what the sandbox charges. The sandbox has no way to know, so it does not guess.
+
+So for calls to an alternate endpoint:
+
+- **Tokens are recorded** — how much went in, how much came back, which model, and when
+- **No cost is recorded.** Not zero as an estimate; no figure at all, because there is none to have
+- **They do not count towards your monthly budget**, which is a limit on Princeton spending
+- **They get their own section of the report**, one per endpoint, kept apart from the sandbox's figures
+
+You will see them at the bottom of `usage report`:
+
+```
+hpc_cluster — separate service, not billed through the sandbox (this month):
+----------------------------------------
+Total Tokens Used: 1,700,000
+  • Input Tokens:  1,300,000
+  • Output Tokens: 400,000
+API Calls:  2
+llama-3-70b:
+  • Calls:  2
+  • Tokens: 1,700,000
+No cost is shown: the sandbox's prices are the university's and
+do not describe this service. Whatever it charges, if anything,
+is between you and whoever runs it.
+```
+
+If you have never used an alternate endpoint — which is almost everyone — nothing about your report changes. See [Configuration](configuration.md#alternate-ai-endpoints) for how one is set up.
 
 ---
 

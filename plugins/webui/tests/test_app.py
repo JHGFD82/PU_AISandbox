@@ -2160,3 +2160,55 @@ class TestBrowseButton:
         resp = elsewhere.post("/api/pick-path", json={"kind": "folder"})
         assert resp.status_code == 403
         assert opened == []
+
+
+class TestEndpointUsageInTheSidebar:
+    """Usage from someone's own AI service, shown apart from Princeton spending."""
+
+    def _page(self):
+        from pathlib import Path
+
+        from fastapi.templating import Jinja2Templates
+
+        here = Path(__file__).resolve().parents[1] / "src" / "templates"
+        return (Jinja2Templates(directory=str(here)).env
+                .get_template("chat.html").render(request=None))
+
+    def test_the_api_reports_endpoint_totals(self, unlocked_client, tmp_path, monkeypatch):
+        from unittest.mock import patch
+
+        from src.tracking.token_tracker import TokenTracker
+
+        tracker = TokenTracker(
+            "heller", data_file=str(tmp_path / "u.json"), monthly_limit=10.0
+        )
+        with patch("src.tracking.token_tracker.get_pricing_unit", return_value=1_000_000), \
+             patch("src.tracking.token_tracker.get_model_pricing",
+                   return_value={"input": 1.0, "output": 1.0}):
+            tracker.record_usage("llama-3-70b", 100, 50, 150, endpoint="my_cluster")
+        import sys
+
+        monkeypatch.setattr(sys.modules["_pu_webui_app"], "TokenTracker", lambda **kw: tracker)
+        data = unlocked_client.get("/api/usage?professor=heller").json()
+        assert data["endpoint_usage"]["my_cluster"]["total_usage"]["total_tokens"] == 150
+
+    def test_the_section_is_hidden_until_there_is_something_in_it(self):
+        """Almost everyone is on the sandbox alone and should see no change."""
+        page = self._page()
+        assert '<div id="spend-endpoints-section" hidden>' in page
+        # And stays hidden after the figures load — the markup alone would let
+        # an empty heading appear the moment the sidebar refreshed.
+        assert "section.hidden = endpoints.length === 0;" in page
+
+    def test_it_shows_tokens_and_never_money(self):
+        page = self._page()
+        # Just the loop that draws these rows — the rest of the sidebar shows
+        # Princeton spending and is supposed to show money.
+        block = page[page.index("const endpoints = Object.entries"):]
+        block = block[:block.index("list.appendChild(row);")]
+        assert "tokens" in block
+        assert "fmtMoney" not in block, "a cost was shown for a service with no known prices"
+
+    def test_it_says_these_are_not_billed_through_the_sandbox(self):
+        page = self._page()
+        assert "Counted, not costed" in page

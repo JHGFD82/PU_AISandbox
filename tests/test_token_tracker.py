@@ -330,6 +330,7 @@ class TestTokenUsage:
         assert names == {
             "model", "prompt_tokens", "completion_tokens", "total_tokens",
             "timestamp", "input_cost", "output_cost", "total_cost", "source",
+            "endpoint",
         }
 
     def test_source_defaults_to_empty_string(self):
@@ -348,7 +349,10 @@ class TestEmptyUsageData:
 
     def test_has_required_keys(self, tracker):
         data = tracker._empty_usage_data()
-        assert set(data.keys()) == {"month", "total_usage", "model_usage", "daily_usage", "session_history"}
+        assert set(data.keys()) == {
+            "month", "total_usage", "model_usage", "daily_usage",
+            "endpoint_usage", "session_history",
+        }
 
     def test_month_matches_current_month(self, tracker):
         from datetime import datetime
@@ -1401,3 +1405,222 @@ class TestUsageFileWithNoMonthRecorded:
         assert "no month recorded" in caplog.text
         # Nothing should have been archived, least of all under an empty name.
         assert not (tmp_path / ".json").exists()
+
+
+class TestAlternateEndpointsAreNotPriced:
+    """An endpoint that isn't the sandbox has no prices the sandbox can apply.
+
+    The sandbox's rates describe the university's arrangement with the one
+    service it buys through. A cluster or subscription someone has set up
+    themselves is charged — or not charged — on terms this program never sees,
+    so its calls are recorded with their tokens and no money.
+    """
+
+    def _make_tracker(self, tmp_path):
+        return TokenTracker(
+            "testprof", data_file=str(tmp_path / "token_usage_test.json"), monthly_limit=100.0
+        )
+
+    def _priced(self):
+        return (
+            patch("src.tracking.token_tracker.get_pricing_unit", return_value=1_000_000),
+            patch("src.tracking.token_tracker.get_model_pricing",
+                  return_value={"input": 2.0, "output": 8.0}),
+        )
+
+    def test_a_call_to_an_endpoint_costs_nothing(self, tmp_path):
+        t = self._make_tracker(tmp_path)
+        p1, p2 = self._priced()
+        with p1, p2:
+            usage = t.record_usage("llama-3-70b", 1000, 500, 1500, endpoint="my_cluster")
+        assert usage.total_cost == 0.0
+        assert usage.input_cost == 0.0
+        assert usage.output_cost == 0.0
+
+    def test_the_price_list_is_never_even_consulted(self, tmp_path):
+        """Not merely zeroed afterwards.
+
+        Looking the model up would log a warning telling someone to add it to
+        the catalogue — advice that makes no sense for a service the catalogue
+        does not describe.
+        """
+        t = self._make_tracker(tmp_path)
+        with patch("src.tracking.token_tracker.get_model_pricing") as pricing:
+            t.record_usage("llama-3-70b", 1000, 500, 1500, endpoint="my_cluster")
+        pricing.assert_not_called()
+
+    def test_a_sandbox_call_is_still_priced(self, tmp_path):
+        t = self._make_tracker(tmp_path)
+        p1, p2 = self._priced()
+        with p1, p2:
+            usage = t.record_usage("gpt-4o", 1_000_000, 1_000_000, 2_000_000)
+        assert usage.total_cost == 10.0
+
+    def test_endpoint_usage_is_kept_out_of_the_sandbox_totals(self, tmp_path):
+        t = self._make_tracker(tmp_path)
+        p1, p2 = self._priced()
+        with p1, p2:
+            t.record_usage("gpt-4o", 100, 50, 150)
+            t.record_usage("llama-3-70b", 900, 400, 1300, endpoint="my_cluster")
+        sandbox = t.usage_data["total_usage"]
+        assert sandbox["total_tokens"] == 150, "the endpoint's tokens leaked into the sandbox's total"
+        assert sandbox["call_count"] == 1
+        assert "llama-3-70b" not in t.usage_data["model_usage"]
+
+    def test_each_endpoint_gets_its_own_totals(self, tmp_path):
+        t = self._make_tracker(tmp_path)
+        p1, p2 = self._priced()
+        with p1, p2:
+            t.record_usage("llama-3-70b", 100, 50, 150, endpoint="my_cluster")
+            t.record_usage("llama-3-70b", 100, 50, 150, endpoint="my_cluster")
+            t.record_usage("mistral", 10, 5, 15, endpoint="a_colleagues_server")
+        endpoints = t.usage_data["endpoint_usage"]
+        assert set(endpoints) == {"my_cluster", "a_colleagues_server"}
+        assert endpoints["my_cluster"]["total_usage"]["call_count"] == 2
+        assert endpoints["my_cluster"]["total_usage"]["total_tokens"] == 300
+        assert endpoints["a_colleagues_server"]["total_usage"]["total_tokens"] == 15
+        assert endpoints["my_cluster"]["total_usage"]["total_cost"] == 0.0
+
+    def test_the_budget_counts_only_what_the_university_pays_for(self, tmp_path):
+        """A budget is about money, and there is no money in these calls."""
+        t = self._make_tracker(tmp_path)
+        p1, p2 = self._priced()
+        with p1, p2:
+            t.record_usage("llama-3-70b", 10_000_000, 10_000_000, 20_000_000, endpoint="my_cluster")
+        status = t.get_monthly_budget_status()
+        assert status["usage_percentage"] == 0.0
+        assert not status["is_exceeded"]
+
+    def test_the_record_says_which_service_answered(self, tmp_path):
+        t = self._make_tracker(tmp_path)
+        p1, p2 = self._priced()
+        with p1, p2:
+            t.record_usage("gpt-4o", 1, 1, 2)
+            t.record_usage("llama-3-70b", 1, 1, 2, endpoint="my_cluster")
+        history = t.usage_data["session_history"]
+        assert history[0]["endpoint"] == ""
+        assert history[1]["endpoint"] == "my_cluster"
+
+
+class TestFoldingRecordsKeepsServicesApart:
+    """Shared-write mode rebuilds its totals from the saved records each time."""
+
+    @staticmethod
+    def _fold(records, month):
+        from src.tracking.token_tracker import fold_usage_records
+
+        return fold_usage_records(records, month)
+
+    def _record(self, endpoint="", cost=1.0, tokens=100, model="gpt-4o"):
+        return {
+            "model": model, "prompt_tokens": tokens, "completion_tokens": tokens,
+            "total_tokens": tokens * 2, "timestamp": "2026-07-15T10:00:00",
+            "input_cost": 0.0, "output_cost": 0.0, "total_cost": cost,
+            "source": "", "endpoint": endpoint,
+        }
+
+    def test_endpoint_records_do_not_reach_the_sandbox_totals(self):
+        folded = self._fold(
+            [self._record(), self._record(endpoint="my_cluster", model="llama-3-70b")], "2026-07"
+        )
+        assert folded["total_usage"]["call_count"] == 1
+        assert folded["endpoint_usage"]["my_cluster"]["total_usage"]["call_count"] == 1
+        assert "llama-3-70b" not in folded["model_usage"]
+
+    def test_a_cost_saved_against_an_endpoint_is_dropped(self):
+        """Files written before this was fixed hold invented figures.
+
+        Those calls were priced against the sandbox's rates, which never
+        applied to them. Re-reading such a file should not carry the invented
+        money forward.
+        """
+        folded = self._fold([self._record(endpoint="my_cluster", cost=7.77)], "2026-07")
+        assert folded["endpoint_usage"]["my_cluster"]["total_usage"]["total_cost"] == 0.0
+
+    def test_older_records_with_no_endpoint_named_count_as_the_sandbox(self):
+        """Every record written before this existed is a sandbox call."""
+        old = self._record()
+        del old["endpoint"]
+        folded = self._fold([old], "2026-07")
+        assert folded["total_usage"]["call_count"] == 1
+        assert folded["endpoint_usage"] == {}
+
+
+class TestSeparateReports:
+    """The sandbox's report and each endpoint's are separate things."""
+
+    def _tracker_with(self, tmp_path, endpoints):
+        t = TokenTracker(
+            "testprof", data_file=str(tmp_path / "token_usage_test.json"), monthly_limit=100.0
+        )
+        with patch("src.tracking.token_tracker.get_pricing_unit", return_value=1_000_000), \
+             patch("src.tracking.token_tracker.get_model_pricing",
+                   return_value={"input": 2.0, "output": 8.0}):
+            t.record_usage("gpt-4o", 100, 50, 150)
+            for name, model in endpoints:
+                t.record_usage(model, 1000, 500, 1500, endpoint=name)
+        return t
+
+    def test_each_endpoint_gets_its_own_section(self, tmp_path, capsys):
+        t = self._tracker_with(tmp_path, [("my_cluster", "llama-3-70b"),
+                                          ("a_colleagues_server", "mistral")])
+        t.print_usage_report()
+        out = capsys.readouterr().out
+        assert "my_cluster" in out
+        assert "a_colleagues_server" in out
+        assert "llama-3-70b" in out
+
+    def test_an_endpoint_section_shows_no_money(self, tmp_path, capsys):
+        t = self._tracker_with(tmp_path, [("my_cluster", "llama-3-70b")])
+        t.print_usage_report()
+        out = capsys.readouterr().out
+        section = out[out.index("my_cluster"):]
+        assert "$" not in section, f"a cost was shown for a service with no known prices:\n{section}"
+
+    def test_it_says_why_there_is_no_cost(self, tmp_path, capsys):
+        """A missing number reads as an omission unless it is explained."""
+        t = self._tracker_with(tmp_path, [("my_cluster", "llama-3-70b")])
+        t.print_usage_report()
+        out = capsys.readouterr().out
+        assert "No cost is shown" in out
+
+    def test_the_sandbox_section_still_shows_money(self, tmp_path, capsys):
+        t = self._tracker_with(tmp_path, [("my_cluster", "llama-3-70b")])
+        t.print_usage_report()
+        out = capsys.readouterr().out
+        assert "Total Cost: $" in out[:out.index("my_cluster")]
+
+    def test_nothing_extra_is_printed_when_no_endpoint_was_used(self, tmp_path, capsys):
+        """Almost everyone is on the sandbox alone; their report is unchanged."""
+        t = self._tracker_with(tmp_path, [])
+        t.print_usage_report()
+        out = capsys.readouterr().out
+        assert "separate service" not in out
+        assert "No cost is shown" not in out
+
+    def test_an_archived_month_reports_its_endpoints_too(self, tmp_path, capsys):
+        import json
+
+        t = self._tracker_with(tmp_path, [("my_cluster", "llama-3-70b")])
+        archive = t._archive_path_for("2026-05")
+        archive.parent.mkdir(parents=True, exist_ok=True)
+        with open(archive, "w") as f:
+            json.dump({
+                "month": "2026-05",
+                "total_usage": UsageStats().to_dict(),
+                "model_usage": {},
+                "daily_usage": {},
+                "endpoint_usage": {
+                    "my_cluster": {
+                        "total_usage": {"total_tokens": 42, "total_input_tokens": 21,
+                                        "total_output_tokens": 21, "total_cost": 0.0,
+                                        "call_count": 1},
+                        "model_usage": {}, "daily_usage": {},
+                    }
+                },
+                "session_history": [],
+            }, f)
+        t.print_usage_report(month="2026-05")
+        out = capsys.readouterr().out
+        assert "my_cluster" in out
+        assert "42" in out
