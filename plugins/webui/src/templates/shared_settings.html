@@ -114,12 +114,20 @@
      falls back to. Greyed to say that is not your value — but still typeable,
      since typing in it is how you take it over. */
   .setting textarea.following { color: var(--text-muted); background: var(--bg); }
+  .setting textarea.invalid { border-color: var(--danger-text); }
+  /* Under the box it belongs to and aligned with its left edge, so which value
+     is being complained about needs no working out. */
+  .setting .field-error {
+    font-size: 0.72rem; color: var(--danger-text); text-align: left;
+    margin-top: 0.25rem; line-height: 1.35;
+  }
+  .setting .field-error:empty { display: none; }
   /* A value cut off mid-way is a value nobody can check. Once the window is too
      narrow to give the value its 34rem, it drops to a full-width row of its own
      rather than being squeezed further. */
   @media (max-width: 1080px) {
     .setting { grid-template-columns: 1.6rem minmax(0, 1fr); }
-    .setting textarea { grid-column: 2; }
+    .setting .value-cell { grid-column: 2; }
   }
   .setting.is-new .name::after {
     content: "NEW"; margin-left: 0.5rem; font-size: 0.62rem; font-weight: 700;
@@ -194,6 +202,145 @@ async function api(path, options) {
 
 function controlId(section, key) { return `s-${section}-${key}`; }
 
+// ── Is this a value the settings file could actually hold? ────────────────────
+// Read the way the file itself reads a value, rather than by looking for
+// patterns: only reading it properly can tell "gpt-4o" apart from "gpt-4o"
+// "gpt-4o", or spot a quotation mark that was never closed. The sandbox checks
+// this again when the file is built — that check is still the authority, and
+// this one exists so a mistake is pointed at while it is being made rather than
+// after twenty other settings have been filled in.
+
+function skipSpace(text, at) {
+  while (at < text.length && /\s/.test(text[at])) at++;
+  return at;
+}
+
+function readValue(text, at) {
+  at = skipSpace(text, at);
+  const first = text[at];
+  if (first === undefined) return null;
+  if (first === '"' || first === "'") {
+    // Between double quotes a backslash escapes the next character; between
+    // single quotes it does not, which is what they are for.
+    let i = at + 1;
+    while (i < text.length) {
+      if (first === '"' && text[i] === "\\") { i += 2; continue; }
+      if (text[i] === first) return { kind: "text", at: i + 1, text: text.slice(at + 1, i) };
+      i++;
+    }
+    return null;  // opened and never closed
+  }
+  if (text.startsWith("true", at)) return { kind: "yes/no", at: at + 4 };
+  if (text.startsWith("false", at)) return { kind: "yes/no", at: at + 5 };
+  if (first === "[") {
+    let i = at + 1;
+    const items = [];
+    for (;;) {
+      i = skipSpace(text, i);
+      if (text[i] === "]") return { kind: "list", at: i + 1, items };
+      const item = readValue(text, i);
+      if (!item) return null;
+      items.push(item);
+      i = skipSpace(text, item.at);
+      if (text[i] === ",") { i++; continue; }
+      if (text[i] === "]") return { kind: "list", at: i + 1, items };
+      return null;  // two values with nothing between them
+    }
+  }
+  const number = /^[+-]?\d[\d_]*(\.\d+)?([eE][+-]?\d+)?/.exec(text.slice(at));
+  if (number) {
+    return { kind: "number", at: at + number[0].length, whole: !number[1] && !number[2] };
+  }
+  return null;
+}
+
+function readWholeValue(text) {
+  const found = readValue(text, 0);
+  if (!found) return null;
+  // Anything left over means more than one value was typed — the usual way that
+  // happens is a second set of quotation marks.
+  found.trailing = skipSpace(text, found.at) !== text.length;
+  return found;
+}
+
+// A setting whose shipped value is one unbroken word is a name or an address —
+// a model, a host, a cookie — and a line break in one of those is never meant.
+// Taken from the value the plugin ships rather than from a list of field names
+// kept here, which would have to grow every time a plugin adds a setting.
+function isProse(want) {
+  return want !== null && want.kind === "text" && /\s/.test(want.text);
+}
+
+function problemWith(setting, text) {
+  if (!text.trim()) return "this needs a value";
+  const want = readWholeValue(setting.default);
+  const got = readWholeValue(text);
+  if (want === null) return "";  // nothing sensible to compare against
+
+  const quoted = /^\s*["']/.test(text);
+  if (got === null) {
+    if (want.kind === "text") {
+      return quoted
+        ? "the quotation marks are not closed"
+        : 'text needs quotation marks around it, like "example"';
+    }
+    if (want.kind === "list") {
+      // Brackets already there means the brackets are not the problem; what is
+      // between them is. Saying "this takes a list" to someone who typed a list
+      // tells them nothing.
+      return /^\s*\[/.test(text)
+        ? 'each thing in the list needs quotation marks, like ["gpt-4o", "gpt-4o-mini"]'
+        : 'this takes a list in square brackets, like ["gpt-4o"]';
+    }
+    if (want.kind === "yes/no") return "this takes true or false";
+    return "this takes a number";
+  }
+  // Checked before the kinds are compared: 127.0.0.1 without quotation marks
+  // reads as a number with more after it, and being told the setting takes text
+  // is more use than being told there is more than one value here.
+  if (want.kind === "text" && (got.kind !== "text" || got.trailing)) {
+    return quoted
+      ? "there is more here than one value — check the quotation marks"
+      : 'text needs quotation marks around it, like "example"';
+  }
+  if (got.trailing) return "there is more here than one value";
+  if (got.kind !== want.kind) {
+    if (want.kind === "number") return `this takes a number, not ${got.kind === "text" ? "text" : "a " + got.kind}`;
+    if (want.kind === "list") return 'this takes a list in square brackets, like ["gpt-4o"]';
+    return "this takes true or false";
+  }
+  if (want.kind === "number" && want.whole && !got.whole) return "this takes a whole number";
+  if (want.kind === "list" && want.items.length) {
+    const itemKind = want.items[0].kind;
+    if (got.items.some(item => item.kind !== itemKind)) {
+      return itemKind === "text"
+        ? 'each thing in the list needs quotation marks, like ["gpt-4o", "gpt-4o-mini"]'
+        : `each thing in the list should be a ${itemKind}`;
+    }
+    if (got.items.length === 0) return "a list with nothing in it leaves nothing to use";
+  }
+  if (want.kind === "text" && !isProse(want) && /\\n|[\r\n]/.test(got.text)) {
+    return "a line break does not belong in a setting like this";
+  }
+  return "";
+}
+
+function valueOf(setting) {
+  // Someone who ticked a setting without typing means the value on screen, which
+  // is the shipped one.
+  return setting.custom === null || setting.custom === undefined ? setting.default : setting.custom;
+}
+
+function problems() {
+  const found = [];
+  sections.forEach(sec => sec.settings.forEach(s => {
+    if (!s.chosen) return;
+    const problem = problemWith(s, valueOf(s));
+    if (problem) found.push(`${sec.section}.${s.key}`);
+  }));
+  return found;
+}
+
 function grow(box) {
   // Opens at whatever height its own text needs, so a long system prompt is
   // readable without being dragged first, and a number is still one line.
@@ -211,6 +358,13 @@ function showValue(box, setting, ticked) {
 
 function render() {
   const onlyNew = document.getElementById("only-new").checked;
+  sections.forEach(sec => sec.settings.forEach(s => {
+    // Held on the setting rather than in the box, so unticking can show the
+    // shipped value without losing what this person typed, and so a row the
+    // filter is hiding keeps both. Only a setting the group already decided
+    // starts with one.
+    if (s.custom === undefined) s.custom = s.chosen ? s.value : null;
+  }));
   const host = document.getElementById("sections");
   host.innerHTML = "";
   sections.forEach(sec => {
@@ -247,14 +401,28 @@ function render() {
         middle.appendChild(why);
       }
 
+      // The box and its complaint travel together in one cell, so the message
+      // sits under the box it is about rather than at the bottom of the page.
+      const cell = document.createElement("div");
+      cell.className = "value-cell";
       const value = document.createElement("textarea");
       value.rows = 1;
       value.id = controlId(sec.section, s.key);
-      // Held on the setting rather than in the box, so unticking can show the
-      // shipped value without losing what this person typed. Only a setting the
-      // group already decided starts with one.
-      if (s.custom === undefined) s.custom = s.chosen ? s.value : null;
+      const complaint = document.createElement("div");
+      complaint.className = "field-error";
+      complaint.id = controlId(sec.section, s.key) + "-problem";
+      cell.appendChild(value);
+      cell.appendChild(complaint);
+
+      const check = () => {
+        // Only a setting the group is deciding can be wrong. An unticked one
+        // shows the shipped value, which is right by definition.
+        const problem = tick.checked ? problemWith(s, value.value) : "";
+        value.classList.toggle("invalid", problem !== "");
+        complaint.textContent = problem;
+      };
       showValue(value, s, tick.checked);
+      check();
 
       // Typing is the tick. Working down a list of forty checkboxes is the part
       // that puts people off, and it carries no information the typing didn't
@@ -267,6 +435,7 @@ function render() {
         s.custom = value.value;
         value.classList.remove("following");
         grow(value);
+        check();
         updateCount();
       });
 
@@ -277,6 +446,9 @@ function render() {
       value.addEventListener("keydown", event => {
         if (event.key !== "Enter") return;
         event.preventDefault();
+        // Only where a line break could be meant. In a host or a model name it
+        // never is, so Enter there does nothing rather than quietly writing one.
+        if (!isProse(readWholeValue(s.default))) return;
         if (!/^\s*"/.test(value.value)) return;
         const at = value.selectionStart;
         value.setRangeText("\\n", at, value.selectionEnd, "end");
@@ -286,12 +458,13 @@ function render() {
       tick.addEventListener("change", () => {
         s.chosen = tick.checked;
         showValue(value, s, tick.checked);
+        check();
         updateCount();
       });
 
       row.appendChild(tick);
       row.appendChild(middle);
-      row.appendChild(value);
+      row.appendChild(cell);
       card.appendChild(row);
     });
     host.appendChild(card);
@@ -303,13 +476,14 @@ function render() {
 }
 
 function collect() {
+  // Read from the settings themselves, not from the boxes on screen: filtering
+  // to NEW takes rows off the page, and a ticked setting that happens to be
+  // hidden still belongs in the file.
   const chosen = {};
   sections.forEach(sec => {
     sec.settings.forEach(s => {
-      const tick = document.getElementById(controlId(sec.section, s.key) + "-on");
-      if (!tick || !tick.checked) return;
-      const value = document.getElementById(controlId(sec.section, s.key)).value.trim();
-      (chosen[sec.section] ||= {})[s.key] = value;
+      if (!s.chosen) return;
+      (chosen[sec.section] ||= {})[s.key] = valueOf(s).trim();
     });
   });
   return chosen;
@@ -318,9 +492,17 @@ function collect() {
 function updateCount() {
   const chosen = collect();
   const n = Object.values(chosen).reduce((sum, keys) => sum + Object.keys(keys).length, 0);
+  const wrong = problems();
   document.getElementById("count").textContent =
     n === 0 ? "Nothing ticked — the file would change nothing."
             : `${n} setting${n === 1 ? "" : "s"} will be set for the group.`;
+  // A setting can be wrong and out of sight, either scrolled past or hidden by
+  // the filter, so the button says how many rather than only marking the rows.
+  const button = document.getElementById("download-btn");
+  button.disabled = wrong.length > 0;
+  document.getElementById("error").textContent = wrong.length === 0
+    ? ""
+    : `${wrong.length} setting${wrong.length === 1 ? " needs" : "s need"} fixing first: ${wrong.join(", ")}`;
 }
 
 async function load() {

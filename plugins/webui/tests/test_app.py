@@ -1963,6 +1963,31 @@ class TestSharedSettingsPagePresentation:
         page = self._page()
         assert "#page { max-width: 1040px; }" in page
 
+    def test_a_wrong_value_is_outlined_and_told_why(self):
+        page = self._page()
+        assert "textarea.invalid" in page
+        assert "border-color: var(--danger-text)" in page
+        assert ".field-error" in page
+        assert "color: var(--danger-text)" in page
+
+    def test_the_message_sits_under_its_own_box(self):
+        """One message at the bottom of forty rows names no row."""
+        page = self._page()
+        assert "value-cell" in page
+        assert "text-align: left" in page
+
+    def test_the_server_still_refuses_a_bad_value(self, unlocked_client):
+        """The page checking first must not become the only thing checking.
+
+        Someone can reach this without the page — an old tab, a script — so the
+        check that builds the file stays the one that decides.
+        """
+        r = unlocked_client.post(
+            "/api/settings/shared-draft", json={"chosen": {"retry": {"max_retries": "lots"}}}
+        )
+        assert r.status_code >= 400
+        assert "max_retries" in r.text
+
     def test_the_page_says_unticking_is_safe(self):
         """People will not untick to peek unless told their value survives it."""
         page = self._page()
