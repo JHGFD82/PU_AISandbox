@@ -81,55 +81,90 @@
   .field-set input { flex: 1; }
 </style>
 <style>
-  /* Only what this page adds on top of the shared styles above. */
-  .setting { display: grid; grid-template-columns: 1.6rem 1fr 15rem; gap: 0.55rem;
-             align-items: start; padding: 0.5rem 0; border-top: 1px solid var(--border); }
+  /* Only what this page adds; everything above is the Settings modal's own
+     stylesheet, so the two are the same page as far as a reader is concerned. */
+  /* Wider than the Settings modal's 720px. That width suits a form of short
+     fields; this is a working list whose values include model lists 60-odd
+     characters long, and at 720px the value column gets squeezed no matter what
+     it asks for. */
+  #page { max-width: 1040px; }
+  .setting {
+    display: grid;
+    grid-template-columns: 1.6rem minmax(0, 1fr) minmax(0, 34rem);
+    gap: 0.55rem; align-items: start;
+    padding: 0.55rem 0; border-top: 1px solid var(--border);
+  }
   .setting:first-of-type { border-top: none; }
   .setting .name { font-weight: 600; font-size: 0.85rem; }
-  .setting .why { font-size: 0.78rem; color: var(--muted, #6e6e73); margin-top: 0.15rem; }
-  .setting input[type="text"] { width: 100%; font-family: ui-monospace, monospace; font-size: 0.8rem; }
+  .setting .why { font-size: 0.78rem; color: var(--text-muted); margin-top: 0.15rem; line-height: 1.35; }
+  .setting input[type="text"] {
+    width: 100%; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.78rem;
+  }
+  /* A value cut off mid-way is a value nobody can check. Once the window is too
+     narrow to give the value its 34rem, it drops to a full-width row of its own
+     rather than being squeezed further. */
+  @media (max-width: 1080px) {
+    .setting { grid-template-columns: 1.6rem minmax(0, 1fr); }
+    .setting input[type="text"] { grid-column: 2; }
+  }
   .setting.is-new .name::after {
     content: "NEW"; margin-left: 0.5rem; font-size: 0.62rem; font-weight: 700;
     letter-spacing: 0.04em; color: var(--orange); border: 1px solid var(--orange);
     border-radius: 3px; padding: 0.03rem 0.25rem; vertical-align: 0.1rem;
   }
-  .section-from { font-size: 0.75rem; color: var(--muted, #6e6e73); margin: 0 0 0.4rem; }
-  .sticky-actions { position: sticky; bottom: 0; background: var(--panel-bg);
-                    border-top: 1px solid var(--border); padding: 0.8rem 0; margin-top: 1rem; }
-  .count { font-size: 0.8rem; color: var(--muted, #6e6e73); }
+  .section-from { font-size: 0.75rem; color: var(--text-muted); margin: -0.5rem 0 0.6rem; }
+  .sticky-actions {
+    position: sticky; bottom: 0; background: var(--panel-bg);
+    border: 1px solid var(--border); border-radius: 10px;
+    padding: 1rem 1.5rem; margin-top: 0.25rem;
+  }
+  .count { font-size: 0.82rem; color: var(--text-muted); margin-left: 0.75rem; }
+  #error:empty { display: none; }
 </style>
 </head>
 <body>
-<main>
-  <h1>Shared settings</h1>
-  <p class="hint" id="intro">Loading&hellip;</p>
-
-  <div class="card">
-    <p class="hint">
-      Tick a setting to put it in the file your group follows. Anything left
-      unticked keeps following whatever the sandbox or the plugin ships, which is
-      usually what you want — so a file with nothing ticked changes nothing for
-      anybody.
-    </p>
-    <p class="hint" id="new-note" hidden></p>
-    <p><label><input type="checkbox" id="only-new"> Show only settings marked NEW</label></p>
+  <div id="topbar">
+    <h1>Shared settings</h1>
+    <button class="secondary" id="lock-btn">Lock</button>
   </div>
 
-  <div id="sections"></div>
+  <div id="page">
+    <div class="card">
+      <p class="hint" id="intro">Loading&hellip;</p>
+      <p class="hint">
+        Tick a setting to put it in the file your group follows. Anything left
+        unticked keeps following whatever the sandbox or the plugin ships, which
+        is usually what you want — so a file with nothing ticked changes nothing
+        for anybody.
+      </p>
+      <p class="hint" id="new-note" hidden></p>
+      <p><label><input type="checkbox" id="only-new"> Show only settings marked NEW</label></p>
+    </div>
 
-  <div class="sticky-actions">
-    <button id="download-btn">Download the file</button>
-    <span class="count" id="count"></span>
-    <p class="hint" style="margin-top:0.5rem">
-      Nothing is saved here. The file downloads to you — rename it if you like,
-      put it where your group can read it, and tell each member to enter that
-      path in <strong>Settings &rarr; Shared settings</strong>.
-    </p>
-    <p class="hint" id="error" style="color:#c0392b"></p>
+    <div id="sections"></div>
+
+    <div class="sticky-actions">
+      <button id="download-btn">Download the file</button>
+      <span class="count" id="count"></span>
+      <p class="hint" style="margin: 0.75rem 0 0">
+        Nothing is saved here. The file downloads to you — rename it if you like,
+        put it where your group can read it, and tell each member to enter that
+        path in <strong>Settings &rarr; Shared settings</strong>.
+      </p>
+      <p class="hint" id="error" style="color:#c0392b; margin: 0.5rem 0 0"></p>
+    </div>
   </div>
-</main>
 
 <script>
+// Same value chat.html's topbar toggle writes, so this page opens in whichever
+// theme the person last chose rather than guessing from the system on its own.
+(function applySavedTheme() {
+  const theme = localStorage.getItem("theme")
+    || (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+  document.documentElement.setAttribute("data-theme", theme);
+})();
+
 let sections = [];
 
 async function api(path, options) {
@@ -234,6 +269,11 @@ async function load() {
 }
 
 document.getElementById("only-new").addEventListener("change", render);
+
+document.getElementById("lock-btn").addEventListener("click", async () => {
+  await fetch("/lock", { method: "POST" });
+  window.location.href = "/";
+});
 
 document.getElementById("download-btn").addEventListener("click", async () => {
   const errorEl = document.getElementById("error");

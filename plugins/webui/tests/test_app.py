@@ -1849,3 +1849,122 @@ class TestGuidedSharedSettingsEditor:
         monkeypatch.setattr(paths_mod, "extras_root", lambda: tmp_path)
         unlocked_client.post("/api/settings/shared-draft", json={"chosen": {}})
         assert list(tmp_path.glob("*.toml")) == []
+
+
+class TestSharedSettingsPagePresentation:
+    """The editor is a page of its own, so it has to carry the app's look itself.
+
+    Embedded pages inherit the modal's styling by being inside it; this one
+    doesn't, and copying the stylesheet without the script that applies the
+    theme is how a page ends up permanently light.
+    """
+
+    def _page(self):
+        from pathlib import Path
+
+        from fastapi.templating import Jinja2Templates
+
+        directory = Path(__file__).resolve().parents[1] / "src" / "templates"
+        return Jinja2Templates(directory=str(directory)).get_template(
+            "shared_settings.html"
+        ).render(request=None)
+
+    def test_it_applies_the_saved_theme(self):
+        """Without this the dark-mode rules below are dead weight."""
+        page = self._page()
+        assert "applySavedTheme" in page
+        assert 'setAttribute("data-theme"' in page
+
+    def test_it_reads_the_same_theme_setting_as_the_rest_of_the_app(self):
+        page = self._page()
+        assert 'localStorage.getItem("theme")' in page
+
+    def test_it_defines_the_dark_theme(self):
+        page = self._page()
+        assert '[data-theme="dark"]' in page
+
+    def test_it_uses_the_same_layout_shell_as_the_settings_modal(self):
+        page = self._page()
+        assert '<div id="topbar">' in page
+        assert '<div id="page">' in page
+
+    def test_it_uses_themed_colours_rather_than_fixed_ones(self):
+        """A hardcoded grey looks wrong in one theme or the other.
+
+        Checks the styles this page adds, not the shared stylesheet it copies —
+        that one defines the colours, so naming them there is the point.
+        """
+        page = self._page()
+        own_styles = page.rsplit("<style>", 1)[1].split("</style>")[0]
+        assert "var(--text-muted)" in own_styles
+        assert "#6e6e73" not in own_styles, "hardcoded light-theme grey"
+        assert "var(--muted," not in own_styles, "invented variable with a fixed fallback"
+
+    def test_value_boxes_fit_the_longest_setting_this_sandbox_has(self):
+        """A list cut off mid-way is a value nobody can check.
+
+        Measured rather than guessed: the widest value any installed plugin
+        offers is a model list, and the box has to hold it.
+        """
+        from pathlib import Path as _Path
+
+        from src.shared_settings import inventory
+
+        repo = _Path(__file__).resolve().parents[3]
+        widest = max(
+            len(s["value"])
+            for section in inventory(repo / "plugins", repo / "settings.default.toml")
+            for s in section["settings"]
+        )
+        import re
+
+        page = self._page()
+        widths = [int(m) for m in re.findall(r"minmax\(0, (\d+)rem\)", page)]
+        assert widths, "no fixed-width value column found"
+        rem = min(widths)
+        # 0.78rem monospace at roughly 0.6em per character, less the input's padding.
+        fits = (rem * 16 - 16) / (0.78 * 16 * 0.6)
+        assert fits >= widest, f"a {rem}rem box holds about {fits:.0f} characters, need {widest}"
+
+    def test_the_page_is_wide_enough_for_that_box(self):
+        """The Settings modal caps at 720px, which squeezes the column back."""
+        page = self._page()
+        assert "#page { max-width: 1040px; }" in page
+
+    def test_a_narrow_window_gives_the_value_its_own_row(self):
+        page = self._page()
+        assert "@media (max-width: 1080px)" in page
+
+
+class TestSharedSettingsLink:
+    """How the editor is reached from the Settings modal."""
+
+    def _settings_page(self):
+        from pathlib import Path
+
+        from fastapi.templating import Jinja2Templates
+
+        directory = Path(__file__).resolve().parents[1] / "src" / "templates"
+        return Jinja2Templates(directory=str(directory)).get_template(
+            "settings.html"
+        ).render(request=None)
+
+    def test_it_opens_in_its_own_tab(self):
+        """It is a long list to work through; losing it by leaving the modal
+        would mean starting again."""
+        page = self._settings_page()
+        assert '<a href="/shared-settings" target="_blank"' in page
+
+    def test_the_new_tab_cannot_reach_back_into_this_one(self):
+        page = self._settings_page()
+        link = page[page.index('href="/shared-settings"'):]
+        assert 'rel="noopener"' in link[:200]
+
+    def test_the_button_carries_the_new_tab_icon(self):
+        page = self._settings_page()
+        assert "external-icon" in page
+
+    def test_and_says_so_for_a_screen_reader(self):
+        """An icon alone tells someone using a screen reader nothing."""
+        page = self._settings_page()
+        assert "(opens in a new tab)" in page

@@ -51,6 +51,13 @@
   .card { background: var(--panel-bg); border: 1px solid var(--border); border-radius: 10px; padding: 1.25rem 1.5rem; }
   .card h2 { font-size: 1rem; margin: 0 0 0.25rem; }
   .card .hint { font-size: 0.82rem; color: var(--text-muted); margin: 0 0 1rem; line-height: 1.4; }
+  /* The new-tab marker: sits with the label rather than after the button, so
+     the whole control reads as one thing. */
+  .external-icon { margin-left: 0.35rem; vertical-align: -0.05rem; opacity: 0.8; }
+  .visually-hidden {
+    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+  }
   .row { display: flex; align-items: center; gap: 0.6rem; padding: 0.5rem 0; border-bottom: 1px solid var(--bg); }
   .row:last-child { border-bottom: none; }
   .row .main { flex: 1; min-width: 0; }
@@ -176,8 +183,22 @@
         already points at a shared file, its decisions are carried across and
         anything new since is marked <code>NEW:</code>.</p>
       <p>
-        <a href="/shared-settings" target="_top">
-          <button type="button">Choose settings for the group…</button>
+        <!-- Its own tab, not this modal: it is a long list to work through, and
+             losing it by clicking away from the settings dialog would mean
+             starting again. rel=noopener because target=_blank otherwise hands
+             the new tab a reference back to this one. -->
+        <a href="/shared-settings" target="_blank" rel="noopener">
+          <button type="button">
+            Choose settings for the group…
+            <svg class="external-icon" viewBox="0 0 16 16" width="11" height="11"
+                 fill="none" stroke="currentColor" stroke-width="1.6"
+                 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M6.5 3.5H3.5v9h9v-3"/>
+              <path d="M9.5 2.5h4v4"/>
+              <path d="M13.5 2.5l-6 6"/>
+            </svg>
+            <span class="visually-hidden">(opens in a new tab)</span>
+          </button>
         </a>
         <a id="download-shared-draft" href="/api/settings/shared-draft"
            download="shared-settings.toml">
