@@ -7,9 +7,15 @@ interface afterwards:
     python3 start.py
 
 It works out what needs doing and does it — finds a suitable Python,
-installs what the sandbox needs, walks you through first-time setup, then
-starts the web interface and opens it in your browser. Nothing to configure
-beforehand.
+installs what the sandbox needs, opens first-time setup in your browser,
+then starts the web interface in that same window. Nothing to configure
+beforehand, and no questions asked in this window: everything this file
+starts is answered in the browser.
+
+The command line can do all of it too (``python main.py settings setup``,
+``settings add-professor``, and the rest), and someone who prefers that is
+free to use it. This file is the other way in, and it doesn't ask which
+one you'd rather have.
 
 This file is deliberately written in old-fashioned Python, using nothing
 newer than version 3.6 understands. It has to be: the whole reason it
@@ -206,34 +212,6 @@ def open_browser_shortly(url):
     thread.start()
 
 
-def ask_where_to_set_up():
-    """Ask whether to answer the setup questions here or in a browser.
-
-    Both routes ask the same things and record the same answers; this is
-    only about which is more comfortable. Offered because the people this
-    sandbox is for did not choose to be at a command line, and a form is a
-    kinder place to paste an API key than a terminal prompt.
-
-    Returns:
-        Either ``"browser"`` or ``"terminal"``. Anything unreadable — no
-        terminal attached, an interrupted prompt — answers ``"terminal"``,
-        because that route works without a browser and never leaves a server
-        running that nobody is looking at.
-    """
-    say("")
-    say("This sandbox hasn't been set up on this computer yet.")
-    say("It's a couple of questions. Where would you rather answer them?")
-    say("")
-    say("  1. Here, in this window")
-    say("  2. In your web browser")
-    say("")
-    try:
-        answer = input("Choose 1 or 2 [1]: ").strip()
-    except (EOFError, KeyboardInterrupt):
-        return "terminal"
-    return "browser" if answer == "2" else "terminal"
-
-
 def main():
     say("")
     say("Princeton AI Sandbox")
@@ -261,22 +239,34 @@ def main():
          "import sys; from src import paths; sys.exit(0 if paths.is_installed() else 1)"],
         cwd=HERE,
     )
-    if already != 0:
-        # Run as its own step so its questions are answered before the web
-        # interface starts, rather than competing with a server for the same
-        # terminal.
-        if ask_where_to_set_up() == "browser":
-            setup = subprocess.call([venv_python(), sandbox, "webui", "setup"])
-        else:
-            setup = subprocess.call([venv_python(), sandbox, "settings", "setup"])
+    url = "http://127.0.0.1:8000"
+    needs_setup = already != 0
+    if needs_setup:
+        # Setup runs as its own step, on the same address the web interface
+        # will use afterwards, and it stops as soon as it has an answer. The
+        # browser opened here lands on the setup page and follows itself to
+        # the sandbox once the answer is in, so nobody has to find a second
+        # window. Answering the same questions at the command line instead
+        # is still there — `python main.py settings setup` — but this file
+        # is the route for someone who just wants to open the sandbox.
+        say("")
+        say("This sandbox hasn't been set up on this computer yet.")
+        say("Setup will open in your browser: it's one question.")
+        say("")
+        open_browser_shortly(url)
+        setup = subprocess.call([venv_python(), sandbox, "webui", "setup"])
         if setup != 0:
             return setup
 
     say("")
-    say("Starting the web interface. It will open in your browser.")
+    if needs_setup:
+        # Setup already opened a window, and its last page moves itself here.
+        say("Starting the web interface. The setup page will move to it.")
+    else:
+        say("Starting the web interface. It will open in your browser.")
+        open_browser_shortly(url)
     say("Leave this window open while you use it; close it or press Ctrl-C to stop.")
     say("")
-    open_browser_shortly("http://127.0.0.1:8000")
     try:
         return subprocess.call([venv_python(), sandbox, "webui", "serve"])
     except KeyboardInterrupt:

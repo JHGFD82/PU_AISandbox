@@ -64,13 +64,15 @@ def _register(module_name: str, rel_path: str) -> None:
 
 
 # Registered in dependency order: settings first (nothing depends on
-# anything), then auth, conversation, attachments, and export (app.py needs
-# all four; none of them depend on each other), then jobs (depends on
-# conversation, registered just above it), then the AI service (a normal
+# anything), then the file chooser (nothing does either, and both the setup
+# page and app.py want it), then auth, conversation, attachments, and export
+# (app.py needs all four; none of them depend on each other), then jobs
+# (depends on conversation, registered just above it), then the AI service (a normal
 # src.services.* registration, needed by app.py's chat route via
 # SandboxProcessor rather than imported directly), then app.py itself last
 # since it's the only file that needs everything else already in place.
 _register("pu_plugin.webui.settings", "src/settings.py")
+_register("_pu_webui_file_picker", "src/file_picker.py")
 _register("_pu_webui_auth", "src/auth.py")
 _register("_pu_webui_conversation", "src/conversation.py")
 _register("_pu_webui_attachments", "src/attachments.py")
@@ -205,10 +207,10 @@ def _is_loopback_host(host: str) -> bool:
 def _serve_setup(args: argparse.Namespace) -> None:
     """Ask where a person's files should go, in a browser, then stop.
 
-    A short-lived server on loopback only, serving one page. It exists so
-    that someone who would rather not answer questions in a terminal can
-    answer them in a form instead; the answers go to the same place either
-    way.
+    A short-lived server on loopback only, serving one page. This is the
+    route ``start.py`` takes; ``python main.py settings setup`` asks the
+    same thing at the command line, and the answers go to the same place
+    either way.
 
     It stops as soon as setup is done, and the sandbox's real web interface
     starts afterwards as a fresh process. Continuing in this one would mean

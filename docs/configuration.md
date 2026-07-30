@@ -37,7 +37,7 @@ python main.py --show-config    # who is configured — makes no API calls
 python main.py --list-models    # the model catalogue
 ```
 
-Setup runs on its own the first time you use a copy that hasn't been set up, so you can also just run the command you actually wanted and answer its questions. `python3 start.py` does the same thing and then opens the web interface; it offers to ask the setup questions in a browser instead of the terminal.
+Setup runs on its own the first time you use a copy that hasn't been set up, so you can also just run the command you actually wanted and answer its questions. `python3 start.py` covers the same two steps in a browser instead: a page asking where your files go, then the web interface's Settings page for adding people. Neither route is the lesser one — they write the same `settings.toml`.
 
 If your files already exist — because you replaced the package with a newer copy — setup finds them, shows you what it found, and offers to carry them forward unchanged.
 

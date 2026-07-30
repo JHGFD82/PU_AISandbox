@@ -39,7 +39,9 @@ def client_and_result():
     """A client for the setup page, plus whatever folder it settles on."""
     chosen: list[Path] = []
     app = setup_web.create_setup_app(lambda folder: chosen.append(folder))
-    return TestClient(app), chosen
+    # A loopback client address, because that is what a real browser on this
+    # computer looks like — and the "Browse…" route refuses anything else.
+    return TestClient(app, client=("127.0.0.1", 50000)), chosen
 
 
 def _make_setup(root: Path, *, people: int = 1):
@@ -115,6 +117,46 @@ class TestCarryingForwardAnExistingSetup:
         assert resp.status_code == 200
         assert (elsewhere / paths.SETTINGS_FILENAME).read_bytes() == before
 
+    def test_somewhere_else_is_offered_alongside_what_was_found(self, client_and_result):
+        """Files found in the usual place aren't proof they're the ones wanted.
+
+        The command line asks "Use these? [Y/n]" and falls through to asking
+        where when the answer is no. Without this the browser had only the
+        yes — someone whose real files sit on an external drive, with a
+        stale folder left in the usual place, was stuck.
+        """
+        _make_setup(paths.DEFAULT_EXTRAS_ROOT, people=1)
+        client, _ = client_and_result
+        page = client.get("/").text
+        assert "somewhere else" in page
+        assert 'name="folder"' in page
+        # Two answers, so two forms — one submitting the found folder, one
+        # submitting whatever gets typed.
+        assert page.count("<form") == 2
+
+    def test_choosing_a_different_folder_carries_that_one_forward(
+        self, client_and_result, tmp_path
+    ):
+        _make_setup(paths.DEFAULT_EXTRAS_ROOT, people=1)
+        real = _make_setup(tmp_path / "external drive", people=4)
+        before = (real / paths.SETTINGS_FILENAME).read_bytes()
+        client, _ = client_and_result
+        resp = client.post("/", data={"folder": str(real)})
+        assert resp.status_code == 200
+        assert "All set" in resp.text
+        assert paths.read_install_marker() == real
+        assert (real / paths.SETTINGS_FILENAME).read_bytes() == before
+
+    def test_an_empty_folder_box_is_not_read_as_the_current_directory(
+        self, client_and_result
+    ):
+        """Submitting the alternative form untouched must not settle on anything."""
+        _make_setup(paths.DEFAULT_EXTRAS_ROOT, people=1)
+        client, _ = client_and_result
+        resp = client.post("/", data={"folder": "   "})
+        assert "No folder was given" in resp.text
+        assert paths.is_installed() is False
+
 
 class TestRejectingBadAnswers:
     def test_a_relative_path_is_refused_with_a_reason(self, client_and_result):
@@ -142,3 +184,118 @@ class TestCloudSyncWarning:
         page = client.get("/").text
         assert "Dropbox" in page
         assert "API keys" in page
+
+    def test_taking_the_suggestion_does_not_ask_twice(
+        self, client_and_result, tmp_path, monkeypatch
+    ):
+        """The warning was beside the button; pressing it read it."""
+        synced = tmp_path / "home" / "Dropbox" / "sandbox"
+        monkeypatch.setattr(paths, "DEFAULT_EXTRAS_ROOT", synced)
+        client, _ = client_and_result
+        resp = client.post("/", data={"folder": str(synced), "acknowledged": str(synced)})
+        assert "All set" in resp.text
+        assert paths.read_install_marker() == synced
+
+    def test_a_synced_folder_someone_chose_themselves_is_queried(
+        self, client_and_result, tmp_path
+    ):
+        """Nothing warned about this one — it was typed, or reached via Browse."""
+        synced = tmp_path / "home" / "Dropbox" / "my documents"
+        client, _ = client_and_result
+        resp = client.post("/", data={"folder": str(synced)})
+        assert resp.status_code == 200
+        assert "Dropbox" in resp.text
+        assert "Use it anyway" in resp.text
+        # Nothing has happened yet — this is a question, not a refusal.
+        assert paths.is_installed() is False
+        assert not synced.exists()
+
+    def test_saying_use_it_anyway_goes_ahead(self, client_and_result, tmp_path):
+        synced = tmp_path / "home" / "Dropbox" / "my documents"
+        client, _ = client_and_result
+        client.post("/", data={"folder": str(synced)})
+        resp = client.post(
+            "/", data={"folder": str(synced), "acknowledged": str(synced)}
+        )
+        assert "All set" in resp.text
+        assert paths.read_install_marker() == synced
+        assert (synced / paths.SETTINGS_FILENAME).is_file()
+
+    def test_an_acknowledgement_for_a_different_folder_does_not_count(
+        self, client_and_result, tmp_path
+    ):
+        """The hidden field names the folder it was shown for, so it can't be reused."""
+        synced = tmp_path / "home" / "Dropbox" / "my documents"
+        client, _ = client_and_result
+        resp = client.post(
+            "/", data={"folder": str(synced), "acknowledged": str(tmp_path / "elsewhere")}
+        )
+        assert "Use it anyway" in resp.text
+        assert paths.is_installed() is False
+
+    def test_an_ordinary_folder_is_never_queried(self, client_and_result, tmp_path):
+        plain = tmp_path / "somewhere ordinary"
+        client, _ = client_and_result
+        resp = client.post("/", data={"folder": str(plain)})
+        assert "All set" in resp.text
+        assert paths.read_install_marker() == plain
+
+
+class TestBrowseButton:
+    """The button that opens this computer's own folder chooser.
+
+    A browser can't tell a page where a folder is — that is a protection,
+    not an oversight. It works here only because the server is running on
+    the same computer as the browser, so the chooser can be opened there.
+    Nothing below opens a real window; the chooser itself is stood in for.
+    """
+
+    def test_the_button_is_offered_when_there_is_a_chooser(self, client_and_result, monkeypatch):
+        monkeypatch.setattr(setup_web.file_picker, "available", lambda: True)
+        client, _ = client_and_result
+        page = client.get("/").text
+        assert 'id="browse-btn"' in page
+        assert "/pick" in page
+
+    def test_no_button_when_this_computer_has_no_chooser(self, client_and_result, monkeypatch):
+        # Better a box you can type in than a button that does nothing.
+        monkeypatch.setattr(setup_web.file_picker, "available", lambda: False)
+        client, _ = client_and_result
+        page = client.get("/").text
+        assert 'id="browse-btn"' not in page
+        assert 'id="folder"' in page
+
+    def test_choosing_a_folder_hands_back_its_real_path(self, client_and_result, monkeypatch, tmp_path):
+        monkeypatch.setattr(setup_web.file_picker, "choose", lambda **kw: tmp_path / "chosen")
+        client, _ = client_and_result
+        resp = client.post("/pick", json={"start": str(tmp_path)})
+        assert resp.status_code == 200
+        assert resp.json()["path"] == str(tmp_path / "chosen")
+
+    def test_closing_the_window_leaves_the_box_alone(self, client_and_result, monkeypatch):
+        monkeypatch.setattr(setup_web.file_picker, "choose", lambda **kw: None)
+        client, _ = client_and_result
+        resp = client.post("/pick", json={"start": None})
+        assert resp.status_code == 200
+        assert resp.json()["path"] is None
+
+    def test_no_chooser_is_explained_rather_than_crashing(self, client_and_result, monkeypatch):
+        def unavailable(**kw):
+            raise setup_web.file_picker.PickerUnavailable("no chooser here")
+
+        monkeypatch.setattr(setup_web.file_picker, "choose", unavailable)
+        client, _ = client_and_result
+        resp = client.post("/pick", json={"start": None})
+        assert resp.status_code == 503
+        assert "no chooser" in resp.json()["error"]
+
+    def test_a_browser_on_another_computer_is_refused(self, monkeypatch):
+        # The window would open on the screen of whoever runs the sandbox,
+        # and hand back a folder from a disk the clicker has never seen.
+        opened = []
+        monkeypatch.setattr(setup_web.file_picker, "choose", lambda **kw: opened.append(kw))
+        app = setup_web.create_setup_app(lambda folder: None)
+        elsewhere = TestClient(app, client=("10.0.0.5", 50000))
+        resp = elsewhere.post("/pick", json={"start": None})
+        assert resp.status_code == 403
+        assert opened == []

@@ -69,6 +69,7 @@ from src.settings import CHAT_ROLE, ENDPOINTS, WEBUI_SESSION_COOKIE_NAME
 from src.tracking.token_tracker import TokenTracker
 
 auth = sys.modules["_pu_webui_auth"]
+file_picker = sys.modules["_pu_webui_file_picker"]
 conversation = sys.modules["_pu_webui_conversation"]
 attachments = sys.modules["_pu_webui_attachments"]
 jobs = sys.modules["_pu_webui_jobs"]
@@ -208,6 +209,12 @@ class SourceBody(BaseModel):
     professor: str | None = None
 
 
+class PickPathBody(BaseModel):
+    kind: str = "folder"
+    start: str | None = None
+    prompt: str = "Choose a folder"
+
+
 # Dotted paths the /settings page may write directly via the generic
 # value/generate/unset endpoints. webui.passphrase_hash is deliberately
 # excluded — a passphrase must only ever be written pre-hashed, through the
@@ -255,6 +262,10 @@ def _settings_snapshot() -> dict:
     return {
         "has_professors": has_professors,
         "order": _SETTINGS_ORDER_FIRST_RUN if not has_professors else _SETTINGS_ORDER_REPEAT,
+        # Whether to draw the "Browse…" buttons at all. A computer with no
+        # file chooser the sandbox can open gets typeable boxes and no
+        # button, rather than a button that does nothing when pressed.
+        "can_browse": file_picker.available(),
         "professors": [
             {
                 "netid": netid,
@@ -300,6 +311,31 @@ def _require_unlocked(request: Request) -> None:
     """Raise a 401 error unless this browser session has already unlocked the app."""
     if not request.session.get("unlocked"):
         raise HTTPException(401, "Not unlocked.")
+
+
+# Addresses that mean the browser asking is on this same computer.
+_SAME_COMPUTER = frozenset({"127.0.0.1", "::1", "localhost"})
+
+
+def _require_same_computer(request: Request) -> None:
+    """Raise a 403 error unless the browser making this request is on this computer.
+
+    Only the file chooser needs this, and it needs it because of what it
+    does: a window opens on the screen of whoever is running the server. If
+    the browser is somewhere else — the sandbox started with ``--host
+    0.0.0.0`` and reached from an iPad — then a "Browse…" button there would
+    pop a window on someone else's desk and hand back a folder from a
+    computer the person clicking has never seen. That isn't a browse button;
+    it's a way of reading someone else's disk. So the button is refused
+    rather than made to work.
+    """
+    client = request.client.host if request.client else None
+    if client not in _SAME_COMPUTER:
+        raise HTTPException(
+            403,
+            "The Browse button only works in a browser on the same computer as "
+            "the sandbox. Type the path instead.",
+        )
 
 
 def _chat_error_message(error: Exception) -> str:
@@ -459,6 +495,28 @@ def create_app() -> FastAPI:
     async def api_settings(request: Request):
         _require_unlocked(request)
         return _settings_snapshot()
+
+    # Deliberately not `async`: opening the chooser waits for a person to
+    # finish looking through their files, and FastAPI gives an ordinary
+    # function its own thread to do that on. Written as `async` it would
+    # hold up every other request in the browser until the window was
+    # answered.
+    @app.post("/api/pick-path")
+    def api_pick_path(request: Request, body: PickPathBody):
+        """Open this computer's file chooser and report back what was picked."""
+        _require_unlocked(request)
+        _require_same_computer(request)
+        try:
+            chosen = file_picker.choose(
+                kind=body.kind, start=body.start, prompt=body.prompt
+            )
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
+        except file_picker.PickerUnavailable as e:
+            raise HTTPException(503, str(e)) from e
+        # No path and no error means the window was closed without choosing,
+        # which is an answer in itself — the page leaves the box alone.
+        return {"path": str(chosen) if chosen else None, "cancelled": chosen is None}
 
     @app.post("/api/settings/professors")
     async def api_add_professor(request: Request, body: AddProfessorBody):

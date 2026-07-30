@@ -65,7 +65,9 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr(jobs, "_CONVERSATIONS_DIR", tmp_path / "conversations")
 
     app = app_module.create_app()
-    return TestClient(app)
+    # A loopback client address, because that's what a browser on this same
+    # computer looks like — and /api/pick-path refuses anything else.
+    return TestClient(app, client=("127.0.0.1", 50000))
 
 
 @pytest.fixture
@@ -1450,6 +1452,34 @@ class TestSettingsProfessors:
         prof = unlocked_client.get("/api/settings").json()["professors"][0]
         assert prof["has_backup_key"] is True
 
+    def test_a_netid_is_required(self, unlocked_client, settings_env):
+        """Without one there is no name for their key, their usage file, or their commands."""
+        resp = unlocked_client.post("/api/settings/professors", json={
+            "name": "Jeff Heller", "key": "sk-primary",
+        })
+        assert resp.status_code == 422
+
+    def test_a_display_name_in_the_netid_box_is_refused(self, unlocked_client, settings_env):
+        """The commonest mistake: 'Jeff Heller' typed where 'jh43' was wanted."""
+        resp = unlocked_client.post("/api/settings/professors", json={
+            "netid": "Jeff Heller", "name": "Jeff Heller", "key": "sk-primary",
+        })
+        assert resp.status_code == 400
+        assert "netID" in resp.json()["detail"]
+
+    def test_an_email_address_in_the_netid_box_is_refused(self, unlocked_client, settings_env):
+        resp = unlocked_client.post("/api/settings/professors", json={
+            "netid": "jh43@princeton.edu", "name": "Jeff Heller", "key": "sk-primary",
+        })
+        assert resp.status_code == 400
+
+    def test_a_netid_typed_in_capitals_is_the_same_person(self, unlocked_client, settings_env):
+        resp = unlocked_client.post("/api/settings/professors", json={
+            "netid": "JH43", "name": "Jeff Heller", "key": "sk-primary",
+        })
+        assert resp.status_code == 200
+        assert resp.json()["netid"] == "jh43"
+
     def test_add_professor_blank_key_rejected(self, unlocked_client, settings_env):
         resp = unlocked_client.post("/api/settings/professors", json={"netid": "jh43", "name": "Jeff Heller", "key": "  "})
         assert resp.status_code == 400
@@ -2038,3 +2068,95 @@ class TestSharedSettingsLink:
         """An icon alone tells someone using a screen reader nothing."""
         page = self._settings_page()
         assert "(opens in a new tab)" in page
+
+class TestBrowseButton:
+    """/api/pick-path — the "Browse…" button behind every path box.
+
+    A browser hands a page a file's contents and never its location, which
+    is why typing paths by hand was the only option before this. It works
+    because the server is on the same computer as the browser, so it can
+    open that computer's own chooser. Nothing here opens a real window.
+    """
+
+    def test_the_settings_page_is_told_whether_to_draw_the_button(
+        self, unlocked_client, settings_env, monkeypatch
+    ):
+        app_module = sys.modules["_pu_webui_app"]
+        monkeypatch.setattr(app_module.file_picker, "available", lambda: False)
+        assert unlocked_client.get("/api/settings").json()["can_browse"] is False
+        monkeypatch.setattr(app_module.file_picker, "available", lambda: True)
+        assert unlocked_client.get("/api/settings").json()["can_browse"] is True
+
+    def test_choosing_a_folder_hands_back_its_real_path(
+        self, unlocked_client, monkeypatch, tmp_path
+    ):
+        app_module = sys.modules["_pu_webui_app"]
+        monkeypatch.setattr(app_module.file_picker, "choose", lambda **kw: tmp_path / "picked")
+        resp = unlocked_client.post("/api/pick-path", json={"kind": "folder"})
+        assert resp.status_code == 200
+        assert resp.json() == {"path": str(tmp_path / "picked"), "cancelled": False}
+
+    def test_closing_the_window_is_an_answer_not_an_error(self, unlocked_client, monkeypatch):
+        app_module = sys.modules["_pu_webui_app"]
+        monkeypatch.setattr(app_module.file_picker, "choose", lambda **kw: None)
+        resp = unlocked_client.post("/api/pick-path", json={"kind": "folder"})
+        assert resp.status_code == 200
+        assert resp.json() == {"path": None, "cancelled": True}
+
+    def test_what_was_typed_is_where_the_chooser_opens(self, unlocked_client, monkeypatch):
+        app_module = sys.modules["_pu_webui_app"]
+        asked = {}
+        monkeypatch.setattr(
+            app_module.file_picker, "choose",
+            lambda **kw: asked.update(kw) or None,
+        )
+        unlocked_client.post(
+            "/api/pick-path",
+            json={"kind": "file", "start": "/Users/x/shared", "prompt": "Pick the file"},
+        )
+        assert asked == {"kind": "file", "start": "/Users/x/shared", "prompt": "Pick the file"}
+
+    def test_a_computer_with_no_chooser_says_so(self, unlocked_client, monkeypatch):
+        app_module = sys.modules["_pu_webui_app"]
+
+        def unavailable(**kw):
+            raise app_module.file_picker.PickerUnavailable("no chooser here")
+
+        monkeypatch.setattr(app_module.file_picker, "choose", unavailable)
+        resp = unlocked_client.post("/api/pick-path", json={"kind": "folder"})
+        assert resp.status_code == 503
+
+    def test_asking_for_something_that_is_not_a_file_or_folder(self, unlocked_client, monkeypatch):
+        app_module = sys.modules["_pu_webui_app"]
+
+        def refuse(**kw):
+            raise ValueError("kind must be 'folder' or 'file'")
+
+        monkeypatch.setattr(app_module.file_picker, "choose", refuse)
+        resp = unlocked_client.post("/api/pick-path", json={"kind": "printer"})
+        assert resp.status_code == 400
+
+    def test_a_locked_browser_cannot_open_a_window(self, client, monkeypatch):
+        app_module = sys.modules["_pu_webui_app"]
+        opened = []
+        monkeypatch.setattr(app_module.file_picker, "choose", lambda **kw: opened.append(kw))
+        resp = client.post("/api/pick-path", json={"kind": "folder"})
+        assert resp.status_code == 401
+        assert opened == []
+
+    def test_a_browser_on_another_computer_is_refused(self, monkeypatch, tmp_path):
+        # The window would open on the screen of whoever runs the sandbox,
+        # and hand back a folder from a disk the clicker has never seen.
+        app_module = sys.modules["_pu_webui_app"]
+        conversation = sys.modules["_pu_webui_conversation"]
+        jobs = sys.modules["_pu_webui_jobs"]
+        monkeypatch.setattr(conversation, "CONVERSATIONS_DIR", tmp_path / "conversations")
+        monkeypatch.setattr(jobs, "_CONVERSATIONS_DIR", tmp_path / "conversations")
+        opened = []
+        monkeypatch.setattr(app_module.file_picker, "choose", lambda **kw: opened.append(kw))
+
+        elsewhere = TestClient(app_module.create_app(), client=("10.0.0.5", 50000))
+        elsewhere.post("/unlock", data={"passphrase": ""})
+        resp = elsewhere.post("/api/pick-path", json={"kind": "folder"})
+        assert resp.status_code == 403
+        assert opened == []

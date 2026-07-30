@@ -64,7 +64,7 @@ python3 start.py
 
 That's it. `start.py` does everything else: finds a Python new enough to run the sandbox, installs what it needs, asks where to keep your files, and opens the web interface in your browser.
 
-The first time, it asks whether you'd rather answer its couple of questions in the terminal window or in your browser — the same questions either way, so pick whichever you find easier.
+The first time, a page opens asking where to keep your files. Answer it and the same window moves straight on to the sandbox. (If you would rather answer at the command line, `python main.py settings setup` asks the same thing — but nothing makes you.)
 
 The first run takes a few minutes — about 200 MB of software is downloaded. Every run after that reaches the web interface in about a second, so this is also the normal way to open the sandbox day to day.
 
@@ -78,13 +78,23 @@ If it does, it will tell you exactly what to do: install Python from [python.org
 
 ### Adding people
 
-Once the sandbox is running, add whoever will be using it:
+Once the sandbox is running, add whoever will be using it. When there is nobody configured yet, the web interface opens straight onto its Settings page for exactly this reason — fill in the **Professors** panel and press *Add professor*.
+
+The same thing at the command line:
 
 ```bash
 python main.py settings add-professor
 ```
 
-It asks for their netID, their display name, and their API keys — the keys are typed hidden, never as a command-line flag. Princeton faculty obtain API keys through OIT; each person registers independently.
+Either way it asks for three things:
+
+| | |
+|---|---|
+| **NetID** | The university username they sign in with — `jh43`. Letters and digits only, not their name and not an email address. This is how the sandbox tells one person from another: it picks their API key, names their usage file, and is what you type to run a command as them. It can't be changed later without removing them and adding them again. |
+| **Display name** | `Jeff Heller`. Only ever shown to people — in reports and in the person picker — so write it however reads best. |
+| **API key** | Princeton faculty obtain these through OIT; each person registers independently. A backup key is optional, and gets used automatically if the primary one ever stops working. |
+
+Keys are never displayed once saved — the settings page shows only whether one is set. At the command line they're typed hidden, never as a flag.
 
 ### Using it from the command line instead
 
@@ -124,18 +134,24 @@ If you would rather start from a clean copy — or you downloaded a ZIP rather t
 
 1. Delete the whole `PU_AISandbox` folder.
 2. Get a fresh one (clone or download again).
-3. Run `python3 start.py`. It rebuilds the environment, then finds your existing files and asks you to confirm:
+3. Run `python3 start.py`. It rebuilds the environment, then opens a page that has already found your existing files and asks you to confirm:
 
 ```
-Found your files already at /Users/you/PU_AISandbox_data:
-    your settings and API keys   (2 people configured)
+Your files are already here
+    /Users/you/PU_AISandbox_data
+
+    your settings and API keys (2 people configured)
     your model catalogue
-    your usage history           (11 months)
+    your usage history (11 months)
 
-Use these? [Y/n]
+    [ Use these files ]
+
+  › My files are somewhere else
 ```
 
-Press Enter and you're done — nothing to copy, nothing to re-enter.
+One click and you're done — nothing to copy, nothing to re-enter.
+
+If your files live somewhere other than the folder it found — on an external drive, or wherever you chose the first time — open **My files are somewhere else** and point it there, typing the folder or pressing *Browse…* to find it. Whatever is in that folder is used exactly as it is: nothing is overwritten, and nothing is lost.
 
 ---
 

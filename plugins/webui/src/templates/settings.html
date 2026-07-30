@@ -86,6 +86,16 @@
   .empty { font-size: 0.85rem; color: var(--text-muted); }
   .field-set { display: flex; gap: 0.5rem; align-items: center; }
   .field-set input { flex: 1; }
+  /* Same row-of-boxes shape as form.inline, but as a block inside a form
+     that also has explanatory text and an error line under it. */
+  .inline-fields { display: flex; gap: 0.5rem; align-items: flex-end; flex-wrap: wrap; margin-top: 0.75rem; }
+  .inline-fields > div { flex: 1; min-width: 140px; }
+  .required { color: var(--orange); font-size: 0.72rem; }
+  .field-note { margin: 0.6rem 0 0; }
+  .field-note code { background: var(--bg); border-radius: 4px; padding: 0.05rem 0.25rem; font-size: 0.9em; }
+  .form-error { font-size: 0.82rem; color: var(--danger-text); border: 1px solid var(--danger-border);
+                background: var(--danger-hover-bg); border-radius: 6px; padding: 0.5rem 0.7rem; margin: 0.7rem 0 0; }
+  #add-professor-form button[type=submit] { margin-top: 0.8rem; }
 </style>
 </head>
 <body>
@@ -100,20 +110,41 @@
       <h2>Professors</h2>
       <p class="hint">Each professor needs a Princeton AI Sandbox API key (from OIT) before they can use this tool. Keys are never shown once saved — only whether one is set.</p>
       <div id="professors-list"></div>
-      <form class="inline" id="add-professor-form">
-        <div>
-          <label for="prof-name">Display name</label>
-          <input type="text" id="prof-name" placeholder="Jeff Heller" required>
+      <form id="add-professor-form">
+        <div class="inline-fields">
+          <div>
+            <label for="prof-netid">NetID <span class="required">required</span></label>
+            <!-- No pattern= attribute on purpose: the browser's own "please match
+                 the requested format" would fire first and replace the sentence
+                 below, which says what a netID actually is. The check is done in
+                 the submit handler instead, and again on the server. -->
+            <input type="text" id="prof-netid" placeholder="jh43"
+                   autocapitalize="none" autocorrect="off" spellcheck="false" required>
+          </div>
+          <div>
+            <label for="prof-name">Display name <span class="required">required</span></label>
+            <input type="text" id="prof-name" placeholder="Jeff Heller" required>
+          </div>
+          <div>
+            <label for="prof-key">Primary API key <span class="required">required</span></label>
+            <input type="password" id="prof-key" required>
+          </div>
+          <div>
+            <label for="prof-backup-key">Backup key (optional)</label>
+            <input type="password" id="prof-backup-key">
+          </div>
         </div>
-        <div>
-          <label for="prof-key">Primary API key</label>
-          <input type="password" id="prof-key" required>
-        </div>
-        <div>
-          <label for="prof-backup-key">Backup key (optional)</label>
-          <input type="password" id="prof-backup-key">
-        </div>
-        <button type="submit">Add professor</button>
+        <p class="hint field-note">
+          The <strong>netID</strong> is the university username this person signs in with —
+          <code>jh43</code>, not <code>Jeff Heller</code> and not an email address. It is how the
+          sandbox knows one person from another: it picks their API key, names their usage file,
+          and is what gets typed to run a command as them. Letters and digits only, and it can't
+          be changed later without removing them and adding them again.
+          The <strong>display name</strong> is only ever shown to people, so write it however reads best.
+          A <strong>backup key</strong>, if they have one, is used automatically whenever the primary key stops working.
+        </p>
+        <div id="add-professor-error" class="form-error" style="display:none"></div>
+        <button type="submit" id="add-professor-btn">Add professor</button>
       </form>
     </div>
 
@@ -169,6 +200,8 @@
       <label for="shared-path">Shared settings file path</label>
       <form class="inline" id="shared-path-form">
         <div><input type="text" id="shared-path" placeholder="/path/to/shared-settings.toml"></div>
+        <button type="button" class="secondary browse" data-browse="shared-path" data-browse-kind="file"
+                data-browse-prompt="Choose the shared settings file" style="display:none">Browse…</button>
         <button type="submit">Save</button>
         <button type="button" class="secondary" id="clear-shared-path-btn">Clear</button>
       </form>
@@ -230,7 +263,11 @@ default_model = "llama-3-70b-instruct"</div>
         </div>
         <div>
           <label for="source-path">Path</label>
-          <input type="text" id="source-path" placeholder="/path/to/shared/data" required>
+          <div class="field-set">
+            <input type="text" id="source-path" placeholder="/path/to/shared/data" required>
+            <button type="button" class="secondary browse" data-browse="source-path" data-browse-kind="folder"
+                    data-browse-prompt="Choose the usage-data folder" style="display:none">Browse…</button>
+          </div>
         </div>
         <div>
           <label for="source-mode">Mode</label>
@@ -275,6 +312,68 @@ async function api(path, opts) {
 function badge(el, isSet, setText, unsetText) {
   el.textContent = isSet ? (setText || "set") : (unsetText || "not set");
   el.className = "badge " + (isSet ? "set" : "unset");
+}
+
+// The server answers errors as JSON ({"detail": "..."}), and that wrapper is
+// not something to show anyone. Anything unrecognisable is passed through as
+// it came, on the grounds that some text beats none.
+function readableError(err) {
+  const raw = (err && err.message) || String(err);
+  try {
+    const parsed = JSON.parse(raw);
+    if (typeof parsed.detail === "string") return parsed.detail;
+    // FastAPI reports a missing or malformed field as a list of objects.
+    if (Array.isArray(parsed.detail)) {
+      return parsed.detail.map(d => d.msg || JSON.stringify(d)).join("; ");
+    }
+  } catch (e) { /* not JSON: show it as it is */ }
+  return raw;
+}
+
+// ── "Browse…" ────────────────────────────────────────────────────────────
+// Every path box on this page has one. The chooser it opens is this
+// computer's own — the server is running here too, so it can open a real
+// Finder or Explorer window and hand back a real path. A browser's own file
+// box can't: it gives back a file's contents and never its location.
+async function browseFor(button) {
+  const field = document.getElementById(button.dataset.browse);
+  const original = button.textContent;
+  button.disabled = true;
+  button.textContent = "Choosing…";
+  try {
+    const result = await api("/api/pick-path", {
+      method: "POST",
+      body: JSON.stringify({
+        kind: button.dataset.browseKind || "folder",
+        start: field.value || null,
+        prompt: button.dataset.browsePrompt || "Choose a folder",
+      }),
+    });
+    // A closed window without a choice leaves whatever was typed alone.
+    if (result.path) {
+      field.value = result.path;
+      field.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+  } catch (e) {
+    alert(readableError(e));
+  } finally {
+    button.disabled = false;
+    button.textContent = original;
+  }
+}
+
+document.addEventListener("click", (ev) => {
+  const button = ev.target.closest("button.browse");
+  if (button) browseFor(button);
+});
+
+// Drawn only where there is a chooser to open. Somewhere without one — a
+// server reached over a plain remote connection, say — keeps the typeable
+// box it always had, rather than gaining a button that does nothing.
+function showBrowseButtons(canBrowse) {
+  document.querySelectorAll("button.browse").forEach(b => {
+    b.style.display = canBrowse ? "" : "none";
+  });
 }
 
 function renderProfessors(data) {
@@ -341,16 +440,38 @@ function renderProfessors(data) {
 
 document.getElementById("add-professor-form").addEventListener("submit", async (ev) => {
   ev.preventDefault();
-  const name = document.getElementById("prof-name").value;
+  const errorBox = document.getElementById("add-professor-error");
+  const button = document.getElementById("add-professor-btn");
+  const netid = document.getElementById("prof-netid").value.trim();
+  const name = document.getElementById("prof-name").value.trim();
   const key = document.getElementById("prof-key").value;
   const backupKey = document.getElementById("prof-backup-key").value || null;
+  errorBox.style.display = "none";
+
+  // Checked here as well as on the server so the commonest mistake — a
+  // display name or an email address typed into the netID box — is answered
+  // instantly, and in terms of what a netID is rather than what a pattern is.
+  if (!/^[A-Za-z0-9]+$/.test(netid)) {
+    errorBox.textContent = "'" + netid + "' isn't a netID. A netID is the university "
+      + "username someone signs in with — letters and digits only, like 'jh43'. "
+      + "Their full name goes in the display name box.";
+    errorBox.style.display = "";
+    return;
+  }
+
+  button.disabled = true;
   try {
     await api("/api/settings/professors", {
-      method: "POST", body: JSON.stringify({ name, key, backup_key: backupKey }),
+      method: "POST", body: JSON.stringify({ netid, name, key, backup_key: backupKey }),
     });
     ev.target.reset();
     await loadSettings();
-  } catch (e) { alert("Error adding professor: " + e.message); }
+  } catch (e) {
+    errorBox.textContent = readableError(e);
+    errorBox.style.display = "";
+  } finally {
+    button.disabled = false;
+  }
 });
 
 function renderWebui(data) {
@@ -524,6 +645,7 @@ function applyOrder(order) {
 async function loadSettings() {
   const data = await api("/api/settings");
   applyOrder(data.order);
+  showBrowseButtons(data.can_browse);
   renderProfessors(data);
   renderWebui(data);
   renderShared(data);
@@ -546,7 +668,7 @@ document.getElementById("lock-btn").addEventListener("click", async () => {
   window.top.location.href = "/";
 });
 
-loadSettings().catch(e => alert("Error loading settings: " + e.message));
+loadSettings().catch(e => alert("Error loading settings: " + readableError(e)));
 </script>
 </body>
 </html>
