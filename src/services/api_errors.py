@@ -11,7 +11,7 @@ from ..models import (
     is_model_access_error,
     is_sampling_param_deprecated_error,
     remove_model_from_catalog,
-    set_model_fixed_parameters,
+    record_sampling_params_rejected,
 )
 
 # Phrases a provider uses when it is refusing one particular field of the
@@ -186,7 +186,7 @@ def raise_for_deprecated_sampling_params(error: Exception, model: str) -> None:
     """
     if not is_sampling_param_deprecated_error(str(error)):
         return
-    updated = set_model_fixed_parameters(model) if model else False
+    updated = record_sampling_params_rejected(model) if model else False
     updated_note = (
         " It has been marked as a fixed-parameter model in the catalog, so "
         "sending your message again should work now."

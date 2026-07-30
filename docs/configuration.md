@@ -193,11 +193,38 @@ A single name still works if you'd rather write one — `"translation": "gpt-4o"
 | `supports_vision` | bool | — | `true` for models that can read images (default `false`) |
 | `portkey_id` | string | — | PortKey routing identifier, e.g. `"openai/gpt-4o"` |
 | `last_sync` | string | — | Timestamp, set automatically after a pricing sync |
-| `use_max_completion_tokens` | bool | — | `true` for reasoning models that expect `max_completion_tokens` rather than `max_tokens`. Note the key is `use_`, not `uses_`. |
-| `fixed_parameters` | bool | — | `true` for models that reject `temperature` and `top_p` outright |
-| `omit_sampling_params` | bool | — | `true` for models that accept `temperature` and `top_p` but do nothing useful with them, so they're left out. Milder than `fixed_parameters`; either one causes them to be dropped. |
 | `max_completion_tokens` | int | — | Per-model cap on response length |
-| `system_role` | string | — | Override the system message's role (defaults to `"system"`; some newer models want `"developer"`) |
+| `rejects` | object | — | Request fields this model won't accept — see [When a model is awkward](#when-a-model-is-awkward) |
+| `prefers` | object | — | Fields this model needs a non-default *value* for — same section |
+
+### When a model is awkward
+
+Models disagree about what a request may contain. One refuses `temperature`; another rejects `stream_options` outright; a third wants the response-length cap called `max_completion_tokens` and the system message's role called `"developer"`. Two keys describe all of it:
+
+```json
+"gpt-5": {
+  "input": 1.25,
+  "output": 10.0,
+  "supports_vision": true,
+  "rejects": {
+    "temperature": "2026-05-14: unsupported parameter",
+    "top_p":       "2026-05-14: unsupported parameter"
+  },
+  "prefers": {
+    "system_role": "developer",
+    "max_tokens_field": "max_completion_tokens"
+  }
+}
+```
+
+- **`rejects`** — field name to a short note saying when and why. Anything listed here is left out of every request for this model. The note is there so you can tell what the sandbox learned by itself from what you set by hand, and judge whether it's still true.
+- **`prefers`** — for things that were never yes-or-no. `system_role` and `max_tokens_field` are *values*: the question is which of two names the model wants, so a flag couldn't record the answer.
+
+**You rarely need to write either.** When a provider refuses a field it usually names it, and the sandbox records that itself, then retries without it — so the second attempt succeeds and every later request is right first time. Editing by hand is for a model you already know is awkward.
+
+**Nothing expires.** If a provider starts accepting a field again, delete its line from `rejects` and it will be re-learned only if refused again. The dates are there to help you judge how stale a line looks.
+
+These may also be written as individual flags — `fixed_parameters` or `omit_sampling_params` (either means all of `temperature`, `top_p`, `frequency_penalty`, `presence_penalty` are refused), `use_max_completion_tokens`, and `system_role` at the top level. Both spellings are read and mean the same thing; where they disagree, `rejects`/`prefers` wins, since that's the one the sandbox writes.
 
 ### Adding models
 

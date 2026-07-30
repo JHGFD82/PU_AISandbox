@@ -232,7 +232,7 @@ class Conversation:
                      way ``model`` is, so it doesn't reset every time the
                      page is reloaded. Only meaningful for models that
                      accept it — see
-                     ``src.models.catalog.model_has_fixed_parameters``.
+                     ``src.models.catalog.model_accepts_sampling_params``.
         top_p: This conversation's nucleus-sampling override (``0.0``-``1.0``),
                or ``None`` for the model's default. Same persistence and
                model-support caveat as ``temperature``.

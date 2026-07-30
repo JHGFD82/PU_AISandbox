@@ -25,6 +25,22 @@ MODEL_CATALOG_FILE = "model_catalog.json"
 # should be able to misconfigure into a broken state.
 _ROLES_REQUIRING_VISION: frozenset = frozenset({"chat", "ocr", "image_translation"})
 
+# The parameters that shape how varied a model's wording is. Grouped because
+# providers treat them as a set: a model that refuses one generally refuses all
+# of them.
+_SAMPLING_FIELDS: tuple = ("temperature", "top_p", "frequency_penalty", "presence_penalty")
+
+# Two ways of writing the same thing. A model's quirks belong under ``rejects``
+# (request fields it won't accept) and ``prefers`` (fields needing a value
+# other than the usual one), which is what the sandbox learns into and what the
+# catalogue template ships. A catalogue may instead spell some of them as
+# individual flags, which are read and understood as the equivalent entry —
+# the two below map a flag onto every field it stands for.
+_FLAGS_MEANING_REJECTED: dict = {
+    "fixed_parameters": _SAMPLING_FIELDS,
+    "omit_sampling_params": _SAMPLING_FIELDS,
+}
+
 # In-memory cache: populated on first load, invalidated whenever the catalog
 # is written.  Eliminates repeated file-descriptor opens during parallel
 # translation where each worker would otherwise call load_model_catalog() for
@@ -153,6 +169,7 @@ def load_model_catalog() -> Dict[str, Any]:
         error_msg = f"Model catalog file {catalog_file} has no models configured."
         logging.error(error_msg)
         raise ValueError(error_msg)
+
 
     # Deliberately records the stamp taken *before* the file was read, not a
     # fresh one. If the file changed while we were reading it, the stamp we
@@ -299,84 +316,142 @@ def get_model_system_role(model: str) -> str:
     """Return the role label the model expects for system-level instructions.
 
     Most models accept a ``"system"`` role for the instruction message at the
-    start of a conversation. A small number of newer reasoning models
-    (such as ``o3-mini``) require the label ``"developer"`` instead and will
-    reject requests that use ``"system"``. This function looks up the correct
-    label from the catalog so each model receives the format it expects.
+    start of a conversation. Some newer reasoning models require the label
+    ``"developer"`` instead and reject requests that use ``"system"``. This
+    looks the answer up so each model receives the form it expects.
 
     Args:
-        model: The model name to look up (e.g. ``'gpt-4o'``, ``'o3-mini'``).
+        model: The model name to look up (e.g. ``'gpt-4o'``, ``'gpt-5'``).
 
     Returns:
-        ``'system'`` for most models, or ``'developer'`` for models that
-        require it. Defaults to ``'system'`` if the model is not in the
-        catalog.
+        ``'system'`` for most models, or whatever the model's ``prefers``
+        entry names — ``'developer'`` in practice. ``'system'`` for a model
+        that isn't in the catalog.
     """
-    config = load_model_catalog()
-    models = config["models"]
-    return models.get(model, {}).get("system_role", "system")
+    role = model_preferences(model).get("system_role")
+    return role if isinstance(role, str) and role else "system"
 
 
 def model_uses_max_completion_tokens(model: str) -> bool:
-    """Check whether a model requires a different parameter name for setting its response length limit.
+    """Check whether a model wants a different parameter name for the response-length cap.
 
-    Standard models accept ``max_tokens`` to cap how long their response can
-    be. Some newer reasoning models (such as ``o3-mini``) reject that
-    parameter and require ``max_completion_tokens`` instead. This function
-    looks up which parameter name applies so the API call is constructed
-    correctly.
-
-    Args:
-        model: The model name to check (e.g. ``'gpt-4o'``, ``'o3-mini'``).
-
-    Returns:
-        ``True`` if the model requires ``max_completion_tokens``,
-        ``False`` if it uses the standard ``max_tokens``.
-    """
-    config = load_model_catalog()
-    models = config["models"]
-    return models.get(model, {}).get("use_max_completion_tokens", False)
-
-
-def model_has_fixed_parameters(model: str) -> bool:
-    """Check whether a model ignores temperature, top-p, and other sampling controls.
-
-    Most models accept parameters that shape how creative or focused their
-    responses are (temperature, top-p, etc.). Some reasoning models
-    (such as ``o3-mini``) only support fixed, default values for those
-    parameters and will reject requests that include them. When this returns
-    ``True``, sampling parameters are omitted from the API call entirely.
+    Standard models accept ``max_tokens``. Some reasoning models reject that
+    and require ``max_completion_tokens`` instead — the same setting under
+    another name, which is why the catalog records the name to use rather than
+    a yes-or-no flag.
 
     Args:
-        model: The model name to check (e.g. ``'gpt-4o'``, ``'o3-mini'``).
+        model: The model name to check (e.g. ``'gpt-4o'``, ``'gpt-5'``).
 
     Returns:
-        ``True`` if the model's catalog entry has ``"fixed_parameters": true``,
-        ``False`` otherwise.
+        ``True`` if this model wants ``max_completion_tokens``, ``False`` for
+        the usual ``max_tokens``.
     """
-    config = load_model_catalog()
-    models = config["models"]
-    return models.get(model, {}).get("fixed_parameters", False)
+    return model_preferences(model).get("max_tokens_field") == "max_completion_tokens"
 
 
-def model_omit_sampling_params(model: str) -> bool:
-    """Check whether sampling parameters should be left out of requests for this model.
+def model_accepts_sampling_params(model: str) -> bool:
+    """Check whether a model will accept being told how varied its wording should be.
 
-    Similar to ``model_has_fixed_parameters``, but applies to models where the
-    provider route discourages temperature and top-p even though the model is
-    not fully locked down. Setting ``"omit_sampling_params": true`` in the
-    catalog for such a model prevents rejected-request errors without treating
-    the model as fully fixed-parameter.
+    Most models take ``temperature`` and ``top_p``. Some reasoning models
+    reject them outright, and some provider routes reject them even where the
+    model itself would not. Either way the answer is the same — leave them out
+    — so there is one question here rather than two nearly-identical ones.
 
     Args:
         model: The model name to check (e.g. ``'gpt-4o'``).
 
     Returns:
-        ``True`` if sampling parameters should be omitted, ``False`` otherwise.
+        ``False`` if the model is known to refuse any of the sampling
+        parameters, ``True`` otherwise (including for a model that isn't in
+        the catalog, which is the optimistic default: a refusal teaches the
+        catalog the answer, see ``record_rejected_field()``).
     """
-    config = load_model_catalog()
-    models = config["models"]
-    return models.get(model, {}).get("omit_sampling_params", False)
+    rejected = model_rejected_fields(model)
+    return not any(field in rejected for field in _SAMPLING_FIELDS)
+
+
+def _with_quirks_gathered(entry: Any) -> Any:
+    """Return one model's catalog entry with its quirks gathered under two keys.
+
+    A model's awkwardnesses are described by ``rejects`` (request fields it
+    won't accept) and ``prefers`` (fields that need a value other than the
+    usual one). A catalog may instead spell some of them as individual flags —
+    ``fixed_parameters``, ``omit_sampling_params``, ``use_max_completion_tokens``
+    and ``system_role``. Both are understood; this turns the second into the
+    first so that nothing further down has to check two places.
+
+    Args:
+        entry: One value from the catalog's ``models`` section. Anything that
+               isn't a dictionary is handed back untouched — a hand-edited file
+               can contain surprises, and this is not the place to complain
+               about them.
+
+    Returns:
+        An entry whose quirks are all under ``rejects`` and ``prefers``, with
+        the individual flags removed. Where both spellings are present the
+        ``rejects``/``prefers`` entry wins, since that is the one the sandbox
+        learns into and therefore the more recent answer.
+    """
+    if not isinstance(entry, dict):
+        return entry
+
+    raw_rejects = entry.get("rejects")
+    raw_prefers = entry.get("prefers")
+    rejects: dict = dict(raw_rejects) if isinstance(raw_rejects, dict) else {}
+    prefers: dict = dict(raw_prefers) if isinstance(raw_prefers, dict) else {}
+    flags_seen = False
+
+    for flag, fields in _FLAGS_MEANING_REJECTED.items():
+        if entry.get(flag):
+            flags_seen = True
+            for field in fields:
+                rejects.setdefault(field, f"catalog: {flag}")
+
+    if entry.get("use_max_completion_tokens"):
+        flags_seen = True
+        prefers.setdefault("max_tokens_field", "max_completion_tokens")
+
+    role = entry.get("system_role")
+    if isinstance(role, str) and role:
+        flags_seen = True
+        prefers.setdefault("system_role", role)
+
+    if not flags_seen:
+        return entry
+
+    gathered = {
+        key: value for key, value in entry.items()
+        if key not in _FLAGS_MEANING_REJECTED
+        and key not in ("use_max_completion_tokens", "system_role")
+    }
+    if rejects:
+        gathered["rejects"] = rejects
+    if prefers:
+        gathered["prefers"] = prefers
+    return gathered
+
+
+def model_preferences(model: str) -> dict[str, Any]:
+    """Return the values this model needs in place of the usual ones.
+
+    Where ``model_rejected_fields()`` lists what a model won't accept at all,
+    this lists what it accepts only in a particular form — which name it wants
+    for the response-length cap, what to call the system message's role. The
+    distinction matters: those two were never yes-or-no questions, so recording
+    them as flags loses the answer.
+
+    Args:
+        model: The model name to look up (e.g. ``'gpt-5'``).
+
+    Returns:
+        A dictionary of setting name to value, empty for a model with no
+        special needs. Recognised keys are ``'max_tokens_field'`` and
+        ``'system_role'``.
+    """
+    entry = _with_quirks_gathered(load_model_catalog()["models"].get(model, {}))
+    preferred = entry.get("prefers") if isinstance(entry, dict) else None
+    return dict(preferred) if isinstance(preferred, dict) else {}
 
 
 def model_rejected_fields(model: str) -> dict[str, str]:
@@ -397,8 +472,8 @@ def model_rejected_fields(model: str) -> dict[str, str]:
         not permitted'}``). Empty for a model with nothing known against it,
         which is the normal case.
     """
-    entry = load_model_catalog()["models"].get(model, {})
-    rejected = entry.get("rejects")
+    entry = _with_quirks_gathered(load_model_catalog()["models"].get(model, {}))
+    rejected = entry.get("rejects") if isinstance(entry, dict) else None
     return dict(rejected) if isinstance(rejected, dict) else {}
 
 
@@ -613,38 +688,27 @@ def is_model_access_error(error_message: str) -> bool:
     return "invalid target name found in the query router" in error_message.lower()
 
 
-def set_model_fixed_parameters(model_name: str) -> bool:
-    """Mark a model's catalog entry as not accepting sampling parameters at all.
+def record_sampling_params_rejected(model_name: str) -> bool:
+    """Remember that a model won't accept being told how varied its wording should be.
 
-    Used automatically when the AI gateway reports that a model has dropped
-    support for temperature/top-p entirely (some Azure AI deployments return
-    this instead of silently ignoring the parameter, or rejecting it the way
-    ``model_omit_sampling_params`` models do) — see
-    ``is_sampling_param_deprecated_error()``. Once set, every future request
-    for this model omits temperature, top-p, and the other sampling
-    parameters (see ``BaseService._build_completion_kwargs()``). Logs a
-    warning so the change is visible in the run log.
+    Called when a provider reports that temperature, top-p and the rest are not
+    merely out of range but not accepted at all — see
+    ``is_sampling_param_deprecated_error()``. Recorded the same way as any
+    other refused field, so there is one list of a model's awkwardnesses rather
+    than a separate flag for this particular one.
 
     Args:
-        model_name: The exact key of the model to update, as it appears in
-                    ``model_catalog.json`` (e.g. ``'claude-fable-5'``).
+        model_name: The model's catalog key (e.g. ``'gpt-5'``).
 
     Returns:
-        ``True`` if the model was found and updated, ``False`` if the model
-        was not present in the catalog, or was already marked
-        ``fixed_parameters: true`` (no changes are made in that case).
+        ``True`` if anything was newly recorded, ``False`` if the model isn't
+        in the catalog or already refused all of them.
     """
-    catalog = load_model_catalog()
-    entry = catalog["models"].get(model_name)
-    if entry is None or entry.get("fixed_parameters") is True:
-        return False
-    entry["fixed_parameters"] = True
-    save_model_catalog(catalog)
-    logging.warning(
-        f"Marked model '{model_name}' as fixed_parameters=true in the catalog "
-        "(gateway reported that sampling parameters are deprecated for it)."
-    )
-    return True
+    recorded = False
+    for field in _SAMPLING_FIELDS:
+        if record_rejected_field(model_name, field, "provider reports it is not accepted"):
+            recorded = True
+    return recorded
 
 
 def is_sampling_param_deprecated_error(error_message: str) -> bool:

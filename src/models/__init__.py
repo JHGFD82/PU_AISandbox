@@ -22,15 +22,15 @@ from .catalog import (
     is_model_access_error,
     is_sampling_param_deprecated_error,
     load_model_catalog,
-    model_has_fixed_parameters,
-    model_omit_sampling_params,
+    model_accepts_sampling_params,
+    model_preferences,
     model_rejected_fields,
     model_supports_vision,
     model_uses_max_completion_tokens,
     record_rejected_field,
     remove_model_from_catalog,
     save_model_catalog,
-    set_model_fixed_parameters,
+    record_sampling_params_rejected,
 )
 from .output_options import OutputOptions
 from .pricing import (
@@ -57,8 +57,8 @@ __all__ = [
     "get_vision_capable_models",
     "get_model_system_role",
     "model_uses_max_completion_tokens",
-    "model_has_fixed_parameters",
-    "model_omit_sampling_params",
+    "model_accepts_sampling_params",
+    "model_preferences",
     "model_rejected_fields",
     "get_model_max_completion_tokens",
     # catalog (continued)
@@ -66,7 +66,7 @@ __all__ = [
     "record_rejected_field",
     "remove_model_from_catalog",
     "is_sampling_param_deprecated_error",
-    "set_model_fixed_parameters",
+    "record_sampling_params_rejected",
     # pricing
     "PORTKEY_PRICING_API_BASE",
     "add_model_to_catalog",

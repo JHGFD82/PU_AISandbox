@@ -257,8 +257,7 @@ class TestModelsEndpoint:
         app_module = sys.modules["_pu_webui_app"]
         monkeypatch.setattr(app_module, "get_available_models", lambda: ["gpt-4o", "o3-mini"])
         monkeypatch.setattr(app_module, "model_supports_vision", lambda m: m == "gpt-4o")
-        monkeypatch.setattr(app_module, "model_has_fixed_parameters", lambda m: m == "o3-mini")
-        monkeypatch.setattr(app_module, "model_omit_sampling_params", lambda m: False)
+        monkeypatch.setattr(app_module, "model_accepts_sampling_params", lambda m: m != "o3-mini")
         monkeypatch.setattr(app_module, "get_default_model", lambda role: "gpt-4o")
         monkeypatch.setattr(app_module, "resolve_model", lambda **kw: "gpt-4o")
 
@@ -270,13 +269,12 @@ class TestModelsEndpoint:
 
     def test_omit_sampling_params_also_hides_the_controls(self, unlocked_client, monkeypatch):
         # A model can be "not fully fixed" but still on a provider route
-        # that rejects temperature/top-p — see model_omit_sampling_params's
+        # that refuses temperature/top-p — see model_accepts_sampling_params's
         # docstring. Either flag alone should hide the controls.
         app_module = sys.modules["_pu_webui_app"]
         monkeypatch.setattr(app_module, "get_available_models", lambda: ["some-model"])
         monkeypatch.setattr(app_module, "model_supports_vision", lambda m: False)
-        monkeypatch.setattr(app_module, "model_has_fixed_parameters", lambda m: False)
-        monkeypatch.setattr(app_module, "model_omit_sampling_params", lambda m: True)
+        monkeypatch.setattr(app_module, "model_accepts_sampling_params", lambda m: False)
         monkeypatch.setattr(app_module, "get_default_model", lambda role: "some-model")
         monkeypatch.setattr(app_module, "resolve_model", lambda **kw: "some-model")
 

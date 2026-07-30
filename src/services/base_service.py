@@ -17,8 +17,7 @@ from portkey_ai import Portkey
 from collections.abc import Iterator as ABCIterator
 
 from ..models import (
-    model_uses_max_completion_tokens, model_has_fixed_parameters, model_omit_sampling_params,
-    model_rejected_fields, record_rejected_field,
+    model_uses_max_completion_tokens, model_rejected_fields, record_rejected_field,
     resolve_model, maybe_sync_model_pricing, get_model_max_completion_tokens,
 )
 from ..tracking.token_tracker import TokenTracker, TokenUsage
@@ -256,10 +255,6 @@ class BaseService:
             The complete keyword-argument dictionary ready to pass to
             ``self.client.chat.completions.create(**kwargs)``.
         """
-        use_completion_tokens = model_uses_max_completion_tokens(model)
-        fixed_params = model_has_fixed_parameters(model)
-        omit_sampling_params = model_omit_sampling_params(model)
-
         kwargs: dict[str, Any] = {
             "model": model,
             "stream": stream,
@@ -273,20 +268,15 @@ class BaseService:
         if top_p is not None:
             kwargs["top_p"] = top_p
 
-        if fixed_params or omit_sampling_params:
-            for key in ("temperature", "top_p", "frequency_penalty", "presence_penalty"):
-                kwargs.pop(key, None)
-            if omit_sampling_params and not fixed_params:
-                logging.debug(
-                    f"Omitting sampling params for model '{model}' due to catalog configuration."
-                )
+        # Which name this model wants for the response-length cap. Recorded as
+        # the name rather than a yes-or-no flag, because that is what it is.
+        kwargs["max_completion_tokens" if model_uses_max_completion_tokens(model) else "max_tokens"] = max_tokens
 
-        kwargs["max_completion_tokens" if use_completion_tokens else "max_tokens"] = max_tokens
-
-        # Anything this model has already refused once is left out from the
-        # start, rather than sent again and refused again. The list is built
-        # from the provider's own error messages — see
-        # model_rejected_fields()'s docstring.
+        # Everything this model is known to refuse comes out here, in one pass:
+        # sampling parameters a reasoning model won't take, request fields a
+        # provider route rejects, anything learned from a refusal (see
+        # model_rejected_fields()). One list rather than a flag per quirk, so
+        # the next awkwardness needs a catalog entry and no new code.
         for field in model_rejected_fields(model):
             if field in _REQUIRED_REQUEST_FIELDS:
                 continue

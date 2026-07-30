@@ -488,7 +488,7 @@ class TranscriptionPlugin:
         - ``temperature`` / ``top_p`` / ``max_tokens``: optional sampling
           overrides, same as the CLI's ``-t``/``-T``/``-M`` flags. The web
           UI only shows these controls for models that accept them (see
-          ``src.models.catalog.model_has_fixed_parameters``); blank means
+          ``src.models.catalog.model_accepts_sampling_params``); blank means
           "use the model's default."
 
         Args:

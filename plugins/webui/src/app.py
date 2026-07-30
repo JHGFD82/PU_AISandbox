@@ -60,8 +60,7 @@ from src.errors import CLIError
 from src.models import (
     get_available_models,
     get_default_model,
-    model_has_fixed_parameters,
-    model_omit_sampling_params,
+    model_accepts_sampling_params,
     model_supports_vision,
     resolve_model,
 )
@@ -550,11 +549,11 @@ def create_app() -> FastAPI:
                 "name": m,
                 "supports_vision": model_supports_vision(m),
                 # Whether this model accepts temperature/top-p at all — some
-                # reasoning models reject them entirely (see
-                # model_has_fixed_parameters's docstring). The front end
-                # uses this to hide/disable those two controls rather than
-                # let a professor set them and have the request fail.
-                "accepts_sampling_params": not (model_has_fixed_parameters(m) or model_omit_sampling_params(m)),
+                # reasoning models refuse them entirely (see
+                # model_accepts_sampling_params's docstring). The front end
+                # uses this to hide those two controls rather than let a
+                # professor set them and have the request fail.
+                "accepts_sampling_params": model_accepts_sampling_params(m),
             }
             for m in names
         ]

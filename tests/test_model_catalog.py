@@ -22,15 +22,16 @@ from src.models import (
     get_vision_capable_models,
     is_sampling_param_deprecated_error,
     load_model_catalog,
-    model_has_fixed_parameters,
+    model_accepts_sampling_params,
     model_supports_vision,
+    model_preferences,
     model_rejected_fields,
     model_uses_max_completion_tokens,
     record_rejected_field,
     remove_model_from_catalog,
     resolve_model,
     save_model_catalog,
-    set_model_fixed_parameters,
+    record_sampling_params_rejected,
 )
 
 # ---------------------------------------------------------------------------
@@ -302,19 +303,19 @@ class TestModelUsesMaxCompletionTokens:
 
 
 # ---------------------------------------------------------------------------
-# model_has_fixed_parameters
+# model_accepts_sampling_params
 # ---------------------------------------------------------------------------
 
 class TestModelHasFixedParameters:
 
     def test_reasoning_model_returns_true(self, mock_catalog):
-        assert model_has_fixed_parameters("gpt-5") is True
+        assert model_accepts_sampling_params("gpt-5") is False
 
     def test_standard_model_returns_false(self, mock_catalog):
-        assert model_has_fixed_parameters("gpt-4o") is False
+        assert model_accepts_sampling_params("gpt-4o") is True
 
     def test_unknown_model_returns_false(self, mock_catalog):
-        assert model_has_fixed_parameters("mystery") is False
+        assert model_accepts_sampling_params("mystery") is True
 
 
 # ---------------------------------------------------------------------------
@@ -918,46 +919,38 @@ class TestIsModelAccessError:
 
 
 # ---------------------------------------------------------------------------
-# set_model_fixed_parameters
+# record_sampling_params_rejected
 # ---------------------------------------------------------------------------
 
-class TestSetModelFixedParameters:
+class TestRecordSamplingParamsRejected:
 
-    def test_marks_existing_model_and_returns_true(self, monkeypatch):
+    def _catalog(self, monkeypatch):
         import copy
         cat = copy.deepcopy(SAMPLE_CATALOG)
         monkeypatch.setattr(catalog_module, "load_model_catalog", lambda: cat)
         saved = {}
         monkeypatch.setattr(catalog_module, "save_model_catalog", lambda c: saved.update(c))
-        result = set_model_fixed_parameters("gpt-4o")
-        assert result is True
-        assert saved["models"]["gpt-4o"]["fixed_parameters"] is True
-        # Existing fields (pricing, supports_vision) must survive untouched.
-        assert saved["models"]["gpt-4o"]["input"] == 2.75
+        return cat, saved
 
-    def test_returns_false_when_model_absent(self, monkeypatch):
-        import copy
-        cat = copy.deepcopy(SAMPLE_CATALOG)
-        monkeypatch.setattr(catalog_module, "load_model_catalog", lambda: cat)
-        result = set_model_fixed_parameters("does-not-exist")
-        assert result is False
+    def test_records_every_sampling_field_as_refused(self, monkeypatch):
+        """All four together: a model that refuses one refuses the rest."""
+        cat, saved = self._catalog(monkeypatch)
+        assert record_sampling_params_rejected("gpt-4o") is True
+        assert set(cat["models"]["gpt-4o"]["rejects"]) == set(catalog_module._SAMPLING_FIELDS)
 
-    def test_returns_false_when_already_fixed_parameters(self, monkeypatch):
-        """gpt-5 in SAMPLE_CATALOG already has fixed_parameters: True — no
-        write should happen, and the caller can tell nothing changed."""
-        import copy
-        cat = copy.deepcopy(SAMPLE_CATALOG)
-        monkeypatch.setattr(catalog_module, "load_model_catalog", lambda: cat)
-        save_called = False
+    def test_leaves_pricing_untouched(self, monkeypatch):
+        cat, _saved = self._catalog(monkeypatch)
+        record_sampling_params_rejected("gpt-4o")
+        assert cat["models"]["gpt-4o"]["input"] == 2.75
 
-        def fake_save(_c):
-            nonlocal save_called
-            save_called = True
-        monkeypatch.setattr(catalog_module, "save_model_catalog", fake_save)
+    def test_returns_false_when_already_recorded(self, monkeypatch):
+        cat, _saved = self._catalog(monkeypatch)
+        record_sampling_params_rejected("gpt-4o")
+        assert record_sampling_params_rejected("gpt-4o") is False
 
-        result = set_model_fixed_parameters("gpt-5")
-        assert result is False
-        assert save_called is False
+    def test_returns_false_for_an_unknown_model(self, monkeypatch):
+        self._catalog(monkeypatch)
+        assert record_sampling_params_rejected("does-not-exist") is False
 
 
 # ---------------------------------------------------------------------------
@@ -1198,3 +1191,87 @@ class TestCheapestModel:
         }}
         monkeypatch.setattr(catalog_module, "load_model_catalog", lambda: cat)
         assert cheapest_model() == "alpha"
+
+
+# ---------------------------------------------------------------------------
+# One shape for a model's quirks, whichever way the catalog spells them
+# ---------------------------------------------------------------------------
+
+class TestQuirksGatheredFromEitherSpelling:
+    """A catalog may name quirks as individual flags; both spellings must work.
+
+    This is the safety net for the change that introduced `rejects`/`prefers`:
+    real catalogs carry the flag spelling on many entries, and reading them
+    wrongly would silently send `temperature` to a model that refuses it.
+    """
+
+    def _catalog(self, monkeypatch, entry):
+        cat = {"config": {}, "models": {"m": entry}}
+        monkeypatch.setattr(catalog_module, "load_model_catalog", lambda: cat)
+
+    @pytest.mark.parametrize("flag", ["fixed_parameters", "omit_sampling_params"])
+    def test_a_sampling_flag_means_every_sampling_field_is_refused(self, monkeypatch, flag):
+        self._catalog(monkeypatch, {"input": 1.0, "output": 1.0, flag: True})
+        assert set(model_rejected_fields("m")) == set(catalog_module._SAMPLING_FIELDS)
+        assert model_accepts_sampling_params("m") is False
+
+    @pytest.mark.parametrize("flag", ["fixed_parameters", "omit_sampling_params"])
+    def test_a_sampling_flag_set_false_refuses_nothing(self, monkeypatch, flag):
+        self._catalog(monkeypatch, {"input": 1.0, "output": 1.0, flag: False})
+        assert model_rejected_fields("m") == {}
+        assert model_accepts_sampling_params("m") is True
+
+    def test_the_token_field_flag_becomes_the_field_name(self, monkeypatch):
+        """It was never a yes/no question — it is which of two names to use."""
+        self._catalog(monkeypatch, {"input": 1.0, "output": 1.0, "use_max_completion_tokens": True})
+        assert model_preferences("m")["max_tokens_field"] == "max_completion_tokens"
+        assert model_uses_max_completion_tokens("m") is True
+
+    def test_system_role_is_carried_as_a_value(self, monkeypatch):
+        self._catalog(monkeypatch, {"input": 1.0, "output": 1.0, "system_role": "developer"})
+        assert model_preferences("m")["system_role"] == "developer"
+        assert get_model_system_role("m") == "developer"
+
+    def test_the_canonical_spelling_is_read_directly(self, monkeypatch):
+        self._catalog(monkeypatch, {
+            "input": 1.0, "output": 1.0,
+            "rejects": {"stream_options": "2026-07-29: refused"},
+            "prefers": {"system_role": "developer", "max_tokens_field": "max_completion_tokens"},
+        })
+        assert model_rejected_fields("m") == {"stream_options": "2026-07-29: refused"}
+        assert get_model_system_role("m") == "developer"
+        assert model_uses_max_completion_tokens("m") is True
+
+    def test_both_spellings_at_once_keep_both_sets_of_information(self, monkeypatch):
+        self._catalog(monkeypatch, {
+            "input": 1.0, "output": 1.0,
+            "fixed_parameters": True,
+            "rejects": {"stream_options": "learned"},
+        })
+        rejected = model_rejected_fields("m")
+        assert "stream_options" in rejected
+        assert set(catalog_module._SAMPLING_FIELDS) <= set(rejected)
+
+    def test_the_canonical_entry_wins_a_disagreement(self, monkeypatch):
+        """`rejects`/`prefers` is what the sandbox learns into, so it is newer."""
+        self._catalog(monkeypatch, {
+            "input": 1.0, "output": 1.0,
+            "system_role": "system",
+            "prefers": {"system_role": "developer"},
+        })
+        assert get_model_system_role("m") == "developer"
+
+    def test_an_entry_with_no_quirks_is_untouched(self, monkeypatch):
+        self._catalog(monkeypatch, {"input": 1.0, "output": 1.0, "supports_vision": True})
+        assert model_rejected_fields("m") == {}
+        assert model_preferences("m") == {}
+        assert get_model_system_role("m") == "system"
+        assert model_uses_max_completion_tokens("m") is False
+        assert model_accepts_sampling_params("m") is True
+
+    @pytest.mark.parametrize("entry", ["not-a-dict", 42, None, []])
+    def test_a_junk_entry_does_not_raise(self, monkeypatch, entry):
+        """Hand-edited file: a wrong type must not break every request."""
+        self._catalog(monkeypatch, entry)
+        assert model_rejected_fields("m") == {}
+        assert model_preferences("m") == {}
