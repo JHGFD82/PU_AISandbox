@@ -2212,3 +2212,134 @@ class TestEndpointUsageInTheSidebar:
     def test_it_says_these_are_not_billed_through_the_sandbox(self):
         page = self._page()
         assert "Counted, not costed" in page
+
+
+class TestSystemPromptPerConversation:
+    """Standing instructions belong to a conversation and apply to every turn.
+
+    A model is handed the whole conversation afresh on each message and
+    remembers nothing of its own, so instructions sent once would quietly stop
+    applying from the second message onwards.
+    """
+
+    def _page(self):
+        from pathlib import Path
+
+        from fastapi.templating import Jinja2Templates
+
+        here = Path(__file__).resolve().parents[1] / "src" / "templates"
+        return (Jinja2Templates(directory=str(here)).env
+                .get_template("chat.html").render(request=None))
+
+    def test_a_conversation_remembers_its_instructions(self, tmp_path):
+        from plugins.webui.src.conversation import Conversation
+
+        conv = Conversation(
+            id="c1", title="t", created_at="2026-07-30T10:00:00",
+            updated_at="2026-07-30T10:00:00", model="gpt-4o",
+            system_prompt="Answer in French.",
+        )
+        assert Conversation.from_dict(conv.to_dict()).system_prompt == "Answer in French."
+
+    def test_a_conversation_saved_before_this_existed_still_loads(self, tmp_path):
+        from plugins.webui.src.conversation import Conversation
+
+        old = {
+            "id": "c1", "title": "t", "created_at": "2026-01-01T00:00:00",
+            "updated_at": "2026-01-01T00:00:00", "model": "gpt-4o", "messages": [],
+        }
+        assert Conversation.from_dict(old).system_prompt is None
+
+    def test_two_conversations_keep_different_instructions(self, tmp_path, monkeypatch):
+        from plugins.webui.src import conversation as conv_mod
+        from plugins.webui.src.conversation import ConversationStore
+
+        monkeypatch.setattr(conv_mod, "_conversations_dir", lambda: tmp_path)
+        store = ConversationStore("heller")
+        a = store.create(model="gpt-4o")
+        b = store.create(model="gpt-4o")
+        a.system_prompt = "Answer in French."
+        store.save(a)
+        assert store.load(a.id).system_prompt == "Answer in French."
+        assert store.load(b.id).system_prompt is None, "instructions leaked between conversations"
+
+    def _chat(self, client, monkeypatch, conv_id, message, **body):
+        """Send one message and hand back what the model was asked."""
+        fake_sandbox = MagicMock()
+        fake_sandbox.chat_service.stream_message.return_value = iter([
+            {"type": "done", "content": "ok", "model": "gpt-4o",
+             "prompt_tokens": 1, "completion_tokens": 1, "cost": 0.0001},
+        ])
+        fake_sandbox.chat_service.generate_title.return_value = None
+        monkeypatch.setattr("src.runtime.sandbox_processor.SandboxProcessor",
+                            lambda *a, **kw: fake_sandbox)
+        resp = client.post("/api/chat", json={
+            "professor": "heller", "conversation_id": conv_id,
+            "message": message, "model": "gpt-4o", **body,
+        })
+        assert resp.status_code == 200
+        return fake_sandbox.chat_service.stream_message.call_args
+
+    def test_the_prompt_is_sent_on_every_turn_not_just_the_first(self, unlocked_client, monkeypatch):
+        """The whole point of keeping it: it has to be resent each time."""
+        conv_id = unlocked_client.post(
+            "/api/conversations", json={"professor": "heller", "model": "gpt-4o"}
+        ).json()["id"]
+
+        first = self._chat(unlocked_client, monkeypatch, conv_id, "Bonjour",
+                           system_prompt="Answer in French.")
+        assert first.kwargs["system_prompt"] == "Answer in French."
+
+        # Second turn sends no instructions of its own; the conversation's must
+        # still reach the model, or they silently stop applying after one message.
+        second = self._chat(unlocked_client, monkeypatch, conv_id, "Et maintenant ?")
+        assert second.kwargs["system_prompt"] == "Answer in French."
+
+    def test_blank_instructions_are_the_same_as_none(self, unlocked_client, monkeypatch):
+        """Spaces sent on every turn would say nothing and cost tokens."""
+        conv_id = unlocked_client.post(
+            "/api/conversations", json={"professor": "heller", "model": "gpt-4o"}
+        ).json()["id"]
+        call = self._chat(unlocked_client, monkeypatch, conv_id, "Hi", system_prompt="   ")
+        assert call.kwargs["system_prompt"] is None
+
+    def test_clearing_the_box_clears_the_instructions(self, unlocked_client, monkeypatch):
+        conv_id = unlocked_client.post(
+            "/api/conversations", json={"professor": "heller", "model": "gpt-4o"}
+        ).json()["id"]
+        self._chat(unlocked_client, monkeypatch, conv_id, "Hi", system_prompt="Answer in French.")
+        call = self._chat(unlocked_client, monkeypatch, conv_id, "Hi again", system_prompt=None)
+        assert call.kwargs["system_prompt"] is None
+
+    def test_the_box_is_offered_with_the_other_model_settings(self):
+        page = self._page()
+        assert 'id="sampling-system-prompt"' in page
+        assert "Instructions for this conversation" in page
+
+    def test_the_box_grows_and_can_be_dragged_taller(self):
+        """Instructions run to a paragraph; the three settings above are numbers."""
+        page = self._page()
+        assert "resize: vertical" in page
+        assert "scrollHeight" in page
+
+    def test_the_page_says_it_applies_to_every_message(self):
+        page = self._page()
+        assert "before every message in this conversation" in page
+
+    def test_what_is_typed_reaches_the_model_unchanged(self):
+        """No quoting or escaping for a person to get wrong.
+
+        The shared settings editor needs quotation marks because a settings file
+        spells text that way. A conversation is stored as JSON, which quotes for
+        itself, so instructions are stored exactly as written.
+        """
+        import json
+
+        from plugins.webui.src.conversation import Conversation
+
+        typed = 'Say "hello" first.\nThen answer in French.'
+        conv = Conversation(
+            id="c1", title="t", created_at="x", updated_at="x", model="gpt-4o",
+            system_prompt=typed,
+        )
+        assert Conversation.from_dict(json.loads(json.dumps(conv.to_dict()))).system_prompt == typed

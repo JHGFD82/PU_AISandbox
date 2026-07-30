@@ -228,6 +228,14 @@
   .spend-figure { font-size: 1.6rem; font-weight: 600; }
   .spend-label { font-size: 0.78rem; color: var(--text-muted); }
   .spend-row { display: flex; justify-content: space-between; font-size: 0.85rem; padding: 0.2rem 0; }
+  /* Instructions run long — a sentence at least, sometimes a paragraph — so
+     the box grows to fit what is in it and can be dragged taller still. The
+     three settings above it are numbers and stay single-line. */
+  #sampling-system-prompt {
+    width: 100%; min-height: 2.6rem; resize: vertical; overflow: hidden;
+    font-family: inherit; font-size: 0.85rem; line-height: 1.4;
+  }
+  .field-note { font-size: 0.72rem; color: var(--text-muted); margin-top: 0.25rem; line-height: 1.35; }
   .empty { color: var(--text-muted); font-size: 0.85rem; text-align: center; margin-top: 2rem; }
 
   /* ── Modal backdrop (shared by the settings modal and the job modal) ──
@@ -489,6 +497,16 @@
               <label for="sampling-max-tokens">Max response tokens</label>
               <input type="text" id="sampling-max-tokens" placeholder="Model default">
             </div>
+            <div class="job-field" id="system-prompt-field">
+              <label for="sampling-system-prompt">Instructions for this conversation</label>
+              <textarea id="sampling-system-prompt" rows="2"
+                        placeholder="e.g. Answer in French. Keep proper nouns as they are."></textarea>
+              <div class="field-note">
+                Sent to the model before every message in this conversation, not
+                only the first. Kept with this conversation, so another one is
+                unaffected.
+              </div>
+            </div>
             <div class="sampling-options-footer">
               <button type="button" class="secondary" id="sampling-options-clear">Clear</button>
               <button type="button" id="sampling-options-done">Done</button>
@@ -620,7 +638,7 @@ const state = {
   // This conversation's sampling overrides (temperature/top-p/max-tokens),
   // shown in the topbar's tune popover and sent with every /api/chat call —
   // see conv.temperature/top_p/max_tokens in conversation.py.
-  sampling: { temperature: null, top_p: null, max_tokens: null },
+  sampling: { temperature: null, top_p: null, max_tokens: null, system_prompt: null },
 };
 
 // ── Dark mode ────────────────────────────────────────────────────────────
@@ -791,12 +809,24 @@ function applySamplingVisibility() {
   document.getElementById("sampling-top-p-field").style.display = accepts ? "" : "none";
 }
 
+function growSystemPrompt() {
+  // Opens at the height of what is already there, so a paragraph of standing
+  // instructions is readable without being dragged open first.
+  const box = document.getElementById("sampling-system-prompt");
+  box.style.height = "auto";
+  box.style.height = box.scrollHeight + "px";
+}
+
 function openSamplingPopover() {
   document.getElementById("sampling-temperature").value = state.sampling.temperature ?? "";
   document.getElementById("sampling-top-p").value = state.sampling.top_p ?? "";
   document.getElementById("sampling-max-tokens").value = state.sampling.max_tokens ?? "";
+  document.getElementById("sampling-system-prompt").value = state.sampling.system_prompt ?? "";
   applySamplingVisibility();
   document.getElementById("sampling-options-popover").hidden = false;
+  // Measured after the panel is shown; a box inside a hidden one has no height
+  // to report.
+  growSystemPrompt();
 }
 function closeSamplingPopover() { document.getElementById("sampling-options-popover").hidden = true; }
 function toggleSamplingPopover() {
@@ -808,10 +838,14 @@ function readSamplingInputs() {
   const temp = document.getElementById("sampling-temperature").value.trim();
   const topP = document.getElementById("sampling-top-p").value.trim();
   const maxTok = document.getElementById("sampling-max-tokens").value.trim();
+  // Kept as typed apart from trimming the ends: line breaks and quotation marks
+  // are part of what somebody wrote and are carried to the model as written.
+  const prompt = document.getElementById("sampling-system-prompt").value.trim();
   state.sampling = {
     temperature: temp === "" ? null : parseFloat(temp),
     top_p: topP === "" ? null : parseFloat(topP),
     max_tokens: maxTok === "" ? null : parseInt(maxTok, 10),
+    system_prompt: prompt === "" ? null : prompt,
   };
 }
 
@@ -821,6 +855,10 @@ document.getElementById("sampling-options-btn").addEventListener("click", (e) =>
 });
 ["sampling-temperature", "sampling-top-p", "sampling-max-tokens"].forEach(id => {
   document.getElementById(id).addEventListener("input", readSamplingInputs);
+});
+document.getElementById("sampling-system-prompt").addEventListener("input", () => {
+  readSamplingInputs();
+  growSystemPrompt();
 });
 document.getElementById("sampling-options-done").addEventListener("click", (e) => {
   e.stopPropagation();
@@ -832,7 +870,9 @@ document.getElementById("sampling-options-clear").addEventListener("click", (e) 
   document.getElementById("sampling-temperature").value = "";
   document.getElementById("sampling-top-p").value = "";
   document.getElementById("sampling-max-tokens").value = "";
-  state.sampling = { temperature: null, top_p: null, max_tokens: null };
+  document.getElementById("sampling-system-prompt").value = "";
+  growSystemPrompt();
+  state.sampling = { temperature: null, top_p: null, max_tokens: null, system_prompt: null };
 });
 
 // ── Export ───────────────────────────────────────────────────────────────
@@ -1777,6 +1817,7 @@ async function openConversation(id) {
   state.conversationHasMessages = conv.messages.length > 0;
   state.sampling = {
     temperature: conv.temperature ?? null, top_p: conv.top_p ?? null, max_tokens: conv.max_tokens ?? null,
+    system_prompt: conv.system_prompt ?? null,
   };
   document.getElementById("model-field").value = conv.model;
   applySamplingVisibility();
@@ -1805,7 +1846,7 @@ document.getElementById("new-conv").addEventListener("click", async () => {
   state.conversationId = conv.id;
   state.conversationModel = conv.model;
   state.conversationHasMessages = false;
-  state.sampling = { temperature: null, top_p: null, max_tokens: null };
+  state.sampling = { temperature: null, top_p: null, max_tokens: null, system_prompt: null };
   renderMessages(conv);
   await loadConversations();
 });
@@ -1865,6 +1906,7 @@ async function sendMessage() {
       body: JSON.stringify({
         professor: state.professor, conversation_id: state.conversationId, message: text, model,
         temperature: state.sampling.temperature, top_p: state.sampling.top_p, max_tokens: state.sampling.max_tokens,
+        system_prompt: state.sampling.system_prompt,
       }),
     });
     if (!res.ok) { throw new Error(await res.text()); }

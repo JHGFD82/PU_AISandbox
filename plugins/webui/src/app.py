@@ -153,6 +153,10 @@ class ChatBody(BaseModel):
     temperature: float | None = None
     top_p: float | None = None
     max_tokens: int | None = None
+    # Standing instructions for this conversation. Applied on the same
+    # one-sided terms as the three above: whatever the options panel is
+    # showing is what gets stored, so blanking the box clears it.
+    system_prompt: str | None = None
 
 
 class RenameConversationBody(BaseModel):
@@ -1126,6 +1130,17 @@ def create_app() -> FastAPI:
         conv.temperature = body.temperature
         conv.top_p = body.top_p
         conv.max_tokens = body.max_tokens
+        # Unlike the three above, this is changed only when the request
+        # actually mentions it. Those are numbers the options panel always
+        # sends, so treating "absent" as "clear it" costs nothing; standing
+        # instructions are a paragraph somebody wrote, and a request that
+        # simply didn't mention them — an older tab, a script, a page that
+        # hasn't finished loading — would otherwise wipe them silently and
+        # the conversation would quietly stop following them mid-way.
+        # Sending it explicitly as blank or null still clears it, which is
+        # what emptying the box does.
+        if "system_prompt" in body.model_fields_set:
+            conv.system_prompt = (body.system_prompt or "").strip() or None
 
         # An attached document's text rides along in api_content (what the
         # model actually reads) rather than content (what the transcript
@@ -1197,7 +1212,13 @@ def create_app() -> FastAPI:
                     professor, model=conv.model,
                     temperature=conv.temperature, top_p=conv.top_p, max_tokens=conv.max_tokens,
                 )
-                for event in sandbox.chat_service.stream_message(conv.api_messages()):
+                # Passed on every turn, not just the first. The model is given
+                # the conversation afresh each time and remembers nothing of its
+                # own, so instructions sent once would stop applying the moment
+                # a second message was sent.
+                for event in sandbox.chat_service.stream_message(
+                    conv.api_messages(), system_prompt=conv.system_prompt
+                ):
                     if event["type"] == "delta":
                         yield f"data: {json.dumps(event)}\n\n"
                     else:
