@@ -332,22 +332,25 @@ def get_model_system_role(model: str) -> str:
     return role if isinstance(role, str) and role else "system"
 
 
-def model_uses_max_completion_tokens(model: str) -> bool:
-    """Check whether a model wants a different parameter name for the response-length cap.
+def model_max_tokens_field(model: str) -> str:
+    """Return the name this model wants for the response-length cap.
 
-    Standard models accept ``max_tokens``. Some reasoning models reject that
-    and require ``max_completion_tokens`` instead — the same setting under
-    another name, which is why the catalog records the name to use rather than
-    a yes-or-no flag.
+    Most models call it ``max_tokens``. Some reasoning models reject that name
+    and require ``max_completion_tokens`` instead — the same setting, spelled
+    differently. Returning the name rather than a yes-or-no answer keeps the
+    caller from having to know which two names the question is between.
+
+    Not to be confused with ``get_model_max_completion_tokens()``, which
+    answers how *long* the response may be. This one answers what to call it.
 
     Args:
-        model: The model name to check (e.g. ``'gpt-4o'``, ``'gpt-5'``).
+        model: The model name to look up (e.g. ``'gpt-4o'``, ``'gpt-5'``).
 
     Returns:
-        ``True`` if this model wants ``max_completion_tokens``, ``False`` for
-        the usual ``max_tokens``.
+        ``'max_tokens'`` or ``'max_completion_tokens'``.
     """
-    return model_preferences(model).get("max_tokens_field") == "max_completion_tokens"
+    preferred = model_preferences(model).get("max_tokens_field")
+    return "max_completion_tokens" if preferred == "max_completion_tokens" else "max_tokens"
 
 
 def model_accepts_sampling_params(model: str) -> bool:

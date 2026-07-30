@@ -26,7 +26,7 @@ from src.models import (
     model_supports_vision,
     model_preferences,
     model_rejected_fields,
-    model_uses_max_completion_tokens,
+    model_max_tokens_field,
     record_rejected_field,
     remove_model_from_catalog,
     resolve_model,
@@ -287,19 +287,19 @@ class TestGetModelSystemRole:
 
 
 # ---------------------------------------------------------------------------
-# model_uses_max_completion_tokens
+# model_max_tokens_field
 # ---------------------------------------------------------------------------
 
-class TestModelUsesMaxCompletionTokens:
+class TestModelMaxTokensField:
 
     def test_reasoning_model_returns_true(self, mock_catalog):
-        assert model_uses_max_completion_tokens("gpt-5") is True
+        assert model_max_tokens_field("gpt-5") == "max_completion_tokens"
 
     def test_standard_model_returns_false(self, mock_catalog):
-        assert model_uses_max_completion_tokens("gpt-4o") is False
+        assert model_max_tokens_field("gpt-4o") == "max_tokens"
 
     def test_unknown_model_returns_false(self, mock_catalog):
-        assert model_uses_max_completion_tokens("mystery") is False
+        assert model_max_tokens_field("mystery") == "max_tokens"
 
 
 # ---------------------------------------------------------------------------
@@ -1225,7 +1225,7 @@ class TestQuirksGatheredFromEitherSpelling:
         """It was never a yes/no question — it is which of two names to use."""
         self._catalog(monkeypatch, {"input": 1.0, "output": 1.0, "use_max_completion_tokens": True})
         assert model_preferences("m")["max_tokens_field"] == "max_completion_tokens"
-        assert model_uses_max_completion_tokens("m") is True
+        assert model_max_tokens_field("m") == "max_completion_tokens"
 
     def test_system_role_is_carried_as_a_value(self, monkeypatch):
         self._catalog(monkeypatch, {"input": 1.0, "output": 1.0, "system_role": "developer"})
@@ -1240,7 +1240,7 @@ class TestQuirksGatheredFromEitherSpelling:
         })
         assert model_rejected_fields("m") == {"stream_options": "2026-07-29: refused"}
         assert get_model_system_role("m") == "developer"
-        assert model_uses_max_completion_tokens("m") is True
+        assert model_max_tokens_field("m") == "max_completion_tokens"
 
     def test_both_spellings_at_once_keep_both_sets_of_information(self, monkeypatch):
         self._catalog(monkeypatch, {
@@ -1266,7 +1266,7 @@ class TestQuirksGatheredFromEitherSpelling:
         assert model_rejected_fields("m") == {}
         assert model_preferences("m") == {}
         assert get_model_system_role("m") == "system"
-        assert model_uses_max_completion_tokens("m") is False
+        assert model_max_tokens_field("m") == "max_tokens"
         assert model_accepts_sampling_params("m") is True
 
     @pytest.mark.parametrize("entry", ["not-a-dict", 42, None, []])

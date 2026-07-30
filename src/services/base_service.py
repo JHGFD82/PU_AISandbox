@@ -17,7 +17,7 @@ from portkey_ai import Portkey
 from collections.abc import Iterator as ABCIterator
 
 from ..models import (
-    model_uses_max_completion_tokens, model_rejected_fields, record_rejected_field,
+    model_max_tokens_field, model_rejected_fields, record_rejected_field,
     resolve_model, maybe_sync_model_pricing, get_model_max_completion_tokens,
 )
 from ..tracking.token_tracker import TokenTracker, TokenUsage
@@ -268,9 +268,8 @@ class BaseService:
         if top_p is not None:
             kwargs["top_p"] = top_p
 
-        # Which name this model wants for the response-length cap. Recorded as
-        # the name rather than a yes-or-no flag, because that is what it is.
-        kwargs["max_completion_tokens" if model_uses_max_completion_tokens(model) else "max_tokens"] = max_tokens
+        # Whichever name this model wants for the response-length cap.
+        kwargs[model_max_tokens_field(model)] = max_tokens
 
         # Everything this model is known to refuse comes out here, in one pass:
         # sampling parameters a reasoning model won't take, request fields a

@@ -50,7 +50,7 @@ def _make_svc(monkeypatch, **kwargs) -> BaseService:
 
 class TestCreateCompletion:
     """
-    max_tokens_field preference     sampling params in `rejects`   branch
+    model_max_tokens_field()        sampling params in `rejects`   branch
     max_tokens (default)            no                             max_tokens=
     max_completion_tokens           no                             max_completion_tokens= + temp/top_p
     max_completion_tokens           yes                            max_completion_tokens= without temp/top_p
@@ -61,15 +61,15 @@ class TestCreateCompletion:
 
     def test_standard_model_uses_max_tokens(self, monkeypatch):
         svc = _make_svc(monkeypatch)
-        monkeypatch.setattr("src.services.base_service.model_uses_max_completion_tokens", lambda m: False)
+        monkeypatch.setattr("src.services.base_service.model_max_tokens_field", lambda m: "max_tokens")
         svc._create_completion("gpt-4o", self._messages(), 512, temperature=0.5, top_p=0.9)
         call_kwargs = svc.client.chat.completions.create.call_args
         assert "max_tokens" in call_kwargs.kwargs
         assert "max_completion_tokens" not in call_kwargs.kwargs
 
-    def test_reasoning_model_uses_max_completion_tokens(self, monkeypatch):
+    def test_reasoning_model_gets_the_max_completion_tokens_name(self, monkeypatch):
         svc = _make_svc(monkeypatch)
-        monkeypatch.setattr("src.services.base_service.model_uses_max_completion_tokens", lambda m: True)
+        monkeypatch.setattr("src.services.base_service.model_max_tokens_field", lambda m: "max_completion_tokens")
         svc._create_completion("o1", self._messages(), 512, temperature=0.5, top_p=0.9)
         call_kwargs = svc.client.chat.completions.create.call_args
         assert "max_completion_tokens" in call_kwargs.kwargs
@@ -78,7 +78,7 @@ class TestCreateCompletion:
 
     def test_fixed_params_model_strips_temperature_and_top_p(self, monkeypatch):
         svc = _make_svc(monkeypatch)
-        monkeypatch.setattr("src.services.base_service.model_uses_max_completion_tokens", lambda m: True)
+        monkeypatch.setattr("src.services.base_service.model_max_tokens_field", lambda m: "max_completion_tokens")
         # All four, because that is what the catalog records as a group — a
         # model that refuses one of these refuses the rest.
         monkeypatch.setattr("src.services.base_service.model_rejected_fields",
@@ -91,7 +91,7 @@ class TestCreateCompletion:
 
     def test_no_temperature_not_passed_when_none(self, monkeypatch):
         svc = _make_svc(monkeypatch)
-        monkeypatch.setattr("src.services.base_service.model_uses_max_completion_tokens", lambda m: False)
+        monkeypatch.setattr("src.services.base_service.model_max_tokens_field", lambda m: "max_tokens")
         svc._create_completion("gpt-4o", self._messages(), 512)
         call_kwargs = svc.client.chat.completions.create.call_args
         assert "temperature" not in call_kwargs.kwargs
@@ -99,7 +99,7 @@ class TestCreateCompletion:
 
     def test_refused_sampling_params_are_all_left_out(self, monkeypatch):
         svc = _make_svc(monkeypatch)
-        monkeypatch.setattr("src.services.base_service.model_uses_max_completion_tokens", lambda m: False)
+        monkeypatch.setattr("src.services.base_service.model_max_tokens_field", lambda m: "max_tokens")
         # All four, because that is what the catalog records as a group — a
         # model that refuses one of these refuses the rest.
         monkeypatch.setattr("src.services.base_service.model_rejected_fields",
@@ -131,29 +131,29 @@ class TestCreateCompletionStream:
 
     def test_sets_stream_true(self, monkeypatch):
         svc = _make_svc(monkeypatch)
-        monkeypatch.setattr("src.services.base_service.model_uses_max_completion_tokens", lambda m: False)
+        monkeypatch.setattr("src.services.base_service.model_max_tokens_field", lambda m: "max_tokens")
         svc._create_completion_stream("gpt-4o", self._messages(), 512)
         call_kwargs = svc.client.chat.completions.create.call_args
         assert call_kwargs.kwargs["stream"] is True
 
     def test_requests_usage_in_final_chunk(self, monkeypatch):
         svc = _make_svc(monkeypatch)
-        monkeypatch.setattr("src.services.base_service.model_uses_max_completion_tokens", lambda m: False)
+        monkeypatch.setattr("src.services.base_service.model_max_tokens_field", lambda m: "max_tokens")
         svc._create_completion_stream("gpt-4o", self._messages(), 512)
         call_kwargs = svc.client.chat.completions.create.call_args
         assert call_kwargs.kwargs["stream_options"] == {"include_usage": True}
 
     def test_non_streaming_call_has_no_stream_options(self, monkeypatch):
         svc = _make_svc(monkeypatch)
-        monkeypatch.setattr("src.services.base_service.model_uses_max_completion_tokens", lambda m: False)
+        monkeypatch.setattr("src.services.base_service.model_max_tokens_field", lambda m: "max_tokens")
         svc._create_completion("gpt-4o", self._messages(), 512)
         call_kwargs = svc.client.chat.completions.create.call_args
         assert "stream_options" not in call_kwargs.kwargs
         assert call_kwargs.kwargs["stream"] is False
 
-    def test_reasoning_model_uses_max_completion_tokens_when_streaming(self, monkeypatch):
+    def test_reasoning_model_gets_the_max_completion_tokens_name_when_streaming(self, monkeypatch):
         svc = _make_svc(monkeypatch)
-        monkeypatch.setattr("src.services.base_service.model_uses_max_completion_tokens", lambda m: True)
+        monkeypatch.setattr("src.services.base_service.model_max_tokens_field", lambda m: "max_completion_tokens")
         svc._create_completion_stream("o1", self._messages(), 512, temperature=0.5, top_p=0.9)
         call_kwargs = svc.client.chat.completions.create.call_args
         assert "max_completion_tokens" in call_kwargs.kwargs
@@ -162,7 +162,7 @@ class TestCreateCompletionStream:
 
     def test_fixed_params_model_strips_temperature_and_top_p_when_streaming(self, monkeypatch):
         svc = _make_svc(monkeypatch)
-        monkeypatch.setattr("src.services.base_service.model_uses_max_completion_tokens", lambda m: True)
+        monkeypatch.setattr("src.services.base_service.model_max_tokens_field", lambda m: "max_completion_tokens")
         # All four, because that is what the catalog records as a group — a
         # model that refuses one of these refuses the rest.
         monkeypatch.setattr("src.services.base_service.model_rejected_fields",
@@ -174,7 +174,7 @@ class TestCreateCompletionStream:
 
     def test_returns_client_create_return_value(self, monkeypatch):
         svc = _make_svc(monkeypatch)
-        monkeypatch.setattr("src.services.base_service.model_uses_max_completion_tokens", lambda m: False)
+        monkeypatch.setattr("src.services.base_service.model_max_tokens_field", lambda m: "max_tokens")
         fake_stream = iter([MagicMock()])
         svc.client.chat.completions.create.return_value = fake_stream
         result = svc._create_completion_stream("gpt-4o", self._messages(), 512)
@@ -485,7 +485,7 @@ class TestLearningRefusedFields:
 
     def _svc(self, monkeypatch, *, already_rejected=None):
         svc = _make_svc(monkeypatch)
-        monkeypatch.setattr("src.services.base_service.model_uses_max_completion_tokens", lambda m: False)
+        monkeypatch.setattr("src.services.base_service.model_max_tokens_field", lambda m: "max_tokens")
         monkeypatch.setattr(
             "src.services.base_service.model_rejected_fields",
             lambda m: dict(already_rejected or {}),
