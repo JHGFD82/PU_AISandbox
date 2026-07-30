@@ -183,3 +183,62 @@ class TestAwkwardInput:
         text = build_shared_settings(plugins, defaults)
         assert "settings set shared_settings.path" in text
         assert "Uncomment" in text
+
+    def test_the_header_says_the_file_may_be_renamed(self, world):
+        """The name it comes out as is easy to mistake for a required one.
+
+        Said in the file itself, not only in the docs, because the file is what
+        travels to whoever ends up looking after it.
+        """
+        plugins, defaults = world
+        text = build_shared_settings(plugins, defaults)
+        assert "Rename this file" in text
+        assert "points at a path, not a name" in text
+
+
+class TestWhatTheCommandProduces:
+    """The name the draft comes out as, and the advice that comes with it."""
+
+    def test_the_default_filename_is_the_documented_one(self, tmp_path, monkeypatch):
+        """docs/configuration.md names this file, so a change here contradicts it."""
+        import argparse
+
+        from src import paths as paths_mod
+        from src import settings_store as store_mod
+        from src.runtime.info_commands import _settings_export_shared
+
+        extras = tmp_path / "extras"
+        extras.mkdir()
+        monkeypatch.setattr(paths_mod, "extras_root", lambda: extras)
+        monkeypatch.setattr(store_mod, "get_shared_settings_path", lambda: None)
+        _settings_export_shared(argparse.Namespace(output=None, from_existing=None))
+        assert (extras / "shared-settings.toml").exists()
+
+    def test_output_puts_it_where_asked_instead(self, tmp_path, monkeypatch):
+        import argparse
+
+        from src import paths as paths_mod
+        from src import settings_store as store_mod
+        from src.runtime.info_commands import _settings_export_shared
+
+        monkeypatch.setattr(paths_mod, "extras_root", lambda: tmp_path)
+        monkeypatch.setattr(store_mod, "get_shared_settings_path", lambda: None)
+        chosen = tmp_path / "our-group.toml"
+        _settings_export_shared(argparse.Namespace(output=str(chosen), from_existing=None))
+        assert chosen.exists()
+        assert not (tmp_path / "shared-settings.toml").exists()
+
+    def test_a_from_path_that_does_not_exist_is_refused_clearly(self, tmp_path, monkeypatch):
+        import argparse
+
+        import pytest as _pytest
+
+        from src import paths as paths_mod
+        from src.errors import CLIError
+        from src.runtime.info_commands import _settings_export_shared
+
+        monkeypatch.setattr(paths_mod, "extras_root", lambda: tmp_path)
+        with _pytest.raises(CLIError, match="No shared settings file"):
+            _settings_export_shared(
+                argparse.Namespace(output=None, from_existing=str(tmp_path / "nope.toml"))
+            )

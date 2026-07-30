@@ -283,17 +283,33 @@ If several people should follow the same settings — a lab agreeing on which mo
 
 Whoever looks after it does this:
 
+**1. Make a draft.**
+
 ```bash
 python main.py settings export-shared
 ```
 
-That writes `shared-settings.toml` into their own files folder. It lists **every** setting the sandbox and the installed plugins have, with each author's explanation, all commented out — so placing it unedited changes nothing for anyone. They uncomment what the group should share, put the file somewhere everyone can read (a synced folder, a network share), and tell each member to run once:
+This writes a file called **`shared-settings.toml`** into their own files folder (`~/PU_AISandbox_data/shared-settings.toml` unless they chose somewhere else). The command prints the full path. `--output` puts it somewhere else instead.
+
+It lists **every** setting the sandbox and the installed plugins have, with each author's explanation, all commented out — so a draft placed unedited changes nothing for anyone.
+
+**2. Edit it, and rename it if you like.**
+
+Uncomment the settings the group should share, and adjust them.
+
+The name is yours to choose. `shared-settings.toml` is just what the draft comes out as; `nurikabe-lab.toml` or `chinese-history-group.toml` may mean more to the people using it. Each installation stores the full **path** you give it, not a name, so renaming costs nothing — do it now, before anyone points at the file, and you won't have to update them later.
+
+**3. Put it where the group can reach it.**
+
+A synced folder, a network share, anywhere every member can read.
+
+**4. Tell each member to point at it, once.**
 
 ```bash
-python main.py settings set shared_settings.path /path/to/shared-settings.toml
+python main.py settings set shared_settings.path /path/to/whatever-you-called-it.toml
 ```
 
-**The filename doesn't matter.** Each installation stores the full path you give it, so call the file whatever suits the group — `nurikabe-settings.toml`, `lab-defaults.toml`, anything. `shared-settings.toml` is only what `export-shared` writes its draft as, and you can rename it when you put it in place. What each member points at is a path, not a name.
+That is the only step each member does, and they only do it once.
 
 **Keeping it current.** Settings appear as plugins are updated. A member who needs one that the shared file doesn't mention will see the plugin's own value in their `preferences.toml` rather than a `# currently set by your group's shared settings` label — that's their cue to ask. Whoever looks after the file then runs the command again:
 

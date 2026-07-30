@@ -543,8 +543,14 @@ def _settings_export_shared(args: argparse.Namespace) -> None:
         else:
             print("\nNothing has appeared since that file was made.")
     print(
-        "\nEverything else is commented out, so placing this unedited changes nothing.\n"
-        "Uncomment what the group should share, then put the file somewhere\n"
-        "everyone can read it and tell each member to run:\n"
-        "    python main.py settings set shared_settings.path <the path>\n"
+        f"\nEverything in it is commented out, so placing it unedited changes nothing.\n"
+        f"\nWhat to do next:\n"
+        f"  1. Open {destination.name} and uncomment what the group should share.\n"
+        f"  2. Rename it if you like — '{destination.stem}' is just what the draft\n"
+        f"     comes out as, and each installation points at a path, not a name.\n"
+        f"     Renaming now saves telling everyone a new path later.\n"
+        f"  3. Put it somewhere every member can read: a synced folder, a\n"
+        f"     network share, anywhere they all have access to.\n"
+        f"  4. Tell each member to run this once:\n"
+        f"         python main.py settings set shared_settings.path <where you put it>\n"
     )

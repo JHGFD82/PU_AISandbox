@@ -43,10 +43,14 @@ _HEADER = """\
 # 1. Uncomment and adjust anything the whole group should share. Leave the rest
 #    commented — a commented line means "whatever the sandbox or the plugin
 #    ships", which is usually what you want.
-# 2. Put the file somewhere every member can read: a synced folder, a network
-#    share, anywhere they all have access to.
-# 3. Tell each member to point at it, once:
-#        python main.py settings set shared_settings.path <the path>
+# 2. Rename this file if you like. "shared-settings.toml" is only what the draft
+#    comes out as; name it after your group if that reads better. Each
+#    installation points at a path, not a name, so renaming now saves having to
+#    tell everyone a new path later.
+# 3. Put it somewhere every member can read: a synced folder, a network share,
+#    anywhere they all have access to.
+# 4. Tell each member to point at it, once:
+#        python main.py settings set shared_settings.path <where you put it>
 #
 # Keeping it up to date
 # --------------------
