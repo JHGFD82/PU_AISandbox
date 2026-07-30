@@ -39,7 +39,7 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.responses import (
     FileResponse,
     HTMLResponse,
@@ -521,6 +521,37 @@ def create_app() -> FastAPI:
             raise HTTPException(400, f"'{path}' is not an editable setting.")
         settings_store.unset_value(path)
         return {"ok": True}
+
+    @app.get("/api/settings/shared-draft")
+    async def api_shared_settings_draft(request: Request):
+        """Hand back a shared settings draft to download.
+
+        The same file ``python main.py settings export-shared`` writes, for
+        whoever looks after a group's settings but doesn't work at a terminal.
+        Downloaded rather than saved anywhere: the sandbox never writes a shared
+        settings file, and it has no idea where this group keeps theirs.
+
+        Carries across whatever the shared file already decides, if one is
+        configured, and marks anything that has appeared since — the same as
+        ``--from`` on the command line, which is what makes coming back for a
+        second draft worth doing.
+        """
+        _require_unlocked(request)
+        from src.paths import PACKAGE_ROOT
+        from src.shared_settings import build_shared_settings
+
+        configured = settings_store.get_shared_settings_path()
+        existing = configured if configured is not None and configured.exists() else None
+        text = build_shared_settings(
+            plugins_dir=PACKAGE_ROOT / "plugins",
+            package_defaults=PACKAGE_ROOT / "settings.default.toml",
+            existing=existing,
+        )
+        return Response(
+            content=text,
+            media_type="text/plain; charset=utf-8",
+            headers={"Content-Disposition": 'attachment; filename="shared-settings.toml"'},
+        )
 
     @app.post("/api/settings/sources")
     async def api_add_source(request: Request, body: SourceBody):

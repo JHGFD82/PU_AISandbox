@@ -73,7 +73,7 @@ python main.py settings export-shared --from /path/to/shared-settings.toml
 | `list` | Lists every optional setting and whether it's currently set. |
 | `set <dotted.path>` | Sets one value, prompting for it. Add `--generate` for a random secret. |
 | `unset <dotted.path>` | Removes one value. |
-| `export-shared` | Writes a draft settings file for a group to follow — every setting the sandbox and its plugins have, commented out, with each author's explanation. `--output` chooses where; `--from` carries decisions across from a file already in use and marks anything new since. You place the result yourself; see [Configuration](configuration.md#setting-up-a-shared-file-for-a-group). |
+| `export-shared` | Writes a draft settings file for a group to follow — every setting the sandbox and its plugins have, commented out, with each author's explanation. `--output` chooses where; `--from` carries decisions across from a file already in use and marks anything new since. You place the result yourself. The web interface can produce the same file — **Settings → Shared settings → Download a shared settings draft** — so neither the person maintaining it nor the members need a terminal. See [Configuration](configuration.md#setting-up-a-shared-file-for-a-group). |
 
 API keys and other secrets are always typed at a hidden prompt, never accepted as a flag, so they can't end up in shell history or be read by another process listing running commands.
 

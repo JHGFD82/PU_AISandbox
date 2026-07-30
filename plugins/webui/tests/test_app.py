@@ -1656,3 +1656,47 @@ class TestConversationIdTraversalOverHttp:
         })
         assert resp.status_code in (400, 404)
         assert victim.exists()
+
+
+class TestSharedSettingsDraftDownload:
+    """The export, for whoever looks after a group's settings but doesn't use a terminal.
+
+    Both the person maintaining the shared file and the members pointing at it
+    may work entirely in the browser, so neither should need the command line.
+    Members were already covered by the shared-path field; this covers the other
+    half.
+    """
+
+    def test_it_returns_a_draft(self, unlocked_client):
+        r = unlocked_client.get("/api/settings/shared-draft")
+        assert r.status_code == 200
+        assert "settings set shared_settings.path" in r.text
+
+    def test_it_downloads_under_the_documented_name(self, unlocked_client):
+        """Same name the CLI writes, so the docs describe one thing."""
+        r = unlocked_client.get("/api/settings/shared-draft")
+        assert 'filename="shared-settings.toml"' in r.headers["content-disposition"]
+
+    def test_the_draft_is_inert(self, unlocked_client):
+        """Everything commented, so placing it unedited changes nothing."""
+        import tomllib
+        r = unlocked_client.get("/api/settings/shared-draft")
+        assert tomllib.loads(r.text) == {}
+
+    def test_it_is_behind_the_unlock_gate(self, client):
+        """It lists this installation's whole settings surface."""
+        r = client.get("/api/settings/shared-draft", follow_redirects=False)
+        assert r.status_code in (302, 303, 401, 403)
+
+    def test_no_shared_settings_file_is_left_behind(self, unlocked_client, tmp_path, monkeypatch):
+        """The sandbox never writes a shared settings file; this hands one over.
+
+        Checked for the draft specifically rather than an empty folder — other
+        parts of the app create their own directories under here, and this is
+        about what the download does, not what else exists.
+        """
+        from src import paths as paths_mod
+        monkeypatch.setattr(paths_mod, "extras_root", lambda: tmp_path)
+        unlocked_client.get("/api/settings/shared-draft")
+        assert not (tmp_path / "shared-settings.toml").exists()
+        assert list(tmp_path.glob("*.toml")) == []

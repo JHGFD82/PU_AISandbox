@@ -161,10 +161,24 @@
 
       <label for="shared-path">Shared settings file path</label>
       <form class="inline" id="shared-path-form">
-        <div><input type="text" id="shared-path" placeholder="/path/to/shared/settings.shared.toml"></div>
+        <div><input type="text" id="shared-path" placeholder="/path/to/shared-settings.toml"></div>
         <button type="submit">Save</button>
         <button type="button" class="secondary" id="clear-shared-path-btn">Clear</button>
       </form>
+      <p class="hint">Point this at a file your group already has. The name is
+        yours to choose — what's stored is the path, not the name.</p>
+
+      <p class="hint" style="margin-top:1rem"><strong>Looking after the shared file yourself?</strong>
+        Download a draft listing every setting this sandbox and its plugins have,
+        all commented out, with each author's explanation. Uncomment what the
+        group should share, rename it if you like, put it somewhere everyone can
+        read, and tell each member to enter that path above. If this installation
+        already points at a shared file, its decisions are carried across and
+        anything new since is marked <code>NEW:</code>.</p>
+      <p><a id="download-shared-draft" href="/api/settings/shared-draft"
+            download="shared-settings.toml">
+        <button type="button" class="secondary">Download a shared settings draft</button>
+      </a></p>
 
       <div id="endpoints-list" style="margin-top:1rem"></div>
       <div class="snippet" id="endpoints-guidance"># preferences.toml
