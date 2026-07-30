@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Shared settings — Princeton AI Sandbox</title>
+<style>
+  /* Kept identical to chat.html's variables so this page (embedded there in
+     a modal iframe) is visually indistinguishable from the rest of the app,
+     in either theme. */
+  :root {
+    --orange: #E77500;
+    --border: #d2d2d7;
+    --bg: #f5f5f7;
+    --panel-bg: #ffffff;
+    --input-bg: #ffffff;
+    --text: #1d1d1f;
+    --text-muted: #6e6e73;
+    --hover-bg: #eeeef0;
+    --shadow: rgba(0, 0, 0, 0.14);
+    --badge-set-bg: #e5f5e6;
+    --badge-set-text: #1c7c2b;
+    --danger-text: #d70015;
+    --danger-border: #f3c6c6;
+    --danger-hover-bg: #fdf0f0;
+  }
+  [data-theme="dark"] {
+    --border: #3a3a3c;
+    --bg: #1c1c1e;
+    --panel-bg: #262628;
+    --input-bg: #1c1c1e;
+    --text: #f2f2f7;
+    --text-muted: #9a9a9e;
+    --hover-bg: #333335;
+    --shadow: rgba(0, 0, 0, 0.5);
+    --badge-set-bg: #16321a;
+    --badge-set-text: #6fd67f;
+    --danger-text: #ff6b6b;
+    --danger-border: #5c2b2b;
+    --danger-hover-bg: #3a1f1f;
+  }
+  * { box-sizing: border-box; }
+  body, #topbar, .card, input, select, .badge, button.secondary, button.danger {
+    transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+  }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 0; background: var(--bg); color: var(--text); }
+  #topbar { display: flex; align-items: center; gap: 0.75rem; padding: 0.8rem 1.5rem; border-bottom: 1px solid var(--border); background: var(--panel-bg); }
+  #topbar h1 { font-size: 1rem; margin: 0; flex: 1; }
+  #topbar a { color: var(--text); text-decoration: none; font-size: 0.85rem; }
+  #topbar a:hover { text-decoration: underline; }
+  #page { max-width: 720px; margin: 0 auto; padding: 1.5rem; display: flex; flex-direction: column; gap: 1.25rem; }
+  .card { background: var(--panel-bg); border: 1px solid var(--border); border-radius: 10px; padding: 1.25rem 1.5rem; }
+  .card h2 { font-size: 1rem; margin: 0 0 0.25rem; }
+  .card .hint { font-size: 0.82rem; color: var(--text-muted); margin: 0 0 1rem; line-height: 1.4; }
+  .row { display: flex; align-items: center; gap: 0.6rem; padding: 0.5rem 0; border-bottom: 1px solid var(--bg); }
+  .row:last-child { border-bottom: none; }
+  .row .main { flex: 1; min-width: 0; }
+  .row .name { font-size: 0.9rem; font-weight: 500; }
+  .row .sub { font-size: 0.78rem; color: var(--text-muted); }
+  .badge { font-size: 0.72rem; padding: 0.15rem 0.5rem; border-radius: 20px; white-space: nowrap; }
+  .badge.set { background: var(--badge-set-bg); color: var(--badge-set-text); }
+  .badge.unset { background: var(--hover-bg); color: var(--text-muted); }
+  label { display: block; font-size: 0.78rem; color: var(--text-muted); margin: 0.6rem 0 0.2rem; }
+  input[type=text], input[type=password], select {
+    width: 100%; padding: 0.5rem; font-size: 0.88rem; border: 1px solid var(--border);
+    border-radius: 6px; font-family: inherit; background: var(--input-bg); color: var(--text);
+  }
+  form.inline { display: flex; gap: 0.5rem; align-items: flex-end; flex-wrap: wrap; margin-top: 0.75rem; }
+  form.inline > div { flex: 1; min-width: 140px; }
+  button { padding: 0.45rem 0.8rem; font-size: 0.85rem; background: var(--orange); color: white; border: none; border-radius: 6px; cursor: pointer; white-space: nowrap; }
+  button:hover { background: #cc6600; }
+  button.secondary { background: transparent; color: var(--text); border: 1px solid var(--border); }
+  button.secondary:hover { background: var(--hover-bg); }
+  button.danger { background: transparent; color: var(--danger-text); border: 1px solid var(--danger-border); }
+  button.danger:hover { background: var(--danger-hover-bg); }
+  button:disabled { opacity: 0.5; cursor: default; }
+  details.manage { margin-top: 0.4rem; }
+  details.manage summary { font-size: 0.78rem; color: var(--orange); cursor: pointer; }
+  .snippet { background: var(--bg); border-radius: 6px; padding: 0.75rem; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.78rem; white-space: pre; overflow-x: auto; margin-top: 0.5rem; }
+  .empty { font-size: 0.85rem; color: var(--text-muted); }
+  .field-set { display: flex; gap: 0.5rem; align-items: center; }
+  .field-set input { flex: 1; }
+</style>
+<style>
+  /* Only what this page adds on top of the shared styles above. */
+  .setting { display: grid; grid-template-columns: 1.6rem 1fr 15rem; gap: 0.55rem;
+             align-items: start; padding: 0.5rem 0; border-top: 1px solid var(--border); }
+  .setting:first-of-type { border-top: none; }
+  .setting .name { font-weight: 600; font-size: 0.85rem; }
+  .setting .why { font-size: 0.78rem; color: var(--muted, #6e6e73); margin-top: 0.15rem; }
+  .setting input[type="text"] { width: 100%; font-family: ui-monospace, monospace; font-size: 0.8rem; }
+  .setting.is-new .name::after {
+    content: "NEW"; margin-left: 0.5rem; font-size: 0.62rem; font-weight: 700;
+    letter-spacing: 0.04em; color: var(--orange); border: 1px solid var(--orange);
+    border-radius: 3px; padding: 0.03rem 0.25rem; vertical-align: 0.1rem;
+  }
+  .section-from { font-size: 0.75rem; color: var(--muted, #6e6e73); margin: 0 0 0.4rem; }
+  .sticky-actions { position: sticky; bottom: 0; background: var(--panel-bg);
+                    border-top: 1px solid var(--border); padding: 0.8rem 0; margin-top: 1rem; }
+  .count { font-size: 0.8rem; color: var(--muted, #6e6e73); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Shared settings</h1>
+  <p class="hint" id="intro">Loading&hellip;</p>
+
+  <div class="card">
+    <p class="hint">
+      Tick a setting to put it in the file your group follows. Anything left
+      unticked keeps following whatever the sandbox or the plugin ships, which is
+      usually what you want — so a file with nothing ticked changes nothing for
+      anybody.
+    </p>
+    <p class="hint" id="new-note" hidden></p>
+    <p><label><input type="checkbox" id="only-new"> Show only settings marked NEW</label></p>
+  </div>
+
+  <div id="sections"></div>
+
+  <div class="sticky-actions">
+    <button id="download-btn">Download the file</button>
+    <span class="count" id="count"></span>
+    <p class="hint" style="margin-top:0.5rem">
+      Nothing is saved here. The file downloads to you — rename it if you like,
+      put it where your group can read it, and tell each member to enter that
+      path in <strong>Settings &rarr; Shared settings</strong>.
+    </p>
+    <p class="hint" id="error" style="color:#c0392b"></p>
+  </div>
+</main>
+
+<script>
+let sections = [];
+
+async function api(path, options) {
+  const r = await fetch(path, options);
+  if (!r.ok) throw new Error((await r.text()) || r.statusText);
+  return r;
+}
+
+function controlId(section, key) { return `s-${section}-${key}`; }
+
+function render() {
+  const onlyNew = document.getElementById("only-new").checked;
+  const host = document.getElementById("sections");
+  host.innerHTML = "";
+  sections.forEach(sec => {
+    const shown = sec.settings.filter(s => !onlyNew || s.new);
+    if (shown.length === 0) return;
+    const card = document.createElement("div");
+    card.className = "card";
+    const h = document.createElement("h2");
+    h.textContent = sec.section;
+    card.appendChild(h);
+    const from = document.createElement("p");
+    from.className = "section-from";
+    from.textContent = "from " + sec.sources.join(", ");
+    card.appendChild(from);
+
+    shown.forEach(s => {
+      const row = document.createElement("div");
+      row.className = "setting" + (s.new ? " is-new" : "");
+
+      const tick = document.createElement("input");
+      tick.type = "checkbox";
+      tick.id = controlId(sec.section, s.key) + "-on";
+      tick.checked = s.chosen;
+      tick.addEventListener("change", updateCount);
+
+      const middle = document.createElement("div");
+      const name = document.createElement("div");
+      name.className = "name";
+      name.textContent = s.key;
+      middle.appendChild(name);
+      if (s.explanation) {
+        const why = document.createElement("div");
+        why.className = "why";
+        why.textContent = s.explanation;
+        middle.appendChild(why);
+      }
+
+      const value = document.createElement("input");
+      value.type = "text";
+      value.id = controlId(sec.section, s.key);
+      value.value = s.value;
+
+      row.appendChild(tick);
+      row.appendChild(middle);
+      row.appendChild(value);
+      card.appendChild(row);
+    });
+    host.appendChild(card);
+  });
+  updateCount();
+}
+
+function collect() {
+  const chosen = {};
+  sections.forEach(sec => {
+    sec.settings.forEach(s => {
+      const tick = document.getElementById(controlId(sec.section, s.key) + "-on");
+      if (!tick || !tick.checked) return;
+      const value = document.getElementById(controlId(sec.section, s.key)).value.trim();
+      (chosen[sec.section] ||= {})[s.key] = value;
+    });
+  });
+  return chosen;
+}
+
+function updateCount() {
+  const chosen = collect();
+  const n = Object.values(chosen).reduce((sum, keys) => sum + Object.keys(keys).length, 0);
+  document.getElementById("count").textContent =
+    n === 0 ? "Nothing ticked — the file would change nothing."
+            : `${n} setting${n === 1 ? "" : "s"} will be set for the group.`;
+}
+
+async function load() {
+  const data = await (await api("/api/settings/shared-inventory")).json();
+  sections = data.sections;
+  const total = sections.reduce((n, s) => n + s.settings.length, 0);
+  const newCount = sections.reduce((n, s) => n + s.settings.filter(x => x.new).length, 0);
+  document.getElementById("intro").textContent = data.existing_path
+    ? `Your group currently follows ${data.existing_path}. Its decisions are already ticked below.`
+    : "Your group has no shared settings file yet. Tick what everyone should share.";
+  if (newCount > 0) {
+    const note = document.getElementById("new-note");
+    note.hidden = false;
+    note.textContent =
+      `${newCount} of the ${total} settings did not exist when that file was made. ` +
+      `They are marked NEW.`;
+  }
+  render();
+}
+
+document.getElementById("only-new").addEventListener("change", render);
+
+document.getElementById("download-btn").addEventListener("click", async () => {
+  const errorEl = document.getElementById("error");
+  errorEl.textContent = "";
+  try {
+    const r = await api("/api/settings/shared-draft", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chosen: collect() }),
+    });
+    const blob = await r.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "shared-settings.toml";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  } catch (e) {
+    errorEl.textContent = e.message;
+  }
+});
+
+load().catch(e => { document.getElementById("intro").textContent = "Could not load: " + e.message; });
+</script>
+</body>
+</html>

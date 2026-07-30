@@ -285,7 +285,10 @@ Whoever looks after it does this:
 
 **1. Make a draft.** Either way works — nobody has to use the terminal for this.
 
-*In the web interface:* open **Settings → Shared settings**, and click **Download a shared settings draft**. It arrives as `shared-settings.toml`.
+*In the web interface:* open **Settings → Shared settings**. Two ways from there:
+
+- **Choose settings for the group…** opens a list of every setting with what each one does. Tick what the group should share, adjust the values, and download the result. Anything your group already decided is ticked for you, and anything that has appeared since is marked **NEW** — with a filter to show only those.
+- **Download the whole file instead** hands you the same file with everything commented out, to edit in a text editor.
 
 *At the command line:*
 
@@ -299,7 +302,9 @@ Either way it lists **every** setting the sandbox and the installed plugins have
 
 **2. Edit it, and rename it if you like.**
 
-Uncomment the settings the group should share, and adjust them. This part is a text editor for now — the file is plain text with an explanation above every setting.
+If you used **Choose settings for the group…**, this is already done — the downloaded file contains exactly what you ticked. Otherwise, uncomment the settings the group should share and adjust them; the file is plain text with an explanation above every setting.
+
+Either way the name is yours to choose.
 
 The name is yours to choose. `shared-settings.toml` is just what the draft comes out as; `nurikabe-lab.toml` or `chinese-history-group.toml` may mean more to the people using it. Each installation stores the full **path** you give it, not a name, so renaming costs nothing — do it now, before anyone points at the file, and you won't have to update them later.
 
@@ -319,7 +324,7 @@ python main.py settings set shared_settings.path /path/to/whatever-you-called-it
 
 That is the only step each member does, and they only do it once.
 
-**Keeping it current.** Settings appear as plugins are updated. A member who needs one that the shared file doesn't mention will see the plugin's own value in their `preferences.toml` rather than a `# currently set by your group's shared settings` label — that's their cue to ask. Whoever looks after the file then makes a fresh draft — the download button again, or:
+**Keeping it current.** Settings appear as plugins are updated. A member who needs one that the shared file doesn't mention will see the plugin's own value in their `preferences.toml` rather than a `# currently set by your group's shared settings` label — that's their cue to ask. Whoever looks after the file then makes a fresh draft — **Choose settings for the group…** again, where anything added since their file was written is marked **NEW** and can be filtered down to on its own, or:
 
 ```bash
 python main.py settings export-shared --from /path/to/shared-settings.toml
@@ -507,7 +512,7 @@ pip install openpyxl
 | Web UI passphrase | `settings.toml` (`webui.passphrase_hash`) | No | N/A | ✅ `webui set-passphrase` | ✅ `/settings` — hashed server-side, never shown |
 | Web UI session secret | `settings.toml` (`webui.session_secret`) | No | N/A | ✅ `settings set` / `--generate` | ✅ `/settings` |
 | Shared-settings pointer | `settings.toml` (`shared_settings.path`) | No — it's just a path | N/A | ✅ `settings set` / `unset` | ✅ `/settings` |
-| A shared-settings draft to edit and place | Nowhere — handed to you, never saved | ✅ that's the point; you place it | N/A | ✅ `settings export-shared` | ✅ `/settings` → Download a shared settings draft |
+| A shared-settings draft to edit and place | Nowhere — handed to you, never saved | ✅ that's the point; you place it | N/A | ✅ `settings export-shared` | ✅ `/settings` → Choose settings for the group, or download the whole file |
 | Endpoint API keys | `settings.toml` (`endpoints.<name>.key`) | No | N/A | ✅ `settings set` / `unset` | ✅ `/settings` — one field per endpoint already defined |
 | Endpoint definitions | `settings.default.toml`, a shared file, or `preferences.toml` | ✅ definitions may live in the tracked file or a shared one | ✅ `preferences.toml` wins | ❌ hand-edit TOML | ❌ read-only on `/settings`, with a copyable snippet |
 | Model pricing | `model_catalog.json`, your files folder | Not designed for it — kept separate precisely to avoid concurrent-write conflicts | N/A | Indirectly: `-m provider/model` registers pricing | ❌ |

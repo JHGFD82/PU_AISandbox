@@ -1746,3 +1746,106 @@ class TestFileOrFolderPicker:
         """collect, restore and submit all look the field up by this id."""
         page = self._page()
         assert "replacement.id = input.id" in page
+
+
+class TestGuidedSharedSettingsEditor:
+    """Choosing a group's settings from a list, rather than editing TOML by hand.
+
+    The plain download works but hands someone a hundred commented lines to read.
+    This shows every setting with what it does, what it is set to, and which ones
+    appeared since their file was written.
+    """
+
+    def test_the_page_is_served(self, unlocked_client):
+        r = unlocked_client.get("/shared-settings")
+        assert r.status_code == 200
+        assert "Shared settings" in r.text
+
+    def test_the_page_is_behind_the_unlock_gate(self, client):
+        r = client.get("/shared-settings")
+        assert "unlock" in r.text.lower() or r.status_code in (302, 303, 401, 403)
+
+    def test_the_inventory_lists_sections_and_settings(self, unlocked_client):
+        data = unlocked_client.get("/api/settings/shared-inventory").json()
+        assert data["sections"], "no settings offered at all"
+        first = data["sections"][0]
+        assert {"section", "sources", "settings"} <= set(first)
+        assert {"key", "value", "explanation", "chosen", "new"} <= set(first["settings"][0])
+
+    def test_the_inventory_says_where_each_section_comes_from(self, unlocked_client):
+        data = unlocked_client.get("/api/settings/shared-inventory").json()
+        assert all(s["sources"] for s in data["sections"])
+
+    def test_with_no_shared_file_nothing_is_chosen_or_new(self, unlocked_client, monkeypatch):
+        from src import settings_store as store_mod
+        monkeypatch.setattr(store_mod, "get_shared_settings_path", lambda: None)
+        data = unlocked_client.get("/api/settings/shared-inventory").json()
+        every = [s for sec in data["sections"] for s in sec["settings"]]
+        assert not any(s["chosen"] for s in every)
+        assert not any(s["new"] for s in every)
+        assert data["existing_path"] is None
+
+    def test_an_existing_file_marks_what_it_decides_and_what_is_new(
+        self, unlocked_client, tmp_path, monkeypatch,
+    ):
+        from src import settings_store as store_mod
+        shared = tmp_path / "lab.toml"
+        shared.write_text("[retry]\nmax_retries = 3\n")
+        monkeypatch.setattr(store_mod, "get_shared_settings_path", lambda: shared)
+        data = unlocked_client.get("/api/settings/shared-inventory").json()
+        retry = next(s for s in data["sections"] if s["section"] == "retry")
+        decided = next(s for s in retry["settings"] if s["key"] == "max_retries")
+        assert decided["chosen"] is True
+        assert decided["value"] == "3", "should show the group's value, not the shipped one"
+        assert decided["new"] is False
+        assert any(s["new"] for s in retry["settings"]), "the rest of the section is new"
+
+    def test_building_from_choices_returns_a_downloadable_file(self, unlocked_client):
+        r = unlocked_client.post(
+            "/api/settings/shared-draft", json={"chosen": {"retry": {"max_retries": "5"}}}
+        )
+        assert r.status_code == 200
+        assert 'filename="shared-settings.toml"' in r.headers["content-disposition"]
+
+    def test_only_the_ticked_settings_are_live(self, unlocked_client):
+        import tomllib
+        r = unlocked_client.post(
+            "/api/settings/shared-draft", json={"chosen": {"retry": {"max_retries": "5"}}}
+        )
+        parsed = tomllib.loads(r.text)
+        assert parsed == {"retry": {"max_retries": 5}}, "nothing else should be set"
+
+    def test_ticking_nothing_gives_a_file_that_changes_nothing(self, unlocked_client):
+        import tomllib
+        r = unlocked_client.post("/api/settings/shared-draft", json={"chosen": {}})
+        assert tomllib.loads(r.text) == {}
+
+    def test_nothing_is_marked_new_in_a_file_built_from_choices(self, unlocked_client):
+        """Every setting was just looked at, so anything unticked was left alone."""
+        r = unlocked_client.post(
+            "/api/settings/shared-draft", json={"chosen": {"retry": {"max_retries": "5"}}}
+        )
+        assert "NEW:" not in r.text
+
+    def test_a_value_toml_cannot_express_is_refused_with_help(self, unlocked_client):
+        """Better a rejected edit than a file that will not parse for the group."""
+        r = unlocked_client.post(
+            "/api/settings/shared-draft",
+            json={"chosen": {"prompt": {"default_system_prompt": "no quotes here"}}},
+        )
+        assert r.status_code == 400
+        assert "quotation marks" in r.text
+
+    def test_a_list_value_survives_the_round_trip(self, unlocked_client):
+        import tomllib
+        r = unlocked_client.post(
+            "/api/settings/shared-draft",
+            json={"chosen": {"ocr": {"models": '["gpt-4o", "gpt-4o-mini"]'}}},
+        )
+        assert tomllib.loads(r.text)["ocr"]["models"] == ["gpt-4o", "gpt-4o-mini"]
+
+    def test_nothing_is_written_to_disk(self, unlocked_client, tmp_path, monkeypatch):
+        from src import paths as paths_mod
+        monkeypatch.setattr(paths_mod, "extras_root", lambda: tmp_path)
+        unlocked_client.post("/api/settings/shared-draft", json={"chosen": {}})
+        assert list(tmp_path.glob("*.toml")) == []

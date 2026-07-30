@@ -175,10 +175,18 @@
         read, and tell each member to enter that path above. If this installation
         already points at a shared file, its decisions are carried across and
         anything new since is marked <code>NEW:</code>.</p>
-      <p><a id="download-shared-draft" href="/api/settings/shared-draft"
-            download="shared-settings.toml">
-        <button type="button" class="secondary">Download a shared settings draft</button>
-      </a></p>
+      <p>
+        <a href="/shared-settings" target="_top">
+          <button type="button">Choose settings for the group…</button>
+        </a>
+        <a id="download-shared-draft" href="/api/settings/shared-draft"
+           download="shared-settings.toml">
+          <button type="button" class="secondary">Download the whole file instead</button>
+        </a>
+      </p>
+      <p class="hint">The first opens a list of every setting, with what each one
+        does, so you can tick what the group should share. The second hands you
+        the same file with everything commented out, to edit in a text editor.</p>
 
       <div id="endpoints-list" style="margin-top:1rem"></div>
       <div class="snippet" id="endpoints-guidance"># preferences.toml

@@ -179,6 +179,19 @@ class PassphraseBody(BaseModel):
     confirm: str
 
 
+class SharedDraftBody(BaseModel):
+    """The settings someone ticked in the guided editor.
+
+    ``chosen`` maps a section to the settings to write live in it, each value as
+    the TOML text the person typed (``0.2``, ``"developer"``, ``["gpt-4o"]``).
+    Kept as text rather than parsed here so what they wrote is what gets
+    checked, and a value TOML can't express is refused with their own input
+    quoted back at them.
+    """
+
+    chosen: dict = {}
+
+
 class SettingValueBody(BaseModel):
     path: str
     value: str
@@ -369,6 +382,13 @@ def create_app() -> FastAPI:
             return templates.TemplateResponse(request, "unlock.html", {"error": None})
         return templates.TemplateResponse(request, "settings.html")
 
+    @app.get("/shared-settings", response_class=HTMLResponse)
+    async def shared_settings_page(request: Request):
+        """The guided editor for whoever looks after a group's shared settings."""
+        if not request.session.get("unlocked"):
+            return templates.TemplateResponse(request, "unlock.html", {"error": None})
+        return templates.TemplateResponse(request, "shared_settings.html")
+
     @app.post("/unlock")
     async def unlock(request: Request):
         # Repeated wrong guesses from one computer are slowed down, so the
@@ -521,6 +541,55 @@ def create_app() -> FastAPI:
             raise HTTPException(400, f"'{path}' is not an editable setting.")
         settings_store.unset_value(path)
         return {"ok": True}
+
+    @app.get("/api/settings/shared-inventory")
+    async def api_shared_settings_inventory(request: Request):
+        """Every setting a group could share, and what their file already says.
+
+        What the guided editor is built from: the same gathering the plain draft
+        comes from, as data rather than a file, so it can be shown as a form
+        instead of a hundred commented lines to read through.
+        """
+        _require_unlocked(request)
+        from src.paths import PACKAGE_ROOT
+        from src.shared_settings import inventory
+
+        configured = settings_store.get_shared_settings_path()
+        existing = configured if configured is not None and configured.exists() else None
+        return {
+            "sections": inventory(
+                plugins_dir=PACKAGE_ROOT / "plugins",
+                package_defaults=PACKAGE_ROOT / "settings.default.toml",
+                existing=existing,
+            ),
+            "existing_path": str(existing) if existing is not None else None,
+        }
+
+    @app.post("/api/settings/shared-draft")
+    async def api_build_shared_settings(request: Request, body: SharedDraftBody):
+        """Build a shared settings file from what someone chose in the editor.
+
+        Handed back to download, never saved: the sandbox does not write shared
+        settings files, and has no idea where a group keeps theirs.
+        """
+        _require_unlocked(request)
+        from src.paths import PACKAGE_ROOT
+        from src.shared_settings import render_chosen
+
+        try:
+            text = render_chosen(
+                plugins_dir=PACKAGE_ROOT / "plugins",
+                package_defaults=PACKAGE_ROOT / "settings.default.toml",
+                chosen=body.chosen,
+            )
+        except ValueError as error:
+            # A value the person typed, so the message is for them.
+            raise HTTPException(400, str(error)) from error
+        return Response(
+            content=text,
+            media_type="text/plain; charset=utf-8",
+            headers={"Content-Disposition": 'attachment; filename="shared-settings.toml"'},
+        )
 
     @app.get("/api/settings/shared-draft")
     async def api_shared_settings_draft(request: Request):
