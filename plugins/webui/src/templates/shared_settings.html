@@ -165,6 +165,10 @@
         back to showing the shipped value, and yours is remembered and comes
         straight back if you tick it on again.
       </p>
+      <p class="hint">
+        Wording is typed as wording — no quotation marks needed. A list keeps
+        its square brackets, with each item in quotation marks.
+      </p>
       <p class="hint" id="new-note" hidden></p>
       <p><label><input type="checkbox" id="only-new"> Show only settings marked NEW</label></p>
     </div>
@@ -225,7 +229,9 @@ function readValue(text, at) {
     let i = at + 1;
     while (i < text.length) {
       if (first === '"' && text[i] === "\\") { i += 2; continue; }
-      if (text[i] === first) return { kind: "text", at: i + 1, text: text.slice(at + 1, i) };
+      if (text[i] === first) {
+        return { kind: "text", at: i + 1, text: text.slice(at + 1, i), quote: first };
+      }
       i++;
     }
     return null;  // opened and never closed
@@ -263,6 +269,43 @@ function readWholeValue(text) {
   return found;
 }
 
+// ── Text settings are typed as text ──────────────────────────────────────────
+// Quotation marks are the file's way of saying "this is text". They are not
+// something a person should have to type, so a text setting shows its content
+// and nothing else, and the quotation marks are put back on the way into the
+// file. Anyone who does type quotation marks gets them, as characters in the
+// value — which is what they meant.
+
+const ESCAPES = { n: "\n", t: "\t", r: "\r", b: "\b", f: "\f", '"': '"', "\\": "\\" };
+
+function unescaped(found) {
+  if (found.quote === "'") return found.text;  // single quotes hold text as-is
+  return found.text.replace(/\\(u[0-9a-fA-F]{4}|U[0-9a-fA-F]{8}|[\s\S])/g, (whole, what) => {
+    if (what[0] === "u" || what[0] === "U") return String.fromCodePoint(parseInt(what.slice(1), 16));
+    return what in ESCAPES ? ESCAPES[what] : whole;
+  });
+}
+
+function shipped(setting) { return readWholeValue(setting.default); }
+
+function isTextSetting(setting) {
+  const want = shipped(setting);
+  return want !== null && want.kind === "text";
+}
+
+// What the box shows: a text setting's content, anything else as the file spells
+// it, since a list needs its brackets and a number is a number either way.
+function forShowing(setting, tomlText) {
+  const found = readWholeValue(tomlText);
+  return found !== null && found.kind === "text" ? unescaped(found) : tomlText;
+}
+
+// What goes into the file. JSON spells a piece of text the same way a settings
+// file does, escapes and all, which is what the sandbox itself uses to write one.
+function forFile(setting, shownText) {
+  return isTextSetting(setting) ? JSON.stringify(shownText) : shownText;
+}
+
 // A setting whose shipped value is one unbroken word is a name or an address —
 // a model, a host, a cookie — and a line break in one of those is never meant.
 // Taken from the value the plugin ships rather than from a list of field names
@@ -272,55 +315,48 @@ function isProse(want) {
 }
 
 function problemWith(setting, text) {
-  if (!text.trim()) return "this needs a value";
-  const want = readWholeValue(setting.default);
-  const got = readWholeValue(text);
+  const want = shipped(setting);
   if (want === null) return "";  // nothing sensible to compare against
 
-  const quoted = /^\s*["']/.test(text);
+  // Text is typed as text, so there is no spelling to get wrong. All that can
+  // be wrong is a line break where the setting is a name or an address.
+  if (want.kind === "text") {
+    if (!text.trim()) return "Enter a value";
+    if (!isProse(want) && /[\r\n]/.test(text)) return "Enter this on one line, with no line breaks";
+    return "";
+  }
+
+  if (!text.trim()) return "Enter a value";
+  const got = readWholeValue(text);
   if (got === null) {
-    if (want.kind === "text") {
-      return quoted
-        ? "the quotation marks are not closed"
-        : 'text needs quotation marks around it, like "example"';
-    }
     if (want.kind === "list") {
       // Brackets already there means the brackets are not the problem; what is
-      // between them is. Saying "this takes a list" to someone who typed a list
-      // tells them nothing.
+      // between them is. Telling someone who typed a list to type a list tells
+      // them nothing.
       return /^\s*\[/.test(text)
-        ? 'each thing in the list needs quotation marks, like ["gpt-4o", "gpt-4o-mini"]'
-        : 'this takes a list in square brackets, like ["gpt-4o"]';
+        ? 'Each item needs quotation marks, like ["gpt-4o", "gpt-4o-mini"]'
+        : 'Enter a list in square brackets, like ["gpt-4o"]';
     }
-    if (want.kind === "yes/no") return "this takes true or false";
-    return "this takes a number";
+    if (want.kind === "yes/no") return "Enter true or false";
+    return "Enter a number";
   }
-  // Checked before the kinds are compared: 127.0.0.1 without quotation marks
-  // reads as a number with more after it, and being told the setting takes text
-  // is more use than being told there is more than one value here.
-  if (want.kind === "text" && (got.kind !== "text" || got.trailing)) {
-    return quoted
-      ? "there is more here than one value — check the quotation marks"
-      : 'text needs quotation marks around it, like "example"';
-  }
-  if (got.trailing) return "there is more here than one value";
+  if (got.trailing) return "Enter one value only";
   if (got.kind !== want.kind) {
-    if (want.kind === "number") return `this takes a number, not ${got.kind === "text" ? "text" : "a " + got.kind}`;
-    if (want.kind === "list") return 'this takes a list in square brackets, like ["gpt-4o"]';
-    return "this takes true or false";
+    if (want.kind === "number") return `Enter a number, not ${got.kind === "text" ? "text" : "a " + got.kind}`;
+    if (want.kind === "list") return 'Enter a list in square brackets, like ["gpt-4o"]';
+    return "Enter true or false";
   }
-  if (want.kind === "number" && want.whole && !got.whole) return "this takes a whole number";
-  if (want.kind === "list" && want.items.length) {
-    const itemKind = want.items[0].kind;
-    if (got.items.some(item => item.kind !== itemKind)) {
-      return itemKind === "text"
-        ? 'each thing in the list needs quotation marks, like ["gpt-4o", "gpt-4o-mini"]'
-        : `each thing in the list should be a ${itemKind}`;
+  if (want.kind === "number" && want.whole && !got.whole) return "Enter an integer";
+  if (want.kind === "list") {
+    if (got.items.length === 0) return "Enter at least one item";
+    if (want.items.length) {
+      const itemKind = want.items[0].kind;
+      if (got.items.some(item => item.kind !== itemKind)) {
+        return itemKind === "text"
+          ? 'Each item needs quotation marks, like ["gpt-4o", "gpt-4o-mini"]'
+          : `Each item should be a ${itemKind}`;
+      }
     }
-    if (got.items.length === 0) return "a list with nothing in it leaves nothing to use";
-  }
-  if (want.kind === "text" && !isProse(want) && /\\n|[\r\n]/.test(got.text)) {
-    return "a line break does not belong in a setting like this";
   }
   return "";
 }
@@ -328,7 +364,9 @@ function problemWith(setting, text) {
 function valueOf(setting) {
   // Someone who ticked a setting without typing means the value on screen, which
   // is the shipped one.
-  return setting.custom === null || setting.custom === undefined ? setting.default : setting.custom;
+  return setting.custom === null || setting.custom === undefined
+    ? forShowing(setting, setting.default)
+    : setting.custom;
 }
 
 function problems() {
@@ -351,7 +389,9 @@ function grow(box) {
 function showValue(box, setting, ticked) {
   // Ticked shows this person's value if they have one; unticked always shows
   // what the setting falls back to, which is the point of unticking it.
-  box.value = ticked && setting.custom !== null ? setting.custom : setting.default;
+  box.value = ticked && setting.custom !== null
+    ? setting.custom
+    : forShowing(setting, setting.default);
   box.classList.toggle("following", !ticked);
   grow(box);
 }
@@ -363,7 +403,7 @@ function render() {
     // shipped value without losing what this person typed, and so a row the
     // filter is hiding keeps both. Only a setting the group already decided
     // starts with one.
-    if (s.custom === undefined) s.custom = s.chosen ? s.value : null;
+    if (s.custom === undefined) s.custom = s.chosen ? forShowing(s, s.value) : null;
   }));
   const host = document.getElementById("sections");
   host.innerHTML = "";
@@ -427,8 +467,11 @@ function render() {
       // Typing is the tick. Working down a list of forty checkboxes is the part
       // that puts people off, and it carries no information the typing didn't
       // already give: a value you bothered to change is a value you want.
+      const takesLineBreaks = isTextSetting(s) && isProse(shipped(s));
       value.addEventListener("input", () => {
-        const flattened = value.value.replace(/[\r\n]+/g, " ");
+        // A line break belongs in a prompt and nowhere else — not in a number,
+        // a list, a host or a model name, where it would only be a stray key.
+        const flattened = takesLineBreaks ? value.value : value.value.replace(/[\r\n]+/g, " ");
         if (flattened !== value.value) value.value = flattened;
         tick.checked = true;
         s.chosen = true;
@@ -439,20 +482,11 @@ function render() {
         updateCount();
       });
 
-      // A settings file writes a line break as \n inside the quotation marks, so
-      // that is what Enter puts there. Typed into the box directly it would end
-      // the line and the file would not read back — which is the one way a
-      // person writing a long system prompt would find that out.
+      // Enter writes a real line break in a prompt, and the file gets a properly
+      // written one because the quotation marks are put on at the end. Anywhere
+      // else it does nothing, rather than quietly leaving a stray key in a host.
       value.addEventListener("keydown", event => {
-        if (event.key !== "Enter") return;
-        event.preventDefault();
-        // Only where a line break could be meant. In a host or a model name it
-        // never is, so Enter there does nothing rather than quietly writing one.
-        if (!isProse(readWholeValue(s.default))) return;
-        if (!/^\s*"/.test(value.value)) return;
-        const at = value.selectionStart;
-        value.setRangeText("\\n", at, value.selectionEnd, "end");
-        value.dispatchEvent(new Event("input"));
+        if (event.key === "Enter" && !takesLineBreaks) event.preventDefault();
       });
 
       tick.addEventListener("change", () => {
@@ -483,7 +517,9 @@ function collect() {
   sections.forEach(sec => {
     sec.settings.forEach(s => {
       if (!s.chosen) return;
-      (chosen[sec.section] ||= {})[s.key] = valueOf(s).trim();
+      // The quotation marks a text setting needs are put back here, so nobody
+      // has to type them and nobody can forget them.
+      (chosen[sec.section] ||= {})[s.key] = forFile(s, valueOf(s).trim());
     });
   });
   return chosen;

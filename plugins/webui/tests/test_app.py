@@ -1988,6 +1988,13 @@ class TestSharedSettingsPagePresentation:
         assert r.status_code >= 400
         assert "max_retries" in r.text
 
+    def test_text_settings_are_typed_as_text(self):
+        """Quotation marks are the file's spelling, not the person's job."""
+        page = self._page()
+        assert "function forFile" in page
+        assert "JSON.stringify" in page
+        assert "no quotation marks needed" in page
+
     def test_the_page_says_unticking_is_safe(self):
         """People will not untick to peek unless told their value survives it."""
         page = self._page()
