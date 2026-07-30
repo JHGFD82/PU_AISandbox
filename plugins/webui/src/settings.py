@@ -5,10 +5,15 @@ Defaults come from this plugin's own ``settings.toml``
 touching that file — a shared settings file, then ``preferences.toml``, apply
 on top under a ``[webui]`` section, in that order. See ``plugin_settings()`` in
 ``src/settings.py``.
+
+The model lists are the exception to "has a default": there is no fallback for
+them in this file, because a list of models is what gets edited when a provider
+retires something, and a second copy here would drift out of step silently. If
+``settings.toml`` doesn't name them, loading fails and says so.
 """
 
 from src.runtime.model_role import ModelRole
-from src.settings import plugin_settings
+from src.settings import plugin_settings, required_models
 
 _webui = plugin_settings(__file__, "webui")["webui"]
 
@@ -22,9 +27,13 @@ WEBUI_COMPACTION_MODEL: str = _webui.get("compaction_model", "gpt-4o-mini")
 # Chat needs to read images because a question in the browser can carry a
 # document; writing an eight-word title does not.
 CHAT_ROLE = ModelRole(
-    models=_webui.get("chat_models", ["gpt-4o-mini", "gemini-2.5-flash-lite", "gpt-4o"]),
+    models=required_models(
+        _webui, "chat_models", where="[webui] in plugins/webui/settings.toml",
+    ),
     requires_vision=True,
 )
 TITLE_ROLE = ModelRole(
-    models=_webui.get("title_models", ["gpt-4o-mini", "gpt-4.1-nano", "gemini-2.5-flash-lite"]),
+    models=required_models(
+        _webui, "title_models", where="[webui] in plugins/webui/settings.toml",
+    ),
 )

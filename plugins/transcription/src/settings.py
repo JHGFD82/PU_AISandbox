@@ -4,10 +4,15 @@ Defaults come from this plugin's own ``settings.toml``. Anyone can override any
 of them without touching that file — a shared settings file, then
 ``preferences.toml``, apply on top, in that order. See ``plugin_settings()`` in
 ``src/settings.py``.
+
+The model lists are the exception to "has a default": there is no fallback for
+them in this file, because a list of models is what gets edited when a provider
+retires something, and a second copy here would drift out of step silently. If
+``settings.toml`` doesn't name them, loading fails and says so.
 """
 
 from src.runtime.model_role import ModelRole
-from src.settings import plugin_settings
+from src.settings import plugin_settings, required_models
 
 _s = plugin_settings(__file__, "ocr", "transcription_review")
 _ocr = _s["ocr"]
@@ -32,9 +37,14 @@ TRANSCRIPTION_REVIEW_MAX_TOKENS: int = _transcription_review.get("max_tokens", 4
 
 # ── Which models each job should use ──────────────────────────────────────────
 OCR_ROLE = ModelRole(
-    models=_ocr.get("models", ["gpt-4o", "gemini-2.5-flash", "gpt-4o-mini"]),
+    models=required_models(
+        _ocr, "models", where="[ocr] in plugins/transcription/settings.toml",
+    ),
     requires_vision=True,   # it is reading an image
 )
 TRANSCRIPTION_REVIEW_ROLE = ModelRole(
-    models=_transcription_review.get("models", ["gpt-4o", "gpt-4o-mini"]),
+    models=required_models(
+        _transcription_review, "models",
+        where="[transcription_review] in plugins/transcription/settings.toml",
+    ),
 )

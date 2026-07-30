@@ -247,3 +247,75 @@ class TestPluginSettingsLayering:
     def test_no_layers_configured_at_all(self, tmp_path, monkeypatch):
         caller = self._layers(tmp_path, monkeypatch)
         assert settings_mod.plugin_settings(caller, "demo")["demo"]["temperature"] == 0.5
+
+
+class TestRequiredModels:
+    """A model list is written in one place — the plugin's settings.toml.
+
+    Every other plugin setting carries a default in code, which is fine for a
+    temperature or a worker count. A model list is different: it is the setting
+    most likely to be edited, because providers retire models, and a second copy
+    in Python would drift out of step silently — the file wins, so the stale
+    copy just sits there looking authoritative. So there is no second copy, and
+    absence is an error rather than a quiet substitution.
+    """
+
+    def test_returns_the_names_in_the_order_given(self):
+        got = settings_mod.required_models(
+            {"models": ["gpt-4o", "gpt-4o-mini"]}, "models", where="somewhere"
+        )
+        assert got == ["gpt-4o", "gpt-4o-mini"]
+
+    def test_surrounding_whitespace_is_forgiven(self):
+        """A hand-edited file shouldn't fail over a stray space."""
+        got = settings_mod.required_models(
+            {"models": [" gpt-4o ", "gpt-4o-mini"]}, "models", where="somewhere"
+        )
+        assert got == ["gpt-4o", "gpt-4o-mini"]
+
+    @pytest.mark.parametrize("value", [
+        None,                       # key absent entirely
+        [],                         # named but empty
+        "gpt-4o",                   # a bare string, not a list
+        ["gpt-4o", ""],             # a blank entry
+        ["gpt-4o", "   "],          # a whitespace-only entry
+        ["gpt-4o", None],           # a non-string entry
+        {"1": "gpt-4o"},            # a table where a list belongs
+    ])
+    def test_anything_unusable_raises(self, value):
+        settings = {} if value is None else {"models": value}
+        with pytest.raises(ValueError, match="list of model names"):
+            settings_mod.required_models(settings, "models", where="somewhere")
+
+    def test_the_error_says_where_to_go_and_why_it_matters(self):
+        """An error about configuration is only useful if it names the file."""
+        with pytest.raises(ValueError) as excinfo:
+            settings_mod.required_models(
+                {}, "models", where="[ocr] in plugins/transcription/settings.toml"
+            )
+        message = str(excinfo.value)
+        assert "[ocr] in plugins/transcription/settings.toml" in message
+        assert "cheapest" in message   # says what the alternative would have been
+
+    def test_every_bundled_plugin_names_its_models_in_its_settings_file(self):
+        """The lists must really be in the TOML — that is the whole point.
+
+        Reads the files rather than the loaded constants, so a Python fallback
+        creeping back in would not hide a missing entry.
+        """
+        import tomllib
+        from pathlib import Path
+
+        expected = {
+            "prompt": [("prompt_command", "models")],
+            "translation": [("translation", "models"), ("image_translation", "models")],
+            "transcription": [("ocr", "models"), ("transcription_review", "models")],
+            "webui": [("webui", "chat_models"), ("webui", "title_models")],
+        }
+        for plugin, entries in expected.items():
+            path = Path("plugins") / plugin / "settings.toml"
+            data = tomllib.loads(path.read_text())
+            for section, key in entries:
+                names = data.get(section, {}).get(key)
+                assert isinstance(names, list) and names, f"{path}: [{section}] {key} missing"
+                assert all(isinstance(n, str) and n.strip() for n in names), f"{path}: [{section}] {key}"
