@@ -742,6 +742,12 @@ def create_app() -> FastAPI:
             "month": budget["monthly_usage"],
             "all_time": tracker.get_all_time_usage(),
             "model_usage": tracker.usage_data.get("model_usage", {}),
+            # Alternate services, each on its own, carrying tokens and no money.
+            # Kept out of the figures above on purpose: those are what the
+            # university is billed for and what the budget is measured against.
+            # Usually empty — only someone using an endpoint of their own from
+            # the command line has anything here.
+            "endpoint_usage": tracker.usage_data.get("endpoint_usage", {}),
             "budget": {
                 "monthly_limit": tracker.monthly_limit,
                 "usage_percentage": budget["usage_percentage"],

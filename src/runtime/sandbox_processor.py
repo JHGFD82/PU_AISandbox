@@ -228,6 +228,11 @@ class SandboxProcessor(*_discover_plugin_mixins(), _FileTypeMixin, _CommandMixin
                 base_url=api_config.base_url,
                 timeout=float(api_config.timeout),
             )
+            # Say which service this is, so its usage is recorded on its own and
+            # priced at nothing. Without this the calls are indistinguishable
+            # from sandbox ones once recorded, and were being costed against the
+            # university's price list, which does not apply to them.
+            val.endpoint_name = api_config.api_name
             # Bypass the model catalog for alternate endpoint models: return the
             # model name as-is rather than going through resolve_model().
             configured_model: Optional[str] = self._svc_kwargs.get("model") or api_config.default_model
