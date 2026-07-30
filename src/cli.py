@@ -287,6 +287,20 @@ def _build_settings_subparser(subparsers: argparse._SubParsersAction) -> None:
         help='Auto-generate a random value instead of prompting (secrets only)',
     )
 
+    export_shared = settings_sub.add_parser(
+        'export-shared',
+        help="Build a shared settings file for a group to follow (you place it yourself)",
+    )
+    export_shared.add_argument(
+        '--output', type=str, default=None, metavar='PATH',
+        help="Where to write the draft (default: shared-settings.toml in your files folder)",
+    )
+    export_shared.add_argument(
+        '--from', dest='from_existing', type=str, default=None, metavar='PATH',
+        help="An existing shared settings file to carry decisions across from "
+             "(default: whatever shared_settings.path points at, if anything)",
+    )
+
     unset_parser = settings_sub.add_parser('unset', help='Remove an optional settings.toml value')
     _add_debug_flags(unset_parser)
     unset_parser.add_argument('key', type=str, help='The variable to remove')

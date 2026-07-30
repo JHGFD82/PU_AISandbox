@@ -61,6 +61,8 @@ python main.py settings list                      # optional values and whether 
 python main.py settings set webui.session_secret            # prompts for a value
 python main.py settings set webui.session_secret --generate  # or generate one
 python main.py settings unset webui.session_secret
+python main.py settings export-shared            # draft a settings file for a group
+python main.py settings export-shared --from /path/to/current-shared.toml
 ```
 
 | Subcommand | What it does |
@@ -71,6 +73,7 @@ python main.py settings unset webui.session_secret
 | `list` | Lists every optional setting and whether it's currently set. |
 | `set <dotted.path>` | Sets one value, prompting for it. Add `--generate` for a random secret. |
 | `unset <dotted.path>` | Removes one value. |
+| `export-shared` | Writes a draft settings file for a group to follow — every setting the sandbox and its plugins have, commented out, with each author's explanation. `--output` chooses where; `--from` carries decisions across from a file already in use and marks anything new since. You place the result yourself; see [Configuration](configuration.md#setting-up-a-shared-file-for-a-group). |
 
 API keys and other secrets are always typed at a hidden prompt, never accepted as a flag, so they can't end up in shell history or be read by another process listing running commands.
 

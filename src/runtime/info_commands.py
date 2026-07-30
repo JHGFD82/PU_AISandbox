@@ -289,6 +289,9 @@ def _handle_settings_command(args: argparse.Namespace) -> None:
     if sub == 'unset':
         _settings_unset_value(args)
         return
+    if sub == 'export-shared':
+        _settings_export_shared(args)
+        return
 
     raise CLIError(
         "No settings subcommand specified.\n"
@@ -297,7 +300,8 @@ def _handle_settings_command(args: argparse.Namespace) -> None:
         "       python main.py settings remove-professor <identifier>\n"
         "       python main.py settings list\n"
         "       python main.py settings set <KEY>\n"
-        "       python main.py settings unset <KEY>"
+        "       python main.py settings unset <KEY>\n"
+        "       python main.py settings export-shared"
     )
 
 
@@ -476,3 +480,71 @@ def _add_source_interactive(args: argparse.Namespace) -> None:
             f"\n(This installation's own source id is '{this_source_id}' — every usage record "
             f"it writes from now on will be tagged with that.)"
         )
+
+
+def _settings_export_shared(args: argparse.Namespace) -> None:
+    """Write a shared settings draft for whoever looks after one to edit and place.
+
+    Gathers every setting the package and the installed plugins have, with the
+    explanations their authors wrote, all commented out — so a draft placed
+    unedited changes nothing for anybody. Where a shared file is already in use,
+    its decisions are carried across untouched and anything new since is marked,
+    which is what makes coming back for a second draft worth doing.
+
+    Deliberately writes a file for the person to move rather than putting it in
+    the shared location itself. The sandbox never writes to a shared settings
+    file: it belongs to a group, and several installations writing to a folder
+    that syncs is how conflicted copies happen.
+
+    Args:
+        args: The parsed flags. ``--output`` chooses where to write, ``--from``
+              names an existing shared file to carry decisions across from.
+    """
+    from pathlib import Path
+
+    from .. import paths, settings_store
+    from ..shared_settings import build_shared_settings, count_new
+
+    if args.from_existing:
+        existing = Path(args.from_existing).expanduser()
+        if not existing.exists():
+            raise CLIError(
+                f"No shared settings file at '{existing}'.\n"
+                "Check the path, or leave --from off to start a fresh draft."
+            )
+    else:
+        configured = settings_store.get_shared_settings_path()
+        existing = configured if configured is not None and configured.exists() else None
+
+    destination = (
+        Path(args.output).expanduser() if args.output
+        else paths.extras_root() / "shared-settings.toml"
+    )
+
+    text = build_shared_settings(
+        plugins_dir=paths.PACKAGE_ROOT / "plugins",
+        package_defaults=paths.PACKAGE_ROOT / "settings.default.toml",
+        existing=existing,
+    )
+    try:
+        destination.write_text(text, encoding="utf-8")
+    except OSError as error:
+        raise CLIError(f"Could not write '{destination}': {error}") from error
+
+    print(f"\nWrote a shared settings draft to:\n    {destination}\n")
+    if existing is not None:
+        new = count_new(text)
+        print(f"Carried your existing decisions across from:\n    {existing}")
+        if new:
+            print(
+                f"\n{new} setting{'s' if new != 1 else ''} did not exist when that file "
+                f"was made. Search the draft for 'NEW:' to find {'them' if new != 1 else 'it'}."
+            )
+        else:
+            print("\nNothing has appeared since that file was made.")
+    print(
+        "\nEverything else is commented out, so placing this unedited changes nothing.\n"
+        "Uncomment what the group should share, then put the file somewhere\n"
+        "everyone can read it and tell each member to run:\n"
+        "    python main.py settings set shared_settings.path <the path>\n"
+    )

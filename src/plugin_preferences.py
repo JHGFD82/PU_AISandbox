@@ -58,7 +58,7 @@ _INTRO = """
 """
 
 
-def _sections_of(path: Path) -> dict:
+def sections_of(path: Path) -> dict:
     """Return the parsed contents of a TOML file, or an empty result if unreadable."""
     try:
         with path.open("rb") as handle:
@@ -86,7 +86,7 @@ def _already_mentions(text: str, section: str, key: str) -> bool:
     return False
 
 
-def _live_line(path: Path, section: str, key: str) -> Optional[str]:
+def live_line(path: Path, section: str, key: str) -> Optional[str]:
     """Return the line where *path* sets this setting for real, if it does.
 
     The raw line rather than the parsed value, so whatever formatting and
@@ -163,7 +163,7 @@ def _render(
             out.extend(f"# {note.lstrip('#').strip()}" for note in pending)
             decided = None
             for description, path in (beneath or []):
-                found = _live_line(path, section, name)
+                found = live_line(path, section, name)
                 if found is not None:
                     decided = (found, description)
             if decided is None:
@@ -237,7 +237,7 @@ def offer_plugin_settings(plugins_dir: Path) -> list[str]:
                         key for key in keys
                         if not _already_mentions(covered, section, key)
                     ]
-                    for section, keys in _sections_of(settings_file).items()
+                    for section, keys in sections_of(settings_file).items()
                 }
                 missing = {s: k for s, k in missing.items() if k}
                 if missing:

@@ -91,6 +91,7 @@ python main.py settings list                     # the optional-settings list
 python main.py settings set webui.session_secret            # prompts for a value
 python main.py settings set webui.session_secret --generate  # or generate one
 python main.py settings unset webui.session_secret
+python main.py settings export-shared           # a draft for a group to follow
 ```
 
 Secrets are always entered at a hidden prompt, never accepted as a command-line flag, so they can't end up in shell history or be seen by another process listing running commands.
@@ -275,6 +276,30 @@ default_parallel_workers = 4
 ```
 
 `settings.toml` itself is never layered — it is this installation's own private configuration, not a set of defaults.
+
+### Setting up a shared file for a group
+
+If several people should follow the same settings — a lab agreeing on which models to use, or one worker count for a shared cluster — one person looks after a file everyone points at. Nothing creates or edits that file automatically, including the sandbox: it lives somewhere that syncs, and several installations writing to it is how you get conflicted copies. So it is made deliberately.
+
+Whoever looks after it does this:
+
+```bash
+python main.py settings export-shared
+```
+
+That writes `shared-settings.toml` into their own files folder. It lists **every** setting the sandbox and the installed plugins have, with each author's explanation, all commented out — so placing it unedited changes nothing for anyone. They uncomment what the group should share, put the file somewhere everyone can read (a synced folder, a network share), and tell each member to run once:
+
+```bash
+python main.py settings set shared_settings.path /path/to/shared-settings.toml
+```
+
+**Keeping it current.** Settings appear as plugins are updated. A member who needs one that the shared file doesn't mention will see the plugin's own value in their `preferences.toml` rather than a `# currently set by your group's shared settings` label — that's their cue to ask. Whoever looks after the file then runs the command again:
+
+```bash
+python main.py settings export-shared --from /path/to/shared-settings.toml
+```
+
+Decisions already in the file are carried across exactly as written, trailing comments and all. Anything that has appeared since is marked `# NEW:` and left commented, so a second draft shows what is worth a look rather than needing to be read from scratch. They edit, and replace the file in the shared location.
 
 A plugin's own settings layer the same way (see [Plugin settings](#plugin-settings)): the plugin's `settings.toml` first, then the shared file, then `preferences.toml`. So `[translation] temperature = 0.2` in your `preferences.toml` overrides what the translation plugin ships, without editing anything inside `plugins/`.
 
