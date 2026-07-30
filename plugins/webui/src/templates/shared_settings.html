@@ -1,0 +1,595 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Shared settings — Princeton AI Sandbox</title>
+<style>
+  /* Kept identical to chat.html's variables so this page (embedded there in
+     a modal iframe) is visually indistinguishable from the rest of the app,
+     in either theme. */
+  :root {
+    --orange: #E77500;
+    --border: #d2d2d7;
+    --bg: #f5f5f7;
+    --panel-bg: #ffffff;
+    --input-bg: #ffffff;
+    --text: #1d1d1f;
+    --text-muted: #6e6e73;
+    --hover-bg: #eeeef0;
+    --shadow: rgba(0, 0, 0, 0.14);
+    --badge-set-bg: #e5f5e6;
+    --badge-set-text: #1c7c2b;
+    --danger-text: #d70015;
+    --danger-border: #f3c6c6;
+    --danger-hover-bg: #fdf0f0;
+  }
+  [data-theme="dark"] {
+    --border: #3a3a3c;
+    --bg: #1c1c1e;
+    --panel-bg: #262628;
+    --input-bg: #1c1c1e;
+    --text: #f2f2f7;
+    --text-muted: #9a9a9e;
+    --hover-bg: #333335;
+    --shadow: rgba(0, 0, 0, 0.5);
+    --badge-set-bg: #16321a;
+    --badge-set-text: #6fd67f;
+    --danger-text: #ff6b6b;
+    --danger-border: #5c2b2b;
+    --danger-hover-bg: #3a1f1f;
+  }
+  * { box-sizing: border-box; }
+  body, #topbar, .card, input, select, .badge, button.secondary, button.danger {
+    transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+  }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 0; background: var(--bg); color: var(--text); }
+  #topbar { display: flex; align-items: center; gap: 0.75rem; padding: 0.8rem 1.5rem; border-bottom: 1px solid var(--border); background: var(--panel-bg); }
+  #topbar h1 { font-size: 1rem; margin: 0; flex: 1; }
+  #topbar a { color: var(--text); text-decoration: none; font-size: 0.85rem; }
+  #topbar a:hover { text-decoration: underline; }
+  #page { max-width: 720px; margin: 0 auto; padding: 1.5rem; display: flex; flex-direction: column; gap: 1.25rem; }
+  .card { background: var(--panel-bg); border: 1px solid var(--border); border-radius: 10px; padding: 1.25rem 1.5rem; }
+  .card h2 { font-size: 1rem; margin: 0 0 0.25rem; }
+  .card .hint { font-size: 0.82rem; color: var(--text-muted); margin: 0 0 1rem; line-height: 1.4; }
+  .row { display: flex; align-items: center; gap: 0.6rem; padding: 0.5rem 0; border-bottom: 1px solid var(--bg); }
+  .row:last-child { border-bottom: none; }
+  .row .main { flex: 1; min-width: 0; }
+  .row .name { font-size: 0.9rem; font-weight: 500; }
+  .row .sub { font-size: 0.78rem; color: var(--text-muted); }
+  .badge { font-size: 0.72rem; padding: 0.15rem 0.5rem; border-radius: 20px; white-space: nowrap; }
+  .badge.set { background: var(--badge-set-bg); color: var(--badge-set-text); }
+  .badge.unset { background: var(--hover-bg); color: var(--text-muted); }
+  label { display: block; font-size: 0.78rem; color: var(--text-muted); margin: 0.6rem 0 0.2rem; }
+  input[type=text], input[type=password], select {
+    width: 100%; padding: 0.5rem; font-size: 0.88rem; border: 1px solid var(--border);
+    border-radius: 6px; font-family: inherit; background: var(--input-bg); color: var(--text);
+  }
+  form.inline { display: flex; gap: 0.5rem; align-items: flex-end; flex-wrap: wrap; margin-top: 0.75rem; }
+  form.inline > div { flex: 1; min-width: 140px; }
+  button { padding: 0.45rem 0.8rem; font-size: 0.85rem; background: var(--orange); color: white; border: none; border-radius: 6px; cursor: pointer; white-space: nowrap; }
+  button:hover { background: #cc6600; }
+  button.secondary { background: transparent; color: var(--text); border: 1px solid var(--border); }
+  button.secondary:hover { background: var(--hover-bg); }
+  button.danger { background: transparent; color: var(--danger-text); border: 1px solid var(--danger-border); }
+  button.danger:hover { background: var(--danger-hover-bg); }
+  button:disabled { opacity: 0.5; cursor: default; }
+  details.manage { margin-top: 0.4rem; }
+  details.manage summary { font-size: 0.78rem; color: var(--orange); cursor: pointer; }
+  .snippet { background: var(--bg); border-radius: 6px; padding: 0.75rem; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.78rem; white-space: pre; overflow-x: auto; margin-top: 0.5rem; }
+  .empty { font-size: 0.85rem; color: var(--text-muted); }
+  .field-set { display: flex; gap: 0.5rem; align-items: center; }
+  .field-set input { flex: 1; }
+</style>
+<style>
+  /* Only what this page adds; everything above is the Settings modal's own
+     stylesheet, so the two are the same page as far as a reader is concerned. */
+  /* Wider than the Settings modal's 720px. That width suits a form of short
+     fields; this is a working list whose values include model lists 60-odd
+     characters long, and at 720px the value column gets squeezed no matter what
+     it asks for. */
+  #page { max-width: 1040px; }
+  .setting {
+    display: grid;
+    grid-template-columns: 1.6rem minmax(0, 1fr) minmax(0, 34rem);
+    gap: 0.55rem; align-items: start;
+    padding: 0.55rem 0; border-top: 1px solid var(--border);
+  }
+  .setting:first-of-type { border-top: none; }
+  .setting .name { font-weight: 600; font-size: 0.85rem; }
+  .setting .why { font-size: 0.78rem; color: var(--text-muted); margin-top: 0.15rem; line-height: 1.35; }
+  /* A box rather than a single line, because the setting most likely to hold a
+     lot of text is the one that looks shortest here: the system prompt ships as
+     one sentence and a group may replace it with paragraphs. Sizing by what a
+     value is today would give that field the smallest box. So every box grows
+     to fit its own content and can be dragged taller, and the short ones sit at
+     one line and look no different from a plain field. */
+  .setting textarea {
+    width: 100%; padding: 0.5rem; border: 1px solid var(--border); border-radius: 6px;
+    background: var(--input-bg); color: var(--text);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.78rem; line-height: 1.45;
+    resize: vertical; overflow: hidden; display: block;
+  }
+  /* Unticked means the group is not deciding this one, so the box shows what it
+     falls back to. Greyed to say that is not your value — but still typeable,
+     since typing in it is how you take it over. */
+  .setting textarea.following { color: var(--text-muted); background: var(--bg); }
+  .setting textarea.invalid { border-color: var(--danger-text); }
+  /* Under the box it belongs to and aligned with its left edge, so which value
+     is being complained about needs no working out. */
+  .setting .field-error {
+    font-size: 0.72rem; color: var(--danger-text); text-align: left;
+    margin-top: 0.25rem; line-height: 1.35;
+  }
+  .setting .field-error:empty { display: none; }
+  /* A value cut off mid-way is a value nobody can check. Once the window is too
+     narrow to give the value its 34rem, it drops to a full-width row of its own
+     rather than being squeezed further. */
+  @media (max-width: 1080px) {
+    .setting { grid-template-columns: 1.6rem minmax(0, 1fr); }
+    .setting .value-cell { grid-column: 2; }
+  }
+  .setting.is-new .name::after {
+    content: "NEW"; margin-left: 0.5rem; font-size: 0.62rem; font-weight: 700;
+    letter-spacing: 0.04em; color: var(--orange); border: 1px solid var(--orange);
+    border-radius: 3px; padding: 0.03rem 0.25rem; vertical-align: 0.1rem;
+  }
+  .section-from { font-size: 0.75rem; color: var(--text-muted); margin: -0.5rem 0 0.6rem; }
+  .sticky-actions {
+    position: sticky; bottom: 0; background: var(--panel-bg);
+    border: 1px solid var(--border); border-radius: 10px;
+    padding: 1rem 1.5rem; margin-top: 0.25rem;
+  }
+  .count { font-size: 0.82rem; color: var(--text-muted); margin-left: 0.75rem; }
+  #error:empty { display: none; }
+</style>
+</head>
+<body>
+  <div id="topbar">
+    <h1>Shared settings</h1>
+    <button class="secondary" id="lock-btn">Lock</button>
+  </div>
+
+  <div id="page">
+    <div class="card">
+      <p class="hint" id="intro">Loading&hellip;</p>
+      <p class="hint">
+        You don't have to work through these. Type in a setting's box and it
+        ticks itself — that's the whole of it. Anything left unticked keeps
+        following whatever the sandbox or the plugin ships, which is usually
+        what you want, so a file with nothing ticked changes nothing for
+        anybody.
+      </p>
+      <p class="hint">
+        It is safe to untick one to see what it was originally: the box goes
+        back to showing the shipped value, and yours is remembered and comes
+        straight back if you tick it on again.
+      </p>
+      <p class="hint">
+        Wording is typed as wording — no quotation marks needed. A list keeps
+        its square brackets, with each item in quotation marks.
+      </p>
+      <p class="hint" id="new-note" hidden></p>
+      <p><label><input type="checkbox" id="only-new"> Show only settings marked NEW</label></p>
+    </div>
+
+    <div id="sections"></div>
+
+    <div class="sticky-actions">
+      <button id="download-btn">Download the file</button>
+      <span class="count" id="count"></span>
+      <p class="hint" style="margin: 0.75rem 0 0">
+        Nothing is saved here. The file downloads to you — rename it if you like,
+        put it where your group can read it, and tell each member to enter that
+        path in <strong>Settings &rarr; Shared settings</strong>.
+      </p>
+      <p class="hint" id="error" style="color:#c0392b; margin: 0.5rem 0 0"></p>
+    </div>
+  </div>
+
+<script>
+// Same value chat.html's topbar toggle writes, so this page opens in whichever
+// theme the person last chose rather than guessing from the system on its own.
+(function applySavedTheme() {
+  const theme = localStorage.getItem("theme")
+    || (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+  document.documentElement.setAttribute("data-theme", theme);
+})();
+
+let sections = [];
+
+async function api(path, options) {
+  const r = await fetch(path, options);
+  if (!r.ok) throw new Error((await r.text()) || r.statusText);
+  return r;
+}
+
+function controlId(section, key) { return `s-${section}-${key}`; }
+
+// ── Is this a value the settings file could actually hold? ────────────────────
+// Read the way the file itself reads a value, rather than by looking for
+// patterns: only reading it properly can tell "gpt-4o" apart from "gpt-4o"
+// "gpt-4o", or spot a quotation mark that was never closed. The sandbox checks
+// this again when the file is built — that check is still the authority, and
+// this one exists so a mistake is pointed at while it is being made rather than
+// after twenty other settings have been filled in.
+
+function skipSpace(text, at) {
+  while (at < text.length && /\s/.test(text[at])) at++;
+  return at;
+}
+
+function readValue(text, at) {
+  at = skipSpace(text, at);
+  const first = text[at];
+  if (first === undefined) return null;
+  if (first === '"' || first === "'") {
+    // Between double quotes a backslash escapes the next character; between
+    // single quotes it does not, which is what they are for.
+    let i = at + 1;
+    while (i < text.length) {
+      if (first === '"' && text[i] === "\\") { i += 2; continue; }
+      if (text[i] === first) {
+        return { kind: "text", at: i + 1, text: text.slice(at + 1, i), quote: first };
+      }
+      i++;
+    }
+    return null;  // opened and never closed
+  }
+  if (text.startsWith("true", at)) return { kind: "yes/no", at: at + 4 };
+  if (text.startsWith("false", at)) return { kind: "yes/no", at: at + 5 };
+  if (first === "[") {
+    let i = at + 1;
+    const items = [];
+    for (;;) {
+      i = skipSpace(text, i);
+      if (text[i] === "]") return { kind: "list", at: i + 1, items };
+      const item = readValue(text, i);
+      if (!item) return null;
+      items.push(item);
+      i = skipSpace(text, item.at);
+      if (text[i] === ",") { i++; continue; }
+      if (text[i] === "]") return { kind: "list", at: i + 1, items };
+      return null;  // two values with nothing between them
+    }
+  }
+  const number = /^[+-]?\d[\d_]*(\.\d+)?([eE][+-]?\d+)?/.exec(text.slice(at));
+  if (number) {
+    return { kind: "number", at: at + number[0].length, whole: !number[1] && !number[2] };
+  }
+  return null;
+}
+
+function readWholeValue(text) {
+  const found = readValue(text, 0);
+  if (!found) return null;
+  // Anything left over means more than one value was typed — the usual way that
+  // happens is a second set of quotation marks.
+  found.trailing = skipSpace(text, found.at) !== text.length;
+  return found;
+}
+
+// ── Text settings are typed as text ──────────────────────────────────────────
+// Quotation marks are the file's way of saying "this is text". They are not
+// something a person should have to type, so a text setting shows its content
+// and nothing else, and the quotation marks are put back on the way into the
+// file. Anyone who does type quotation marks gets them, as characters in the
+// value — which is what they meant.
+
+const ESCAPES = { n: "\n", t: "\t", r: "\r", b: "\b", f: "\f", '"': '"', "\\": "\\" };
+
+function unescaped(found) {
+  if (found.quote === "'") return found.text;  // single quotes hold text as-is
+  return found.text.replace(/\\(u[0-9a-fA-F]{4}|U[0-9a-fA-F]{8}|[\s\S])/g, (whole, what) => {
+    if (what[0] === "u" || what[0] === "U") return String.fromCodePoint(parseInt(what.slice(1), 16));
+    return what in ESCAPES ? ESCAPES[what] : whole;
+  });
+}
+
+function shipped(setting) { return readWholeValue(setting.default); }
+
+function isTextSetting(setting) {
+  const want = shipped(setting);
+  return want !== null && want.kind === "text";
+}
+
+// What the box shows: a text setting's content, anything else as the file spells
+// it, since a list needs its brackets and a number is a number either way.
+function forShowing(setting, tomlText) {
+  const found = readWholeValue(tomlText);
+  return found !== null && found.kind === "text" ? unescaped(found) : tomlText;
+}
+
+// What goes into the file. JSON spells a piece of text the same way a settings
+// file does, escapes and all, which is what the sandbox itself uses to write one.
+function forFile(setting, shownText) {
+  return isTextSetting(setting) ? JSON.stringify(shownText) : shownText;
+}
+
+// A setting whose shipped value is one unbroken word is a name or an address —
+// a model, a host, a cookie — and a line break in one of those is never meant.
+// Taken from the value the plugin ships rather than from a list of field names
+// kept here, which would have to grow every time a plugin adds a setting.
+function isProse(want) {
+  return want !== null && want.kind === "text" && /\s/.test(want.text);
+}
+
+function problemWith(setting, text) {
+  const want = shipped(setting);
+  if (want === null) return "";  // nothing sensible to compare against
+
+  // Text is typed as text, so there is no spelling to get wrong. All that can
+  // be wrong is a line break where the setting is a name or an address.
+  if (want.kind === "text") {
+    if (!text.trim()) return "Enter a value";
+    if (!isProse(want) && /[\r\n]/.test(text)) return "Enter this on one line, with no line breaks";
+    return "";
+  }
+
+  if (!text.trim()) return "Enter a value";
+  const got = readWholeValue(text);
+  if (got === null) {
+    if (want.kind === "list") {
+      // Brackets already there means the brackets are not the problem; what is
+      // between them is. Telling someone who typed a list to type a list tells
+      // them nothing.
+      return /^\s*\[/.test(text)
+        ? 'Each item needs quotation marks, like ["gpt-4o", "gpt-4o-mini"]'
+        : 'Enter a list in square brackets, like ["gpt-4o"]';
+    }
+    if (want.kind === "yes/no") return "Enter true or false";
+    return "Enter a number";
+  }
+  if (got.trailing) return "Enter one value only";
+  if (got.kind !== want.kind) {
+    if (want.kind === "number") return `Enter a number, not ${got.kind === "text" ? "text" : "a " + got.kind}`;
+    if (want.kind === "list") return 'Enter a list in square brackets, like ["gpt-4o"]';
+    return "Enter true or false";
+  }
+  if (want.kind === "number" && want.whole && !got.whole) return "Enter an integer";
+  if (want.kind === "list") {
+    if (got.items.length === 0) return "Enter at least one item";
+    if (want.items.length) {
+      const itemKind = want.items[0].kind;
+      if (got.items.some(item => item.kind !== itemKind)) {
+        return itemKind === "text"
+          ? 'Each item needs quotation marks, like ["gpt-4o", "gpt-4o-mini"]'
+          : `Each item should be a ${itemKind}`;
+      }
+    }
+  }
+  return "";
+}
+
+function valueOf(setting) {
+  // Someone who ticked a setting without typing means the value on screen, which
+  // is the shipped one.
+  return setting.custom === null || setting.custom === undefined
+    ? forShowing(setting, setting.default)
+    : setting.custom;
+}
+
+function problems() {
+  const found = [];
+  sections.forEach(sec => sec.settings.forEach(s => {
+    if (!s.chosen) return;
+    const problem = problemWith(s, valueOf(s));
+    if (problem) found.push(`${sec.section}.${s.key}`);
+  }));
+  return found;
+}
+
+function grow(box) {
+  // Opens at whatever height its own text needs, so a long system prompt is
+  // readable without being dragged first, and a number is still one line.
+  box.style.height = "auto";
+  box.style.height = box.scrollHeight + "px";
+}
+
+function showValue(box, setting, ticked) {
+  // Ticked shows this person's value if they have one; unticked always shows
+  // what the setting falls back to, which is the point of unticking it.
+  box.value = ticked && setting.custom !== null
+    ? setting.custom
+    : forShowing(setting, setting.default);
+  box.classList.toggle("following", !ticked);
+  grow(box);
+}
+
+function render() {
+  const onlyNew = document.getElementById("only-new").checked;
+  sections.forEach(sec => sec.settings.forEach(s => {
+    // Held on the setting rather than in the box, so unticking can show the
+    // shipped value without losing what this person typed, and so a row the
+    // filter is hiding keeps both. Only a setting the group already decided
+    // starts with one.
+    if (s.custom === undefined) s.custom = s.chosen ? forShowing(s, s.value) : null;
+  }));
+  const host = document.getElementById("sections");
+  host.innerHTML = "";
+  sections.forEach(sec => {
+    const shown = sec.settings.filter(s => !onlyNew || s.new);
+    if (shown.length === 0) return;
+    const card = document.createElement("div");
+    card.className = "card";
+    const h = document.createElement("h2");
+    h.textContent = sec.section;
+    card.appendChild(h);
+    const from = document.createElement("p");
+    from.className = "section-from";
+    from.textContent = "from " + sec.sources.join(", ");
+    card.appendChild(from);
+
+    shown.forEach(s => {
+      const row = document.createElement("div");
+      row.className = "setting" + (s.new ? " is-new" : "");
+
+      const tick = document.createElement("input");
+      tick.type = "checkbox";
+      tick.id = controlId(sec.section, s.key) + "-on";
+      tick.checked = s.chosen;
+
+      const middle = document.createElement("div");
+      const name = document.createElement("div");
+      name.className = "name";
+      name.textContent = s.key;
+      middle.appendChild(name);
+      if (s.explanation) {
+        const why = document.createElement("div");
+        why.className = "why";
+        why.textContent = s.explanation;
+        middle.appendChild(why);
+      }
+
+      // The box and its complaint travel together in one cell, so the message
+      // sits under the box it is about rather than at the bottom of the page.
+      const cell = document.createElement("div");
+      cell.className = "value-cell";
+      const value = document.createElement("textarea");
+      value.rows = 1;
+      value.id = controlId(sec.section, s.key);
+      const complaint = document.createElement("div");
+      complaint.className = "field-error";
+      complaint.id = controlId(sec.section, s.key) + "-problem";
+      cell.appendChild(value);
+      cell.appendChild(complaint);
+
+      const check = () => {
+        // Only a setting the group is deciding can be wrong. An unticked one
+        // shows the shipped value, which is right by definition.
+        const problem = tick.checked ? problemWith(s, value.value) : "";
+        value.classList.toggle("invalid", problem !== "");
+        complaint.textContent = problem;
+      };
+      showValue(value, s, tick.checked);
+      check();
+
+      // Typing is the tick. Working down a list of forty checkboxes is the part
+      // that puts people off, and it carries no information the typing didn't
+      // already give: a value you bothered to change is a value you want.
+      const takesLineBreaks = isTextSetting(s) && isProse(shipped(s));
+      value.addEventListener("input", () => {
+        // A line break belongs in a prompt and nowhere else — not in a number,
+        // a list, a host or a model name, where it would only be a stray key.
+        const flattened = takesLineBreaks ? value.value : value.value.replace(/[\r\n]+/g, " ");
+        if (flattened !== value.value) value.value = flattened;
+        tick.checked = true;
+        s.chosen = true;
+        s.custom = value.value;
+        value.classList.remove("following");
+        grow(value);
+        check();
+        updateCount();
+      });
+
+      // Enter writes a real line break in a prompt, and the file gets a properly
+      // written one because the quotation marks are put on at the end. Anywhere
+      // else it does nothing, rather than quietly leaving a stray key in a host.
+      value.addEventListener("keydown", event => {
+        if (event.key === "Enter" && !takesLineBreaks) event.preventDefault();
+      });
+
+      tick.addEventListener("change", () => {
+        s.chosen = tick.checked;
+        showValue(value, s, tick.checked);
+        check();
+        updateCount();
+      });
+
+      row.appendChild(tick);
+      row.appendChild(middle);
+      row.appendChild(cell);
+      card.appendChild(row);
+    });
+    host.appendChild(card);
+  });
+  // Only now are the boxes on the page; a box that is not cannot measure its
+  // own text, and every one of them would open at no height at all.
+  host.querySelectorAll("textarea").forEach(grow);
+  updateCount();
+}
+
+function collect() {
+  // Read from the settings themselves, not from the boxes on screen: filtering
+  // to NEW takes rows off the page, and a ticked setting that happens to be
+  // hidden still belongs in the file.
+  const chosen = {};
+  sections.forEach(sec => {
+    sec.settings.forEach(s => {
+      if (!s.chosen) return;
+      // The quotation marks a text setting needs are put back here, so nobody
+      // has to type them and nobody can forget them.
+      (chosen[sec.section] ||= {})[s.key] = forFile(s, valueOf(s).trim());
+    });
+  });
+  return chosen;
+}
+
+function updateCount() {
+  const chosen = collect();
+  const n = Object.values(chosen).reduce((sum, keys) => sum + Object.keys(keys).length, 0);
+  const wrong = problems();
+  document.getElementById("count").textContent =
+    n === 0 ? "Nothing ticked — the file would change nothing."
+            : `${n} setting${n === 1 ? "" : "s"} will be set for the group.`;
+  // A setting can be wrong and out of sight, either scrolled past or hidden by
+  // the filter, so the button says how many rather than only marking the rows.
+  const button = document.getElementById("download-btn");
+  button.disabled = wrong.length > 0;
+  document.getElementById("error").textContent = wrong.length === 0
+    ? ""
+    : `${wrong.length} setting${wrong.length === 1 ? " needs" : "s need"} fixing first: ${wrong.join(", ")}`;
+}
+
+async function load() {
+  const data = await (await api("/api/settings/shared-inventory")).json();
+  sections = data.sections;
+  const total = sections.reduce((n, s) => n + s.settings.length, 0);
+  const newCount = sections.reduce((n, s) => n + s.settings.filter(x => x.new).length, 0);
+  document.getElementById("intro").textContent = data.existing_path
+    ? `Your group currently follows ${data.existing_path}. Its decisions are already ticked below.`
+    : "Your group has no shared settings file yet. Tick what everyone should share.";
+  if (newCount > 0) {
+    const note = document.getElementById("new-note");
+    note.hidden = false;
+    note.textContent =
+      `${newCount} of the ${total} settings did not exist when that file was made. ` +
+      `They are marked NEW.`;
+  }
+  render();
+}
+
+document.getElementById("only-new").addEventListener("change", render);
+
+document.getElementById("lock-btn").addEventListener("click", async () => {
+  await fetch("/lock", { method: "POST" });
+  window.location.href = "/";
+});
+
+document.getElementById("download-btn").addEventListener("click", async () => {
+  const errorEl = document.getElementById("error");
+  errorEl.textContent = "";
+  try {
+    const r = await api("/api/settings/shared-draft", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chosen: collect() }),
+    });
+    const blob = await r.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "shared-settings.toml";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  } catch (e) {
+    errorEl.textContent = e.message;
+  }
+});
+
+load().catch(e => { document.getElementById("intro").textContent = "Could not load: " + e.message; });
+</script>
+</body>
+</html>

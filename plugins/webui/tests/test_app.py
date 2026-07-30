@@ -1746,3 +1746,295 @@ class TestFileOrFolderPicker:
         """collect, restore and submit all look the field up by this id."""
         page = self._page()
         assert "replacement.id = input.id" in page
+
+
+class TestGuidedSharedSettingsEditor:
+    """Choosing a group's settings from a list, rather than editing TOML by hand.
+
+    The plain download works but hands someone a hundred commented lines to read.
+    This shows every setting with what it does, what it is set to, and which ones
+    appeared since their file was written.
+    """
+
+    def test_the_page_is_served(self, unlocked_client):
+        r = unlocked_client.get("/shared-settings")
+        assert r.status_code == 200
+        assert "Shared settings" in r.text
+
+    def test_the_page_is_behind_the_unlock_gate(self, client):
+        r = client.get("/shared-settings")
+        assert "unlock" in r.text.lower() or r.status_code in (302, 303, 401, 403)
+
+    def test_the_inventory_lists_sections_and_settings(self, unlocked_client):
+        data = unlocked_client.get("/api/settings/shared-inventory").json()
+        assert data["sections"], "no settings offered at all"
+        first = data["sections"][0]
+        assert {"section", "sources", "settings"} <= set(first)
+        assert {"key", "value", "default", "explanation", "chosen", "new"} <= set(
+            first["settings"][0]
+        )
+
+    def test_the_inventory_says_where_each_section_comes_from(self, unlocked_client):
+        data = unlocked_client.get("/api/settings/shared-inventory").json()
+        assert all(s["sources"] for s in data["sections"])
+
+    def test_with_no_shared_file_nothing_is_chosen_or_new(self, unlocked_client, monkeypatch):
+        from src import settings_store as store_mod
+        monkeypatch.setattr(store_mod, "get_shared_settings_path", lambda: None)
+        data = unlocked_client.get("/api/settings/shared-inventory").json()
+        every = [s for sec in data["sections"] for s in sec["settings"]]
+        assert not any(s["chosen"] for s in every)
+        assert not any(s["new"] for s in every)
+        assert data["existing_path"] is None
+
+    def test_an_existing_file_marks_what_it_decides_and_what_is_new(
+        self, unlocked_client, tmp_path, monkeypatch,
+    ):
+        from src import settings_store as store_mod
+        shared = tmp_path / "lab.toml"
+        shared.write_text("[retry]\nmax_retries = 3\n")
+        monkeypatch.setattr(store_mod, "get_shared_settings_path", lambda: shared)
+        data = unlocked_client.get("/api/settings/shared-inventory").json()
+        retry = next(s for s in data["sections"] if s["section"] == "retry")
+        decided = next(s for s in retry["settings"] if s["key"] == "max_retries")
+        assert decided["chosen"] is True
+        assert decided["value"] == "3", "should show the group's value, not the shipped one"
+        assert decided["new"] is False
+        # Both values have to survive: unticking a setting shows what it falls
+        # back to, and it can only show that if the shipped value came along.
+        assert decided["default"] != "3", "the shipped value was lost"
+        assert decided["default"], "no shipped value to fall back to"
+        assert any(s["new"] for s in retry["settings"]), "the rest of the section is new"
+
+    def test_a_setting_nobody_has_decided_reports_the_same_pair(self, unlocked_client, monkeypatch):
+        """With no group file, what a setting is and what it falls back to are one thing."""
+        from src import settings_store as store_mod
+
+        monkeypatch.setattr(store_mod, "get_shared_settings_path", lambda: None)
+        data = unlocked_client.get("/api/settings/shared-inventory").json()
+        every = [s for sec in data["sections"] for s in sec["settings"]]
+        assert all(s["value"] == s["default"] for s in every)
+
+    def test_building_from_choices_returns_a_downloadable_file(self, unlocked_client):
+        r = unlocked_client.post(
+            "/api/settings/shared-draft", json={"chosen": {"retry": {"max_retries": "5"}}}
+        )
+        assert r.status_code == 200
+        assert 'filename="shared-settings.toml"' in r.headers["content-disposition"]
+
+    def test_only_the_ticked_settings_are_live(self, unlocked_client):
+        import tomllib
+        r = unlocked_client.post(
+            "/api/settings/shared-draft", json={"chosen": {"retry": {"max_retries": "5"}}}
+        )
+        parsed = tomllib.loads(r.text)
+        assert parsed == {"retry": {"max_retries": 5}}, "nothing else should be set"
+
+    def test_ticking_nothing_gives_a_file_that_changes_nothing(self, unlocked_client):
+        import tomllib
+        r = unlocked_client.post("/api/settings/shared-draft", json={"chosen": {}})
+        assert tomllib.loads(r.text) == {}
+
+    def test_nothing_is_marked_new_in_a_file_built_from_choices(self, unlocked_client):
+        """Every setting was just looked at, so anything unticked was left alone."""
+        r = unlocked_client.post(
+            "/api/settings/shared-draft", json={"chosen": {"retry": {"max_retries": "5"}}}
+        )
+        assert "NEW:" not in r.text
+
+    def test_a_value_toml_cannot_express_is_refused_with_help(self, unlocked_client):
+        """Better a rejected edit than a file that will not parse for the group."""
+        r = unlocked_client.post(
+            "/api/settings/shared-draft",
+            json={"chosen": {"prompt": {"default_system_prompt": "no quotes here"}}},
+        )
+        assert r.status_code == 400
+        assert "quotation marks" in r.text
+
+    def test_a_list_value_survives_the_round_trip(self, unlocked_client):
+        import tomllib
+        r = unlocked_client.post(
+            "/api/settings/shared-draft",
+            json={"chosen": {"ocr": {"models": '["gpt-4o", "gpt-4o-mini"]'}}},
+        )
+        assert tomllib.loads(r.text)["ocr"]["models"] == ["gpt-4o", "gpt-4o-mini"]
+
+    def test_nothing_is_written_to_disk(self, unlocked_client, tmp_path, monkeypatch):
+        from src import paths as paths_mod
+        monkeypatch.setattr(paths_mod, "extras_root", lambda: tmp_path)
+        unlocked_client.post("/api/settings/shared-draft", json={"chosen": {}})
+        assert list(tmp_path.glob("*.toml")) == []
+
+
+class TestSharedSettingsPagePresentation:
+    """The editor is a page of its own, so it has to carry the app's look itself.
+
+    Embedded pages inherit the modal's styling by being inside it; this one
+    doesn't, and copying the stylesheet without the script that applies the
+    theme is how a page ends up permanently light.
+    """
+
+    def _page(self):
+        from pathlib import Path
+
+        from fastapi.templating import Jinja2Templates
+
+        directory = Path(__file__).resolve().parents[1] / "src" / "templates"
+        return Jinja2Templates(directory=str(directory)).get_template(
+            "shared_settings.html"
+        ).render(request=None)
+
+    def test_it_applies_the_saved_theme(self):
+        """Without this the dark-mode rules below are dead weight."""
+        page = self._page()
+        assert "applySavedTheme" in page
+        assert 'setAttribute("data-theme"' in page
+
+    def test_it_reads_the_same_theme_setting_as_the_rest_of_the_app(self):
+        page = self._page()
+        assert 'localStorage.getItem("theme")' in page
+
+    def test_it_defines_the_dark_theme(self):
+        page = self._page()
+        assert '[data-theme="dark"]' in page
+
+    def test_it_uses_the_same_layout_shell_as_the_settings_modal(self):
+        page = self._page()
+        assert '<div id="topbar">' in page
+        assert '<div id="page">' in page
+
+    def test_it_uses_themed_colours_rather_than_fixed_ones(self):
+        """A hardcoded grey looks wrong in one theme or the other.
+
+        Checks the styles this page adds, not the shared stylesheet it copies —
+        that one defines the colours, so naming them there is the point.
+        """
+        page = self._page()
+        own_styles = page.rsplit("<style>", 1)[1].split("</style>")[0]
+        assert "var(--text-muted)" in own_styles
+        assert "#6e6e73" not in own_styles, "hardcoded light-theme grey"
+        assert "var(--muted," not in own_styles, "invented variable with a fixed fallback"
+
+    def test_value_boxes_fit_the_longest_setting_this_sandbox_has(self):
+        """A list cut off mid-way is a value nobody can check.
+
+        Measured rather than guessed: the widest value any installed plugin
+        offers is a model list, and the box has to hold it.
+        """
+        from pathlib import Path as _Path
+
+        from src.shared_settings import inventory
+
+        repo = _Path(__file__).resolve().parents[3]
+        widest = max(
+            len(s["value"])
+            for section in inventory(repo / "plugins", repo / "settings.default.toml")
+            for s in section["settings"]
+        )
+        import re
+
+        page = self._page()
+        widths = [int(m) for m in re.findall(r"minmax\(0, (\d+)rem\)", page)]
+        assert widths, "no fixed-width value column found"
+        rem = min(widths)
+        # 0.78rem monospace at roughly 0.6em per character, less the input's padding.
+        fits = (rem * 16 - 16) / (0.78 * 16 * 0.6)
+        assert fits >= widest, f"a {rem}rem box holds about {fits:.0f} characters, need {widest}"
+
+    def test_every_value_box_can_be_dragged_taller(self):
+        """The field most likely to hold a lot is the one that looks smallest.
+
+        prompt.default_system_prompt ships as a single sentence, so any rule
+        based on how long a value is today would give it the smallest box —
+        which is the opposite of what a group replacing it with paragraphs
+        needs.
+        """
+        page = self._page()
+        assert "resize: vertical" in page
+        assert 'createElement("textarea")' in page
+        assert 'createElement("input")\n      value.type = "text"' not in page
+
+    def test_a_box_opens_at_the_height_of_its_own_text(self):
+        page = self._page()
+        assert "scrollHeight" in page
+
+    def test_the_page_is_wide_enough_for_that_box(self):
+        """The Settings modal caps at 720px, which squeezes the column back."""
+        page = self._page()
+        assert "#page { max-width: 1040px; }" in page
+
+    def test_a_wrong_value_is_outlined_and_told_why(self):
+        page = self._page()
+        assert "textarea.invalid" in page
+        assert "border-color: var(--danger-text)" in page
+        assert ".field-error" in page
+        assert "color: var(--danger-text)" in page
+
+    def test_the_message_sits_under_its_own_box(self):
+        """One message at the bottom of forty rows names no row."""
+        page = self._page()
+        assert "value-cell" in page
+        assert "text-align: left" in page
+
+    def test_the_server_still_refuses_a_bad_value(self, unlocked_client):
+        """The page checking first must not become the only thing checking.
+
+        Someone can reach this without the page — an old tab, a script — so the
+        check that builds the file stays the one that decides.
+        """
+        r = unlocked_client.post(
+            "/api/settings/shared-draft", json={"chosen": {"retry": {"max_retries": "lots"}}}
+        )
+        assert r.status_code >= 400
+        assert "max_retries" in r.text
+
+    def test_text_settings_are_typed_as_text(self):
+        """Quotation marks are the file's spelling, not the person's job."""
+        page = self._page()
+        assert "function forFile" in page
+        assert "JSON.stringify" in page
+        assert "no quotation marks needed" in page
+
+    def test_the_page_says_unticking_is_safe(self):
+        """People will not untick to peek unless told their value survives it."""
+        page = self._page()
+        assert "remembered" in page
+        assert "tick it on again" in page
+
+    def test_a_narrow_window_gives_the_value_its_own_row(self):
+        page = self._page()
+        assert "@media (max-width: 1080px)" in page
+
+
+class TestSharedSettingsLink:
+    """How the editor is reached from the Settings modal."""
+
+    def _settings_page(self):
+        from pathlib import Path
+
+        from fastapi.templating import Jinja2Templates
+
+        directory = Path(__file__).resolve().parents[1] / "src" / "templates"
+        return Jinja2Templates(directory=str(directory)).get_template(
+            "settings.html"
+        ).render(request=None)
+
+    def test_it_opens_in_its_own_tab(self):
+        """It is a long list to work through; losing it by leaving the modal
+        would mean starting again."""
+        page = self._settings_page()
+        assert '<a href="/shared-settings" target="_blank"' in page
+
+    def test_the_new_tab_cannot_reach_back_into_this_one(self):
+        page = self._settings_page()
+        link = page[page.index('href="/shared-settings"'):]
+        assert 'rel="noopener"' in link[:200]
+
+    def test_the_button_carries_the_new_tab_icon(self):
+        page = self._settings_page()
+        assert "external-icon" in page
+
+    def test_and_says_so_for_a_screen_reader(self):
+        """An icon alone tells someone using a screen reader nothing."""
+        page = self._settings_page()
+        assert "(opens in a new tab)" in page
