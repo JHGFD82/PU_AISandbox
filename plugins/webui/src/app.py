@@ -58,9 +58,9 @@ from src import settings_store
 from src.config import load_professor_config
 from src.errors import CLIError
 from src.models import (
-    get_available_models,
     model_accepts_sampling_params,
     model_supports_vision,
+    models_in_reading_order,
     resolve_model,
 )
 from src.runtime.info_commands import list_optional_settings
@@ -783,7 +783,7 @@ def create_app() -> FastAPI:
     async def api_models(request: Request, professor: str):
         _require_unlocked(request)
         _validated_professor(professor)
-        names = sorted(get_available_models())
+        names = models_in_reading_order()
         models = [
             {
                 "name": m,
