@@ -62,18 +62,28 @@ class APIConfig:
         display_name:       Human-readable name shown in logs and --list-apis output.
         base_url:           The root URL for the API (e.g. ``https://example.com/v1``).
         api_key:            Resolved API key (from ``settings.toml``).
-        openai_compatible:  When True, use the OpenAI SDK with ``base_url`` for LLM calls.
-                            When False, use ``requests`` for generic HTTP calls.
+        openai_compatible:  Whether this endpoint speaks the OpenAI API's
+                            language, which nearly every self-hosted server and
+                            provider does. True unless said otherwise, since it
+                            is the only kind the sandbox can talk to; setting it
+                            False is a way of saying "this one doesn't", and the
+                            sandbox then refuses it plainly rather than trying
+                            and failing in a way that looks like the endpoint's
+                            fault.
         default_model:      Default model name for OpenAI-compatible endpoints.
         timeout:            Request timeout in seconds.
-        verify_ssl:         Whether to verify SSL certificates.
+        verify_ssl:         Whether to check the endpoint's certificate. True
+                            unless said otherwise. Turning it off is sometimes
+                            the only way to reach a cluster with an internal
+                            certificate; it is a real weakening, so the sandbox
+                            says so in the log each time it connects.
     """
 
     api_name: str
     display_name: str
     base_url: str
     api_key: str
-    openai_compatible: bool = False
+    openai_compatible: bool = True
     default_model: str | None = None
     timeout: int = 30
     verify_ssl: bool = True
@@ -130,7 +140,7 @@ def load_api_config(api_name: str) -> APIConfig:
         display_name=raw.get("name", api_name),
         base_url=base_url,
         api_key=api_key,
-        openai_compatible=raw.get("openai_compatible", False),
+        openai_compatible=raw.get("openai_compatible", True),
         default_model=raw.get("default_model"),
         timeout=int(raw.get("timeout", 30)),
         verify_ssl=bool(raw.get("verify_ssl", True)),

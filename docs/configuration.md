@@ -373,6 +373,8 @@ An `[endpoints.<name>]` table describes an AI endpoint other than the built-in s
 
 Definitions merge through the same three layers as every other setting. Only the credential is kept apart, in `settings.toml`, because credentials are never meant to be shared or layered.
 
+An endpoint must speak the OpenAI API's language, which nearly every self-hosted server and provider does; that is assumed unless you set `openai_compatible = false`, which makes the sandbox refuse it plainly instead of failing in a way that looks like the endpoint's fault. Setting `verify_ssl = false` turns off the check on the endpoint's certificate — sometimes the only way to reach a cluster with an internal one — and the sandbox writes a warning to the log each time it connects that way.
+
 Calls to one of these are counted but carry no cost, and are reported on their own — the sandbox's prices are Princeton's and do not describe anyone else's service. See [Alternate endpoints are counted, but not costed](token-usage-guide.md#alternate-endpoints-are-counted-but-not-costed).
 
 ### Defining one

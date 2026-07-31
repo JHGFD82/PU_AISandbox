@@ -295,6 +295,112 @@ class TestServicesKnowWhichEndpointTheyAreOn:
         ))
         assert service.endpoint_name == "hpc_cluster"
 
+    def test_an_endpoint_that_does_not_speak_openai_is_refused_plainly(self, monkeypatch):
+        """The setting was read and ignored, so it looked like it took effect."""
+        import pytest
+
+        from src.errors import CLIError
+        from src.services.api_config import APIConfig
+
+        with pytest.raises(CLIError, match="OpenAI-compatible"):
+            self._service_from(monkeypatch, APIConfig(
+                api_name="odd_one", display_name="Odd", base_url="https://x/v1",
+                api_key="k", openai_compatible=False,
+            ))
+
+    def test_an_endpoint_that_says_nothing_about_it_still_works(self, monkeypatch):
+        """Omitting the setting used to work, and must go on working."""
+        from src.services.api_config import APIConfig
+
+        service = self._service_from(monkeypatch, APIConfig(
+            api_name="quiet", display_name="Quiet", base_url="https://x/v1", api_key="k",
+        ))
+        assert service.endpoint_name == "quiet"
+
     def test_a_service_on_the_sandbox_names_no_endpoint(self, monkeypatch):
         service = self._service_from(monkeypatch, None)
         assert service.endpoint_name == ""
+
+
+class TestAnEndpointsOwnSettingsAreUsed:
+    """Settings that were parsed and then read by nothing.
+
+    A setting that is read and ignored is worse than one that does not exist:
+    it looks like it took effect.
+    """
+
+    def _service(self, monkeypatch, **config):
+        import sys
+        import types
+
+        from src.services.api_config import APIConfig
+        from src.services.base_service import BaseService
+
+        class Chatter(BaseService):
+            def __init__(self, *args, **kwargs):
+                # Stands in for the real one, which does the same two things
+                # among others. Skipping super() avoids building a Portkey
+                # client and a token tracker for a test about neither.
+                self.client = object()
+                self.custom_model = None
+
+        module = types.ModuleType("src.services.chatter")
+        module.Chatter = Chatter
+        monkeypatch.setitem(sys.modules, "src.services.chatter", module)
+
+        cfg = APIConfig(
+            api_name="cluster", display_name="Cluster",
+            base_url="https://cluster.example.com/v1", api_key="key", **config,
+        )
+        proc = SandboxProcessor.__new__(SandboxProcessor)
+        object.__setattr__(proc, "_api_key", "k")
+        object.__setattr__(proc, "professor_name", "Dr. Smith")
+        object.__setattr__(proc, "_svc_kwargs", {})
+        object.__setattr__(proc, "_api_config", cfg)
+        return proc.__getattr__("chatter")
+
+    def test_the_endpoints_address_is_the_one_used(self, monkeypatch):
+        service = self._service(monkeypatch)
+        assert "cluster.example.com" in str(service.client.base_url)
+
+    def test_its_timeout_is_the_one_used(self, monkeypatch):
+        service = self._service(monkeypatch, timeout=7)
+        assert service.client.timeout == 7.0
+
+    def test_turning_off_certificate_checking_actually_turns_it_off(self, monkeypatch):
+        """Parsed since it was added, and until now acted on by nothing."""
+        service = self._service(monkeypatch, verify_ssl=False)
+        transport = service.client._client._transport
+        assert transport._pool._ssl_context.verify_mode.name == "CERT_NONE"
+
+    def test_leaving_it_on_leaves_it_on(self, monkeypatch):
+        service = self._service(monkeypatch, verify_ssl=True)
+        transport = service.client._client._transport
+        assert transport._pool._ssl_context.verify_mode.name != "CERT_NONE"
+
+    def test_it_says_so_when_certificate_checking_is_off(self, monkeypatch, caplog):
+        """A real weakening should not happen quietly."""
+        import logging
+
+        with caplog.at_level(logging.WARNING):
+            self._service(monkeypatch, verify_ssl=False)
+        assert "Certificate checking is turned off" in caplog.text
+
+    def test_the_model_is_taken_as_given_not_looked_up(self, monkeypatch):
+        """The catalogue describes the sandbox's models, not this endpoint's."""
+        service = self._service(monkeypatch, default_model="llama-3-70b")
+        assert service._get_model() == "llama-3-70b"
+
+    def test_a_model_asked_for_beats_the_endpoints_own_default(self, monkeypatch):
+        service = self._service(monkeypatch, default_model="llama-3-70b")
+        service.custom_model = "mistral-large"
+        assert service._get_model() == "mistral-large"
+
+    def test_no_model_anywhere_says_so_plainly(self, monkeypatch):
+        import pytest
+
+        from src.errors import CLIError
+
+        service = self._service(monkeypatch)
+        with pytest.raises(CLIError, match="No model was named"):
+            service._get_model()

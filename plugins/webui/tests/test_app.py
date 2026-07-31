@@ -1609,7 +1609,10 @@ class TestSettingsValues:
         ep = data["shared"]["endpoints"][0]
         assert ep == {
             "name": "hpc_cluster", "display_name": "HPC Cluster", "base_url": "http://x.internal/v1",
-            "openai_compatible": False, "default_model": None, "timeout": 30,
+            # True unless the endpoint says otherwise — the same default the
+            # code that actually connects uses, so the page and the behaviour
+            # cannot describe an endpoint differently.
+            "openai_compatible": True, "default_model": None, "timeout": 30,
             "credential_path": "endpoints.hpc_cluster.key", "key_set": False,
         }
 
@@ -2536,3 +2539,24 @@ class TestAJobFormNamesItsOwnNumbers:
         page = self._page()
         assert "declared[key] !== undefined && declared[key] !== null" in page
         assert "parts.length ? " in page
+
+class TestTheEndpointListDescribesEndpointsTruthfully:
+    def test_an_endpoint_that_says_nothing_is_shown_as_usable(self, unlocked_client, monkeypatch):
+        """The page had its own default, opposite to the one that decides."""
+        import sys
+
+        app_module = sys.modules["_pu_webui_app"]
+        monkeypatch.setattr(app_module, "ENDPOINTS", {"quiet": {"base_url": "https://x/v1"}})
+        shown = unlocked_client.get("/api/settings/endpoints?professor=heller")
+        if shown.status_code != 200:  # the list lives on the settings payload
+            shown = unlocked_client.get("/api/settings")
+        assert shown.status_code == 200
+        assert "quiet" in shown.text
+        assert "cannot use it" not in shown.text
+
+    def test_the_page_only_remarks_on_one_it_cannot_use(self):
+        from pathlib import Path
+
+        page = (Path(__file__).resolve().parents[1] / "src" / "templates" / "settings.html").read_text()
+        assert "marked as not OpenAI-compatible" in page
+        assert '" · OpenAI-compatible"' not in page
