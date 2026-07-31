@@ -210,7 +210,13 @@ _register(
 from src.cli import add_common_flags, add_notes_flags           # noqa: E402
 from src.config import parse_language_code, LANGUAGE_MAP, register_language    # noqa: E402
 from src.errors import CLIError                                    # noqa: E402
-from src.settings import IMAGE_TRANSLATION_ROLE, TRANSLATION_ROLE  # noqa: E402
+from src.settings import (  # noqa: E402
+    IMAGE_TRANSLATION_ROLE,
+    TRANSLATION_MAX_TOKENS,
+    TRANSLATION_ROLE,
+    TRANSLATION_TEMPERATURE,
+    TRANSLATION_TOP_P,
+)
 from src.models import OutputOptions                               # noqa: E402
 from src.processors.constants import IMAGE_EXTENSIONS             # noqa: E402
 from src.processors.docx_processor import DocxProcessor           # noqa: E402
@@ -810,7 +816,8 @@ class TranslationPlugin:
           overrides, same as the CLI's ``-t``/``-T``/``-M`` flags. The web
           UI only shows these controls for models that accept them (see
           ``src.models.catalog.model_accepts_sampling_params``); blank means
-          "use the model's default."
+          this plugin's own setting is used, not the model's own preference —
+          a value is always sent.
 
         Args:
             fields: The submitted form's values, keyed by ``UiField.name``.
@@ -1082,6 +1089,16 @@ ui_action = UiAction(
     id="translate",
     label="Translate a document",
     command="translate",
+    # What a blank box in the form actually means here — this plugin's own
+    # settings, with the group's shared file and this person's preferences
+    # already applied. Reported so the form can show the number rather than
+    # describe it; nothing else can work it out, since these settings and the
+    # sections they live in belong to this plugin.
+    sampling={
+        "temperature": TRANSLATION_TEMPERATURE,
+        "top_p": TRANSLATION_TOP_P,
+        "max_tokens": TRANSLATION_MAX_TOKENS,
+    },
     fields=[
         UiField(name="source_language", label="Source language", kind="language", group="Document"),
         UiField(name="target_language", label="Target language", kind="language", group="Document"),

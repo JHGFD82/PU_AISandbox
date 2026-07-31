@@ -487,15 +487,15 @@
           <div class="sampling-options-popover" id="sampling-options-popover" hidden>
             <div class="job-field" id="sampling-temperature-field">
               <label for="sampling-temperature">Temperature (0.0–2.0)</label>
-              <input type="text" id="sampling-temperature" placeholder="Model default">
+              <input type="text" id="sampling-temperature" placeholder="">
             </div>
             <div class="job-field" id="sampling-top-p-field">
               <label for="sampling-top-p">Top-p (0.0–1.0)</label>
-              <input type="text" id="sampling-top-p" placeholder="Model default">
+              <input type="text" id="sampling-top-p" placeholder="">
             </div>
             <div class="job-field">
               <label for="sampling-max-tokens">Max response tokens</label>
-              <input type="text" id="sampling-max-tokens" placeholder="Model default">
+              <input type="text" id="sampling-max-tokens" placeholder="">
             </div>
             <div class="job-field" id="system-prompt-field">
               <label for="sampling-system-prompt">Instructions for this conversation</label>
@@ -639,6 +639,13 @@ const state = {
   // shown in the topbar's tune popover and sent with every /api/chat call —
   // see conv.temperature/top_p/max_tokens in conversation.py.
   sampling: { temperature: null, top_p: null, max_tokens: null, system_prompt: null },
+  // Settled by the server when the page is built: whether this computer has a
+  // file browser to open at all. See file_picker.can_reveal().
+  canReveal: {{ can_reveal | default(false) | tojson }},
+  // What a message is sent with when this conversation sets nothing of its own.
+  // Real numbers, from the server: a blank box is not "whatever the model
+  // likes", it is these.
+  defaultSampling: {{ default_sampling | default({}, true) | tojson }},
 };
 
 // ── Dark mode ────────────────────────────────────────────────────────────
@@ -817,11 +824,22 @@ function growSystemPrompt() {
   box.style.height = box.scrollHeight + "px";
 }
 
+function showSamplingDefaults() {
+  // In the box, as the value a blank one stands for. Naming the number beats
+  // naming the idea of a number: this is what the answer was produced with.
+  const d = state.defaultSampling || {};
+  [["sampling-temperature", d.temperature], ["sampling-top-p", d.top_p],
+   ["sampling-max-tokens", d.max_tokens]].forEach(([id, value]) => {
+    document.getElementById(id).placeholder = value === null || value === undefined ? "" : String(value);
+  });
+}
+
 function openSamplingPopover() {
   document.getElementById("sampling-temperature").value = state.sampling.temperature ?? "";
   document.getElementById("sampling-top-p").value = state.sampling.top_p ?? "";
   document.getElementById("sampling-max-tokens").value = state.sampling.max_tokens ?? "";
   document.getElementById("sampling-system-prompt").value = state.sampling.system_prompt ?? "";
+  showSamplingDefaults();
   applySamplingVisibility();
   document.getElementById("sampling-options-popover").hidden = false;
   // Measured after the panel is shown; a box inside a hidden one has no height
@@ -880,6 +898,16 @@ document.getElementById("sampling-options-clear").addEventListener("click", (e) 
 // than as a standalone topbar button, so it's scoped to the conversation
 // it's next to instead of always acting on "whichever conversation happens
 // to be open."
+async function revealConversationFolder(id) {
+  try {
+    await api(`/api/conversations/${id}/reveal?professor=${encodeURIComponent(state.professor)}`,
+              { method: "POST" });
+  } catch (e) {
+    // Says where the folder is, so someone can still get to it by hand.
+    alert(e.message || "Could not open the folder.");
+  }
+}
+
 function exportConversation(id, format) {
   const url = `/api/conversations/${id}/export`
     + `?professor=${encodeURIComponent(state.professor)}&format=${format}`;
@@ -963,22 +991,35 @@ function jobFieldControlId(name) { return `job-field-${name}`; }
 // there. Max-tokens is always offered: every model accepts some response-
 // length cap, only the parameter name differs, which the backend already
 // handles.
-function samplingFieldsFor(modelName) {
+function samplingFieldsFor(modelName, action) {
   const model = (state.models || []).find(m => m.name === modelName);
   const acceptsSampling = !model || model.accepts_sampling_params !== false;
   const fields = [];
+  // The number this action itself reports for an empty box — its own settings
+  // with the group's and this person's already applied, so it is what would
+  // actually be used, not a guess. An action that reports nothing gets a plain
+  // label rather than an invented figure.
+  const declared = (action && action.sampling) || {};
+  const samplingLabel = (text, key, range) => {
+    const parts = [];
+    if (range) parts.push(range);
+    if (declared[key] !== undefined && declared[key] !== null) {
+      parts.push(`blank = ${declared[key]}`);
+    }
+    return parts.length ? `${text} (${parts.join(", ")})` : text;
+  };
   if (acceptsSampling) {
     fields.push({
-      name: "temperature", label: "Temperature (0.0–2.0, blank = model default)",
+      name: "temperature", label: samplingLabel("Temperature", "temperature", "0.0–2.0"),
       kind: "text", required: false, group: "Sampling",
     });
     fields.push({
-      name: "top_p", label: "Top-p (0.0–1.0, blank = model default)",
+      name: "top_p", label: samplingLabel("Top-p", "top_p", "0.0–1.0"),
       kind: "text", required: false, group: "Sampling",
     });
   }
   fields.push({
-    name: "max_tokens", label: "Max response tokens (blank = model default)",
+    name: "max_tokens", label: samplingLabel("Max response tokens", "max_tokens"),
     kind: "text", required: false, group: "Sampling",
   });
   return fields;
@@ -1038,7 +1079,7 @@ async function refreshJobExtensionFields() {
   appendFieldGroup(box, fields);
 
   const model = document.getElementById("model-field").value || state.defaultModel;
-  state.activeActionFields = action.fields.concat(fields, samplingFieldsFor(model));
+  state.activeActionFields = action.fields.concat(fields, samplingFieldsFor(model, action));
   // A field that just appeared (e.g. reopening this same action after
   // Japanese was already selected before) should show whatever was typed
   // into it last time, same as every other field.
@@ -1059,7 +1100,7 @@ async function openJobModal(action) {
   if (action.fields.some(f => f.kind === "language")) await loadLanguages();
 
   const model = document.getElementById("model-field").value || state.defaultModel;
-  const samplingFields = samplingFieldsFor(model);
+  const samplingFields = samplingFieldsFor(model, action);
   // Provisional — refreshJobExtensionFields() below fills in the middle
   // section and updates this once it resolves (it's async: a network call).
   state.activeActionFields = action.fields.concat(samplingFields);
@@ -1590,6 +1631,22 @@ async function loadConversations() {
       closeConvMenu();
       startRenaming(titleSpan, c.id, c.title);
     });
+
+    // Only where it can work: the folder opens on the computer running the
+    // sandbox, which is only the person's own computer when the browser is
+    // there too. Drawn from the same answer the Browse buttons use.
+    if (state.canReveal) {
+      const folderBtn = document.createElement("button");
+      folderBtn.type = "button";
+      folderBtn.className = "conv-menu-option";
+      folderBtn.textContent = "Open this conversation's folder";
+      folderBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        closeConvMenu();
+        revealConversationFolder(c.id);
+      });
+      menu.appendChild(folderBtn);
+    }
 
     const divider1 = document.createElement("div");
     divider1.className = "conv-menu-divider";

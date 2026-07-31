@@ -104,10 +104,12 @@ class SandboxProcessor(*_discover_plugin_mixins(), _FileTypeMixin, _CommandMixin
                    load the matching endpoint configuration. ``None`` uses
                    the plugin's own default model.
             temperature: How varied or creative the response should be
-                         (``0.0``–``2.0``), overriding the model's default.
+                         (``0.0``–``2.0``). ``None`` means the service's
+                         own setting is used — never the model's own
+                         preference, since a value is always sent.
                          ``None`` uses the default.
             top_p: An alternative response-variety control (``0.0``–``1.0``),
-                   overriding the model's default. ``None`` uses the default.
+                   ``None`` uses the service's own setting.
             max_tokens: The maximum response length, in tokens (tokens are
                         the unit AI providers use to measure text length,
                         roughly one token per word), overriding the model's

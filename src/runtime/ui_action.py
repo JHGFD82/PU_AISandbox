@@ -131,6 +131,16 @@ class UiAction:
                        misspelled "Translateing", which is exactly the bug
                        this field replaces). Defaults to ``'Processing'``
                        for a plugin that doesn't bother to set one.
+        sampling: What this action's own settings say for ``temperature``,
+                  ``top_p`` and ``max_tokens`` — the values it will actually
+                  use when the person leaves those boxes empty, after the
+                  plugin's own settings file, the group's shared file and this
+                  person's preferences have all been applied. Shown in the
+                  empty boxes so that "leave it alone" names a number rather
+                  than an idea. Only the plugin can answer this: the settings
+                  belong to it, and which sections they live in is its own
+                  business. Any key left out simply isn't shown, and a plugin
+                  that sets none of this loses nothing else.
     """
 
     id: str
@@ -138,6 +148,7 @@ class UiAction:
     command: str
     fields: list[UiField] = field(default_factory=list)
     progress_verb: str = "Processing"
+    sampling: dict = field(default_factory=dict)
 
 
 @dataclass

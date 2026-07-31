@@ -284,3 +284,59 @@ def choose(kind: str = "folder", start: str | None = None,
     with _lock:
         chosen = _run(command)
     return Path(chosen) if chosen else None
+
+
+def reveal(path: str | os.PathLike[str]) -> bool:
+    """Open a folder in this computer's own file browser — Finder, Explorer, Files.
+
+    The counterpart to ``choose()``: that asks the person to point at a
+    folder, this shows them one they already have. Used to open a
+    conversation's folder, so that the documents supplied to it, the files a
+    job produced from it and the settings that produced them can be looked at,
+    copied or cited with the tools someone already knows, rather than through a
+    web page.
+
+    Runs on the computer the sandbox is running on, which is the same one the
+    browser is on — every caller checks that first, for the reason given in
+    ``_require_same_computer()``.
+
+    Args:
+        path: The folder to show. Nothing is opened if it doesn't exist.
+
+    Returns:
+        ``True`` if a file browser was asked to open it. ``False`` if the
+        folder is missing, or if this computer has no way to open one — a
+        server with no desktop, for instance. Either way nothing is raised:
+        not being able to open a window is a disappointment, not a failure of
+        the thing the person was doing.
+    """
+    folder = Path(path)
+    if not folder.is_dir():
+        return False
+    if sys.platform == "darwin":
+        command = ["open", str(folder)]
+    elif sys.platform.startswith("win"):
+        command = ["explorer", str(folder)]
+    else:
+        command = ["xdg-open", str(folder)]
+    try:
+        # Not waited on: a file browser stays open as long as the person wants
+        # it, and waiting would hold the request until they closed the window.
+        subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return True
+    except (OSError, ValueError):
+        return False
+
+
+def can_reveal() -> bool:
+    """Whether this computer has a file browser that ``reveal()`` could open.
+
+    A separate question from ``available()``, which asks whether a *chooser*
+    can be opened. The two use different tools and a computer can have one
+    without the other — a Linux machine may have ``xdg-open`` and no tkinter,
+    or the reverse — so asking one and acting on the other would draw a button
+    that does nothing.
+    """
+    if sys.platform == "darwin" or sys.platform.startswith("win"):
+        return True
+    return shutil.which("xdg-open") is not None

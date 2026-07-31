@@ -116,19 +116,34 @@ def discard_output_dir_if_empty(output_dir: Path) -> bool:
         return False
 
 
-def job_output_dir(professor: str, job_id: str, base_dir: Optional[Path] = None) -> Path:
+def job_output_dir(professor: str, job_id: str, base_dir: Optional[Path] = None,
+                   conversation_id: Optional[str] = None) -> Path:
     """Return the directory a job's one output file should be written into, creating it if needed.
 
-    Lives alongside that professor's conversation storage
-    (``data/conversations/{professor}/_job_outputs/{job_id}/``) rather than
-    a system temp directory, so a finished job's output survives at least
-    as long as the conversation that references it — a temp directory can
-    be cleaned up by the OS at any time, which would silently break a
-    "download this" link sitting in a saved conversation.
+    Inside the conversation's own folder
+    (``data/conversations/{professor}/{conversation_id}/outputs/{job_id}/``)
+    when the conversation is known, so that what a job produced sits with the
+    conversation that asked for it, the documents it was given, and the note of
+    the settings that produced them — a whole piece of work in one place, which
+    is the point of the folder. A job whose conversation isn't known falls back
+    to ``_job_outputs/{job_id}/`` beside them.
+
+    Either way it lives with the conversation storage rather than in a system
+    temp directory, so a finished job's output survives at least as long as the
+    conversation that references it — a temp directory can be cleaned up by the
+    OS at any time, which would silently break a "download this" link sitting in
+    a saved conversation.
+
+    Kept in a folder of its own per job rather than all together, so two runs
+    that happen to name their output the same thing cannot overwrite one
+    another.
 
     Args:
         professor: The professor this job runs under.
         job_id: The job's unique id (see ``new_job_id()``).
+        conversation_id: The conversation this job was started from. ``None``
+                         for a job with no conversation, which keeps the older
+                         shared location.
         base_dir: Override for the conversations root directory. ``None``
                   (the normal case) uses ``data/conversations``; redirected
                   to a temporary directory in tests.
@@ -137,7 +152,10 @@ def job_output_dir(professor: str, job_id: str, base_dir: Optional[Path] = None)
         The absolute path to the (now-existing) output directory.
     """
     base = base_dir if base_dir is not None else _conversations_dir()
-    d = base / professor / "_job_outputs" / job_id
+    if conversation_id and conversation._CONVERSATION_ID_RE.fullmatch(conversation_id):
+        d = base / professor / conversation_id / "outputs" / job_id
+    else:
+        d = base / professor / "_job_outputs" / job_id
     d.mkdir(parents=True, exist_ok=True)
     return d
 
@@ -170,7 +188,7 @@ def discard_scratch_dir(fields: dict) -> None:
 
 def resolve_output_path(
     netid: str, job_id: str, output_filename: Optional[str],
-    stored_path: Optional[str] = None,
+    stored_path: Optional[str] = None, conversation_id: Optional[str] = None,
 ) -> Optional[Path]:
     """Work out where a finished job's output file is *now*.
 
@@ -198,6 +216,9 @@ def resolve_output_path(
         stored_path: The old recorded absolute path, used only when
                      *output_filename* is missing — records written before
                      filenames were kept have nothing else to go on.
+        conversation_id: The conversation the job ran in, when known. Its own
+                         folder is looked in first; jobs that ran before
+                         outputs were kept there are still found afterwards.
 
     Returns:
         The path to the file, or ``None`` if there is nothing to point at.
@@ -208,7 +229,18 @@ def resolve_output_path(
         # basename() because the filename is echoed from the plugin that
         # produced it. Everything else here is trusted, so this is the only
         # component that could carry a path separator.
-        return job_output_dir(netid, job_id) / os.path.basename(output_filename)
+        name = os.path.basename(output_filename)
+        if conversation_id:
+            in_conversation = job_output_dir(
+                netid, job_id, conversation_id=conversation_id
+            ) / name
+            if in_conversation.exists():
+                return in_conversation
+        # Jobs run before outputs moved into the conversation's own folder are
+        # still where they were. Checked second so a file that has moved is
+        # found in its new home first, and left in place either way — a
+        # download link in a saved conversation goes on working.
+        return job_output_dir(netid, job_id) / name
     return Path(stored_path) if stored_path else None
 
 
@@ -489,7 +521,11 @@ def _run_job(
         ))
         conversation_store.save(conv)
 
-    output_dir = job_output_dir(professor, job.id)
+    # Inside the conversation the job was started from, so that what a job
+    # produced sits with the conversation that asked for it and the documents
+    # it was given, rather than in a separate tree keyed by job id where
+    # nobody would think to look for it.
+    output_dir = job_output_dir(professor, job.id, conversation_id=job.conversation_id)
 
     # The scratch folder is this module's bookkeeping, not something a
     # plugin declared or should have to know about, so it doesn't travel

@@ -27,6 +27,11 @@ WEBUI_PORT: int = _webui.get("port", 8000)
 WEBUI_SESSION_COOKIE_NAME: str = _webui.get("session_cookie_name", "pu_sandbox_session")
 WEBUI_COMPACTION_THRESHOLD: float = _webui.get("compaction_threshold", 0.70)
 WEBUI_COMPACTION_MODEL: str = _webui.get("compaction_model", "gpt-4o-mini")
+# Whether a document supplied to a conversation is kept in that conversation's
+# folder afterwards. Off unless someone asks for it: the text is read out and
+# kept in the conversation either way, so this is only about having the original
+# document to hand — worth the disk for work that may need showing or citing.
+WEBUI_KEEP_SUPPLIED_DOCUMENTS: bool = bool(_webui.get("keep_supplied_documents", False))
 
 # ── Which models each job should use ──────────────────────────────────────────
 # Chat needs to read images because a question in the browser can carry a

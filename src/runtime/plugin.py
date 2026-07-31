@@ -121,15 +121,18 @@ class ModePlugin(Protocol):
                    own default model.
             temperature: How varied or creative the response should be, if
                          the user specified a value with ``-t``. ``None``
-                         means use the model's default.
+                         means the service's own setting is used; a
+                         value is always sent, so the model is never left to
+                         choose.
             top_p: An alternative response-variety control, if the user
                    specified a value with ``-T``. ``None`` means use the
-                   model's default.
+                   service's own setting.
             max_tokens: The maximum length of the AI's response, in tokens
                         (tokens are the unit AI providers use to measure text
                         length, roughly one token per word), if the user
                         specified a value with ``-M``. ``None`` means use the
-                        model's default limit.
+                        service's own limit, or whatever the
+                        catalogue says the model can manage.
 
         Note:
             Token tracking is mandatory — every API call made here must be

@@ -336,6 +336,37 @@ A plugin's own settings layer the same way (see [Plugin settings](#plugin-settin
 
 ---
 
+## Where a conversation's files are kept
+
+Each conversation in the web interface has a folder of its own, under your files folder:
+
+```
+data/conversations/<netid>/c_8f2a1c9de4b7a501/
+    conversation.json     what was said, and by which model
+    settings.txt          a readable note of the model, sampling settings and instructions
+    attachments/          the documents you supplied (only if you turn that on, below)
+    outputs/              files a translation or transcription job produced
+```
+
+The point is that a whole piece of work sits in one place you can open, keep, back up, or cite. Each conversation's **⋮** menu has **Open this conversation's folder**, which opens it in Finder or Explorer. (That only appears when the browser is on the same computer as the sandbox — a folder can only be opened on the machine it is on.)
+
+Conversations saved before this existed are moved into folders automatically, once, the first time the web interface reads them. Nothing is copied and nothing is left behind.
+
+### Keeping the documents you supply
+
+By default the sandbox reads the text out of a document you give it, keeps that text in the conversation, and does not keep the document itself — otherwise every translated file would be stored twice, once where you put it and once here, growing forever.
+
+If you would rather have the originals filed with the conversation — worth it for work you may need to show or cite — turn this on in `preferences.toml`:
+
+```toml
+[webui]
+keep_supplied_documents = true
+```
+
+Two documents with the same name do not overwrite each other; the second becomes `report (2).pdf`.
+
+---
+
 ## Alternate AI endpoints
 
 An `[endpoints.<name>]` table describes an AI endpoint other than the built-in service — a model running on an HPC cluster or other self-hosted inference server, or a provider's direct API (many expose an OpenAI-compatible interface reachable with just a URL and a key).

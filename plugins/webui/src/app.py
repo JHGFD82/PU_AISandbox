@@ -65,7 +65,12 @@ from src.models import (
 )
 from src.runtime.info_commands import list_optional_settings
 from src.services.api_config import credential_path_for_endpoint
-from src.settings import CHAT_ROLE, ENDPOINTS, WEBUI_SESSION_COOKIE_NAME
+from src.settings import (
+    CHAT_ROLE,
+    ENDPOINTS,
+    WEBUI_KEEP_SUPPLIED_DOCUMENTS,
+    WEBUI_SESSION_COOKIE_NAME,
+)
 from src.tracking.token_tracker import TokenTracker
 
 auth = sys.modules["_pu_webui_auth"]
@@ -342,6 +347,58 @@ def _require_same_computer(request: Request) -> None:
         )
 
 
+def _keep_supplied_document(
+    professor: str, conversation_id: str, filename: str, data: bytes
+) -> str | None:
+    """Put a copy of a supplied document in its conversation's folder, if asked to.
+
+    The text is read out of a document and kept in the conversation whatever
+    this does; what this decides is whether the document *itself* is kept too,
+    so that a conversation's folder holds the things it was given and not only
+    what was read from them. Off unless someone turns it on — see
+    ``keep_supplied_documents`` in the webui settings.
+
+    Args:
+        professor: Whose conversation this is, already validated.
+        conversation_id: The conversation the document was supplied to. Empty
+                         when the browser didn't say, in which case there is no
+                         folder to put it in and nothing is kept.
+        filename: The name the document was uploaded under.
+        data: The document itself.
+
+    Returns:
+        The name it was saved under, or ``None`` if nothing was saved. A name
+        already in use gets a number added rather than being overwritten:
+        supplying two different documents that happen to share a name is
+        ordinary, and losing the first one silently would not be.
+    """
+    if not WEBUI_KEEP_SUPPLIED_DOCUMENTS or not conversation_id:
+        return None
+    store = conversation.ConversationStore(professor)
+    try:
+        folder = store.attachments_dir(conversation_id)
+    except ValueError:
+        return None
+    if store.load(conversation_id) is None:
+        return None
+    # basename() because the name comes from the browser: it is the one part of
+    # this path not built from something already checked.
+    name = os.path.basename(filename) or "document"
+    folder.mkdir(parents=True, exist_ok=True)
+    stem, suffix = os.path.splitext(name)
+    candidate, n = name, 2
+    while (folder / candidate).exists():
+        candidate, n = f"{stem} ({n}){suffix}", n + 1
+    try:
+        (folder / candidate).write_bytes(data)
+    except OSError as e:
+        # A document that could not be filed away is a disappointment, not a
+        # reason to lose the answer that was about to be given about it.
+        logging.warning("Could not keep %s with conversation %s: %s", name, conversation_id, e)
+        return None
+    return candidate
+
+
 def _chat_error_message(error: Exception) -> str:
     """Turn an exception from a chat turn into something safe to show in the browser.
 
@@ -414,7 +471,26 @@ def create_app() -> FastAPI:
             # Nothing to chat with yet — send a first-time visitor straight
             # to setup instead of an empty, broken-looking chat screen.
             return RedirectResponse("/settings", status_code=303)
-        return templates.TemplateResponse(request, "chat.html")
+        from src.settings import PROMPT_MAX_TOKENS, PROMPT_TEMPERATURE, PROMPT_TOP_P
+
+        return templates.TemplateResponse(
+            request, "chat.html",
+            # Whether to offer "Open this conversation's folder" at all. A
+            # computer with no file browser to open gets no menu item, rather
+            # than one that does nothing when pressed.
+            {
+                "can_reveal": file_picker.can_reveal(),
+                # The actual numbers a message is sent with when a conversation
+                # sets none of its own. Shown rather than described, because
+                # "the model's default" names no value and is not even true —
+                # the sandbox always sends these.
+                "default_sampling": {
+                    "temperature": PROMPT_TEMPERATURE,
+                    "top_p": PROMPT_TOP_P,
+                    "max_tokens": PROMPT_MAX_TOKENS,
+                },
+            },
+        )
 
     @app.get("/settings", response_class=HTMLResponse)
     async def settings_page(request: Request):
@@ -761,6 +837,32 @@ def create_app() -> FastAPI:
             },
         }
 
+    @app.post("/api/conversations/{conversation_id}/reveal")
+    async def api_reveal_conversation_folder(
+        conversation_id: str, request: Request, professor: str
+    ):
+        """Open one conversation's folder in this computer's file browser.
+
+        Everything belonging to the conversation is in there — the
+        conversation itself, a readable note of the settings that produced it,
+        the documents supplied to it, and any files a job produced — so that a
+        whole piece of work can be looked at, kept or cited as one thing.
+        """
+        _require_unlocked(request)
+        _validated_professor(professor)
+        _require_same_computer(request)
+        store = conversation.ConversationStore(professor)
+        if store.load(conversation_id) is None:
+            raise HTTPException(404, "No such conversation.")
+        folder = store.folder(conversation_id)
+        if not file_picker.reveal(folder):
+            raise HTTPException(
+                500,
+                "This computer could not open a file browser. The folder is at "
+                f"{folder}",
+            )
+        return {"opened": True, "path": str(folder)}
+
     @app.get("/api/conversations")
     async def api_list_conversations(request: Request, professor: str):
         _require_unlocked(request)
@@ -849,7 +951,8 @@ def create_app() -> FastAPI:
 
     @app.post("/api/attachments")
     async def api_upload_attachment(
-        request: Request, professor: str = Form(...), file: UploadFile = File(...)
+        request: Request, professor: str = Form(...), file: UploadFile = File(...),
+        conversation_id: str = Form(""),
     ):
         """Extract text from an uploaded document so it can be attached to a chat turn.
 
@@ -875,7 +978,14 @@ def create_app() -> FastAPI:
         finally:
             os.unlink(tmp_path)
 
-        return {"filename": doc.filename, "text": doc.text, "char_count": doc.char_count}
+        kept = _keep_supplied_document(professor, conversation_id, file.filename, data)
+        return {
+            "filename": doc.filename, "text": doc.text, "char_count": doc.char_count,
+            # Where the document itself was put, if it was kept at all. The
+            # browser shows nothing for this; it is here so that what happened
+            # to somebody's file is answerable rather than invisible.
+            "saved_as": kept,
+        }
 
     # ── Plugin composer actions ──────────────────────────────────────────────
     # Background jobs (translate/transcribe/...) triggered from a
@@ -1027,15 +1137,22 @@ def create_app() -> FastAPI:
             #
             # Somewhere, but not here: they go to a scratch folder the
             # operating system already cleans up after, and the job deletes
-            # it as soon as it finishes. Keeping them would mean every
-            # translated document quietly stored twice — once where the
-            # professor put it, once inside their usage data, growing
+            # it as soon as it finishes. Keeping every one by default would
+            # mean each translated document quietly stored twice — once where
+            # the professor put it, once inside their usage data, growing
             # forever, for no purpose either of them would recognise.
+            #
+            # Unless someone asks for it. Turning on keep_supplied_documents
+            # puts a copy in the conversation's own folder as well, so that the
+            # documents a piece of work started from sit with the conversation
+            # and the results, and the whole of it can be kept or cited. Off
+            # unless chosen, so nobody pays that cost without meaning to.
             upload_dir = Path(tempfile.mkdtemp(prefix="pu_webui_job_"))
             for part, filename in uploaded:
                 data = await part.read()
                 with open(upload_dir / os.path.basename(filename), "wb") as out:
                     out.write(data)
+                _keep_supplied_document(professor, conversation_id, filename, data)
             fields["_scratch_dir"] = str(upload_dir)
             if len(uploaded) == 1:
                 only_name = os.path.basename(uploaded[0][1])
@@ -1090,6 +1207,7 @@ def create_app() -> FastAPI:
         # person's own job-output directory.
         path = jobs.resolve_output_path(
             professor, job_id, match.output_filename, match.output_path,
+            conversation_id=conv.id,
         )
         if path is None or not path.exists():
             raise HTTPException(404, "Job output not found.")
@@ -1124,7 +1242,7 @@ def create_app() -> FastAPI:
         # Unlike `model` above, these three are applied unconditionally,
         # not gated on truthiness — the options popover always sends the
         # sampling values it currently shows (any of which may legitimately
-        # be None, meaning "no override, use the model's default"), so this
+        # be None, meaning "nothing chosen here, use the sandbox's own"), so this
         # is how a professor clears a previously-set override rather than
         # only ever being able to add one.
         conv.temperature = body.temperature

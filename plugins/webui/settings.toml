@@ -16,3 +16,9 @@ session_cookie_name = "pu_sandbox_session"
 compaction_threshold = 0.70
 # Model used for the cheap summarization call that compaction performs.
 compaction_model = "gpt-4o-mini"
+# Whether to keep a copy of each document supplied to a conversation, in that
+# conversation's own folder. Off by default: the text is read out of a document
+# and kept in the conversation either way, so this is about having the document
+# itself afterwards — worth it if the conversation is something you may need to
+# show or cite, and not worth the disk if it isn't.
+keep_supplied_documents = false

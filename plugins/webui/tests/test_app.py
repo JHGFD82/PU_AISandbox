@@ -2343,3 +2343,196 @@ class TestSystemPromptPerConversation:
             system_prompt=typed,
         )
         assert Conversation.from_dict(json.loads(json.dumps(conv.to_dict()))).system_prompt == typed
+
+
+class TestOpeningAConversationFolder:
+    """The way in to everything a conversation is made of."""
+
+    def _page(self):
+        from pathlib import Path
+
+        from fastapi.templating import Jinja2Templates
+
+        here = Path(__file__).resolve().parents[1] / "src" / "templates"
+        return (Jinja2Templates(directory=str(here)).env
+                .get_template("chat.html").render(request=None, can_reveal=True))
+
+    def test_the_menu_offers_it(self):
+        page = self._page()
+        assert "Open this conversation's folder" in page
+
+    def test_it_is_not_offered_where_there_is_nothing_to_open_it_with(self):
+        from pathlib import Path
+
+        from fastapi.templating import Jinja2Templates
+
+        here = Path(__file__).resolve().parents[1] / "src" / "templates"
+        page = (Jinja2Templates(directory=str(here)).env
+                .get_template("chat.html").render(request=None, can_reveal=False))
+        assert "canReveal: false" in page
+
+    def test_the_chat_page_is_told_whether_it_can(self, unlocked_client):
+        """The template defaults to false, so a route that forgot would be silent."""
+        page = unlocked_client.get("/").text
+        assert "canReveal: true" in page or "canReveal: false" in page
+
+    def test_it_opens_the_conversations_own_folder(self, unlocked_client, monkeypatch):
+        import sys
+
+        opened = []
+        picker = sys.modules["_pu_webui_file_picker"]
+        monkeypatch.setattr(picker, "reveal", lambda p: opened.append(str(p)) or True)
+        conv_id = unlocked_client.post(
+            "/api/conversations", json={"professor": "heller", "model": "gpt-4o"}
+        ).json()["id"]
+        r = unlocked_client.post(
+            f"/api/conversations/{conv_id}/reveal?professor=heller"
+        )
+        assert r.status_code == 200
+        assert len(opened) == 1
+        assert opened[0].endswith(conv_id)
+
+    def test_a_conversation_that_does_not_exist_is_refused(self, unlocked_client):
+        r = unlocked_client.post(
+            "/api/conversations/c_" + "f" * 16 + "/reveal?professor=heller"
+        )
+        assert r.status_code == 404
+
+    def test_a_malformed_id_is_refused_rather_than_used_as_a_path(self, unlocked_client):
+        r = unlocked_client.post("/api/conversations/..%2F..%2Fetc/reveal?professor=heller")
+        assert r.status_code in (404, 400)
+
+    def test_it_is_behind_the_unlock_gate(self, client):
+        r = client.post("/api/conversations/c_" + "f" * 16 + "/reveal?professor=heller")
+        assert r.status_code in (401, 403, 302, 303)
+
+    def test_a_browser_on_another_computer_cannot_open_a_window_here(
+        self, unlocked_client, monkeypatch
+    ):
+        """It would open on the server's screen, not the person's."""
+        import sys
+
+        app_module = sys.modules["_pu_webui_app"]
+        monkeypatch.setattr(app_module, "_SAME_COMPUTER", frozenset())
+        conv_id = unlocked_client.post(
+            "/api/conversations", json={"professor": "heller", "model": "gpt-4o"}
+        ).json()["id"]
+        r = unlocked_client.post(f"/api/conversations/{conv_id}/reveal?professor=heller")
+        assert r.status_code == 403
+
+
+class TestKeepingSuppliedDocuments:
+    """Off by default; on, the documents sit with the conversation."""
+
+    def _upload(self, client, conversation_id, name=b"source.txt"):
+        return client.post(
+            "/api/attachments",
+            files={"file": (name.decode(), b"hello", "text/plain")},
+            data={"professor": "heller", "conversation_id": conversation_id},
+        )
+
+    def _conv(self, client):
+        return client.post(
+            "/api/conversations", json={"professor": "heller", "model": "gpt-4o"}
+        ).json()["id"]
+
+    def test_nothing_is_kept_unless_it_is_asked_for(self, unlocked_client, monkeypatch):
+        import sys
+
+        app_module = sys.modules["_pu_webui_app"]
+        monkeypatch.setattr(app_module, "WEBUI_KEEP_SUPPLIED_DOCUMENTS", False)
+        conv_id = self._conv(unlocked_client)
+        assert self._upload(unlocked_client, conv_id).json()["saved_as"] is None
+
+    def test_when_asked_for_it_sits_with_the_conversation(self, unlocked_client, monkeypatch):
+        import sys
+
+        app_module = sys.modules["_pu_webui_app"]
+        monkeypatch.setattr(app_module, "WEBUI_KEEP_SUPPLIED_DOCUMENTS", True)
+        conv_id = self._conv(unlocked_client)
+        assert self._upload(unlocked_client, conv_id).json()["saved_as"] == "source.txt"
+        store = sys.modules["_pu_webui_conversation"].ConversationStore("heller")
+        assert (store.attachments_dir(conv_id) / "source.txt").read_bytes() == b"hello"
+
+    def test_a_second_document_of_the_same_name_does_not_replace_the_first(
+        self, unlocked_client, monkeypatch
+    ):
+        import sys
+
+        app_module = sys.modules["_pu_webui_app"]
+        monkeypatch.setattr(app_module, "WEBUI_KEEP_SUPPLIED_DOCUMENTS", True)
+        conv_id = self._conv(unlocked_client)
+        self._upload(unlocked_client, conv_id)
+        second = self._upload(unlocked_client, conv_id)
+        assert second.json()["saved_as"] == "source (2).txt"
+
+    def test_a_name_that_is_a_path_cannot_write_outside_the_folder(
+        self, unlocked_client, monkeypatch
+    ):
+        import sys
+
+        app_module = sys.modules["_pu_webui_app"]
+        monkeypatch.setattr(app_module, "WEBUI_KEEP_SUPPLIED_DOCUMENTS", True)
+        conv_id = self._conv(unlocked_client)
+        saved = self._upload(unlocked_client, conv_id, b"../../escaped.txt").json()["saved_as"]
+        assert saved == "escaped.txt"
+
+
+class TestTheInterfaceNamesTheValue:
+    """A blank box stands for a real number, and says which."""
+
+    def test_the_page_is_given_the_numbers_it_will_send(self, unlocked_client):
+        from src.settings import PROMPT_TEMPERATURE, PROMPT_TOP_P
+
+        page = unlocked_client.get("/").text
+        assert "defaultSampling" in page
+        assert str(PROMPT_TEMPERATURE) in page
+        assert str(PROMPT_TOP_P) in page
+
+    def test_no_box_claims_the_model_decides(self, unlocked_client):
+        """It does not: a value is always sent, and the sandbox chooses it."""
+        page = unlocked_client.get("/").text
+        assert "Model default" not in page
+        assert "model default" not in page
+        assert "model's default" not in page
+
+
+class TestAJobFormNamesItsOwnNumbers:
+    """A blank box in a job form has a real value behind it, and shows it.
+
+    The value comes from the plugin's own settings with the group's shared file
+    and this person's preferences applied — so somebody who set
+    ``[translation] temperature`` sees the number they set, not a description.
+    """
+
+    def _page(self):
+        from pathlib import Path
+
+        from fastapi.templating import Jinja2Templates
+
+        here = Path(__file__).resolve().parents[1] / "src" / "templates"
+        return (Jinja2Templates(directory=str(here)).env
+                .get_template("chat.html").render(request=None))
+
+    def test_whatever_an_action_reports_reaches_the_browser(self, unlocked_client):
+        """The route hands the values on; each plugin decides what they are."""
+        actions = unlocked_client.get("/api/plugin-actions?professor=heller").json()["actions"]
+        assert all("sampling" in a for a in actions), (
+            "an action's own settings are dropped on the way to the page"
+        )
+
+    def test_the_form_shows_the_number_beside_the_box(self):
+        page = self._page()
+        assert "blank = ${declared[key]}" in page
+
+    def test_a_label_reads_properly_whether_or_not_it_has_a_range(self):
+        """Max response tokens has no range, and read "(, blank = 4000)"."""
+        page = self._page()
+        assert "parts.join(\", \")" in page
+        assert 'samplingLabel("Max response tokens", "max_tokens")' in page
+
+    def test_an_action_that_reports_nothing_gets_no_invented_figure(self):
+        """A plugin that declares no settings gets a plain label, not a guess."""
+        page = self._page()
+        assert "declared[key] !== undefined && declared[key] !== null" in page
+        assert "parts.length ? " in page

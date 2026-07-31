@@ -115,7 +115,13 @@ _register(
 from src.cli import add_common_flags, add_notes_flags           # noqa: E402
 from src.config import parse_single_language_code, register_language, LANGUAGE_MAP  # noqa: E402
 from src.errors import CLIError                                    # noqa: E402
-from src.settings import OCR_ROLE, TRANSCRIPTION_REVIEW_ROLE  # noqa: E402
+from src.settings import (  # noqa: E402
+    OCR_MAX_TOKENS,
+    OCR_ROLE,
+    OCR_TEMPERATURE,
+    OCR_TOP_P,
+    TRANSCRIPTION_REVIEW_ROLE,
+)
 from src.runtime.ui_action import (  # noqa: E402
     PageTextCallback, ProgressCallback, UiAction, UiField, UiJobResult, UiPromptPreview,
     apply_extension_ui_hooks,
@@ -497,7 +503,8 @@ class TranscriptionPlugin:
           overrides, same as the CLI's ``-t``/``-T``/``-M`` flags. The web
           UI only shows these controls for models that accept them (see
           ``src.models.catalog.model_accepts_sampling_params``); blank means
-          "use the model's default."
+          this plugin's own setting is used, not the model's own preference —
+          a value is always sent.
 
         Args:
             fields: The submitted form's values, keyed by ``UiField.name``.
@@ -706,6 +713,14 @@ ui_action = UiAction(
     id="transcribe",
     label="Transcribe an image (OCR)",
     command="transcribe",
+    # See the note on translate's: the number a blank box stands for, after
+    # this plugin's settings, the group's shared file and this person's
+    # preferences have been applied.
+    sampling={
+        "temperature": OCR_TEMPERATURE,
+        "top_p": OCR_TOP_P,
+        "max_tokens": OCR_MAX_TOKENS,
+    },
     fields=[
         UiField(name="target_language", label="Language in the image", kind="language", group="Document"),
         UiField(

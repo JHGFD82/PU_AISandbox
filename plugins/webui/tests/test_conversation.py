@@ -475,3 +475,158 @@ class TestConversationIdValidation:
         assert [c["id"] for c in store.list_conversations()] == [conv.id]
         assert store.delete(conv.id) is True
         assert store.load(conv.id) is None
+
+
+class TestEachConversationHasAFolder:
+    """A conversation, what it was given, what it produced, and how — in one place."""
+
+    def _store(self, tmp_path):
+        from plugins.webui.src.conversation import ConversationStore
+
+        return ConversationStore("jh43", base_dir=tmp_path)
+
+    def test_a_conversation_is_saved_in_a_folder_of_its_own(self, tmp_path):
+        store = self._store(tmp_path)
+        conv = store.create(model="gpt-4o")
+        assert (tmp_path / "jh43" / conv.id / "conversation.json").exists()
+
+    def test_the_folder_is_named_after_the_conversation(self, tmp_path):
+        store = self._store(tmp_path)
+        conv = store.create(model="gpt-4o")
+        assert store.folder(conv.id).name == conv.id
+        assert conv.id.startswith("c_")
+
+    def test_a_malformed_id_cannot_reach_outside_the_persons_own_folder(self, tmp_path):
+        """The id comes from the browser and becomes part of a path."""
+        import pytest
+
+        store = self._store(tmp_path)
+        for bad in ["../../etc", "c_../../x", "c_zzz", "", "c_" + "f" * 15]:
+            with pytest.raises(ValueError):
+                store.folder(bad)
+            with pytest.raises(ValueError):
+                store.attachments_dir(bad)
+            with pytest.raises(ValueError):
+                store.outputs_dir(bad)
+
+    def test_the_settings_that_produced_it_are_written_beside_it(self, tmp_path):
+        store = self._store(tmp_path)
+        conv = store.create(model="gpt-4o")
+        conv.temperature = 0.2
+        conv.system_prompt = "Answer in French."
+        store.save(conv)
+        note = (store.folder(conv.id) / "settings.txt").read_text()
+        assert "gpt-4o" in note
+        assert "0.2" in note
+        assert "Answer in French." in note
+
+    def test_the_note_records_the_value_actually_used(self, tmp_path):
+        """Not the word "default", which names no value — and is not even true.
+
+        A conversation that sets nothing is not sent without these: the sandbox
+        fills in its own. Someone reading this months later, or citing it, needs
+        the number the answer was produced with.
+        """
+        from src.settings import PROMPT_TEMPERATURE, PROMPT_TOP_P
+
+        store = self._store(tmp_path)
+        conv = store.create(model="gpt-4o")
+        note = (store.folder(conv.id) / "settings.txt").read_text()
+        assert str(PROMPT_TEMPERATURE) in note
+        assert str(PROMPT_TOP_P) in note
+        assert "default" not in note.lower(), "the note describes a value instead of giving it"
+
+    def test_a_chosen_value_and_a_filled_in_one_read_the_same(self, tmp_path):
+        """An archive states what the settings were, not who settled on them."""
+        from src.settings import PROMPT_TOP_P
+
+        store = self._store(tmp_path)
+        conv = store.create(model="gpt-4o")
+        conv.temperature = 0.2
+        store.save(conv)
+        note = (store.folder(conv.id) / "settings.txt").read_text()
+        lines = {ln.split(":")[0]: ln for ln in note.splitlines() if ":" in ln}
+        assert lines["Temperature"].split(":")[1].strip() == "0.2"
+        assert lines["Top-p"].split(":")[1].strip() == str(PROMPT_TOP_P)
+
+    def test_a_model_missing_from_the_catalogue_still_gets_a_note(self, tmp_path):
+        """A conversation outlives the model it used."""
+        store = self._store(tmp_path)
+        conv = store.create(model="a-model-that-was-retired")
+        note = (store.folder(conv.id) / "settings.txt").read_text()
+        assert "Max response tokens:" in note
+        assert "(none)" in note
+
+    def test_deleting_takes_the_whole_folder(self, tmp_path):
+        store = self._store(tmp_path)
+        conv = store.create(model="gpt-4o")
+        store.attachments_dir(conv.id).mkdir(parents=True)
+        (store.attachments_dir(conv.id) / "source.pdf").write_bytes(b"x")
+        assert store.delete(conv.id) is True
+        assert not store.folder(conv.id).exists()
+
+
+class TestMovingOlderConversationsIntoFolders:
+    """Conversations saved as loose files must survive the change untouched."""
+
+    def _loose(self, tmp_path, conversation_id, title="Older work"):
+        import json
+
+        folder = tmp_path / "jh43"
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / f"{conversation_id}.json").write_text(json.dumps({
+            "id": conversation_id, "title": title,
+            "created_at": "2026-01-01T00:00:00", "updated_at": "2026-01-02T00:00:00",
+            "model": "gpt-4o",
+            "messages": [{"role": "user", "content": "Hello", "timestamp": "2026-01-01T00:00:00"}],
+        }))
+
+    def _store(self, tmp_path):
+        from plugins.webui.src.conversation import ConversationStore
+
+        return ConversationStore("jh43", base_dir=tmp_path)
+
+    def test_an_older_conversation_is_moved_and_still_reads(self, tmp_path):
+        self._loose(tmp_path, "c_" + "a" * 16)
+        store = self._store(tmp_path)
+        conv = store.load("c_" + "a" * 16)
+        assert conv is not None
+        assert conv.title == "Older work"
+        assert conv.messages[0].content == "Hello"
+
+    def test_nothing_is_left_behind_to_be_read_twice(self, tmp_path):
+        cid = "c_" + "b" * 16
+        self._loose(tmp_path, cid)
+        self._store(tmp_path)
+        assert not (tmp_path / "jh43" / f"{cid}.json").exists()
+        assert (tmp_path / "jh43" / cid / "conversation.json").exists()
+
+    def test_it_still_appears_in_the_list(self, tmp_path):
+        cid = "c_" + "c" * 16
+        self._loose(tmp_path, cid, title="Findable")
+        store = self._store(tmp_path)
+        assert [s["title"] for s in store.list_conversations()] == ["Findable"]
+
+    def test_a_conversation_already_moved_is_left_alone(self, tmp_path):
+        """Running twice must not overwrite the newer copy with a stale one."""
+        import json
+
+        cid = "c_" + "d" * 16
+        self._loose(tmp_path, cid, title="Stale loose copy")
+        folder = tmp_path / "jh43" / cid
+        folder.mkdir(parents=True)
+        (folder / "conversation.json").write_text(json.dumps({
+            "id": cid, "title": "The one being used", "created_at": "x", "updated_at": "y",
+            "model": "gpt-4o", "messages": [],
+        }))
+        store = self._store(tmp_path)
+        assert store.load(cid).title == "The one being used"
+
+    def test_a_file_that_is_not_a_conversation_is_not_touched(self, tmp_path):
+        folder = tmp_path / "jh43"
+        folder.mkdir(parents=True)
+        (folder / "notes.json").write_text("{}")
+        (folder / "c_nonsense.json").write_text("{}")
+        self._store(tmp_path)
+        assert (folder / "notes.json").exists()
+        assert (folder / "c_nonsense.json").exists()

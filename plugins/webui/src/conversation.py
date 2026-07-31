@@ -14,6 +14,7 @@ import json
 import os
 import re
 import secrets
+import shutil
 import threading
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
@@ -206,6 +207,46 @@ class Message:
         )
 
 
+def effective_sampling(conversation: "Conversation") -> dict[str, Any]:
+    """Return the settings a message in this conversation is actually sent with.
+
+    A conversation that sets none of these is not sent without them, and the
+    model does not fall back to a preference of its own: the sandbox fills in
+    its own values, from the ``[prompt]`` section of ``settings.default.toml``
+    (and, for the response-length cap, whatever the model catalogue says that
+    model can manage). So there is always a real number, and recording the word
+    "default" instead of it would hide the one thing worth knowing — what the
+    answer was actually produced with.
+
+    Args:
+        conversation: The conversation to describe.
+
+    Returns:
+        ``{'temperature', 'top_p', 'max_tokens'}``, each the value that would be
+        sent right now. Values chosen for the conversation win; the rest are the
+        sandbox's.
+    """
+    # Imported here rather than at the top: this module is the plain store for
+    # conversations, and it should not drag the model catalogue in on import.
+    from src.models.catalog import get_model_max_completion_tokens
+    from src.settings import PROMPT_MAX_TOKENS, PROMPT_TEMPERATURE, PROMPT_TOP_P
+
+    if conversation.max_tokens is not None:
+        max_tokens: Any = conversation.max_tokens
+    else:
+        try:
+            max_tokens = get_model_max_completion_tokens(conversation.model, PROMPT_MAX_TOKENS)
+        except Exception:
+            # A model no longer in the catalogue still had a conversation; the
+            # sandbox's own figure is what it would fall back to.
+            max_tokens = PROMPT_MAX_TOKENS
+    return {
+        "temperature": PROMPT_TEMPERATURE if conversation.temperature is None else conversation.temperature,
+        "top_p": PROMPT_TOP_P if conversation.top_p is None else conversation.top_p,
+        "max_tokens": max_tokens,
+    }
+
+
 @dataclass
 class Conversation:
     """One saved conversation: its messages, current model, and (later) a compaction summary.
@@ -226,18 +267,23 @@ class Conversation:
                        set, ``POST /api/chat`` on this conversation is
                        rejected and the composer is shown locked — a
                        conversation can only run one job at a time.
-        temperature: This conversation's sampling-temperature override
-                     (``0.0``-``2.0``), or ``None`` to use the selected
-                     model's default. Persisted per-conversation the same
+        temperature: This conversation's sampling temperature
+                     (``0.0``-``2.0``), or ``None`` to use the sandbox's own
+                     — *not* the model's: a value is always sent, and when
+                     this is ``None`` it comes from ``[prompt]`` in
+                     ``settings.default.toml``. See ``effective_sampling()``.
+                     Persisted per-conversation the same
                      way ``model`` is, so it doesn't reset every time the
                      page is reloaded. Only meaningful for models that
                      accept it — see
                      ``src.models.catalog.model_accepts_sampling_params``.
         top_p: This conversation's nucleus-sampling override (``0.0``-``1.0``),
-               or ``None`` for the model's default. Same persistence and
+               or ``None`` for the sandbox's own. Same persistence and
                model-support caveat as ``temperature``.
         max_tokens: This conversation's response-length cap override, or
-                    ``None`` for the model's default. Same persistence as
+                    ``None`` for the sandbox's own, which for this one is
+                    whatever the catalogue says the model can manage. Same
+                    persistence as
                     ``temperature``, but (unlike temperature/top-p) every
                     model accepts a max-tokens cap of some kind.
         system_prompt: Standing instructions for the model in this conversation
@@ -346,6 +392,29 @@ class ConversationStore:
         self.professor = professor
         self._dir = (base_dir if base_dir is not None else _conversations_dir()) / professor
         self._dir.mkdir(parents=True, exist_ok=True)
+        self._move_loose_files_into_folders()
+
+    def _move_loose_files_into_folders(self) -> None:
+        """Put each conversation saved as a loose file into a folder of its own.
+
+        Conversations used to be single files sitting side by side. They now
+        each have a folder, so that everything belonging to one — the
+        documents supplied to it, the files a job produced, the settings that
+        produced them — can sit together where a person can find it.
+
+        Done once, in place: the file is moved, not copied, so nothing is
+        duplicated and nothing is left behind to be read by mistake. A
+        conversation whose folder already exists is left alone. Once there
+        are no loose files this costs one directory listing and does nothing.
+        """
+        for loose in self._dir.glob("c_*.json"):
+            if not _CONVERSATION_ID_RE.fullmatch(loose.stem):
+                continue
+            destination = self._dir / loose.stem / "conversation.json"
+            if destination.exists():
+                continue
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            os.replace(loose, destination)
 
     def _path(self, conversation_id: str) -> Path:
         """Return the file this conversation is stored in, refusing anything malformed.
@@ -370,9 +439,45 @@ class ConversationStore:
                         instead, since a malformed id can't name a real
                         conversation anyway.
         """
+        return self.folder(conversation_id) / "conversation.json"
+
+    def folder(self, conversation_id: str) -> Path:
+        """Return the folder holding everything belonging to one conversation.
+
+        Each conversation has a folder of its own, named by its id, holding
+        the conversation itself, a readable note of the settings that
+        produced it, the documents supplied to it, and any files a plugin
+        job produced from it. The point is that the whole of a piece of work
+        sits in one place a person can open, keep, or cite, rather than being
+        spread between a file here and a job folder there.
+
+        The id is checked against the exact shape ``new_conversation_id()``
+        produces before it becomes part of a path. This is a security check,
+        not a tidiness one: an id arrives from the browser and is pasted
+        straight into a path, so without this an id containing ``../`` would
+        walk out of this professor's own folder — letting a request read,
+        overwrite or delete files anywhere the server can reach. It lives
+        here, in the one place every read and write funnels through, so that
+        a route added later inherits the protection rather than having to
+        remember it.
+
+        Raises:
+            ValueError: If *conversation_id* isn't a well-formed id. Callers
+                        simply looking something up (``load``, ``delete``)
+                        catch this and report "not found" instead, since a
+                        malformed id can't name a real conversation anyway.
+        """
         if not _CONVERSATION_ID_RE.fullmatch(conversation_id):
             raise ValueError(f"Malformed conversation id: {conversation_id!r}")
-        return self._dir / f"{conversation_id}.json"
+        return self._dir / conversation_id
+
+    def attachments_dir(self, conversation_id: str) -> Path:
+        """Return the folder for documents supplied to one conversation."""
+        return self.folder(conversation_id) / "attachments"
+
+    def outputs_dir(self, conversation_id: str) -> Path:
+        """Return the folder for files a plugin job produced in one conversation."""
+        return self.folder(conversation_id) / "outputs"
 
     def list_conversations(self) -> list[dict[str, Any]]:
         """Return a short summary of every saved conversation, newest first.
@@ -383,13 +488,13 @@ class ConversationStore:
             corrupted JSON) are skipped rather than raising.
         """
         summaries = []
-        for f in self._dir.glob("*.json"):
+        for f in self._dir.glob("c_*/conversation.json"):
             try:
                 data = json.loads(f.read_text())
             except (json.JSONDecodeError, OSError):
                 continue
             summaries.append({
-                "id": data.get("id", f.stem),
+                "id": data.get("id", f.parent.name),
                 "title": data.get("title", "Untitled conversation"),
                 "updated_at": data.get("updated_at", ""),
                 "model": data.get("model", ""),
@@ -431,9 +536,48 @@ class ConversationStore:
         """
         conversation.updated_at = datetime.now().isoformat()
         path = self._path(conversation.id)
+        path.parent.mkdir(parents=True, exist_ok=True)
         tmp_path = path.with_suffix(f".{os.getpid()}.{threading.get_ident()}.tmp")
         tmp_path.write_text(json.dumps(conversation.to_dict(), indent=2))
         os.replace(tmp_path, path)
+        self._write_settings_note(conversation)
+
+    def _write_settings_note(self, conversation: "Conversation") -> None:
+        """Write a plain readable note of the settings that produced this conversation.
+
+        Beside the conversation itself, so that someone opening the folder —
+        or citing it, or handing it to a colleague — can see which model
+        answered and under what instructions without opening a file meant for
+        the program to read. Written afresh on every save, so it always
+        describes the conversation as it now stands.
+        """
+        sent = effective_sampling(conversation)
+
+        def line(label: str, key: str) -> str:
+            # The value and nothing else. Who settled on it — this person, their
+            # group, or the sandbox — is not what anyone reading an archive is
+            # asking; they want to know what the answer was produced with.
+            return f"{label:<22}{sent[key]}"
+
+        lines = [
+            f"Conversation: {conversation.title}",
+            f"Reference:    {conversation.id}",
+            f"Started:      {conversation.created_at}",
+            f"Last updated: {conversation.updated_at}",
+            "",
+            f"Model:                {conversation.model}",
+            line("Temperature:", "temperature"),
+            line("Top-p:", "top_p"),
+            line("Max response tokens:", "max_tokens"),
+            "",
+            "Instructions given for the whole conversation:",
+            conversation.system_prompt or "  (none)",
+            "",
+        ]
+        note = self.folder(conversation.id) / "settings.txt"
+        tmp = note.with_suffix(f".{os.getpid()}.{threading.get_ident()}.tmp")
+        tmp.write_text("\n".join(lines), encoding="utf-8")
+        os.replace(tmp, note)
 
     def create(self, model: str, title: str = "New conversation") -> Conversation:
         """Create, save, and return a brand new empty conversation."""
@@ -452,10 +596,12 @@ class ConversationStore:
         reason ``load()`` returns ``None`` — see its docstring.
         """
         try:
-            path = self._path(conversation_id)
+            folder = self.folder(conversation_id)
         except ValueError:
             return False
-        if path.exists():
-            path.unlink()
+        # The whole folder: deleting a conversation and leaving the documents
+        # supplied to it behind would be a surprise, and an invisible one.
+        if folder.is_dir():
+            shutil.rmtree(folder, ignore_errors=True)
             return True
         return False
