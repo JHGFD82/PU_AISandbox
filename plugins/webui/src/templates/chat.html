@@ -834,14 +834,18 @@ function applySamplingVisibility() {
   const accepts = !model || model.accepts_sampling_params !== false;
   document.getElementById("sampling-temperature-field").style.display = accepts ? "" : "none";
   document.getElementById("sampling-top-p-field").style.display = accepts ? "" : "none";
+  showSamplingDefaults(model);
   showModelCapabilities(model);
 }
 
-// What the chosen model can do, said plainly. Temperature and top-p simply
-// vanish for a model that refuses them, which answers "why is that gone?" only
-// if you already knew it was there — this says so instead. Shown for every
-// model, not only the awkward ones, so it reads as a description of what you
-// picked rather than a warning about it.
+// What the chosen model can do that the boxes below do not already say.
+//
+// Only that. Whether it takes a temperature is answered by whether there is a
+// temperature box; how long an answer it can give is answered by what that box
+// says a blank one means. Repeating either would be one more thing to read and
+// one more thing to keep true. Reading images has no box, because it is not
+// something anyone sets — so it is stated here, and it is the sort of thing
+// that decides whether a model is any use for a folder of scans.
 function showModelCapabilities(model) {
   const box = document.getElementById("model-capabilities");
   box.innerHTML = "";
@@ -865,13 +869,6 @@ function showModelCapabilities(model) {
       model.supports_vision === true
         ? "Can read images and scanned pages"
         : "Cannot read images — text only");
-  say(model.accepts_sampling_params !== false,
-      model.accepts_sampling_params !== false
-        ? "Takes a temperature and top-p"
-        : "Sets its own temperature and top-p, and will not take yours");
-  if (model.max_response_tokens) {
-    say(true, `Can answer with up to ${model.max_response_tokens.toLocaleString()} tokens at once`);
-  }
 }
 
 function growSystemPrompt() {
@@ -882,12 +879,18 @@ function growSystemPrompt() {
   box.style.height = box.scrollHeight + "px";
 }
 
-function showSamplingDefaults() {
+function showSamplingDefaults(model) {
   // In the box, as the value a blank one stands for. Naming the number beats
   // naming the idea of a number: this is what the answer was produced with.
+  //
+  // The response cap is the model's own where it has one. Reasoning models
+  // spend part of their allowance on thinking that never reaches the answer, so
+  // they carry a larger one — 16,000 against 4,000 — and showing the shared
+  // figure for those said 4,000 where 16,000 was what actually happened.
   const d = state.defaultSampling || {};
+  const cap = (model && model.max_response_tokens) || d.max_tokens;
   [["sampling-temperature", d.temperature], ["sampling-top-p", d.top_p],
-   ["sampling-max-tokens", d.max_tokens]].forEach(([id, value]) => {
+   ["sampling-max-tokens", cap]].forEach(([id, value]) => {
     document.getElementById(id).placeholder = value === null || value === undefined ? "" : String(value);
   });
 }
@@ -897,7 +900,6 @@ function openSamplingPopover() {
   document.getElementById("sampling-top-p").value = state.sampling.top_p ?? "";
   document.getElementById("sampling-max-tokens").value = state.sampling.max_tokens ?? "";
   document.getElementById("sampling-system-prompt").value = state.sampling.system_prompt ?? "";
-  showSamplingDefaults();
   applySamplingVisibility();
   document.getElementById("sampling-options-popover").hidden = false;
   // Measured after the panel is shown; a box inside a hidden one has no height
