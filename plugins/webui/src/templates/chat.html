@@ -1051,10 +1051,40 @@ function jobFieldControlId(name) { return `job-field-${name}`; }
 // there. Max-tokens is always offered: every model accepts some response-
 // length cap, only the parameter name differs, which the backend already
 // handles.
+// What the modal is set to run on, falling back to the chat header's choice
+// before the form has been built.
+function jobModelName() {
+  const chooser = document.getElementById(jobFieldControlId("model"));
+  return (chooser && chooser.value)
+    || document.getElementById("model-field").value
+    || state.defaultModel;
+}
+
+// Sampling settings a model refuses are taken away, and what it can do is
+// restated, when the model is changed here — not only when the form was built.
+function applyJobModelChoice() {
+  const model = (state.models || []).find(m => m.name === jobModelName());
+  const accepts = !model || model.accepts_sampling_params !== false;
+  ["temperature", "top_p"].forEach(name => {
+    const wrap = document.getElementById(jobFieldControlId(name) + "-field");
+    if (wrap) wrap.style.display = accepts ? "" : "none";
+  });
+  const cap = document.getElementById(jobFieldControlId("max_tokens"));
+  if (cap && model && model.max_response_tokens) {
+    cap.placeholder = String(model.max_response_tokens);
+  }
+}
+
 function samplingFieldsFor(modelName, action) {
   const model = (state.models || []).find(m => m.name === modelName);
   const acceptsSampling = !model || model.accepts_sampling_params !== false;
   const fields = [];
+  // Which model does the work, chooseable here rather than only in the chat
+  // header — a job may want a different one from the conversation that started
+  // it, and closing the form to change it loses everything typed into it.
+  fields.push({
+    name: "model", label: "Model", kind: "model", required: false, group: "Sampling",
+  });
   // The number this action itself reports for an empty box — its own settings
   // with the group's and this person's already applied, so it is what would
   // actually be used, not a guess. An action that reports nothing gets a plain
@@ -1181,6 +1211,13 @@ async function openJobModal(action) {
   // clears this.
   restoreJobFieldValues(action.id, state.activeActionFields);
 
+  // Opens on the conversation's model, so leaving it alone behaves exactly as
+  // before this was offered. Set after restoring, so a model chosen for this
+  // action last time still wins.
+  const chooser = document.getElementById(jobFieldControlId("model"));
+  if (chooser && !chooser.value) chooser.value = model;
+  applyJobModelChoice();
+
   const targetEl = document.getElementById(jobFieldControlId("target_language"));
   if (targetEl) targetEl.addEventListener("change", refreshJobExtensionFields);
 
@@ -1299,6 +1336,7 @@ function buildFileModeToggle(field, input) {
 function buildJobFieldControl(field) {
   const wrap = document.createElement("div");
   wrap.className = "job-field" + (field.kind === "checkbox" ? " job-field-checkbox" : "");
+  wrap.id = jobFieldControlId(field.name) + "-field";
 
   if (field.kind === "checkbox") {
     const input = document.createElement("input");
@@ -1319,7 +1357,23 @@ function buildJobFieldControl(field) {
   wrap.appendChild(label);
 
   let input;
-  if (field.kind === "language") {
+  if (field.kind === "model") {
+    input = document.createElement("select");
+    input.id = jobFieldControlId(field.name);
+    (state.models || []).forEach(m => {
+      const opt = document.createElement("option");
+      opt.value = m.name;
+      opt.textContent = m.name;
+      input.appendChild(opt);
+    });
+    // Chosen for this job alone. The conversation goes on using whatever it was
+    // using, because running one translation on a different model is not a
+    // decision about the conversation it was started from.
+    input.addEventListener("change", () => {
+      applyJobModelChoice();
+      scheduleJobPreview();
+    });
+  } else if (field.kind === "language") {
     input = document.createElement("select");
     input.id = jobFieldControlId(field.name);
     const blank = document.createElement("option");
@@ -1400,7 +1454,10 @@ async function refreshJobPreview() {
   const action = state.activeAction;
   if (!action) return;
   const { values } = collectJobFieldValues(state.activeActionFields);
-  const model = document.getElementById("model-field").value || state.defaultModel;
+  // The preview must be of the job that would actually run, on the model that
+  // would actually run it — a prompt differs by model (see get_model_system_role).
+  const { model: _chosen, ...actionValues } = values;
+  const model = jobModelName();
   const systemEl = document.getElementById("job-preview-system");
   const userEl = document.getElementById("job-preview-user");
   const noteEl = document.getElementById("job-preview-note");
@@ -1408,7 +1465,7 @@ async function refreshJobPreview() {
     const resp = await fetch(`/api/plugin-actions/${encodeURIComponent(action.id)}/preview`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ professor: state.professor, model, fields: values }),
+      body: JSON.stringify({ professor: state.professor, model, fields: actionValues }),
     });
     const data = await resp.json();
     // A stale response landing after the modal moved on to a different
@@ -1453,8 +1510,10 @@ async function startJobFromModal() {
     return;
   }
 
-  const model = document.getElementById("model-field").value || state.defaultModel;
+  const model = jobModelName();
   if (!state.conversationId) {
+    // A conversation started by running a job begins on the model that job
+    // used, there being nothing else to go on.
     const conv = await api("/api/conversations", {
       method: "POST",
       body: JSON.stringify({ professor: state.professor, model }),
@@ -1472,7 +1531,11 @@ async function startJobFromModal() {
     formData.append("conversation_id", state.conversationId);
     formData.append("action_id", action.id);
     if (model) formData.append("model", model);
-    formData.append("fields_json", JSON.stringify(values));
+    // The model travels as its own form value, and is not one of the action's
+    // fields. Leaving it in here as well would hand every plugin a field it
+    // never declared.
+    const { model: _chosenModel, ...actionValues } = values;
+    formData.append("fields_json", JSON.stringify(actionValues));
     files.forEach(f => formData.append("files", f));
 
     const resp = await fetch("/api/jobs", { method: "POST", body: formData });
