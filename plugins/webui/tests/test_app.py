@@ -2848,7 +2848,9 @@ class TestTheSuppliedButtonIcons:
         """They were supplied painted white, which is invisible on a light page."""
 
         for button_id in ("theme-toggle-btn", "lock-btn", "sampling-options-btn",
-                          "plugin-action-btn"):
+                          "plugin-action-btn", "settings-btn", "spend-toggle-btn",
+                          "model-toggle-btn", "model-add-btn", "job-modal-reset",
+                          "settings-modal-close", "job-modal-close"):
             block = self._button(button_id)
             assert "currentColor" in block, button_id
             assert 'fill="white"' not in block, f"{button_id} is painted white regardless of theme"
@@ -2872,8 +2874,72 @@ class TestTheSuppliedButtonIcons:
             root = ET.fromstring(re.search(r"<svg\b.*?</svg>", self._button(button_id), re.S).group(0))
             assert len(root) == paths, button_id
 
+    def test_every_button_uses_the_supplied_artwork(self):
+        """None left on the drawing it shipped with."""
+        import re
+        from pathlib import Path
+
+        page = (Path(__file__).resolve().parents[1] / "src" / "templates" / "chat.html").read_text()
+        for m in re.finditer(r'<button\b[^>]*id="([^"]+)"[^>]*>(.*?)</button>', page, re.S):
+            block = m.group(2)
+            if "<svg" not in block:
+                continue
+            # The originals were drawn as strokes; every supplied one is a
+            # filled shape, so a leftover would show up here.
+            assert 'stroke="currentColor"' not in block, f"{m.group(1)} is still the old drawing"
+
+    def test_the_conversation_menu_dots_stand_upright(self):
+        """They are supplied in a row, and the button wants a column."""
+        import re
+        from pathlib import Path
+
+        page = (Path(__file__).resolve().parents[1] / "src" / "templates" / "chat.html").read_text()
+        dots = re.search(r"menuBtn\.innerHTML = '(.*?)';", page, re.S).group(1)
+        assert "icon-upright" in dots
+        assert ".icon-upright { transform: rotate(90deg); }" in page
+
+    def test_the_menu_button_gives_those_dots_a_square_to_sit_in(self):
+        """A drawing that is turned upright cannot be fitted to its old shape.
+
+        The box was 3px by 13px, for a drawing that was already vertical. The
+        supplied one is a wide row: fitted to that box it would come out 3px by
+        0.6px, and rotating that would not help.
+        """
+        from pathlib import Path
+
+        page = (Path(__file__).resolve().parents[1] / "src" / "templates" / "chat.html").read_text()
+        rule = page.split(".conv-menu-btn svg {")[1].split("}")[0]
+        width = rule.split("width:")[1].split("px")[0].strip()
+        height = rule.split("height:")[1].split("px")[0].strip()
+        assert width == height, f"the dots would be squashed before being turned: {width}x{height}"
+
+    def test_a_cross_is_the_plus_turned(self):
+        """Asked for: the same drawing, rotated, rather than a second one."""
+        from pathlib import Path
+
+        page = (Path(__file__).resolve().parents[1] / "src" / "templates" / "chat.html").read_text()
+        for button_id in ("settings-modal-close", "job-modal-close"):
+            start = page.index(f'id="{button_id}"')
+            block = page[page.rindex("<button", 0, start): page.index("</button>", start)]
+            assert "icon-as-cross" in block, button_id
+        assert "rotate(45deg)" in page
+        # Turned, its corners reach further than its sides did, so it is scaled
+        # back to sit level with the icons beside it.
+        assert "scale(0.707)" in page
+
+    def test_the_new_conversation_button_is_the_sandboxs_orange(self):
+        from pathlib import Path
+
+        page = (Path(__file__).resolve().parents[1] / "src" / "templates" / "chat.html").read_text()
+        start = page.index('id="new-conv"')
+        block = page[page.rindex("<button", 0, start): page.index("</button>", start)]
+        assert "#f58025" in block
+        assert "currentColor" not in block
+
     def test_no_drawing_carries_a_hidden_backing_rectangle(self):
         """Each was supplied with a fully transparent rect the size of itself."""
         for button_id in ("theme-toggle-btn", "lock-btn", "sampling-options-btn",
-                          "plugin-action-btn"):
+                          "plugin-action-btn", "settings-btn", "spend-toggle-btn",
+                          "new-conv", "model-toggle-btn", "model-add-btn",
+                          "job-modal-reset", "settings-modal-close", "job-modal-close"):
             assert "<rect" not in self._button(button_id), button_id

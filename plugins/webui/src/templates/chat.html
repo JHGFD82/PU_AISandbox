@@ -117,7 +117,10 @@
   }
   .conv-item:hover .conv-menu-btn, .conv-menu-btn.menu-open { opacity: 1; }
   .conv-menu-btn:hover { background: var(--border); }
-  .conv-menu-btn svg { width: 3px; height: 13px; display: block; }
+  /* Square, because the drawing is a wide row of dots that gets turned upright:
+     the old 3x13 box was shaped for a drawing that was already vertical, and
+     would shrink this one to almost nothing before rotating it. */
+  .conv-menu-btn svg { width: 13px; height: 13px; display: block; }
   .conv-menu {
     position: absolute; top: calc(100% + 2px); right: 0.3rem; min-width: 190px;
     background: var(--panel-bg); border: 1px solid var(--border); border-radius: 8px;
@@ -151,6 +154,11 @@
   .icon-btn:hover { background: var(--hover-bg); }
   .icon-btn.neutral { color: var(--text-muted); }
   .icon-btn svg { width: 18px; height: 18px; display: block; }
+  /* The three dots are drawn in a row; the button wants them in a column. */
+  .icon-upright { transform: rotate(90deg); }
+  /* A cross is a plus turned half a right angle. Scaled by the same amount its
+     corners gain, so it takes up no more room than the icons beside it. */
+  .icon-as-cross { transform: rotate(45deg) scale(0.707); }
   .sidebar-footer .icon-btn { width: 36px; height: 36px; }
   .sidebar-footer .icon-btn svg { width: 17px; height: 17px; }
   .conv-menu-divider { height: 1px; background: var(--border); margin: 0.3rem 0.2rem; }
@@ -444,10 +452,7 @@
         </span>
       </button>
       <button class="icon-btn" id="spend-toggle-btn" title="Hide spend panel" aria-label="Toggle spend panel">
-        <svg viewBox="0 0 18 18">
-          <rect x="1.5" y="2.5" width="15" height="13" rx="2" fill="none" stroke="currentColor" stroke-width="1.3"/>
-          <rect class="panel-fill" x="11.5" y="2.5" width="5" height="13" fill="currentColor"/>
-        </svg>
+        <svg viewBox="0 0 29.9512 22.959"><path d="M18.457 21.582L20.1465 21.582L20.1465 1.37695L18.457 1.37695ZM5.08789 22.959L24.7461 22.959C27.8027 22.959 29.5898 21.0938 29.5898 17.8809L29.5898 5.08789C29.5898 1.86523 27.8027 0 24.7461 0L5.08789 0C1.86523 0 0 1.86523 0 5.08789L0 17.8809C0 21.0938 1.86523 22.959 5.08789 22.959ZM5.09766 21.2305C2.97852 21.2305 1.72852 19.9805 1.72852 17.8613L1.72852 5.09766C1.72852 2.97852 2.97852 1.72852 5.09766 1.72852L24.4922 1.72852C26.6113 1.72852 27.8516 2.97852 27.8516 5.09766L27.8516 17.8613C27.8516 19.9805 26.6113 21.2305 24.4922 21.2305ZM22.5684 6.43555L25.4395 6.43555C25.7812 6.43555 26.0742 6.13281 26.0742 5.81055C26.0742 5.46875 25.7812 5.18555 25.4395 5.18555L22.5684 5.18555C22.2266 5.18555 21.9336 5.46875 21.9336 5.81055C21.9336 6.13281 22.2266 6.43555 22.5684 6.43555ZM22.5684 9.73633L25.4395 9.73633C25.7812 9.73633 26.0742 9.44336 26.0742 9.11133C26.0742 8.7793 25.7812 8.49609 25.4395 8.49609L22.5684 8.49609C22.2266 8.49609 21.9336 8.7793 21.9336 9.11133C21.9336 9.44336 22.2266 9.73633 22.5684 9.73633ZM22.5684 13.0371L25.4395 13.0371C25.7812 13.0371 26.0742 12.7539 26.0742 12.4219C26.0742 12.0898 25.7812 11.8066 25.4395 11.8066L22.5684 11.8066C22.2266 11.8066 21.9336 12.0898 21.9336 12.4219C21.9336 12.7539 22.2266 13.0371 22.5684 13.0371Z" fill="currentColor"/></svg>
       </button>
     </div>
   </div>
@@ -458,7 +463,7 @@
     <div class="section-header">
       <h2>Conversations</h2>
       <button id="new-conv" class="plus-btn" title="New conversation" aria-label="New conversation">
-        <svg viewBox="0 0 14 14"><path d="M7 1v12M1 7h12" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+        <svg viewBox="0 0 23.3203 22.959"><path d="M3.79883 22.959L19.1504 22.959C21.6797 22.959 22.959 21.6797 22.959 19.1992L22.959 3.76953C22.959 1.2793 21.6797 0 19.1504 0L3.79883 0C1.2793 0 0 1.26953 0 3.76953L0 19.1992C0 21.6992 1.2793 22.959 3.79883 22.959Z" fill="#f58025" fill-opacity="0.25"/><path d="M12.4121 16.4258L12.4121 6.49414C12.4121 5.92773 12.0312 5.53711 11.4648 5.53711C10.9375 5.53711 10.5566 5.9375 10.5566 6.49414L10.5566 16.4258C10.5566 16.9727 10.9375 17.373 11.4648 17.373C12.0312 17.373 12.4121 16.9824 12.4121 16.4258ZM6.52344 12.3828L16.4648 12.3828C17.002 12.3828 17.4023 12.0117 17.4023 11.4746C17.4023 10.9082 17.0117 10.5273 16.4648 10.5273L6.52344 10.5273C5.95703 10.5273 5.56641 10.9082 5.56641 11.4746C5.56641 12.0117 5.9668 12.3828 6.52344 12.3828Z" fill="#f58025"/></svg>
       </button>
     </div>
     <div id="conv-list"></div>
@@ -469,14 +474,7 @@
              as near-identical to the sun icon's radial rays at this size, so
              this uses a completely different shape (horizontal tracks with
              knobs) to stay unambiguous next to the theme toggle. -->
-        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
-          <line x1="2.5" y1="5" x2="17.5" y2="5"/>
-          <circle cx="12.5" cy="5" r="2" fill="currentColor" stroke="none"/>
-          <line x1="2.5" y1="10" x2="17.5" y2="10"/>
-          <circle cx="7" cy="10" r="2" fill="currentColor" stroke="none"/>
-          <line x1="2.5" y1="15" x2="17.5" y2="15"/>
-          <circle cx="14" cy="15" r="2" fill="currentColor" stroke="none"/>
-        </svg>
+        <svg viewBox="0 0 25.4785 21.2793"><path d="M17.207 21.2793C18.8086 21.2793 20.1172 19.9707 20.1172 18.3691C20.1172 16.7773 18.8086 15.4688 17.207 15.4688C15.6152 15.4688 14.3066 16.7773 14.3066 18.3691C14.3066 19.9707 15.6152 21.2793 17.207 21.2793ZM17.207 19.8926C16.3574 19.8926 15.6934 19.2188 15.6934 18.3691C15.6934 17.5098 16.3574 16.8457 17.207 16.8457C18.0664 16.8457 18.7305 17.5098 18.7305 18.3691C18.7305 19.2188 18.0664 19.8926 17.207 19.8926ZM15.1953 17.5L0.869141 17.5C0.380859 17.5 0 17.8809 0 18.3691C0 18.8477 0.380859 19.2285 0.869141 19.2285L15.1953 19.2285ZM24.2871 17.5L19.3652 17.5L19.3652 19.2285L24.2871 19.2285C24.7363 19.2285 25.1172 18.8477 25.1172 18.3691C25.1172 17.8809 24.7363 17.5 24.2871 17.5ZM8.1543 13.5742C9.75586 13.5742 11.0645 12.2754 11.0645 10.6738C11.0645 9.07227 9.75586 7.76367 8.1543 7.76367C6.5625 7.76367 5.25391 9.07227 5.25391 10.6738C5.25391 12.2754 6.5625 13.5742 8.1543 13.5742ZM8.1543 12.1973C7.30469 12.1973 6.64062 11.5137 6.64062 10.6641C6.64062 9.80469 7.30469 9.14062 8.1543 9.14062C9.01367 9.14062 9.67773 9.80469 9.67773 10.6641C9.67773 11.5137 9.01367 12.1973 8.1543 12.1973ZM0.830078 9.80469C0.380859 9.80469 0 10.1855 0 10.6641C0 11.1523 0.380859 11.5332 0.830078 11.5332L6.02539 11.5332L6.02539 9.80469ZM24.248 9.80469L10.1758 9.80469L10.1758 11.5332L24.248 11.5332C24.7363 11.5332 25.1172 11.1523 25.1172 10.6641C25.1172 10.1855 24.7363 9.80469 24.248 9.80469ZM17.207 5.85938C18.8086 5.85938 20.1172 4.55078 20.1172 2.94922C20.1172 1.35742 18.8086 0.0488281 17.207 0.0488281C15.6152 0.0488281 14.3066 1.35742 14.3066 2.94922C14.3066 4.55078 15.6152 5.85938 17.207 5.85938ZM17.207 4.47266C16.3574 4.47266 15.6934 3.79883 15.6934 2.94922C15.6934 2.08984 16.3574 1.42578 17.207 1.42578C18.0664 1.42578 18.7305 2.08984 18.7305 2.94922C18.7305 3.79883 18.0664 4.47266 17.207 4.47266ZM15.2246 2.09961L0.869141 2.09961C0.380859 2.09961 0 2.48047 0 2.96875C0 3.44727 0.380859 3.82812 0.869141 3.82812L15.2246 3.82812ZM24.2871 2.09961L19.2578 2.09961L19.2578 3.82812L24.2871 3.82812C24.7363 3.82812 25.1172 3.44727 25.1172 2.96875C25.1172 2.48047 24.7363 2.09961 24.2871 2.09961Z" fill="currentColor"/></svg>
       </button>
       <button class="icon-btn neutral" id="lock-btn" title="Lock" aria-label="Lock">
         <svg viewBox="0 0 17.5 25.2051"><path d="M2.73438 24.541L14.4043 24.541C16.1523 24.541 17.1387 23.5352 17.1387 21.6602L17.1387 12.7734C17.1387 10.8984 16.1523 9.89258 14.4043 9.89258L2.73438 9.89258C0.976562 9.89258 0 10.8984 0 12.7734L0 21.6602C0 23.5352 0.976562 24.541 2.73438 24.541ZM2.77344 22.9102C2.13867 22.9102 1.73828 22.4805 1.73828 21.7676L1.73828 12.6562C1.73828 11.9434 2.13867 11.5234 2.77344 11.5234L14.375 11.5234C15.0098 11.5234 15.3906 11.9434 15.3906 12.6562L15.3906 21.7676C15.3906 22.4805 15.0098 22.9102 14.375 22.9102ZM2.23633 10.7129L3.95508 10.7129L3.95508 6.72852C3.95508 3.47656 6.01562 1.63086 8.56445 1.63086C11.1133 1.63086 13.1934 3.47656 13.1934 6.72852L13.1934 10.7129L14.9121 10.7129L14.9121 6.92383C14.9121 2.38281 11.9434 0 8.56445 0C5.19531 0 2.23633 2.38281 2.23633 6.92383Z" fill="currentColor"/></svg>
@@ -491,15 +489,13 @@
           <input class="model-field" id="model-field" type="text" readonly
                  placeholder="Model (e.g. gpt-4o, anthropic/claude-fable-5)" autocomplete="off">
           <button type="button" class="combobox-toggle" id="model-toggle-btn" aria-label="Show model list" title="Show model list">
-            <svg viewBox="0 0 10 6" width="10" height="6">
-              <path d="M1 1l4 4 4-4" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
+            <svg viewBox="0 0 21.6895 12.959"><path d="M10.6641 12.959C10.9473 12.959 11.2109 12.832 11.4062 12.6172L21.0352 2.58789C21.2207 2.40234 21.3281 2.16797 21.3281 1.89453C21.3281 1.34766 20.9082 0.927734 20.3516 0.927734C20.0977 0.927734 19.8438 1.02539 19.6582 1.20117L10.0684 11.1816L11.2695 11.1816L1.66016 1.20117C1.48438 1.02539 1.24023 0.927734 0.976562 0.927734C0.419922 0.927734 0 1.34766 0 1.89453C0 2.16797 0.117188 2.40234 0.292969 2.59766L9.92188 12.627C10.1367 12.832 10.3809 12.959 10.6641 12.959Z" fill="currentColor"/></svg>
           </button>
           <div class="combobox-list" id="model-list" hidden></div>
         </div>
         <div class="model-add" id="model-add">
           <button type="button" class="icon-btn neutral" id="model-add-btn" title="Use a custom model" aria-label="Use a custom model">
-            <svg viewBox="0 0 14 14"><path d="M7 1v12M1 7h12" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+            <svg viewBox="0 0 20.918 20.5762"><path d="M11.2305 19.5996L11.2305 0.957031C11.2305 0.439453 10.8008 0 10.2734 0C9.75586 0 9.32617 0.439453 9.32617 0.957031L9.32617 19.5996C9.32617 20.1172 9.75586 20.5566 10.2734 20.5566C10.8008 20.5566 11.2305 20.1172 11.2305 19.5996ZM0.957031 11.2305L19.5996 11.2305C20.1172 11.2305 20.5566 10.8008 20.5566 10.2832C20.5566 9.75586 20.1172 9.32617 19.5996 9.32617L0.957031 9.32617C0.439453 9.32617 0 9.75586 0 10.2832C0 10.8008 0.439453 11.2305 0.957031 11.2305Z" fill="currentColor"/></svg>
           </button>
           <div class="model-add-popover" id="model-add-popover" hidden>
             <input type="text" id="model-add-input" placeholder="e.g. openai/gpt-4o" autocomplete="off">
@@ -595,7 +591,7 @@
       <div class="modal-header">
         <h2 style="margin:0; text-transform:none; font-size:1rem; letter-spacing:normal;">Settings</h2>
         <button type="button" class="icon-btn" id="settings-modal-close" title="Close" aria-label="Close settings">
-          <svg viewBox="0 0 14 14"><path d="M1 1l12 12M13 1L1 13" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+          <svg class="icon-as-cross" viewBox="0 0 20.918 20.5762"><path d="M11.2305 19.5996L11.2305 0.957031C11.2305 0.439453 10.8008 0 10.2734 0C9.75586 0 9.32617 0.439453 9.32617 0.957031L9.32617 19.5996C9.32617 20.1172 9.75586 20.5566 10.2734 20.5566C10.8008 20.5566 11.2305 20.1172 11.2305 19.5996ZM0.957031 11.2305L19.5996 11.2305C20.1172 11.2305 20.5566 10.8008 20.5566 10.2832C20.5566 9.75586 20.1172 9.32617 19.5996 9.32617L0.957031 9.32617C0.439453 9.32617 0 9.75586 0 10.2832C0 10.8008 0.439453 11.2305 0.957031 11.2305Z" fill="currentColor"/></svg>
         </button>
       </div>
       <iframe id="settings-iframe" title="Settings"></iframe>
@@ -616,13 +612,10 @@
             <!-- Two arrows chasing each other in a circle, like a browser
                  reload button — clearing the form back to blank, distinct
                  from just closing it (which now preserves values). -->
-            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M4 9a6 6 0 0110.5-3.9M16 9a6 6 0 01-10.5 3.9"/>
-              <path d="M14.5 2.6v2.9h-2.9M5.5 17.4v-2.9h2.9"/>
-            </svg>
+            <svg viewBox="0 0 25.8008 30.579"><path d="M14.4824 0.792409C14.4824 0.00139356 13.9355-0.223216 13.3008 0.235769L9.35547 3.00921C8.81836 3.3803 8.82812 3.91741 9.35547 4.27874L13.3105 7.05217C13.9355 7.49163 14.4824 7.27678 14.4824 6.48577ZM23.6133 15.2846C23.6133 18.4877 22.2363 21.3979 19.9805 23.4096C19.5117 23.8393 19.5215 24.3178 19.7852 24.6694C20.0684 25.0698 20.6934 25.2162 21.1719 24.7768C23.8086 22.4428 25.4395 19.0248 25.4395 15.2846C25.4395 8.26311 19.7461 2.56975 12.7051 2.55999C12.2168 2.56975 11.8164 2.97991 11.8164 3.46819C11.8164 3.976 12.2266 4.38616 12.7148 4.38616C18.7402 4.38616 23.6133 9.25921 23.6133 15.2846ZM10.957 29.767C10.957 30.5678 11.5039 30.7826 12.1387 30.3334L16.084 27.56C16.6113 27.1889 16.6016 26.6518 16.084 26.2807L12.1289 23.5073C11.5039 23.0678 10.957 23.2924 10.957 24.0737ZM1.81641 15.2846C1.81641 12.0815 3.20312 9.17132 5.44922 7.14983C5.92773 6.72014 5.9082 6.25139 5.6543 5.89983C5.36133 5.49944 4.74609 5.35296 4.25781 5.78264C1.63086 8.12639 0 11.5444 0 15.2846C0 22.3061 5.68359 27.9897 12.7246 27.9994C13.2227 27.9897 13.623 27.5893 13.623 27.0912C13.623 26.5932 13.2129 26.183 12.7148 26.183C6.68945 26.183 1.81641 21.31 1.81641 15.2846Z" fill="currentColor"/></svg>
           </button>
           <button type="button" class="icon-btn" id="job-modal-close" title="Close" aria-label="Close">
-            <svg viewBox="0 0 14 14"><path d="M1 1l12 12M13 1L1 13" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+            <svg class="icon-as-cross" viewBox="0 0 20.918 20.5762"><path d="M11.2305 19.5996L11.2305 0.957031C11.2305 0.439453 10.8008 0 10.2734 0C9.75586 0 9.32617 0.439453 9.32617 0.957031L9.32617 19.5996C9.32617 20.1172 9.75586 20.5566 10.2734 20.5566C10.8008 20.5566 11.2305 20.1172 11.2305 19.5996ZM0.957031 11.2305L19.5996 11.2305C20.1172 11.2305 20.5566 10.8008 20.5566 10.2832C20.5566 9.75586 20.1172 9.32617 19.5996 9.32617L0.957031 9.32617C0.439453 9.32617 0 9.75586 0 10.2832C0 10.8008 0.439453 11.2305 0.957031 11.2305Z" fill="currentColor"/></svg>
           </button>
         </div>
       </div>
@@ -1780,8 +1773,7 @@ async function loadConversations() {
     menuBtn.className = "conv-menu-btn";
     menuBtn.setAttribute("aria-label", "Conversation options");
     menuBtn.title = "Conversation options";
-    menuBtn.innerHTML = '<svg viewBox="0 0 4 16"><circle cx="2" cy="2" r="1.6" fill="currentColor"/>'
-      + '<circle cx="2" cy="8" r="1.6" fill="currentColor"/><circle cx="2" cy="14" r="1.6" fill="currentColor"/></svg>';
+    menuBtn.innerHTML = '<svg class="icon-upright" viewBox="0 0 23.1641 4.58008"><path d="M20.5176 4.56055C21.7773 4.56055 22.8027 3.54492 22.8027 2.28516C22.8027 1.01562 21.7773 0 20.5176 0C19.2578 0 18.2324 1.01562 18.2324 2.28516C18.2324 3.54492 19.2578 4.56055 20.5176 4.56055Z" fill="currentColor"/><path d="M11.3965 4.56055C12.666 4.56055 13.6816 3.54492 13.6816 2.28516C13.6816 1.01562 12.666 0 11.3965 0C10.1367 0 9.12109 1.01562 9.12109 2.28516C9.12109 3.54492 10.1367 4.56055 11.3965 4.56055Z" fill="currentColor"/><path d="M2.28516 4.56055C3.54492 4.56055 4.57031 3.54492 4.57031 2.28516C4.57031 1.01562 3.54492 0 2.28516 0C1.01562 0 0 1.01562 0 2.28516C0 3.54492 1.01562 4.56055 2.28516 4.56055Z" fill="currentColor"/></svg>';
 
     const menu = document.createElement("div");
     menu.className = "conv-menu";
