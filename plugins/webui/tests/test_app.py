@@ -2813,12 +2813,17 @@ class TestTheSandboxsMarkSitsBehindItsName:
         root = ET.fromstring(unquote(as_a_browser_reads_it))
         assert len(root) == 3
 
-    def test_the_words_are_readable_over_it(self):
-        """Behind the name, not across it — the name is the thing being read."""
+    def test_the_mark_is_actually_drawn(self):
         page = self._page()
         mark = page.split(".page-title-mark {")[1].split("}")[0]
-        opacity = float(mark.split("opacity:")[1].split(";")[0])
-        assert 0 < opacity <= 0.35, f"the mark is drawn at {opacity}, which would obscure the name"
+        assert float(mark.split("opacity:")[1].split(";")[0]) > 0
+
+    def test_the_name_does_not_sit_on_top_of_the_mark(self):
+        """The mark is drawn at full strength, so the words move clear of it
+        rather than being read through it."""
+        page = self._page()
+        text = page.split(".page-title-text {")[1].split("}")[0]
+        assert "left:" in text, "the name would overlap the mark it is meant to sit beside"
 
     def test_it_is_visible_in_both_themes(self):
         page = self._page()
@@ -2827,3 +2832,48 @@ class TestTheSandboxsMarkSitsBehindItsName:
     def test_a_screen_reader_is_not_told_the_name_twice(self):
         page = self._page()
         assert '<span class="page-title-mark" aria-hidden="true">' in page
+
+
+class TestTheSuppliedButtonIcons:
+    """Drawings supplied for the buttons, fitted to how the buttons work here."""
+
+    def _button(self, button_id):
+        from pathlib import Path
+
+        page = (Path(__file__).resolve().parents[1] / "src" / "templates" / "chat.html").read_text()
+        start = page.index(f'id="{button_id}"')
+        return page[page.rindex("<button", 0, start): page.index("</button>", start)]
+
+    def test_every_icon_takes_its_colour_from_the_button(self):
+        """They were supplied painted white, which is invisible on a light page."""
+
+        for button_id in ("theme-toggle-btn", "lock-btn", "sampling-options-btn",
+                          "plugin-action-btn"):
+            block = self._button(button_id)
+            assert "currentColor" in block, button_id
+            assert 'fill="white"' not in block, f"{button_id} is painted white regardless of theme"
+            assert "fill-opacity" not in block, f"{button_id} is drawn faded"
+
+    def test_the_theme_button_still_holds_both_drawings(self):
+        """It cross-fades between them; one would leave nothing to fade to."""
+        import re
+
+        block = self._button("theme-toggle-btn")
+        assert len(re.findall(r"<svg\b", block)) == 2
+        assert 'class="icon-sun"' in block and 'class="icon-moon"' in block
+
+    def test_each_drawing_is_whole(self):
+        """A path lost in the swap would show as a piece of an icon."""
+        import re
+        import xml.etree.ElementTree as ET
+
+        expected = {"lock-btn": 1, "sampling-options-btn": 1, "plugin-action-btn": 1}
+        for button_id, paths in expected.items():
+            root = ET.fromstring(re.search(r"<svg\b.*?</svg>", self._button(button_id), re.S).group(0))
+            assert len(root) == paths, button_id
+
+    def test_no_drawing_carries_a_hidden_backing_rectangle(self):
+        """Each was supplied with a fully transparent rect the size of itself."""
+        for button_id in ("theme-toggle-btn", "lock-btn", "sampling-options-btn",
+                          "plugin-action-btn"):
+            assert "<rect" not in self._button(button_id), button_id
