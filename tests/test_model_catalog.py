@@ -1172,3 +1172,29 @@ class TestQuirksGatheredFromEitherSpelling:
         self._catalog(monkeypatch, entry)
         assert model_rejected_fields("m") == {}
         assert model_preferences("m") == {}
+
+
+class TestModelsAreListedTheWayPeopleRead:
+    """One capitalised name should not sit alone at the top of the list."""
+
+    def _ordered(self, names, monkeypatch):
+        from src.models import catalog
+
+        monkeypatch.setattr(catalog, "get_available_models", lambda: list(names))
+        return catalog.models_in_reading_order()
+
+    def test_capitals_do_not_jump_the_queue(self, monkeypatch):
+        names = ["gpt-4o", "Llama-3.3-70B-Instruct", "mistral-small", "claude-sonnet-5"]
+        assert self._ordered(names, monkeypatch) == [
+            "claude-sonnet-5", "gpt-4o", "Llama-3.3-70B-Instruct", "mistral-small",
+        ]
+
+    def test_plain_sorting_is_what_this_replaces(self, monkeypatch):
+        """Stated so the difference is not mistaken for a matter of taste."""
+        names = ["gpt-4o", "Llama-3.3-70B-Instruct"]
+        assert sorted(names)[0] == "Llama-3.3-70B-Instruct"
+        assert self._ordered(names, monkeypatch)[0] == "gpt-4o"
+
+    def test_every_model_is_still_there(self, monkeypatch):
+        names = ["b", "A", "c"]
+        assert sorted(self._ordered(names, monkeypatch)) == sorted(names)

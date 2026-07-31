@@ -211,6 +211,26 @@ def get_available_models() -> List[str]:
     return list(config["models"].keys())
 
 
+def models_in_reading_order() -> List[str]:
+    """Return every model in the catalog, in the order a person would look for them.
+
+    Alphabetical, ignoring capitals. Plain alphabetical order puts every capital
+    letter before every small one, so a single model named with a capital —
+    ``Llama-3.3-70B-Instruct`` among twenty-seven lower-case names — sits alone
+    at the top of the list, above everything, for no reason a reader could see.
+
+    Use this wherever a list of models is shown to somebody. Sorting at each
+    place it is displayed is how the two lists in this sandbox came to be
+    ordered the same wrong way.
+
+    Returns:
+        The model names, ordered for reading. Anywhere the order does not
+        matter — checking whether a model exists, working out the cheapest —
+        use ``get_available_models()``.
+    """
+    return sorted(get_available_models(), key=str.lower)
+
+
 def get_model_pricing(model: str) -> Dict[str, float]:
     """Return the input and output cost rates for a model from the catalog.
 

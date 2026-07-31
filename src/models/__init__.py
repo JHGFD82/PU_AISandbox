@@ -9,6 +9,7 @@ from .embedded_media import EmbeddedMedia
 from .catalog import (
     MODEL_CATALOG_FILE,
     get_available_models,
+    models_in_reading_order,
     cheapest_model,
     get_model_catalog_path,
     get_model_max_completion_tokens,
@@ -45,6 +46,7 @@ __all__ = [
     "load_model_catalog",
     "save_model_catalog",
     "get_available_models",
+    "models_in_reading_order",
     "cheapest_model",
     "get_model_pricing",
     "get_pricing_unit",

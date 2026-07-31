@@ -257,7 +257,7 @@ def _parse_sse(text: str) -> list[dict]:
 class TestModelsEndpoint:
     def test_includes_accepts_sampling_params_flag(self, unlocked_client, monkeypatch):
         app_module = sys.modules["_pu_webui_app"]
-        monkeypatch.setattr(app_module, "get_available_models", lambda: ["gpt-4o", "o3-mini"])
+        monkeypatch.setattr(app_module, "models_in_reading_order", lambda: ["gpt-4o", "o3-mini"])
         monkeypatch.setattr(app_module, "model_supports_vision", lambda m: m == "gpt-4o")
         monkeypatch.setattr(app_module, "model_accepts_sampling_params", lambda m: m != "o3-mini")
         monkeypatch.setattr(app_module, "resolve_model", lambda **kw: "gpt-4o")
@@ -273,7 +273,7 @@ class TestModelsEndpoint:
         # that refuses temperature/top-p — see model_accepts_sampling_params's
         # docstring. Either flag alone should hide the controls.
         app_module = sys.modules["_pu_webui_app"]
-        monkeypatch.setattr(app_module, "get_available_models", lambda: ["some-model"])
+        monkeypatch.setattr(app_module, "models_in_reading_order", lambda: ["some-model"])
         monkeypatch.setattr(app_module, "model_supports_vision", lambda m: False)
         monkeypatch.setattr(app_module, "model_accepts_sampling_params", lambda m: False)
         monkeypatch.setattr(app_module, "resolve_model", lambda **kw: "some-model")
@@ -2560,3 +2560,29 @@ class TestTheEndpointListDescribesEndpointsTruthfully:
         page = (Path(__file__).resolve().parents[1] / "src" / "templates" / "settings.html").read_text()
         assert "marked as not OpenAI-compatible" in page
         assert '" · OpenAI-compatible"' not in page
+
+
+class TestTheModelMenuReadsInOrder:
+    def test_the_menu_uses_the_shared_ordering(self, unlocked_client, monkeypatch):
+        """Sorting at each display site is how two lists went wrong the same way."""
+        import sys
+
+        app_module = sys.modules["_pu_webui_app"]
+        monkeypatch.setattr(
+            app_module, "models_in_reading_order",
+            lambda: ["claude-sonnet-5", "gpt-4o", "Llama-3.3-70B-Instruct"],
+        )
+        monkeypatch.setattr(app_module, "model_supports_vision", lambda m: True)
+        monkeypatch.setattr(app_module, "model_accepts_sampling_params", lambda m: True)
+        monkeypatch.setattr(app_module, "resolve_model", lambda **kw: "gpt-4o")
+        names = [m["name"] for m in
+                 unlocked_client.get("/api/models?professor=heller").json()["models"]]
+        assert names == ["claude-sonnet-5", "gpt-4o", "Llama-3.3-70B-Instruct"]
+
+    def test_the_page_shows_them_in_the_order_it_is_given(self):
+        """The list is built by walking state.models, so the server decides."""
+        from pathlib import Path
+
+        page = (Path(__file__).resolve().parents[1] / "src" / "templates" / "chat.html").read_text()
+        assert "state.models.forEach" in page
+        assert ".sort(" not in page.split("function renderModelList")[1].split("}")[0]

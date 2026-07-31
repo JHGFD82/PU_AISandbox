@@ -135,7 +135,8 @@ def list_available_models() -> None:
     print(f"\n{bar}")
     print(f"Pricing is per {pricing_unit:,} tokens\n")
 
-    for model_name, pricing in sorted(models.items()):
+    # Ignoring capitals, so one capitalised name does not sit alone at the top.
+    for model_name, pricing in sorted(models.items(), key=lambda pair: pair[0].lower()):
         vision = "✓" if pricing.get("supports_vision", False) else "✗"
         print(f"{model_name}")
         print(f"  Vision Support: {vision}")
