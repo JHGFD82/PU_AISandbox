@@ -2697,3 +2697,66 @@ class TestTheModelSaysWhatItCanDo:
         page = self._page()
         visibility = page.split("function applySamplingVisibility")[1].split("\n}")[0]
         assert "showSamplingDefaults(model)" in visibility
+
+
+class TestAJobCanRunOnItsOwnModel:
+    """Choosable in the form, without changing the conversation."""
+
+    def _page(self):
+        from pathlib import Path
+
+        return (Path(__file__).resolve().parents[1] / "src" / "templates" / "chat.html").read_text()
+
+    def test_the_form_offers_a_model(self):
+        page = self._page()
+        assert 'name: "model", label: "Model", kind: "model"' in page
+
+    def test_the_job_runs_on_what_the_form_says(self):
+        """Not on the chat header, which the form only starts from."""
+        page = self._page()
+        start = page.split("async function startJobFromModal")[1]
+        assert "const model = jobModelName();" in start
+
+    def test_the_preview_is_of_the_job_that_would_run(self):
+        """A prompt differs by model — see get_model_system_role."""
+        page = self._page()
+        preview = page.split("async function refreshJobPreview")[1].split("\n}")[0]
+        assert "jobModelName()" in preview
+
+    def test_the_model_is_not_passed_off_as_one_of_the_plugins_fields(self):
+        """It is the sandbox's field, not something any plugin declared."""
+        page = self._page()
+        assert "const { model: _chosenModel, ...actionValues } = values;" in page
+        assert "fields_json\", JSON.stringify(actionValues)" in page
+
+    def test_the_conversation_keeps_its_own_model(self, unlocked_client, monkeypatch):
+        """Running one job on another model is not a decision about the chat."""
+        import sys
+
+        conv_id = unlocked_client.post(
+            "/api/conversations", json={"professor": "heller", "model": "gpt-4o"}
+        ).json()["id"]
+
+        jobs_module = sys.modules["_pu_webui_jobs"]
+        started = {}
+
+        def remember(**kwargs):
+            started.update(kwargs)
+            from unittest.mock import MagicMock
+
+            job = MagicMock()
+            job.id = "job_1"
+            return job
+
+        monkeypatch.setattr(jobs_module, "start_job", remember)
+        resp = unlocked_client.post("/api/jobs", data={
+            "professor": "heller", "conversation_id": conv_id,
+            "action_id": "translate", "model": "o3-mini", "fields_json": "{}",
+        })
+        assert resp.status_code in (200, 400, 404), resp.text
+        if resp.status_code == 200:
+            assert started.get("model") == "o3-mini", "the job did not run on the chosen model"
+        conv = unlocked_client.get(
+            f"/api/conversations/{conv_id}?professor=heller"
+        ).json()
+        assert conv["model"] == "gpt-4o", "running a job changed the conversation's model"
