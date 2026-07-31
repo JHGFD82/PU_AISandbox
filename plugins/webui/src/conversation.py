@@ -553,9 +553,11 @@ class ConversationStore:
         """
         sent = effective_sampling(conversation)
 
-        def line(label: str, chosen: Any, key: str) -> str:
-            source = "chosen for this conversation" if chosen is not None else "the sandbox's own default"
-            return f"{label:<22}{sent[key]}   ({source})"
+        def line(label: str, key: str) -> str:
+            # The value and nothing else. Who settled on it — this person, their
+            # group, or the sandbox — is not what anyone reading an archive is
+            # asking; they want to know what the answer was produced with.
+            return f"{label:<22}{sent[key]}"
 
         lines = [
             f"Conversation: {conversation.title}",
@@ -564,9 +566,9 @@ class ConversationStore:
             f"Last updated: {conversation.updated_at}",
             "",
             f"Model:                {conversation.model}",
-            line("Temperature:", conversation.temperature, "temperature"),
-            line("Top-p:", conversation.top_p, "top_p"),
-            line("Max response tokens:", conversation.max_tokens, "max_tokens"),
+            line("Temperature:", "temperature"),
+            line("Top-p:", "top_p"),
+            line("Max response tokens:", "max_tokens"),
             "",
             "Instructions given for the whole conversation:",
             conversation.system_prompt or "  (none)",

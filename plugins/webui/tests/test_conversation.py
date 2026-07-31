@@ -534,20 +534,20 @@ class TestEachConversationHasAFolder:
         note = (store.folder(conv.id) / "settings.txt").read_text()
         assert str(PROMPT_TEMPERATURE) in note
         assert str(PROMPT_TOP_P) in note
-        assert "default" not in note.lower() or "the sandbox's own default" in note
-        assert "model's default" not in note
+        assert "default" not in note.lower(), "the note describes a value instead of giving it"
 
-    def test_the_note_says_where_each_value_came_from(self, tmp_path):
-        """A number alone cannot say whether anyone chose it."""
+    def test_a_chosen_value_and_a_filled_in_one_read_the_same(self, tmp_path):
+        """An archive states what the settings were, not who settled on them."""
+        from src.settings import PROMPT_TOP_P
+
         store = self._store(tmp_path)
         conv = store.create(model="gpt-4o")
         conv.temperature = 0.2
         store.save(conv)
         note = (store.folder(conv.id) / "settings.txt").read_text()
-        temperature_line = next(ln for ln in note.splitlines() if ln.startswith("Temperature:"))
-        top_p_line = next(ln for ln in note.splitlines() if ln.startswith("Top-p:"))
-        assert "0.2" in temperature_line and "chosen for this conversation" in temperature_line
-        assert "the sandbox's own default" in top_p_line
+        lines = {ln.split(":")[0]: ln for ln in note.splitlines() if ":" in ln}
+        assert lines["Temperature"].split(":")[1].strip() == "0.2"
+        assert lines["Top-p"].split(":")[1].strip() == str(PROMPT_TOP_P)
 
     def test_a_model_missing_from_the_catalogue_still_gets_a_note(self, tmp_path):
         """A conversation outlives the model it used."""
