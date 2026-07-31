@@ -2495,3 +2495,44 @@ class TestTheInterfaceNamesTheValue:
         assert "Model default" not in page
         assert "model default" not in page
         assert "model's default" not in page
+
+
+class TestAJobFormNamesItsOwnNumbers:
+    """A blank box in a job form has a real value behind it, and shows it.
+
+    The value comes from the plugin's own settings with the group's shared file
+    and this person's preferences applied — so somebody who set
+    ``[translation] temperature`` sees the number they set, not a description.
+    """
+
+    def _page(self):
+        from pathlib import Path
+
+        from fastapi.templating import Jinja2Templates
+
+        here = Path(__file__).resolve().parents[1] / "src" / "templates"
+        return (Jinja2Templates(directory=str(here)).env
+                .get_template("chat.html").render(request=None))
+
+    def test_whatever_an_action_reports_reaches_the_browser(self, unlocked_client):
+        """The route hands the values on; each plugin decides what they are."""
+        actions = unlocked_client.get("/api/plugin-actions?professor=heller").json()["actions"]
+        assert all("sampling" in a for a in actions), (
+            "an action's own settings are dropped on the way to the page"
+        )
+
+    def test_the_form_shows_the_number_beside_the_box(self):
+        page = self._page()
+        assert "blank = ${declared[key]}" in page
+
+    def test_a_label_reads_properly_whether_or_not_it_has_a_range(self):
+        """Max response tokens has no range, and read "(, blank = 4000)"."""
+        page = self._page()
+        assert "parts.join(\", \")" in page
+        assert 'samplingLabel("Max response tokens", "max_tokens")' in page
+
+    def test_an_action_that_reports_nothing_gets_no_invented_figure(self):
+        """A plugin that declares no settings gets a plain label, not a guess."""
+        page = self._page()
+        assert "declared[key] !== undefined && declared[key] !== null" in page
+        assert "parts.length ? " in page

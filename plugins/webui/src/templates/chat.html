@@ -991,26 +991,35 @@ function jobFieldControlId(name) { return `job-field-${name}`; }
 // there. Max-tokens is always offered: every model accepts some response-
 // length cap, only the parameter name differs, which the backend already
 // handles.
-function samplingFieldsFor(modelName) {
+function samplingFieldsFor(modelName, action) {
   const model = (state.models || []).find(m => m.name === modelName);
   const acceptsSampling = !model || model.accepts_sampling_params !== false;
   const fields = [];
-  // A plugin job runs on that plugin's own settings, which this page does not
-  // know, so it says where a blank value comes from rather than naming a
-  // number it would be guessing at. No figure beats a wrong one.
-  const samplingLabel = (text) => `${text}, blank = the sandbox's setting)`;
+  // The number this action itself reports for an empty box — its own settings
+  // with the group's and this person's already applied, so it is what would
+  // actually be used, not a guess. An action that reports nothing gets a plain
+  // label rather than an invented figure.
+  const declared = (action && action.sampling) || {};
+  const samplingLabel = (text, key, range) => {
+    const parts = [];
+    if (range) parts.push(range);
+    if (declared[key] !== undefined && declared[key] !== null) {
+      parts.push(`blank = ${declared[key]}`);
+    }
+    return parts.length ? `${text} (${parts.join(", ")})` : text;
+  };
   if (acceptsSampling) {
     fields.push({
-      name: "temperature", label: samplingLabel("Temperature (0.0–2.0"),
+      name: "temperature", label: samplingLabel("Temperature", "temperature", "0.0–2.0"),
       kind: "text", required: false, group: "Sampling",
     });
     fields.push({
-      name: "top_p", label: samplingLabel("Top-p (0.0–1.0"),
+      name: "top_p", label: samplingLabel("Top-p", "top_p", "0.0–1.0"),
       kind: "text", required: false, group: "Sampling",
     });
   }
   fields.push({
-    name: "max_tokens", label: samplingLabel("Max response tokens ("),
+    name: "max_tokens", label: samplingLabel("Max response tokens", "max_tokens"),
     kind: "text", required: false, group: "Sampling",
   });
   return fields;
@@ -1070,7 +1079,7 @@ async function refreshJobExtensionFields() {
   appendFieldGroup(box, fields);
 
   const model = document.getElementById("model-field").value || state.defaultModel;
-  state.activeActionFields = action.fields.concat(fields, samplingFieldsFor(model));
+  state.activeActionFields = action.fields.concat(fields, samplingFieldsFor(model, action));
   // A field that just appeared (e.g. reopening this same action after
   // Japanese was already selected before) should show whatever was typed
   // into it last time, same as every other field.
@@ -1091,7 +1100,7 @@ async function openJobModal(action) {
   if (action.fields.some(f => f.kind === "language")) await loadLanguages();
 
   const model = document.getElementById("model-field").value || state.defaultModel;
-  const samplingFields = samplingFieldsFor(model);
+  const samplingFields = samplingFieldsFor(model, action);
   // Provisional — refreshJobExtensionFields() below fills in the middle
   // section and updates this once it resolves (it's async: a network call).
   state.activeActionFields = action.fields.concat(samplingFields);
