@@ -250,7 +250,10 @@ def _settings_snapshot() -> dict:
             "name": api_name,
             "display_name": raw.get("name", api_name),
             "base_url": raw.get("base_url", ""),
-            "openai_compatible": bool(raw.get("openai_compatible", False)),
+            # Same default as load_api_config(): true unless said otherwise.
+            # A second, different default here would have this page describing
+            # endpoints differently from the way they actually behave.
+            "openai_compatible": bool(raw.get("openai_compatible", True)),
             "default_model": raw.get("default_model"),
             "timeout": raw.get("timeout", 30),
             "credential_path": cred_path,

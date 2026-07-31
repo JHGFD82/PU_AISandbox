@@ -534,7 +534,7 @@ function renderShared(data) {
     row.innerHTML = `
       <div class="main">
         <div class="name">${ep.display_name} <span class="sub">(${ep.name})</span></div>
-        <div class="sub">${ep.base_url}${ep.openai_compatible ? " · OpenAI-compatible" : ""}${ep.default_model ? " · default: " + ep.default_model : ""}</div>
+        <div class="sub">${ep.base_url}${ep.openai_compatible ? "" : " · marked as not OpenAI-compatible, so the sandbox cannot use it"}${ep.default_model ? " · default: " + ep.default_model : ""}</div>
         <form class="inline" data-endpoint="${ep.credential_path}">
           <div><label>API key</label><input type="password" placeholder="${ep.key_set ? '••••••••' : ''}"></div>
           <button type="submit">Save</button>

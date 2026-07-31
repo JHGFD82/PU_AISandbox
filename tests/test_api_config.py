@@ -95,9 +95,18 @@ class TestLoadAPIConfig:
         with _patch_endpoints(minimal), _patch_credentials({"endpoints.minimal.key": "k"}):
             cfg = load_api_config("minimal")
         assert cfg.display_name == "minimal"  # falls back to api_name
-        assert cfg.openai_compatible is False
+        # True unless said otherwise: it is the only kind the sandbox can talk
+        # to, so an endpoint that says nothing is taken at its word and works.
+        assert cfg.openai_compatible is True
         assert cfg.timeout == 30
         assert cfg.verify_ssl is True
+
+    def test_saying_it_is_not_openai_compatible_is_kept(self):
+        """The setting has to survive to be acted on."""
+        data = {"odd": {"base_url": "http://localhost:8000", "openai_compatible": False}}
+        with _patch_endpoints(data), _patch_credentials({"endpoints.odd.key": "k"}):
+            cfg = load_api_config("odd")
+        assert cfg.openai_compatible is False
 
     def test_extra_fields_preserved(self):
         """Unknown fields are captured in cfg.extra."""

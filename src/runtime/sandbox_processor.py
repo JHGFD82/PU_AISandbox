@@ -217,27 +217,16 @@ class SandboxProcessor(*_discover_plugin_mixins(), _FileTypeMixin, _CommandMixin
             )
         val = cls(self._api_key, self.professor_name, **self._svc_kwargs)
 
-        # When routing to an alternate API endpoint, swap the Portkey client
-        # with a standard OpenAI client so that any OpenAI-compatible endpoint
-        # is used transparently — no changes to the service subclasses needed.
+        # When routing somewhere other than the sandbox, the service is told so
+        # and settles the rest itself — the connection, the name its usage is
+        # recorded under, and where its model name comes from. This used to be
+        # done by reaching in afterwards and replacing the client and the
+        # _get_model method, which is how the endpoint's own settings came to be
+        # read and ignored and how its usage came to be recorded as though the
+        # sandbox had answered it.
         api_config = object.__getattribute__(self, "_api_config")
-        if api_config is not None and hasattr(val, "client"):
-            from openai import OpenAI
-            val.client = OpenAI(
-                api_key=api_config.api_key,
-                base_url=api_config.base_url,
-                timeout=float(api_config.timeout),
-            )
-            # Say which service this is, so its usage is recorded on its own and
-            # priced at nothing. Without this the calls are indistinguishable
-            # from sandbox ones once recorded, and were being costed against the
-            # university's price list, which does not apply to them.
-            val.endpoint_name = api_config.api_name
-            # Bypass the model catalog for alternate endpoint models: return the
-            # model name as-is rather than going through resolve_model().
-            configured_model: Optional[str] = self._svc_kwargs.get("model") or api_config.default_model
-            if configured_model:
-                val._get_model = lambda: configured_model  # type: ignore[method-assign]
+        if api_config is not None and hasattr(val, "use_endpoint"):
+            val.use_endpoint(api_config)
 
         # Cache on the instance so __getattr__ is only called once per service.
         object.__setattr__(self, name, val)

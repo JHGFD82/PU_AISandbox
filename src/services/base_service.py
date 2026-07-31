@@ -13,8 +13,11 @@ import re
 import time
 from typing import TYPE_CHECKING, Any, Callable, Optional
 
+from openai import OpenAI
 from portkey_ai import Portkey
 from collections.abc import Iterator as ABCIterator
+
+from ..errors import CLIError
 
 from ..models import (
     model_max_tokens_field, model_rejected_fields, record_rejected_field,
@@ -28,6 +31,7 @@ from .constants import MAX_RETRIES, RETRY_DELAY_SECONDS
 
 if TYPE_CHECKING:  # pragma: no cover - import only for type checking
     from ..runtime.model_role import ModelRole
+    from .api_config import APIConfig
 
 # Parts of a request that can never be dropped, however a provider phrases its
 # objection. Without this, one badly-worded error could talk the sandbox into
@@ -67,12 +71,14 @@ class BaseService:
 
     # Which AI service this one is talking to. Empty means the Princeton
     # sandbox, which is what nearly every service is on and the only service
-    # with prices the sandbox knows. It is set from outside, by whatever pointed
-    # this service at an alternate endpoint, because a service has no other way
-    # to tell: its network client is swapped after it is built (see
-    # ``SandboxProcessor.__getattr__``), and the swap used to leave usage being
-    # recorded as though the sandbox had answered.
+    # with prices the sandbox knows. Set by ``use_endpoint()`` when something
+    # points this service somewhere else.
     endpoint_name: str = ""
+
+    # The endpoint this service was pointed at, or None for the sandbox. Read by
+    # ``_get_model()``, which must not look a model up in the catalogue when the
+    # catalogue does not describe the service answering.
+    _endpoint: Optional["APIConfig"] = None
 
     def __init__(
         self,
@@ -169,6 +175,57 @@ class BaseService:
             logging.debug(f"Sampling params: temperature={temperature}, top_p={top_p}")
         return temperature, top_p, max_tokens
 
+    def use_endpoint(self, api_config: "APIConfig") -> None:
+        """Point this service at an AI service other than the Princeton sandbox.
+
+        Everything that makes a service talk somewhere else happens here, in one
+        call, rather than by reaching into it from outside and rearranging it
+        afterwards. What changes is the connection, the name recorded against
+        its usage, and where its model name comes from — nothing else about the
+        service differs, which is why no subclass needs to know this exists.
+
+        Args:
+            api_config: The endpoint's definition and credential, from
+                        ``load_api_config()``.
+
+        Raises:
+            CLIError: If the endpoint is not marked ``openai_compatible``. That
+                      is the only kind this can talk to, and a setting that was
+                      read and then ignored is worse than one that is refused —
+                      it looks like it took effect.
+        """
+        if not api_config.openai_compatible:
+            raise CLIError(
+                f"The endpoint '{api_config.api_name}' is not set up as an "
+                "OpenAI-compatible one, and that is the only kind the sandbox can "
+                "talk to. Add 'openai_compatible = true' to its settings if it does "
+                "speak that way; if it doesn't, it cannot be used from here."
+            )
+        # Built once, with the endpoint's own settings applied — including
+        # verify_ssl, which was being read and then thrown away. Turning
+        # certificate checking off is occasionally the only way to reach a
+        # cluster with an internal certificate, so it is offered; it is worth
+        # saying out loud when it happens, because it is a real weakening.
+        client_options: dict[str, Any] = {}
+        if not api_config.verify_ssl:
+            import httpx
+
+            logging.warning(
+                "Certificate checking is turned off for the endpoint '%s'. Anything "
+                "between this computer and %s could read or alter what is sent.",
+                api_config.api_name, api_config.base_url,
+            )
+            client_options["http_client"] = httpx.Client(verify=False)
+
+        self.client = OpenAI(
+            api_key=api_config.api_key,
+            base_url=api_config.base_url,
+            timeout=float(api_config.timeout),
+            **client_options,
+        )
+        self._endpoint = api_config
+        self.endpoint_name = api_config.api_name
+
     def _get_model(self) -> str:
         """Return the model to use, honouring this service's declared preference.
 
@@ -178,11 +235,28 @@ class BaseService:
         the model's price is current before returning, since pricing feeds
         straight into per-professor budget tracking.
 
+        A service pointed at an alternate endpoint skips all of that and uses
+        the name it was given, since the catalogue describes the sandbox's
+        models and not that endpoint's.
+
         Subclasses rarely need to override this — setting ``model_role`` is
         normally the whole of it. ``resolve_model()`` already says which model
         it fell back to and why, so an override that only logged that is not
         worth keeping.
         """
+        if self._endpoint is not None:
+            # An endpoint of somebody's own runs whatever models it runs, and the
+            # catalogue describes the sandbox's. Resolving against it would pick
+            # a model this service cannot reach, and pricing it would invent a
+            # figure — see the endpoint's own usage reporting.
+            model = self.custom_model or self._endpoint.default_model
+            if not model:
+                raise CLIError(
+                    f"No model was named for the endpoint '{self._endpoint.api_name}'. "
+                    f"Give one as '{self._endpoint.api_name}:the-model-name', or set "
+                    "'default_model' in that endpoint's settings."
+                )
+            return model
         model = resolve_model(requested_model=self.custom_model, role=self.model_role)
         maybe_sync_model_pricing(model)
         return model
