@@ -260,6 +260,7 @@ class TestModelsEndpoint:
         monkeypatch.setattr(app_module, "models_in_reading_order", lambda: ["gpt-4o", "o3-mini"])
         monkeypatch.setattr(app_module, "model_supports_vision", lambda m: m == "gpt-4o")
         monkeypatch.setattr(app_module, "model_accepts_sampling_params", lambda m: m != "o3-mini")
+        monkeypatch.setattr(app_module, "get_model_max_completion_tokens", lambda m, d: d)
         monkeypatch.setattr(app_module, "resolve_model", lambda **kw: "gpt-4o")
 
         resp = unlocked_client.get("/api/models", params={"professor": "heller"})
@@ -276,6 +277,7 @@ class TestModelsEndpoint:
         monkeypatch.setattr(app_module, "models_in_reading_order", lambda: ["some-model"])
         monkeypatch.setattr(app_module, "model_supports_vision", lambda m: False)
         monkeypatch.setattr(app_module, "model_accepts_sampling_params", lambda m: False)
+        monkeypatch.setattr(app_module, "get_model_max_completion_tokens", lambda m, d: d)
         monkeypatch.setattr(app_module, "resolve_model", lambda **kw: "some-model")
 
         resp = unlocked_client.get("/api/models", params={"professor": "heller"})
@@ -2574,6 +2576,7 @@ class TestTheModelMenuReadsInOrder:
         )
         monkeypatch.setattr(app_module, "model_supports_vision", lambda m: True)
         monkeypatch.setattr(app_module, "model_accepts_sampling_params", lambda m: True)
+        monkeypatch.setattr(app_module, "get_model_max_completion_tokens", lambda m, d: d)
         monkeypatch.setattr(app_module, "resolve_model", lambda **kw: "gpt-4o")
         names = [m["name"] for m in
                  unlocked_client.get("/api/models?professor=heller").json()["models"]]
@@ -2635,3 +2638,44 @@ class TestConversationsAreGroupedByAge:
         page = self._page()
         assert "data.conversations.forEach" in page
         assert "conversations.sort" not in page
+
+
+class TestTheModelSaysWhatItCanDo:
+    """Shown beside the settings, for reference while choosing."""
+
+    def _page(self):
+        from pathlib import Path
+
+        return (Path(__file__).resolve().parents[1] / "src" / "templates" / "chat.html").read_text()
+
+    def test_the_menu_reports_how_long_an_answer_a_model_can_give(
+        self, unlocked_client, monkeypatch
+    ):
+        import sys
+
+        app_module = sys.modules["_pu_webui_app"]
+        monkeypatch.setattr(app_module, "models_in_reading_order", lambda: ["o3-mini"])
+        monkeypatch.setattr(app_module, "model_supports_vision", lambda m: False)
+        monkeypatch.setattr(app_module, "model_accepts_sampling_params", lambda m: False)
+        monkeypatch.setattr(app_module, "get_model_max_completion_tokens", lambda m, d: 16000)
+        monkeypatch.setattr(app_module, "resolve_model", lambda **kw: "o3-mini")
+        model = unlocked_client.get("/api/models?professor=heller").json()["models"][0]
+        assert model["max_response_tokens"] == 16000
+        assert model["supports_vision"] is False
+        assert model["accepts_sampling_params"] is False
+
+    def test_it_is_shown_wherever_the_settings_are(self):
+        page = self._page()
+        assert 'id="model-capabilities"' in page
+        assert "What this model can do" in page
+
+    def test_it_refreshes_when_the_model_changes(self):
+        """It sits beside controls that appear and disappear with the model."""
+        page = self._page()
+        visibility = page.split("function applySamplingVisibility")[1].split("\n}")[0]
+        assert "showModelCapabilities(model)" in visibility
+
+    def test_it_explains_a_control_that_has_gone_rather_than_leaving_a_gap(self):
+        """Temperature simply vanishes for a model that refuses it."""
+        page = self._page()
+        assert "will not take yours" in page
