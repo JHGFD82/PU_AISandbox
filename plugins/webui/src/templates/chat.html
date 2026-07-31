@@ -55,6 +55,17 @@
   #sidebar, #spend { grid-row: 2; background: var(--panel-bg); border-right: 1px solid var(--border); padding: 1rem; overflow-y: auto; }
   #sidebar { display: flex; flex-direction: column; }
   #conv-list { flex: 1; overflow-y: auto; min-height: 0; }
+  /* Quiet enough to be scanned past when you already know where you are
+     going, and clear enough to find your way by when you don't. Sticky, so
+     the heading you are under stays visible while scrolling a long list. */
+  .conv-group {
+    position: sticky; top: 0; z-index: 1;
+    background: var(--bg);
+    font-size: 0.7rem; font-weight: 600; letter-spacing: 0.04em;
+    text-transform: uppercase; color: var(--text-muted);
+    padding: 0.7rem 0.5rem 0.25rem;
+  }
+  .conv-group:first-child { padding-top: 0.25rem; }
   .sidebar-footer {
     flex: none; display: flex; gap: 0.4rem; margin-top: 0.75rem; padding-top: 0.75rem;
     border-top: 1px solid var(--border);
@@ -1593,12 +1604,44 @@ async function deleteConversationFromMenu(id, title) {
   await loadConversations();
 }
 
+// Which heading a conversation belongs under. Today is the calendar day rather
+// than the last twenty-four hours, because a conversation from yesterday
+// evening is not "today" to the person who had it, however few hours ago it
+// was. The rest are counted back from the start of today, so nothing shifts
+// group part-way through an afternoon.
+function conversationAgeGroup(updatedAt) {
+  const when = new Date(updatedAt);
+  // A timestamp that can't be read lands under Older. Stated rather than left
+  // to fall out of the comparisons below, which would reach the same answer
+  // only because every comparison with an unreadable date is false — true, but
+  // not something the next reader should have to work out.
+  if (isNaN(when.getTime())) return "Older";
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  if (when >= startOfToday) return "Today";
+  const days = (startOfToday - when) / 86400000;
+  if (days <= 7) return "This week";
+  if (days <= 30) return "This month";
+  return "Older";
+}
+
 async function loadConversations() {
   const data = await api("/api/conversations?professor=" + encodeURIComponent(state.professor));
   const list = document.getElementById("conv-list");
   list.innerHTML = "";
   openConvMenu = null;
+  // The server hands these back newest first, so each group is reached once and
+  // a heading goes in wherever the group changes.
+  let currentGroup = null;
   data.conversations.forEach(c => {
+    const group = conversationAgeGroup(c.updated_at);
+    if (group !== currentGroup) {
+      currentGroup = group;
+      const heading = document.createElement("div");
+      heading.className = "conv-group";
+      heading.textContent = group;
+      list.appendChild(heading);
+    }
     const item = document.createElement("div");
     item.className = "conv-item" + (c.id === state.conversationId ? " active" : "");
 

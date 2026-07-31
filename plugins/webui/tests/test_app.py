@@ -2586,3 +2586,33 @@ class TestTheModelMenuReadsInOrder:
         page = (Path(__file__).resolve().parents[1] / "src" / "templates" / "chat.html").read_text()
         assert "state.models.forEach" in page
         assert ".sort(" not in page.split("function renderModelList")[1].split("}")[0]
+
+
+class TestConversationsAreGroupedByAge:
+    """A long list is easier to find your way around when it is dated."""
+
+    def _page(self):
+        from pathlib import Path
+
+        return (Path(__file__).resolve().parents[1] / "src" / "templates" / "chat.html").read_text()
+
+    def test_the_page_groups_by_how_recent_a_conversation_is(self):
+        page = self._page()
+        for group in ("Today", "This week", "This month", "Older"):
+            assert f'"{group}"' in page
+
+    def test_a_heading_goes_in_only_where_the_group_changes(self):
+        """Otherwise every conversation gets one."""
+        page = self._page()
+        assert "if (group !== currentGroup) {" in page
+
+    def test_the_headings_stay_in_view_while_scrolling(self):
+        page = self._page()
+        block = page.split(".conv-group {")[1].split("}")[0]
+        assert "position: sticky" in block
+
+    def test_the_server_still_decides_the_order(self, unlocked_client):
+        """Grouping is a heading over an order it does not change."""
+        page = self._page()
+        assert "data.conversations.forEach" in page
+        assert "conversations.sort" not in page
