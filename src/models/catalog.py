@@ -539,6 +539,65 @@ def record_rejected_field(model_name: str, field: str, reason: str) -> bool:
     return True
 
 
+def clear_rejected_fields(model_name: str) -> dict[str, str]:
+    """Forget what a model was found to refuse, so it is worked out afresh.
+
+    A refusal is remembered for good, on purpose: nothing expires on a
+    schedule, because that would bring the original failure back on a schedule
+    too. But providers do change — a field refused last spring may be accepted
+    now — and until this existed the only way to find out was to open
+    ``model_catalog.json`` and delete part of it by hand, which is not a
+    reasonable thing to ask of anybody.
+
+    Forgetting costs one failed request at most: the next call includes the
+    field again, and if the provider still objects it is recorded again
+    immediately, exactly as it was the first time.
+
+    Args:
+        model_name: The model's catalog key (e.g. ``'mistral-small-2503'``).
+
+    Returns:
+        What was forgotten — field name to the note recorded when it was
+        learned — so the caller can say what it did. Empty if the model had
+        nothing recorded against it, or is not in the catalog at all; the file
+        is left untouched in both cases.
+
+    Notes:
+        Only what was *learned* is forgotten. A quirk written into the catalog
+        by hand stays, since nobody's request taught the sandbox that and
+        clearing it would quietly undo somebody's decision.
+    """
+    catalog = load_model_catalog()
+    entry = catalog["models"].get(model_name)
+    if not isinstance(entry, dict):
+        return {}
+    learned = entry.get("rejects")
+    if not isinstance(learned, dict) or not learned:
+        return {}
+    forgotten = dict(learned)
+    del entry["rejects"]
+    save_model_catalog(catalog)
+    logging.info(
+        "Forgot what '%s' was found to refuse (%s). The next request includes "
+        "those fields again.", model_name, ", ".join(sorted(forgotten)),
+    )
+    return forgotten
+
+
+def models_with_rejected_fields() -> dict[str, dict[str, str]]:
+    """Return every model that has been found to refuse something, and what.
+
+    So that somebody can see what has been learned before deciding whether any
+    of it is worth forgetting. Usually empty.
+    """
+    catalog = load_model_catalog()
+    found: dict[str, dict[str, str]] = {}
+    for name, entry in catalog["models"].items():
+        if isinstance(entry, dict) and isinstance(entry.get("rejects"), dict) and entry["rejects"]:
+            found[name] = dict(entry["rejects"])
+    return found
+
+
 def get_model_max_completion_tokens(model: str, default: int) -> int:
     """Return the response-length cap to use for a model, applying any per-model override from the catalog.
 

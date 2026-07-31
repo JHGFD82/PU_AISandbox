@@ -8,8 +8,10 @@ from .doc_block import ParagraphBlock, TableBlock
 from .embedded_media import EmbeddedMedia
 from .catalog import (
     MODEL_CATALOG_FILE,
+    clear_rejected_fields,
     get_available_models,
     models_in_reading_order,
+    models_with_rejected_fields,
     cheapest_model,
     get_model_catalog_path,
     get_model_max_completion_tokens,
@@ -45,8 +47,10 @@ __all__ = [
     "get_model_catalog_path",
     "load_model_catalog",
     "save_model_catalog",
+    "clear_rejected_fields",
     "get_available_models",
     "models_in_reading_order",
+    "models_with_rejected_fields",
     "cheapest_model",
     "get_model_pricing",
     "get_pricing_unit",

@@ -1198,3 +1198,88 @@ class TestModelsAreListedTheWayPeopleRead:
     def test_every_model_is_still_there(self, monkeypatch):
         names = ["b", "A", "c"]
         assert sorted(self._ordered(names, monkeypatch)) == sorted(names)
+
+
+class TestForgettingWhatAModelRefuses:
+    """A refusal is remembered for good, but providers change.
+
+    Nothing expires on its own — that would bring the original failure back on
+    a schedule — so forgetting is something somebody asks for.
+    """
+
+    def _catalog(self, tmp_path, monkeypatch, models):
+        import json
+
+        from src.models import catalog as catalog_mod
+
+        path = tmp_path / "model_catalog.json"
+        path.write_text(json.dumps({"models": models, "config": {}}))
+        monkeypatch.setattr(catalog_mod, "load_model_catalog",
+                            lambda: json.loads(path.read_text()))
+        monkeypatch.setattr(catalog_mod, "save_model_catalog",
+                            lambda c: path.write_text(json.dumps(c)))
+        return path
+
+    def test_it_forgets_what_was_learned(self, tmp_path, monkeypatch):
+        import json
+
+        from src.models.catalog import clear_rejected_fields
+
+        path = self._catalog(tmp_path, monkeypatch, {
+            "m": {"input": 1.0, "output": 2.0, "rejects": {"stream_options": "2026-07-29: no"}},
+        })
+        assert clear_rejected_fields("m") == {"stream_options": "2026-07-29: no"}
+        assert "rejects" not in json.loads(path.read_text())["models"]["m"]
+
+    def test_the_next_request_would_include_the_field_again(self, tmp_path, monkeypatch):
+        """The point of forgetting: it is tried once more."""
+        from src.models.catalog import clear_rejected_fields, model_rejected_fields
+
+        self._catalog(tmp_path, monkeypatch, {
+            "m": {"input": 1.0, "output": 2.0, "rejects": {"stream_options": "2026-07-29: no"}},
+        })
+        assert "stream_options" in model_rejected_fields("m")
+        clear_rejected_fields("m")
+        assert model_rejected_fields("m") == {}
+
+    def test_a_model_with_nothing_recorded_is_left_alone(self, tmp_path, monkeypatch):
+        from src.models.catalog import clear_rejected_fields
+
+        path = self._catalog(tmp_path, monkeypatch, {"m": {"input": 1.0, "output": 2.0}})
+        before = path.read_text()
+        assert clear_rejected_fields("m") == {}
+        assert path.read_text() == before, "the catalogue was rewritten for nothing"
+
+    def test_a_model_that_is_not_there_at_all_is_not_an_error(self, tmp_path, monkeypatch):
+        from src.models.catalog import clear_rejected_fields
+
+        self._catalog(tmp_path, monkeypatch, {"m": {"input": 1.0, "output": 2.0}})
+        assert clear_rejected_fields("nothing-like-this") == {}
+
+    def test_a_quirk_written_by_hand_is_not_forgotten(self, tmp_path, monkeypatch):
+        """Nobody's request taught the sandbox that, so it is not ours to undo."""
+        import json
+
+        from src.models.catalog import clear_rejected_fields
+
+        path = self._catalog(tmp_path, monkeypatch, {
+            "m": {
+                "input": 1.0, "output": 2.0, "system_role": "developer",
+                "max_completion_tokens": 16000,
+                "rejects": {"stream_options": "2026-07-29: no"},
+            },
+        })
+        clear_rejected_fields("m")
+        entry = json.loads(path.read_text())["models"]["m"]
+        assert entry["system_role"] == "developer"
+        assert entry["max_completion_tokens"] == 16000
+
+    def test_it_can_say_what_is_known_before_anything_is_forgotten(self, tmp_path, monkeypatch):
+        from src.models.catalog import models_with_rejected_fields
+
+        self._catalog(tmp_path, monkeypatch, {
+            "quiet": {"input": 1.0, "output": 2.0},
+            "fussy": {"input": 1.0, "output": 2.0, "rejects": {"stream_options": "2026-07-29: no"}},
+            "empty": {"input": 1.0, "output": 2.0, "rejects": {}},
+        })
+        assert list(models_with_rejected_fields()) == ["fussy"]

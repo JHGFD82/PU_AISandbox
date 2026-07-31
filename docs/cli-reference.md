@@ -63,6 +63,8 @@ python main.py settings set webui.session_secret --generate  # or generate one
 python main.py settings unset webui.session_secret
 python main.py settings export-shared            # draft a settings file for a group
 python main.py settings export-shared --from /path/to/shared-settings.toml
+python main.py settings model-quirks             # what models have refused
+python main.py settings model-quirks gpt-4o      # have one worked out again
 ```
 
 | Subcommand | What it does |
@@ -73,6 +75,7 @@ python main.py settings export-shared --from /path/to/shared-settings.toml
 | `list` | Lists every optional setting and whether it's currently set. |
 | `set <dotted.path>` | Sets one value, prompting for it. Add `--generate` for a random secret. |
 | `unset <dotted.path>` | Removes one value. |
+| `model-quirks [model]` | Shows what parts of a request each model has been found to refuse, and when. Name a model to forget its notes, so those parts are tried once more — useful when a provider has since started accepting something. Costs one failed request at worst: if it is still refused, that is noted again. Quirks written into `model_catalog.json` by hand are left alone. See [Configuration](configuration.md#when-a-model-turns-part-of-a-request-down). |
 | `export-shared` | Writes a draft settings file for a group to follow — every setting the sandbox and its plugins have, commented out, with each author's explanation. `--output` chooses where; `--from` carries decisions across from a file already in use and marks anything new since. You place the result yourself. The web interface can produce the same file — **Settings → Shared settings → Download a shared settings draft** — so neither the person maintaining it nor the members need a terminal. See [Configuration](configuration.md#setting-up-a-shared-file-for-a-group). |
 
 API keys and other secrets are always typed at a hidden prompt, never accepted as a flag, so they can't end up in shell history or be read by another process listing running commands.

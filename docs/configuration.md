@@ -367,6 +367,32 @@ Two documents with the same name do not overwrite each other; the second becomes
 
 ---
 
+## When a model turns part of a request down
+
+Providers differ over which optional parts of a request they allow, and there is no way to know in advance. When one is refused, the sandbox notes which part and leaves it out from then on, so the same failure does not happen twice. You may see a warning the first time it happens; after that it is silent.
+
+Nothing is ever forgotten on its own — that would bring the original failure back on a schedule. To see what has been learned:
+
+```bash
+python main.py settings model-quirks
+```
+
+```
+mistral-small-2503
+  stream_options  (noted 2026-07-29)
+    Error code: 422 - azure-ai error: Extra inputs are not permitted…
+```
+
+If a provider has since started accepting something, have it worked out again:
+
+```bash
+python main.py settings model-quirks mistral-small-2503
+```
+
+The next request includes it once more. If the provider still turns it down, that is noted afresh and nothing is lost — so the worst this costs is one failed request. Anything written into `model_catalog.json` by hand is left alone; only what the sandbox learned for itself is forgotten.
+
+---
+
 ## Alternate AI endpoints
 
 An `[endpoints.<name>]` table describes an AI endpoint other than the built-in service — a model running on an HPC cluster or other self-hosted inference server, or a provider's direct API (many expose an OpenAI-compatible interface reachable with just a URL and a key).
