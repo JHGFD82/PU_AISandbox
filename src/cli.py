@@ -301,6 +301,16 @@ def _build_settings_subparser(subparsers: argparse._SubParsersAction) -> None:
              "(default: whatever shared_settings.path points at, if anything)",
     )
 
+    quirks_parser = settings_sub.add_parser(
+        'model-quirks',
+        help="Show what models have been found to refuse, and forget it so it is worked out again",
+    )
+    _add_debug_flags(quirks_parser)
+    quirks_parser.add_argument(
+        'model', type=str, nargs='?', default=None, metavar='MODEL',
+        help="Forget what this model was found to refuse. Omit to list what is known.",
+    )
+
     unset_parser = settings_sub.add_parser('unset', help='Remove an optional settings.toml value')
     _add_debug_flags(unset_parser)
     unset_parser.add_argument('key', type=str, help='The variable to remove')

@@ -613,3 +613,58 @@ class TestHandleInfoCommandsSettings:
     def test_list_returns_true(self):
         args = _make_ns(command="settings", settings_subcommand="list")
         assert handle_info_commands(args) is True
+
+
+class TestTheModelQuirksCommand:
+    """Saying "try that again" without editing the catalogue by hand."""
+
+    def _args(self, model=None):
+        import argparse
+
+        return argparse.Namespace(settings_subcommand="model-quirks", model=model)
+
+    def _run(self, monkeypatch, known, model=None):
+        from src.runtime import info_commands
+
+        cleared = {}
+        monkeypatch.setattr("src.models.models_with_rejected_fields", lambda: known)
+        monkeypatch.setattr(
+            "src.models.clear_rejected_fields",
+            lambda name: cleared.setdefault(name, known.get(name, {})) or known.get(name, {}),
+        )
+        info_commands._settings_model_quirks(self._args(model))
+        return cleared
+
+    def test_it_lists_what_has_been_learned(self, monkeypatch, capsys):
+        self._run(monkeypatch, {"fussy": {"stream_options": "2026-07-29: not permitted"}})
+        out = capsys.readouterr().out
+        assert "fussy" in out
+        assert "stream_options" in out
+        assert "2026-07-29" in out
+
+    def test_it_says_plainly_when_nothing_has_been_learned(self, monkeypatch, capsys):
+        """Which is the ordinary case."""
+        self._run(monkeypatch, {})
+        assert "Nothing" in capsys.readouterr().out
+
+    def test_a_wall_of_provider_detail_is_cut_down_to_read(self, monkeypatch, capsys):
+        long_note = "2026-07-29: " + ("x" * 400)
+        self._run(monkeypatch, {"fussy": {"stream_options": long_note}})
+        out = capsys.readouterr().out
+        assert "…" in out
+        assert "x" * 400 not in out
+
+    def test_naming_a_model_forgets_it(self, monkeypatch, capsys):
+        cleared = self._run(
+            monkeypatch, {"fussy": {"stream_options": "2026-07-29: no"}}, model="fussy",
+        )
+        assert "fussy" in cleared
+        assert "stream_options" in capsys.readouterr().out
+
+    def test_naming_a_model_with_nothing_recorded_says_so(self, monkeypatch):
+        import pytest
+
+        from src.errors import CLIError
+
+        with pytest.raises(CLIError, match="Nothing has been recorded"):
+            self._run(monkeypatch, {}, model="quiet")

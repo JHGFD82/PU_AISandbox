@@ -293,6 +293,9 @@ def _handle_settings_command(args: argparse.Namespace) -> None:
     if sub == 'export-shared':
         _settings_export_shared(args)
         return
+    if sub == 'model-quirks':
+        _settings_model_quirks(args)
+        return
 
     raise CLIError(
         "No settings subcommand specified.\n"
@@ -302,7 +305,67 @@ def _handle_settings_command(args: argparse.Namespace) -> None:
         "       python main.py settings list\n"
         "       python main.py settings set <KEY>\n"
         "       python main.py settings unset <KEY>\n"
-        "       python main.py settings export-shared"
+        "       python main.py settings export-shared\n"
+        "       python main.py settings model-quirks [MODEL]"
+    )
+
+
+def _settings_model_quirks(args: argparse.Namespace) -> None:
+    """Show what models have been found to refuse, or forget it for one of them.
+
+    When a provider turns down part of a request, the sandbox notes which part
+    and leaves it out from then on, so the same failure doesn't happen twice.
+    Nothing is ever forgotten on its own — that would bring the failure back on
+    a schedule — but providers do change, and this is how somebody says "try
+    that again" without opening the catalogue file and editing it by hand.
+
+    With no model named, lists what has been learned and when. With one, forgets
+    it: the next request includes those parts again, and if the provider still
+    objects the note comes straight back.
+    """
+    from ..console import print_banner
+    from ..models import clear_rejected_fields, models_with_rejected_fields
+
+    known = models_with_rejected_fields()
+
+    if args.model is None:
+        print_banner("WHAT MODELS HAVE BEEN FOUND TO REFUSE")
+        if not known:
+            print("Nothing. No provider has turned down part of a request.")
+            print("=" * 60)
+            return
+        for name in sorted(known, key=str.lower):
+            print(f"\n{name}")
+            for field, note in sorted(known[name].items()):
+                when, _, said = note.partition(": ")
+                print(f"  {field}  (noted {when})")
+                # What a provider says when it refuses something is often a
+                # wall of machine-readable detail. The whole of it stays in the
+                # catalogue; enough to recognise it is what belongs on screen.
+                said = " ".join(said.split())
+                print(f"    {said[:110] + '…' if len(said) > 110 else said}")
+        print(
+            "\nTo have one of these worked out again — say a provider has since "
+            "started\naccepting it — run:"
+        )
+        print("  python main.py settings model-quirks <model>")
+        print("=" * 60)
+        return
+
+    forgotten = clear_rejected_fields(args.model)
+    if not forgotten:
+        if args.model in known:
+            raise CLIError(f"Nothing was recorded against '{args.model}'.")
+        raise CLIError(
+            f"Nothing has been recorded against '{args.model}'. Run "
+            "'python main.py settings model-quirks' to see which models have anything."
+        )
+    print(f"Forgot what '{args.model}' was found to refuse:")
+    for field in sorted(forgotten):
+        print(f"  {field}")
+    print(
+        "\nThe next request will include these again. If the provider still turns "
+        "them\ndown, that is noted afresh and nothing is lost."
     )
 
 
