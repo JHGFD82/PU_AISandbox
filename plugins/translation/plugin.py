@@ -810,7 +810,8 @@ class TranslationPlugin:
           overrides, same as the CLI's ``-t``/``-T``/``-M`` flags. The web
           UI only shows these controls for models that accept them (see
           ``src.models.catalog.model_accepts_sampling_params``); blank means
-          "use the model's default."
+          this plugin's own setting is used, not the model's own preference —
+          a value is always sent.
 
         Args:
             fields: The submitted form's values, keyed by ``UiField.name``.

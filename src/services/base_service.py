@@ -120,7 +120,8 @@ class BaseService:
                    default.
             max_tokens: Cap on how long the model's response can be, measured
                         in tokens (roughly one token per word). ``None`` means
-                        use the per-model default from the catalog.
+                        use the cap recorded for that model in the
+                        catalogue, or the service's own if it has none.
         """
         self.professor = professor
         self.custom_model = model

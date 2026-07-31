@@ -99,7 +99,7 @@ def add_common_flags(parser: argparse.ArgumentParser) -> None:
     parser.add_argument('-m', '--model', dest='model', type=str, help='Model to use (e.g., gpt-4o, gpt-4o-mini)')
     parser.add_argument('-t', '--temperature', dest='temperature', type=float, default=None, help='Sampling temperature override (0.0–2.0)')
     parser.add_argument('-T', '--top-p', dest='top_p', type=float, default=None, help='Nucleus sampling top-p override (0.0–1.0)')
-    parser.add_argument('-M', '--max-tokens', dest='max_tokens', type=int, default=None, help='Maximum response tokens (overrides model default)')
+    parser.add_argument('-M', '--max-tokens', dest='max_tokens', type=int, default=None, help='Maximum response tokens (overrides the sandbox setting)')
     parser.add_argument('--dry-run', dest='dry_run', action='store_true', help='Print the prompt(s) that would be sent without making any API calls')
 
 

@@ -207,6 +207,46 @@ class Message:
         )
 
 
+def effective_sampling(conversation: "Conversation") -> dict[str, Any]:
+    """Return the settings a message in this conversation is actually sent with.
+
+    A conversation that sets none of these is not sent without them, and the
+    model does not fall back to a preference of its own: the sandbox fills in
+    its own values, from the ``[prompt]`` section of ``settings.default.toml``
+    (and, for the response-length cap, whatever the model catalogue says that
+    model can manage). So there is always a real number, and recording the word
+    "default" instead of it would hide the one thing worth knowing — what the
+    answer was actually produced with.
+
+    Args:
+        conversation: The conversation to describe.
+
+    Returns:
+        ``{'temperature', 'top_p', 'max_tokens'}``, each the value that would be
+        sent right now. Values chosen for the conversation win; the rest are the
+        sandbox's.
+    """
+    # Imported here rather than at the top: this module is the plain store for
+    # conversations, and it should not drag the model catalogue in on import.
+    from src.models.catalog import get_model_max_completion_tokens
+    from src.settings import PROMPT_MAX_TOKENS, PROMPT_TEMPERATURE, PROMPT_TOP_P
+
+    if conversation.max_tokens is not None:
+        max_tokens: Any = conversation.max_tokens
+    else:
+        try:
+            max_tokens = get_model_max_completion_tokens(conversation.model, PROMPT_MAX_TOKENS)
+        except Exception:
+            # A model no longer in the catalogue still had a conversation; the
+            # sandbox's own figure is what it would fall back to.
+            max_tokens = PROMPT_MAX_TOKENS
+    return {
+        "temperature": PROMPT_TEMPERATURE if conversation.temperature is None else conversation.temperature,
+        "top_p": PROMPT_TOP_P if conversation.top_p is None else conversation.top_p,
+        "max_tokens": max_tokens,
+    }
+
+
 @dataclass
 class Conversation:
     """One saved conversation: its messages, current model, and (later) a compaction summary.
@@ -227,18 +267,23 @@ class Conversation:
                        set, ``POST /api/chat`` on this conversation is
                        rejected and the composer is shown locked — a
                        conversation can only run one job at a time.
-        temperature: This conversation's sampling-temperature override
-                     (``0.0``-``2.0``), or ``None`` to use the selected
-                     model's default. Persisted per-conversation the same
+        temperature: This conversation's sampling temperature
+                     (``0.0``-``2.0``), or ``None`` to use the sandbox's own
+                     — *not* the model's: a value is always sent, and when
+                     this is ``None`` it comes from ``[prompt]`` in
+                     ``settings.default.toml``. See ``effective_sampling()``.
+                     Persisted per-conversation the same
                      way ``model`` is, so it doesn't reset every time the
                      page is reloaded. Only meaningful for models that
                      accept it — see
                      ``src.models.catalog.model_accepts_sampling_params``.
         top_p: This conversation's nucleus-sampling override (``0.0``-``1.0``),
-               or ``None`` for the model's default. Same persistence and
+               or ``None`` for the sandbox's own. Same persistence and
                model-support caveat as ``temperature``.
         max_tokens: This conversation's response-length cap override, or
-                    ``None`` for the model's default. Same persistence as
+                    ``None`` for the sandbox's own, which for this one is
+                    whatever the catalogue says the model can manage. Same
+                    persistence as
                     ``temperature``, but (unlike temperature/top-p) every
                     model accepts a max-tokens cap of some kind.
         system_prompt: Standing instructions for the model in this conversation
@@ -506,8 +551,11 @@ class ConversationStore:
         the program to read. Written afresh on every save, so it always
         describes the conversation as it now stands.
         """
-        def shown(value: Any, default: str = "the model's default") -> str:
-            return default if value is None else str(value)
+        sent = effective_sampling(conversation)
+
+        def line(label: str, chosen: Any, key: str) -> str:
+            source = "chosen for this conversation" if chosen is not None else "the sandbox's own default"
+            return f"{label:<22}{sent[key]}   ({source})"
 
         lines = [
             f"Conversation: {conversation.title}",
@@ -516,9 +564,9 @@ class ConversationStore:
             f"Last updated: {conversation.updated_at}",
             "",
             f"Model:                {conversation.model}",
-            f"Temperature:          {shown(conversation.temperature)}",
-            f"Top-p:                {shown(conversation.top_p)}",
-            f"Max response tokens:  {shown(conversation.max_tokens)}",
+            line("Temperature:", conversation.temperature, "temperature"),
+            line("Top-p:", conversation.top_p, "top_p"),
+            line("Max response tokens:", conversation.max_tokens, "max_tokens"),
             "",
             "Instructions given for the whole conversation:",
             conversation.system_prompt or "  (none)",

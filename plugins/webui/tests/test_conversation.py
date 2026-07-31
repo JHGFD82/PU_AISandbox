@@ -520,12 +520,41 @@ class TestEachConversationHasAFolder:
         assert "0.2" in note
         assert "Answer in French." in note
 
-    def test_the_note_says_when_a_setting_was_left_alone(self, tmp_path):
-        """Blank would read as "none", which is not the same as the default."""
+    def test_the_note_records_the_value_actually_used(self, tmp_path):
+        """Not the word "default", which names no value — and is not even true.
+
+        A conversation that sets nothing is not sent without these: the sandbox
+        fills in its own. Someone reading this months later, or citing it, needs
+        the number the answer was produced with.
+        """
+        from src.settings import PROMPT_TEMPERATURE, PROMPT_TOP_P
+
         store = self._store(tmp_path)
         conv = store.create(model="gpt-4o")
         note = (store.folder(conv.id) / "settings.txt").read_text()
-        assert "the model's default" in note
+        assert str(PROMPT_TEMPERATURE) in note
+        assert str(PROMPT_TOP_P) in note
+        assert "default" not in note.lower() or "the sandbox's own default" in note
+        assert "model's default" not in note
+
+    def test_the_note_says_where_each_value_came_from(self, tmp_path):
+        """A number alone cannot say whether anyone chose it."""
+        store = self._store(tmp_path)
+        conv = store.create(model="gpt-4o")
+        conv.temperature = 0.2
+        store.save(conv)
+        note = (store.folder(conv.id) / "settings.txt").read_text()
+        temperature_line = next(ln for ln in note.splitlines() if ln.startswith("Temperature:"))
+        top_p_line = next(ln for ln in note.splitlines() if ln.startswith("Top-p:"))
+        assert "0.2" in temperature_line and "chosen for this conversation" in temperature_line
+        assert "the sandbox's own default" in top_p_line
+
+    def test_a_model_missing_from_the_catalogue_still_gets_a_note(self, tmp_path):
+        """A conversation outlives the model it used."""
+        store = self._store(tmp_path)
+        conv = store.create(model="a-model-that-was-retired")
+        note = (store.folder(conv.id) / "settings.txt").read_text()
+        assert "Max response tokens:" in note
         assert "(none)" in note
 
     def test_deleting_takes_the_whole_folder(self, tmp_path):

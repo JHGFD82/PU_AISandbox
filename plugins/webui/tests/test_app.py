@@ -2476,3 +2476,22 @@ class TestKeepingSuppliedDocuments:
         conv_id = self._conv(unlocked_client)
         saved = self._upload(unlocked_client, conv_id, b"../../escaped.txt").json()["saved_as"]
         assert saved == "escaped.txt"
+
+
+class TestTheInterfaceNamesTheValue:
+    """A blank box stands for a real number, and says which."""
+
+    def test_the_page_is_given_the_numbers_it_will_send(self, unlocked_client):
+        from src.settings import PROMPT_TEMPERATURE, PROMPT_TOP_P
+
+        page = unlocked_client.get("/").text
+        assert "defaultSampling" in page
+        assert str(PROMPT_TEMPERATURE) in page
+        assert str(PROMPT_TOP_P) in page
+
+    def test_no_box_claims_the_model_decides(self, unlocked_client):
+        """It does not: a value is always sent, and the sandbox chooses it."""
+        page = unlocked_client.get("/").text
+        assert "Model default" not in page
+        assert "model default" not in page
+        assert "model's default" not in page

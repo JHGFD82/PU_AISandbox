@@ -471,12 +471,25 @@ def create_app() -> FastAPI:
             # Nothing to chat with yet — send a first-time visitor straight
             # to setup instead of an empty, broken-looking chat screen.
             return RedirectResponse("/settings", status_code=303)
+        from src.settings import PROMPT_MAX_TOKENS, PROMPT_TEMPERATURE, PROMPT_TOP_P
+
         return templates.TemplateResponse(
             request, "chat.html",
             # Whether to offer "Open this conversation's folder" at all. A
             # computer with no file browser to open gets no menu item, rather
             # than one that does nothing when pressed.
-            {"can_reveal": file_picker.can_reveal()},
+            {
+                "can_reveal": file_picker.can_reveal(),
+                # The actual numbers a message is sent with when a conversation
+                # sets none of its own. Shown rather than described, because
+                # "the model's default" names no value and is not even true —
+                # the sandbox always sends these.
+                "default_sampling": {
+                    "temperature": PROMPT_TEMPERATURE,
+                    "top_p": PROMPT_TOP_P,
+                    "max_tokens": PROMPT_MAX_TOKENS,
+                },
+            },
         )
 
     @app.get("/settings", response_class=HTMLResponse)
@@ -1229,7 +1242,7 @@ def create_app() -> FastAPI:
         # Unlike `model` above, these three are applied unconditionally,
         # not gated on truthiness — the options popover always sends the
         # sampling values it currently shows (any of which may legitimately
-        # be None, meaning "no override, use the model's default"), so this
+        # be None, meaning "nothing chosen here, use the sandbox's own"), so this
         # is how a professor clears a previously-set override rather than
         # only ever being able to add one.
         conv.temperature = body.temperature

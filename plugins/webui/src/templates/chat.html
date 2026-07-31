@@ -487,15 +487,15 @@
           <div class="sampling-options-popover" id="sampling-options-popover" hidden>
             <div class="job-field" id="sampling-temperature-field">
               <label for="sampling-temperature">Temperature (0.0–2.0)</label>
-              <input type="text" id="sampling-temperature" placeholder="Model default">
+              <input type="text" id="sampling-temperature" placeholder="">
             </div>
             <div class="job-field" id="sampling-top-p-field">
               <label for="sampling-top-p">Top-p (0.0–1.0)</label>
-              <input type="text" id="sampling-top-p" placeholder="Model default">
+              <input type="text" id="sampling-top-p" placeholder="">
             </div>
             <div class="job-field">
               <label for="sampling-max-tokens">Max response tokens</label>
-              <input type="text" id="sampling-max-tokens" placeholder="Model default">
+              <input type="text" id="sampling-max-tokens" placeholder="">
             </div>
             <div class="job-field" id="system-prompt-field">
               <label for="sampling-system-prompt">Instructions for this conversation</label>
@@ -642,6 +642,10 @@ const state = {
   // Settled by the server when the page is built: whether this computer has a
   // file browser to open at all. See file_picker.can_reveal().
   canReveal: {{ can_reveal | default(false) | tojson }},
+  // What a message is sent with when this conversation sets nothing of its own.
+  // Real numbers, from the server: a blank box is not "whatever the model
+  // likes", it is these.
+  defaultSampling: {{ default_sampling | default({}, true) | tojson }},
 };
 
 // ── Dark mode ────────────────────────────────────────────────────────────
@@ -820,11 +824,22 @@ function growSystemPrompt() {
   box.style.height = box.scrollHeight + "px";
 }
 
+function showSamplingDefaults() {
+  // In the box, as the value a blank one stands for. Naming the number beats
+  // naming the idea of a number: this is what the answer was produced with.
+  const d = state.defaultSampling || {};
+  [["sampling-temperature", d.temperature], ["sampling-top-p", d.top_p],
+   ["sampling-max-tokens", d.max_tokens]].forEach(([id, value]) => {
+    document.getElementById(id).placeholder = value === null || value === undefined ? "" : String(value);
+  });
+}
+
 function openSamplingPopover() {
   document.getElementById("sampling-temperature").value = state.sampling.temperature ?? "";
   document.getElementById("sampling-top-p").value = state.sampling.top_p ?? "";
   document.getElementById("sampling-max-tokens").value = state.sampling.max_tokens ?? "";
   document.getElementById("sampling-system-prompt").value = state.sampling.system_prompt ?? "";
+  showSamplingDefaults();
   applySamplingVisibility();
   document.getElementById("sampling-options-popover").hidden = false;
   // Measured after the panel is shown; a box inside a hidden one has no height
@@ -980,18 +995,22 @@ function samplingFieldsFor(modelName) {
   const model = (state.models || []).find(m => m.name === modelName);
   const acceptsSampling = !model || model.accepts_sampling_params !== false;
   const fields = [];
+  // A plugin job runs on that plugin's own settings, which this page does not
+  // know, so it says where a blank value comes from rather than naming a
+  // number it would be guessing at. No figure beats a wrong one.
+  const samplingLabel = (text) => `${text}, blank = the sandbox's setting)`;
   if (acceptsSampling) {
     fields.push({
-      name: "temperature", label: "Temperature (0.0–2.0, blank = model default)",
+      name: "temperature", label: samplingLabel("Temperature (0.0–2.0"),
       kind: "text", required: false, group: "Sampling",
     });
     fields.push({
-      name: "top_p", label: "Top-p (0.0–1.0, blank = model default)",
+      name: "top_p", label: samplingLabel("Top-p (0.0–1.0"),
       kind: "text", required: false, group: "Sampling",
     });
   }
   fields.push({
-    name: "max_tokens", label: "Max response tokens (blank = model default)",
+    name: "max_tokens", label: samplingLabel("Max response tokens ("),
     kind: "text", required: false, group: "Sampling",
   });
   return fields;
