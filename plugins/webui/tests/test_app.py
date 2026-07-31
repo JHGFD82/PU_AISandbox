@@ -2611,6 +2611,25 @@ class TestConversationsAreGroupedByAge:
         block = page.split(".conv-group {")[1].split("}")[0]
         assert "position: sticky" in block
 
+    def test_every_heading_is_the_same_height(self):
+        """They are sticky, so two are seen together as one passes the other.
+
+        The first one used to be trimmed to save a little space at the top of
+        the list, which made the pair jump as they scrolled past each other.
+        """
+        import re
+
+        css = self._page().split("</style>")[0]
+        rules = re.findall(r"([^{}]*\.conv-group[^{}]*)\{([^}]*)\}", css)
+        sizing = ("padding", "height", "margin", "font-size", "line-height")
+        assert len(rules) == 1, (
+            "more than one rule sets a conversation heading's box: "
+            f"{[r[0].strip().splitlines()[-1] for r in rules]}"
+        )
+        assert not any(
+            key in rules[0][1] for key in sizing if ":first-child" in rules[0][0]
+        )
+
     def test_the_server_still_decides_the_order(self, unlocked_client):
         """Grouping is a heading over an order it does not change."""
         page = self._page()
