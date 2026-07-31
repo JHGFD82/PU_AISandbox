@@ -2760,3 +2760,46 @@ class TestAJobCanRunOnItsOwnModel:
             f"/api/conversations/{conv_id}?professor=heller"
         ).json()
         assert conv["model"] == "gpt-4o", "running a job changed the conversation's model"
+
+
+class TestTheSandboxsMarkSitsBehindItsName:
+    def _page(self):
+        from pathlib import Path
+
+        from fastapi.templating import Jinja2Templates
+
+        here = Path(__file__).resolve().parents[1] / "src" / "templates"
+        return (Jinja2Templates(directory=str(here)).env
+                .get_template("chat.html").render(request=None))
+
+    def test_the_title_is_the_sandboxs_name(self):
+        page = self._page()
+        assert "Princeton University AI Sandbox" in page
+        assert "Chat UI" not in page
+
+    def test_the_mark_is_a_real_drawing_and_not_a_broken_link(self):
+        """It is written into the page, so nothing fetches it and finds it gone."""
+        import re
+        import xml.etree.ElementTree as ET
+        from urllib.parse import unquote
+
+        found = re.search(r'url\("data:image/svg\+xml,(.*?)"\)', self._page(), re.S)
+        assert found, "no mark is embedded"
+        root = ET.fromstring(unquote(found.group(1)))
+        assert root.tag.endswith("svg")
+        assert len(root) == 3, "the mark is missing part of its drawing"
+
+    def test_the_words_are_readable_over_it(self):
+        """Behind the name, not across it — the name is the thing being read."""
+        page = self._page()
+        mark = page.split(".page-title-mark {")[1].split("}")[0]
+        opacity = float(mark.split("opacity:")[1].split(";")[0])
+        assert 0 < opacity <= 0.35, f"the mark is drawn at {opacity}, which would obscure the name"
+
+    def test_it_is_visible_in_both_themes(self):
+        page = self._page()
+        assert '[data-theme="dark"] .page-title-mark' in page
+
+    def test_a_screen_reader_is_not_told_the_name_twice(self):
+        page = self._page()
+        assert '<span class="page-title-mark" aria-hidden="true">' in page
