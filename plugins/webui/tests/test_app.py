@@ -2675,7 +2675,25 @@ class TestTheModelSaysWhatItCanDo:
         visibility = page.split("function applySamplingVisibility")[1].split("\n}")[0]
         assert "showModelCapabilities(model)" in visibility
 
-    def test_it_explains_a_control_that_has_gone_rather_than_leaving_a_gap(self):
-        """Temperature simply vanishes for a model that refuses it."""
+    def test_it_says_nothing_a_field_below_already_says(self):
+        """A field's presence answers whether a model takes that setting.
+
+        Saying it again is one more thing to read and one more thing to keep
+        true. What has no field — reading images — is what belongs here.
+        """
         page = self._page()
-        assert "will not take yours" in page
+        block = page.split("function showModelCapabilities")[1].split("\n}")[0]
+        assert "images" in block
+        assert "temperature" not in block.lower()
+        assert "max_response_tokens" not in block
+
+    def test_the_response_cap_is_shown_in_the_box_it_is_about(self):
+        page = self._page()
+        defaults = page.split("function showSamplingDefaults")[1].split("\n}")[0]
+        assert "model.max_response_tokens" in defaults
+
+    def test_the_boxes_are_refreshed_when_the_model_changes(self):
+        """The cap differs by model, so it cannot be settled once at load."""
+        page = self._page()
+        visibility = page.split("function applySamplingVisibility")[1].split("\n}")[0]
+        assert "showSamplingDefaults(model)" in visibility
