@@ -2777,17 +2777,41 @@ class TestTheSandboxsMarkSitsBehindItsName:
         assert "Princeton University AI Sandbox" in page
         assert "Chat UI" not in page
 
-    def test_the_mark_is_a_real_drawing_and_not_a_broken_link(self):
-        """It is written into the page, so nothing fetches it and finds it gone."""
+    def _data_uri(self):
         import re
-        import xml.etree.ElementTree as ET
-        from urllib.parse import unquote
 
         found = re.search(r'url\("data:image/svg\+xml,(.*?)"\)', self._page(), re.S)
         assert found, "no mark is embedded"
-        root = ET.fromstring(unquote(found.group(1)))
+        return found.group(1)
+
+    def test_the_mark_is_a_real_drawing_and_not_a_broken_link(self):
+        """It is written into the page, so nothing fetches it and finds it gone."""
+        import xml.etree.ElementTree as ET
+        from urllib.parse import unquote
+
+        root = ET.fromstring(unquote(self._data_uri()))
         assert root.tag.endswith("svg")
         assert len(root) == 3, "the mark is missing part of its drawing"
+
+    def test_a_browser_reads_the_whole_address(self):
+        """A '#' inside it would end the address and drop the rest of the drawing.
+
+        The colour of every path in this mark is written as a '#' followed by
+        six digits, so this is not a hypothetical: unencoded, a browser stops
+        reading part-way through the first path and draws nothing at all. It
+        cost an afternoon once, and reading the string back in Python does not
+        show it, because Python does not stop at a '#'.
+        """
+        import xml.etree.ElementTree as ET
+        from urllib.parse import unquote
+
+        uri = self._data_uri()
+        assert "#" not in uri, "the address ends early at a '#' and the mark will not draw"
+
+        # And what a browser would actually be handed is still a whole drawing.
+        as_a_browser_reads_it = uri.split("#")[0]
+        root = ET.fromstring(unquote(as_a_browser_reads_it))
+        assert len(root) == 3
 
     def test_the_words_are_readable_over_it(self):
         """Behind the name, not across it — the name is the thing being read."""
