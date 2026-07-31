@@ -246,6 +246,12 @@
     font-family: inherit; font-size: 0.85rem; line-height: 1.4;
   }
   .field-note { font-size: 0.72rem; color: var(--text-muted); margin-top: 0.25rem; line-height: 1.35; }
+  /* For reference while choosing, so it reads as a description and not as more
+     settings to fill in. */
+  #model-capabilities { font-size: 0.78rem; line-height: 1.5; }
+  .capability { display: flex; gap: 0.4rem; align-items: baseline; }
+  .capability .mark { flex: none; width: 0.9rem; text-align: center; }
+  .capability.no { color: var(--text-muted); }
   .empty { color: var(--text-muted); font-size: 0.85rem; text-align: center; margin-top: 2rem; }
 
   /* ── Modal backdrop (shared by the settings modal and the job modal) ──
@@ -516,6 +522,10 @@
                 only the first. Kept with this conversation, so another one is
                 unaffected.
               </div>
+            </div>
+            <div class="job-field" id="model-capabilities-field">
+              <label>What this model can do</label>
+              <div id="model-capabilities"></div>
             </div>
             <div class="sampling-options-footer">
               <button type="button" class="secondary" id="sampling-options-clear">Clear</button>
@@ -824,6 +834,44 @@ function applySamplingVisibility() {
   const accepts = !model || model.accepts_sampling_params !== false;
   document.getElementById("sampling-temperature-field").style.display = accepts ? "" : "none";
   document.getElementById("sampling-top-p-field").style.display = accepts ? "" : "none";
+  showModelCapabilities(model);
+}
+
+// What the chosen model can do, said plainly. Temperature and top-p simply
+// vanish for a model that refuses them, which answers "why is that gone?" only
+// if you already knew it was there — this says so instead. Shown for every
+// model, not only the awkward ones, so it reads as a description of what you
+// picked rather than a warning about it.
+function showModelCapabilities(model) {
+  const box = document.getElementById("model-capabilities");
+  box.innerHTML = "";
+  const field = document.getElementById("model-capabilities-field");
+  if (!model) { field.style.display = "none"; return; }
+  field.style.display = "";
+
+  const say = (yes, text) => {
+    const row = document.createElement("div");
+    row.className = "capability" + (yes ? "" : " no");
+    const mark = document.createElement("span");
+    mark.className = "mark";
+    mark.textContent = yes ? "\u2713" : "\u2014";
+    const label = document.createElement("span");
+    label.textContent = text;
+    row.append(mark, label);
+    box.appendChild(row);
+  };
+
+  say(model.supports_vision === true,
+      model.supports_vision === true
+        ? "Can read images and scanned pages"
+        : "Cannot read images — text only");
+  say(model.accepts_sampling_params !== false,
+      model.accepts_sampling_params !== false
+        ? "Takes a temperature and top-p"
+        : "Sets its own temperature and top-p, and will not take yours");
+  if (model.max_response_tokens) {
+    say(true, `Can answer with up to ${model.max_response_tokens.toLocaleString()} tokens at once`);
+  }
 }
 
 function growSystemPrompt() {

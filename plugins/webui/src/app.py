@@ -58,6 +58,7 @@ from src import settings_store
 from src.config import load_professor_config
 from src.errors import CLIError
 from src.models import (
+    get_model_max_completion_tokens,
     model_accepts_sampling_params,
     model_supports_vision,
     models_in_reading_order,
@@ -68,6 +69,9 @@ from src.services.api_config import credential_path_for_endpoint
 from src.settings import (
     CHAT_ROLE,
     ENDPOINTS,
+    PROMPT_MAX_TOKENS,
+    PROMPT_TEMPERATURE,
+    PROMPT_TOP_P,
     WEBUI_KEEP_SUPPLIED_DOCUMENTS,
     WEBUI_SESSION_COOKIE_NAME,
 )
@@ -474,8 +478,6 @@ def create_app() -> FastAPI:
             # Nothing to chat with yet — send a first-time visitor straight
             # to setup instead of an empty, broken-looking chat screen.
             return RedirectResponse("/settings", status_code=303)
-        from src.settings import PROMPT_MAX_TOKENS, PROMPT_TEMPERATURE, PROMPT_TOP_P
-
         return templates.TemplateResponse(
             request, "chat.html",
             # Whether to offer "Open this conversation's folder" at all. A
@@ -794,6 +796,12 @@ def create_app() -> FastAPI:
                 # uses this to hide those two controls rather than let a
                 # professor set them and have the request fail.
                 "accepts_sampling_params": model_accepts_sampling_params(m),
+                # The longest reply this model can be asked for. Some reasoning
+                # models spend part of their allowance on thinking that never
+                # appears in the answer, so they carry a larger one; shown
+                # because a person choosing a model for a long piece of work
+                # has no other way to find out.
+                "max_response_tokens": get_model_max_completion_tokens(m, PROMPT_MAX_TOKENS),
             }
             for m in names
         ]
