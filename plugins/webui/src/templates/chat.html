@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Princeton University AI Sandbox</title>
 {% include "_design-system.html" %}
 <style>
@@ -26,7 +27,7 @@
   #page-title-bar {
     grid-column: 1 / -1; grid-row: 1; display: flex; align-items: center; justify-content: space-between;
     padding: 0.4rem 1rem; background: var(--panel-bg); border-bottom: 1px solid var(--border);
-    font-weight: 600; font-size: 0.92rem; letter-spacing: 0.01em;
+    font-weight: 600; font-size: var(--text-md); letter-spacing: 0.01em;
   }
   /* The sandbox's mark, sitting behind its name. Faint on purpose — it is
      there to be recognised at a glance, not read, and the words in front of it
@@ -42,9 +43,15 @@
   }
   /* Painted after the mark because it comes after it, which is what keeps the
      words on top without either of them naming a stacking order. */
-  .page-title-text { position: relative; left: 3rem; }
+  .page-title-text {
+    position: relative; left: 3rem;
+    font-size: inherit; font-weight: inherit; margin: 0;
+  }
   /* A little stronger against a dark panel, where the same orange reads fainter. */
   [data-theme="dark"] .page-title-mark { opacity: 1.38; }
+  /* Only where the conversation list is a drawer rather than a column. */
+  #sidebar-toggle-btn { display: none; }
+  @media (max-width: 820px) { #sidebar-toggle-btn { display: inline-flex; } }
   .title-bar-actions { display: flex; align-items: center; gap: 0.3rem; flex: none; }
   #sidebar, #spend { grid-row: 2; background: var(--panel-bg); border-right: 1px solid var(--border); padding: 1rem; overflow-y: auto; }
   #sidebar { display: flex; flex-direction: column; }
@@ -55,7 +62,7 @@
   .conv-group {
     position: sticky; top: 0; z-index: 1;
     background: var(--bg);
-    font-size: 0.7rem; font-weight: 600; letter-spacing: 0.04em;
+    font-size: var(--text-xs); font-weight: 600; letter-spacing: 0.04em;
     text-transform: uppercase; color: var(--text-muted);
     padding: 0.5rem 0.5rem;
   }
@@ -69,16 +76,16 @@
                 opacity 0.2s ease, padding 0.25s ease;
   }
   body.spend-hidden #spend { opacity: 0; padding-left: 0; padding-right: 0; border-left-color: transparent; pointer-events: none; }
-  h2 { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); margin: 1rem 0 0.4rem; }
+  h2 { font-size: var(--text-sm); text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); margin: 1rem 0 0.4rem; }
   h2:first-child { margin-top: 0; }
   .section-header { display: flex; align-items: center; justify-content: space-between; margin: 1rem 0 0.4rem; }
   .section-header h2 { margin: 0; }
   select, input[type=text], textarea {
-    width: 100%; padding: 0.45rem; font-size: 0.9rem; border: 1px solid var(--border);
+    width: 100%; padding: 0.45rem; font-size: var(--text-md); border: 1px solid var(--border);
     border-radius: 6px; background: var(--input-bg); color: var(--text); font-family: inherit;
   }
   .conv-item { display: flex; align-items: center; gap: 0.2rem; padding: 0.3rem 0.2rem 0.3rem 0.5rem;
-               border-radius: 6px; cursor: pointer; font-size: 0.85rem; margin-bottom: 0.2rem; position: relative; }
+               border-radius: 6px; cursor: pointer; font-size: var(--text-md); margin-bottom: 0.2rem; position: relative; }
   .conv-item:hover { background: var(--hover-bg); }
   .conv-item.active { background: var(--orange-tint); }
   .conv-item-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0.2rem 0; }
@@ -87,17 +94,24 @@
     white-space: normal; cursor: text; background: var(--input-bg);
   }
   .conv-menu-btn {
-    flex: none; width: 20px; height: 20px; padding: 0; border-radius: 4px;
+    position: relative; flex: none; width: 28px; height: 28px; padding: 0; border-radius: var(--radius-sm);
     background: transparent; border: none; color: var(--text-muted);
     display: flex; align-items: center; justify-content: center; cursor: pointer;
     opacity: 0; transition: opacity 0.15s ease, background-color 0.15s ease;
   }
-  .conv-item:hover .conv-menu-btn, .conv-menu-btn.menu-open { opacity: 1; }
+  .conv-item:hover .conv-menu-btn, .conv-item:focus-within .conv-menu-btn,
+  .conv-menu-btn:focus-visible, .conv-menu-btn.menu-open { opacity: 1; }
   .conv-menu-btn:hover { background: var(--border); }
   /* Square, because the drawing is a wide row of dots that gets turned upright:
      the old 3x13 box was shaped for a drawing that was already vertical, and
      would shrink this one to almost nothing before rotating it. */
   .conv-menu-btn svg { width: 13px; height: 13px; display: block; }
+  /* A pointer target of 44px, out of a button drawn at 28px. Everything here
+     was smaller than a fingertip, and these two were the smallest of all —
+     which would be forgivable if one of them did not hold Delete. */
+  .conv-menu-btn::after, .msg-action-btn::after {
+    content: ""; position: absolute; inset: -8px;
+  }
   .conv-menu {
     position: absolute; top: calc(100% + 2px); right: 0.3rem; min-width: 190px;
     background: var(--panel-bg); border: 1px solid var(--border); border-radius: 8px;
@@ -105,12 +119,12 @@
   }
   .conv-menu[hidden] { display: none; }
   .conv-menu-option {
-    display: block; width: 100%; text-align: left; padding: 0.4rem 0.6rem; font-size: 0.82rem;
+    display: block; width: 100%; text-align: left; padding: 0.4rem 0.6rem; font-size: var(--text-sm);
     background: transparent; color: var(--text); border: none; border-radius: 4px; cursor: pointer;
   }
   .conv-menu-option:hover { background: var(--hover-bg); }
   .conv-menu-option.danger { color: var(--danger-text); }
-  button { padding: 0.5rem 0.8rem; font-size: 0.85rem; background: var(--orange); color: white; border: none; border-radius: 6px; cursor: pointer; }
+  button { padding: 0.5rem 0.8rem; font-size: var(--text-md); background: var(--orange); color: var(--on-orange); border: none; border-radius: 6px; cursor: pointer; }
   button:hover { background: var(--orange-hover); }
   button.secondary { background: transparent; color: var(--text); border: 1px solid var(--border); }
   button.secondary:hover { background: var(--hover-bg); }
@@ -171,7 +185,7 @@
     background: var(--panel-bg); border: 1px solid var(--border); border-radius: 8px;
     box-shadow: 0 6px 18px var(--shadow); z-index: 20; padding: 0.25rem; margin: 0;
   }
-  .combobox-option { padding: 0.4rem 0.6rem; border-radius: 4px; font-size: 0.85rem; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .combobox-option { padding: 0.4rem 0.6rem; border-radius: 4px; font-size: var(--text-md); cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .combobox-option:hover { background: var(--hover-bg); }
 
   .model-add { position: relative; }
@@ -185,8 +199,8 @@
      built-in [hidden] rule) would win, leaving the popover visible even
      when its hidden attribute is set. */
   .model-add-popover[hidden] { display: none; }
-  .model-add-popover input { padding: 0.4rem; font-size: 0.82rem; }
-  .model-add-popover button { padding: 0.4rem 0.6rem; font-size: 0.8rem; flex: none; }
+  .model-add-popover input { padding: 0.4rem; font-size: var(--text-sm); }
+  .model-add-popover button { padding: 0.4rem 0.6rem; font-size: var(--text-sm); flex: none; }
 
   .sampling-options { position: relative; }
   .sampling-options-popover {
@@ -196,9 +210,9 @@
   }
   .sampling-options-popover[hidden] { display: none; }
   .sampling-options-popover .job-field { margin-bottom: 0.7rem; }
-  .sampling-options-popover .job-field label { font-size: 0.76rem; }
+  .sampling-options-popover .job-field label { font-size: var(--text-xs); }
   .sampling-options-footer { display: flex; justify-content: flex-end; gap: 0.4rem; margin-top: 0.3rem; }
-  .sampling-options-footer button { padding: 0.4rem 0.6rem; font-size: 0.8rem; }
+  .sampling-options-footer button { padding: 0.4rem 0.6rem; font-size: var(--text-sm); }
 
   #messages { flex: 1; overflow-y: auto; padding: var(--space-6) var(--space-4); }
 
@@ -252,9 +266,9 @@
      overlap the message text) but only opaque on hover, same "reveal on
      hover" pattern as .conv-menu-btn above. */
   .msg-actions { display: flex; gap: 0.3rem; margin-top: 0.4rem; opacity: 0; transition: opacity 0.15s ease; }
-  .msg:hover .msg-actions { opacity: 1; }
+  .msg:hover .msg-actions, .msg:focus-within .msg-actions { opacity: 1; }
   .msg-action-btn {
-    width: 20px; height: 20px; padding: 0; border-radius: 4px; border: none;
+    position: relative; width: 28px; height: 28px; padding: 0; border-radius: var(--radius-sm); border: none;
     background: transparent; color: var(--text-muted); cursor: pointer;
     display: flex; align-items: center; justify-content: center;
   }
@@ -268,32 +282,39 @@
      add new ones. */
   .attachment-chip {
     display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.25rem 0.55rem;
-    border-radius: 999px; font-size: 0.78rem; white-space: nowrap;
+    border-radius: 999px; font-size: var(--text-xs); white-space: nowrap;
   }
   .attachment-chip svg { width: 12px; height: 12px; flex: none; }
   .msg-attachment-chip { background: var(--hover-bg); color: inherit; margin-top: var(--space-2); }
 
   #composer { display: flex; align-items: flex-end; gap: 0.5rem; padding: 1rem; border-top: 1px solid var(--border); background: var(--panel-bg); }
-  #composer textarea { flex: 1; resize: none; height: 2.6rem; }
+  #composer textarea {
+    flex: 1; resize: none; height: 2.6rem; max-height: 40vh; overflow-y: auto;
+    font-family: var(--font-ui); line-height: 1.5;
+  }
   #composer .icon-btn { flex: none; }
-  .spend-figure { font-size: 1.6rem; font-weight: 600; }
-  .spend-label { font-size: 0.78rem; color: var(--text-muted); }
-  .spend-row { display: flex; justify-content: space-between; font-size: 0.85rem; padding: 0.2rem 0; }
+  /* Lining figures of one width, so a column of money reads as a column. */
+  .spend-figure, .spend-row, #spend-endpoints {
+    font-variant-numeric: tabular-nums;
+  }
+  .spend-figure { font-size: var(--text-figure); font-weight: 600; }
+  .spend-label { font-size: var(--text-xs); color: var(--text-muted); }
+  .spend-row { display: flex; justify-content: space-between; font-size: var(--text-md); padding: 0.2rem 0; }
   /* Instructions run long — a sentence at least, sometimes a paragraph — so
      the box grows to fit what is in it and can be dragged taller still. The
      three settings above it are numbers and stay single-line. */
   #sampling-system-prompt {
     width: 100%; min-height: 2.6rem; resize: vertical; overflow: hidden;
-    font-family: inherit; font-size: 0.85rem; line-height: 1.4;
+    font-family: inherit; font-size: var(--text-md); line-height: 1.4;
   }
-  .field-note { font-size: 0.72rem; color: var(--text-muted); margin-top: 0.25rem; line-height: 1.35; }
+  .field-note { font-size: var(--text-xs); color: var(--text-muted); margin-top: 0.25rem; line-height: 1.35; }
   /* For reference while choosing, so it reads as a description and not as more
      settings to fill in. */
-  #model-capabilities { font-size: 0.78rem; line-height: 1.5; }
+  #model-capabilities { font-size: var(--text-xs); line-height: 1.5; }
   .capability { display: flex; gap: 0.4rem; align-items: baseline; }
   .capability .mark { flex: none; width: 0.9rem; text-align: center; }
   .capability.no { color: var(--text-muted); }
-  .empty { color: var(--text-muted); font-size: 0.85rem; text-align: center; margin-top: 2rem; }
+  .empty { color: var(--text-muted); font-size: var(--text-md); text-align: center; margin-top: 2rem; }
 
   /* ── Modal backdrop (shared by the settings modal and the job modal) ──
      A single .modal-backdrop class rather than ID-scoped rules per modal —
@@ -336,7 +357,7 @@
     box-shadow: 0 6px 18px var(--shadow); z-index: 30; padding: 0.25rem;
   }
   .action-picker[hidden] { display: none; }
-  .action-picker-empty { padding: 0.5rem 0.7rem; font-size: 0.82rem; color: var(--text-muted); max-width: 220px; }
+  .action-picker-empty { padding: 0.5rem 0.7rem; font-size: var(--text-sm); color: var(--text-muted); max-width: 220px; }
 
   /* job_result/job_error still render as bubbles in the transcript — a
      job's progress pings (job_progress) do not; those are shown only in
@@ -346,7 +367,7 @@
   /* job_page: one page's translated text, streamed in as the job runs. */
   .msg.job-page .msg-body { border-left-color: var(--border); }
   .job-page-label {
-    font-size: 0.75rem; font-weight: 600; color: var(--text-muted);
+    font-size: var(--text-xs); font-weight: 600; color: var(--text-muted);
     text-transform: uppercase; letter-spacing: 0.03em; margin-bottom: 0.3rem;
   }
   /* job_notice: a one-off aside about how the job will behave (e.g. "no
@@ -357,8 +378,8 @@
   }
   .job-download-link {
     display: inline-flex; align-items: center; gap: 0.3rem; margin-top: 0.5rem;
-    padding: 0.35rem 0.7rem; border-radius: 6px; background: var(--orange); color: white;
-    font-size: 0.82rem; text-decoration: none;
+    padding: 0.35rem 0.7rem; border-radius: 6px; background: var(--orange); color: var(--on-orange);
+    font-size: var(--text-sm); text-decoration: none;
   }
   .job-download-link:hover { background: var(--orange-hover); }
 
@@ -392,9 +413,9 @@
     50% { margin-left: 68%; }
     100% { margin-left: 0%; }
   }
-  .job-progress-label { margin-top: 0.45rem; font-size: 0.82rem; color: var(--text); }
+  .job-progress-label { margin-top: 0.45rem; font-size: var(--text-sm); color: var(--text); }
   .job-progress-advisory {
-    margin-top: 0.25rem; font-size: 0.76rem; font-style: italic; color: var(--text-muted);
+    margin-top: 0.25rem; font-size: var(--text-xs); font-style: italic; color: var(--text-muted);
   }
 
   /* Job modal: options on the left, a much larger two-pane live prompt
@@ -404,13 +425,13 @@
   .job-modal-body { flex: 1; display: flex; min-height: 0; }
   .job-options { flex: 0 0 300px; overflow-y: auto; padding: 1.1rem 1.2rem; border-right: 1px solid var(--border); }
   .job-field { margin-bottom: 1.15rem; }
-  .job-field label { display: block; font-size: 0.8rem; font-weight: 600; margin-bottom: 0.35rem; }
+  .job-field label { display: block; font-size: var(--text-sm); font-weight: 600; margin-bottom: 0.35rem; }
   /* The file-or-folder choice: inline, and quieter than the field's own label,
      because it qualifies that label rather than competing with it. */
   .file-mode { display: flex; align-items: center; gap: 0.3rem; margin-bottom: 0.4rem; }
   .file-mode input[type="radio"] { margin: 0; }
   .file-mode label {
-    display: inline; font-size: 0.76rem; font-weight: 400;
+    display: inline; font-size: var(--text-xs); font-weight: 400;
     margin: 0 0.9rem 0 0.15rem; cursor: pointer;
   }
   .job-field-checkbox { display: flex; align-items: center; gap: 0.5rem; }
@@ -419,7 +440,7 @@
      long, dense column of fields — purely cosmetic (see UiField.group's
      docstring), not a real fieldset. */
   .job-field-group-label {
-    font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
+    font-size: var(--text-xs); font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
     color: var(--text-muted); margin: 1.4rem 0 0.7rem;
   }
   /* Scoped to a direct child of #job-options specifically (not any nested
@@ -435,28 +456,58 @@
   .job-preview-pane { flex: 1; min-height: 0; display: flex; flex-direction: column; }
   .job-preview-pane + .job-preview-pane { border-top: 1px solid var(--border); }
   .job-preview-label {
-    flex: none; padding: 0.5rem 1rem; font-size: 0.75rem; font-weight: 600; text-transform: uppercase;
+    flex: none; padding: 0.5rem 1rem; font-size: var(--text-xs); font-weight: 600; text-transform: uppercase;
     letter-spacing: 0.04em; color: var(--text-muted); background: var(--bg); border-bottom: 1px solid var(--border);
   }
-  .job-preview-note { flex: none; padding: 0.4rem 1rem 0; font-size: 0.78rem; font-style: italic; color: var(--text-muted); }
+  .job-preview-note { flex: none; padding: 0.4rem 1rem 0; font-size: var(--text-xs); font-style: italic; color: var(--text-muted); }
   .job-preview-text {
     flex: 1; overflow-y: auto; margin: 0; padding: 1rem; font-family: ui-monospace, "SF Mono", Menlo, monospace;
-    font-size: 0.8rem; line-height: 1.5; white-space: pre-wrap; word-break: break-word;
+    font-size: var(--text-sm); line-height: 1.5; white-space: pre-wrap; word-break: break-word;
   }
   .job-modal-footer {
     flex: none; display: flex; align-items: center; gap: 0.5rem; padding: 0.7rem 1rem;
     border-top: 1px solid var(--border);
   }
   .job-modal-error { flex: 1; font-size: var(--text-sm); color: var(--danger-text); }
+  /* This page had no width rules at all: three fixed tracks totalling 520px of
+     furniture at every size, so on a laptop the transcript was squeezed to
+     whatever was left. The spend panel goes first, being a reference rather
+     than the work; the conversation list follows, sliding over the transcript
+     when it is asked for rather than taking a column from it. */
+  @media (max-width: 1100px) {
+    body { grid-template-columns: 240px 1fr 0px; }
+    #spend { opacity: 0; padding-left: 0; padding-right: 0; border-left-color: transparent; }
+  }
+  @media (max-width: 820px) {
+    body { grid-template-columns: 0px 1fr 0px; }
+    #sidebar {
+      position: fixed; top: 0; bottom: 0; left: 0; width: 17rem; z-index: 20;
+      transform: translateX(-100%); transition: transform 0.2s ease;
+      box-shadow: 0 0 40px var(--shadow);
+    }
+    body.sidebar-open #sidebar { transform: translateX(0); }
+    #messages { padding: var(--space-4) var(--space-2); }
+    /* The margin becomes a line above the passage rather than a column beside
+       it: at this width a 6.5rem gutter costs more than it tells. */
+    .msg { grid-template-columns: minmax(0, 1fr); gap: var(--space-1) 0; }
+    .msg-source { grid-column: 1; text-align: left; }
+    .msg-body { grid-column: 1; padding-left: var(--space-3); }
+  }
 </style>
 </head>
 <body>
-  <div id="page-title-bar">
+  <header id="page-title-bar">
+    <button type="button" class="icon-btn" id="sidebar-toggle-btn"
+            title="Show conversations" aria-label="Show conversations" aria-expanded="false">
+      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
+        <path d="M3 5h14M3 10h14M3 15h14"/>
+      </svg>
+    </button>
     <span class="page-title">
       <!-- Decorative, and marked so: the sandbox is named in the words beside
            it, so a screen reader announcing it again would only repeat them. -->
       <span class="page-title-mark" aria-hidden="true"></span>
-      <span class="page-title-text">Princeton University AI Sandbox</span>
+      <h1 class="page-title-text">Princeton University AI Sandbox</h1>
     </span>
     <div class="title-bar-actions">
       <button class="icon-btn" id="theme-toggle-btn" title="Switch to dark mode" aria-label="Toggle dark mode">
@@ -469,8 +520,8 @@
         <svg viewBox="0 0 29.9512 22.959"><path d="M18.457 21.582L20.1465 21.582L20.1465 1.37695L18.457 1.37695ZM5.08789 22.959L24.7461 22.959C27.8027 22.959 29.5898 21.0938 29.5898 17.8809L29.5898 5.08789C29.5898 1.86523 27.8027 0 24.7461 0L5.08789 0C1.86523 0 0 1.86523 0 5.08789L0 17.8809C0 21.0938 1.86523 22.959 5.08789 22.959ZM5.09766 21.2305C2.97852 21.2305 1.72852 19.9805 1.72852 17.8613L1.72852 5.09766C1.72852 2.97852 2.97852 1.72852 5.09766 1.72852L24.4922 1.72852C26.6113 1.72852 27.8516 2.97852 27.8516 5.09766L27.8516 17.8613C27.8516 19.9805 26.6113 21.2305 24.4922 21.2305ZM22.5684 6.43555L25.4395 6.43555C25.7812 6.43555 26.0742 6.13281 26.0742 5.81055C26.0742 5.46875 25.7812 5.18555 25.4395 5.18555L22.5684 5.18555C22.2266 5.18555 21.9336 5.46875 21.9336 5.81055C21.9336 6.13281 22.2266 6.43555 22.5684 6.43555ZM22.5684 9.73633L25.4395 9.73633C25.7812 9.73633 26.0742 9.44336 26.0742 9.11133C26.0742 8.7793 25.7812 8.49609 25.4395 8.49609L22.5684 8.49609C22.2266 8.49609 21.9336 8.7793 21.9336 9.11133C21.9336 9.44336 22.2266 9.73633 22.5684 9.73633ZM22.5684 13.0371L25.4395 13.0371C25.7812 13.0371 26.0742 12.7539 26.0742 12.4219C26.0742 12.0898 25.7812 11.8066 25.4395 11.8066L22.5684 11.8066C22.2266 11.8066 21.9336 12.0898 21.9336 12.4219C21.9336 12.7539 22.2266 13.0371 22.5684 13.0371Z" fill="currentColor"/></svg>
       </button>
     </div>
-  </div>
-  <div id="sidebar">
+  </header>
+  <nav id="sidebar" aria-label="Conversations">
     <h2>Professor</h2>
     <select id="professor-select"></select>
 
@@ -494,9 +545,9 @@
         <svg viewBox="0 0 17.5 25.2051"><path d="M2.73438 24.541L14.4043 24.541C16.1523 24.541 17.1387 23.5352 17.1387 21.6602L17.1387 12.7734C17.1387 10.8984 16.1523 9.89258 14.4043 9.89258L2.73438 9.89258C0.976562 9.89258 0 10.8984 0 12.7734L0 21.6602C0 23.5352 0.976562 24.541 2.73438 24.541ZM2.77344 22.9102C2.13867 22.9102 1.73828 22.4805 1.73828 21.7676L1.73828 12.6562C1.73828 11.9434 2.13867 11.5234 2.77344 11.5234L14.375 11.5234C15.0098 11.5234 15.3906 11.9434 15.3906 12.6562L15.3906 21.7676C15.3906 22.4805 15.0098 22.9102 14.375 22.9102ZM2.23633 10.7129L3.95508 10.7129L3.95508 6.72852C3.95508 3.47656 6.01562 1.63086 8.56445 1.63086C11.1133 1.63086 13.1934 3.47656 13.1934 6.72852L13.1934 10.7129L14.9121 10.7129L14.9121 6.92383C14.9121 2.38281 11.9434 0 8.56445 0C5.19531 0 2.23633 2.38281 2.23633 6.92383Z" fill="currentColor"/></svg>
       </button>
     </div>
-  </div>
+  </nav>
 
-  <div id="main">
+  <main id="main">
     <div id="topbar">
       <div class="model-picker">
         <div class="combobox" id="model-combobox">
@@ -566,7 +617,8 @@
         </button>
         <div class="action-picker" id="action-picker" hidden></div>
       </div>
-      <textarea id="input" placeholder="Message..."></textarea>
+      <label class="visually-hidden" for="input">Message</label>
+      <textarea id="input" placeholder="Ask a question, or paste a passage. Enter sends, Shift+Enter starts a new line."></textarea>
       <button id="send-btn">Send</button>
     </div>
     <!-- Background job progress: hidden unless a job is running in the
@@ -577,9 +629,9 @@
       <div class="job-progress-label" id="job-progress-label"></div>
       <div class="job-progress-advisory">A background job is running in this conversation — open a new conversation if you'd like to keep chatting while it finishes.</div>
     </div>
-  </div>
+  </main>
 
-  <div id="spend">
+  <aside id="spend" aria-label="Spending">
     <h2>This month</h2>
     <div class="spend-figure" id="spend-month">$0.00</div>
     <div class="spend-label" id="spend-budget"></div>
@@ -598,12 +650,12 @@
         Counted, not costed — these are not billed through the sandbox.
       </div>
     </div>
-  </div>
+  </aside>
 
   <div id="settings-modal-backdrop" class="modal-backdrop" hidden>
     <div class="modal-panel">
       <div class="modal-header">
-        <h2 style="margin:0; text-transform:none; font-size:1rem; letter-spacing:normal;">Settings</h2>
+        <h2 style="margin:0; text-transform:none; font-size:var(--text-lg); letter-spacing:normal;">Settings</h2>
         <button type="button" class="icon-btn" id="settings-modal-close" title="Close" aria-label="Close settings">
           <svg class="icon-as-cross" viewBox="0 0 20.918 20.5762"><path d="M11.2305 19.5996L11.2305 0.957031C11.2305 0.439453 10.8008 0 10.2734 0C9.75586 0 9.32617 0.439453 9.32617 0.957031L9.32617 19.5996C9.32617 20.1172 9.75586 20.5566 10.2734 20.5566C10.8008 20.5566 11.2305 20.1172 11.2305 19.5996ZM0.957031 11.2305L19.5996 11.2305C20.1172 11.2305 20.5566 10.8008 20.5566 10.2832C20.5566 9.75586 20.1172 9.32617 19.5996 9.32617L0.957031 9.32617C0.439453 9.32617 0 9.75586 0 10.2832C0 10.8008 0.439453 11.2305 0.957031 11.2305Z" fill="currentColor"/></svg>
         </button>
@@ -620,7 +672,7 @@
   <div id="job-modal-backdrop" class="modal-backdrop" hidden>
     <div class="modal-panel job-modal-panel">
       <div class="modal-header">
-        <h2 id="job-modal-title" style="margin:0; text-transform:none; font-size:1rem; letter-spacing:normal;">Plugin action</h2>
+        <h2 id="job-modal-title" style="margin:0; text-transform:none; font-size:var(--text-lg); letter-spacing:normal;">Plugin action</h2>
         <div class="modal-header-actions">
           <button type="button" class="icon-btn neutral" id="job-modal-reset" title="Reset fields" aria-label="Reset all fields to blank">
             <!-- Two arrows chasing each other in a circle, like a browser
@@ -2139,6 +2191,7 @@ async function sendMessage() {
     await loadConversations();
   }
   input.value = "";
+  growComposer();          // back to one line, now that it is empty
   appendPendingMessage(text);
   const sendBtn = document.getElementById("send-btn");
   sendBtn.disabled = true;
@@ -2217,6 +2270,31 @@ async function sendMessage() {
 }
 
 document.getElementById("send-btn").addEventListener("click", sendMessage);
+// Grows with what is typed or pasted, up to a point, then scrolls. The same
+// two lines the conversation-instructions box uses; this box did not have them,
+// so a pasted passage was read through a slot an inch and a half tall.
+function growComposer() {
+  const box = document.getElementById("input");
+  box.style.height = "auto";
+  box.style.height = Math.min(box.scrollHeight, window.innerHeight * 0.4) + "px";
+}
+document.getElementById("input").addEventListener("input", growComposer);
+
+// The conversation list is a column on a wide screen and a drawer on a narrow
+// one; this is the only way to open it in the second case.
+document.getElementById("sidebar-toggle-btn").addEventListener("click", (e) => {
+  e.stopPropagation();
+  const open = document.body.classList.toggle("sidebar-open");
+  const btn = document.getElementById("sidebar-toggle-btn");
+  btn.setAttribute("aria-expanded", open ? "true" : "false");
+  btn.title = btn.ariaLabel = open ? "Hide conversations" : "Show conversations";
+});
+// Choosing a conversation is the end of the drawer's job.
+document.getElementById("conv-list").addEventListener("click", () => {
+  document.body.classList.remove("sidebar-open");
+  document.getElementById("sidebar-toggle-btn").setAttribute("aria-expanded", "false");
+});
+
 document.getElementById("input").addEventListener("keydown", (e) => {
   if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); }
 });

@@ -20,6 +20,19 @@
     --orange: #E77500;
     --orange-hover: #cc6600;
     --orange-tint: #fdeadb;
+    /* The same orange, darkened, for the one thing that must be seen against
+       every surface here: where the keyboard is. Princeton's own value reaches
+       3.02:1 on a white panel but only 2.78:1 on the page behind the
+       transcript, which is under the 3:1 an outline has to make. This clears
+       3.83:1 and 4.17:1, with room to spare rather than a rounding to spare. */
+    --focus-ring: #C26200;
+    /* What is written on top of a filled orange button. White reaches only
+       3.02:1 there, under the 4.5:1 a label needs; the interface's own dark ink
+       reaches 5.56:1 on the very same orange. So the brand colour stays at full
+       strength and the writing changes instead of the other way round. The
+       value does not follow the theme — the orange underneath it does not
+       either. */
+    --on-orange: #1d1d1f;
 
     /* ── Surfaces ─────────────────────────────────────────────────────── */
     --bg: #f5f5f7;
@@ -98,6 +111,10 @@
   }
 
   [data-theme="dark"] {
+    /* Against a dark panel the ordinary orange is already well clear — 5.62:1
+       on the page, 4.99:1 on a panel — so it needs no darkening here. */
+    --focus-ring: #E77500;
+
     /* A lighter orange on hover here: darkening one on a dark panel takes it
        towards the background rather than away from it. */
     --orange-hover: #ff8f2e;
@@ -123,11 +140,13 @@
   * { box-sizing: border-box; }
 
   /* Where the keyboard is. There was no focus style anywhere in this
-     interface, so anyone not using a mouse had to guess. The orange is used
-     for it because an outline only has to reach 3:1 to count, which is the
-     one job this colour is strong enough for. */
+     interface — not one rule in any of the four pages — so anyone not using a
+     mouse had to guess. It is drawn in the darkened orange rather than the
+     plain one for the reason given against --focus-ring: an outline has to
+     make 3:1 against whatever is behind it, and behind the transcript the
+     plain orange does not. */
   :focus-visible {
-    outline: 2px solid var(--orange);
+    outline: 2px solid var(--focus-ring);
     outline-offset: 2px;
     border-radius: var(--radius-sm);
   }
