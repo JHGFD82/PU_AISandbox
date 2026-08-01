@@ -3000,6 +3000,16 @@ class TestOneDesignSystem:
             literals = re.findall(r"font-size:\s*([0-9.]+)rem", css)
             assert not literals, f"{name} still sizes text by hand: {literals}"
 
+    def test_shapes_and_faces_come_from_the_scale_too(self):
+        """Eight corner radii, where 20px and 999px both meant "fully round"."""
+        import re
+
+        for name in self.TEMPLATES:
+            page = self._source(name)
+            radii = re.findall(r"border-radius:\s*(\d+)px", page)
+            assert not radii, f"{name} still rounds corners by hand: {radii}"
+            assert "ui-monospace" not in page, f"{name} writes out a font stack"
+
     def test_nothing_is_smaller_than_twelve_pixels(self):
         """It went down to 9.9px, on a badge, and 11.2px on the sidebar."""
         import re

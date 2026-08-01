@@ -14,7 +14,7 @@
   #topbar a { color: var(--text); text-decoration: none; font-size: var(--text-md); }
   #topbar a:hover { text-decoration: underline; }
   #page { max-width: 720px; margin: 0 auto; padding: 1.5rem; display: flex; flex-direction: column; gap: 1.25rem; }
-  .card { background: var(--panel-bg); border: 1px solid var(--border); border-radius: 10px; padding: 1.25rem 1.5rem; }
+  .card { background: var(--panel-bg); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 1.25rem 1.5rem; }
   .card h2 { font-size: var(--text-lg); margin: 0 0 0.25rem; }
   .card .hint { font-size: var(--text-sm); color: var(--text-muted); margin: 0 0 1rem; line-height: 1.4; }
   /* The new-tab marker: sits with the label rather than after the button, so
@@ -25,17 +25,17 @@
   .row .main { flex: 1; min-width: 0; }
   .row .name { font-size: var(--text-md); font-weight: 500; }
   .row .sub { font-size: var(--text-xs); color: var(--text-muted); }
-  .badge { font-size: var(--text-xs); padding: 0.15rem 0.5rem; border-radius: 20px; white-space: nowrap; }
+  .badge { font-size: var(--text-xs); padding: 0.15rem 0.5rem; border-radius: var(--radius-pill); white-space: nowrap; }
   .badge.set { background: var(--badge-set-bg); color: var(--badge-set-text); }
   .badge.unset { background: var(--hover-bg); color: var(--text-muted); }
   label { display: block; font-size: var(--text-xs); color: var(--text-muted); margin: 0.6rem 0 0.2rem; }
   input[type=text], input[type=password], select {
     width: 100%; padding: 0.5rem; font-size: var(--text-md); border: 1px solid var(--border);
-    border-radius: 6px; font-family: inherit; background: var(--input-bg); color: var(--text);
+    border-radius: var(--radius-md); font-family: inherit; background: var(--input-bg); color: var(--text);
   }
   form.inline { display: flex; gap: 0.5rem; align-items: flex-end; flex-wrap: wrap; margin-top: 0.75rem; }
   form.inline > div { flex: 1; min-width: 140px; }
-  button { padding: 0.45rem 0.8rem; font-size: var(--text-md); background: var(--orange); color: var(--on-orange); border: none; border-radius: 6px; cursor: pointer; white-space: nowrap; }
+  button { padding: 0.45rem 0.8rem; font-size: var(--text-md); background: var(--orange); color: var(--on-orange); border: none; border-radius: var(--radius-md); cursor: pointer; white-space: nowrap; }
   button:hover { background: #cc6600; }
   button.secondary { background: transparent; color: var(--text); border: 1px solid var(--border); }
   button.secondary:hover { background: var(--hover-bg); }
@@ -44,7 +44,7 @@
   button:disabled { opacity: 0.5; cursor: default; }
   details.manage { margin-top: 0.4rem; }
   details.manage summary { font-size: var(--text-xs); color: var(--orange); cursor: pointer; }
-  .snippet { background: var(--bg); border-radius: 6px; padding: 0.75rem; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: var(--text-xs); white-space: pre; overflow-x: auto; margin-top: 0.5rem; }
+  .snippet { background: var(--bg); border-radius: var(--radius-md); padding: 0.75rem; font-family: var(--font-mono); font-size: var(--text-xs); white-space: pre; overflow-x: auto; margin-top: 0.5rem; }
   .empty { font-size: var(--text-md); color: var(--text-muted); }
   .field-set { display: flex; gap: 0.5rem; align-items: center; }
   .field-set input { flex: 1; }
@@ -54,9 +54,9 @@
   .inline-fields > div { flex: 1; min-width: 140px; }
   .required { color: var(--orange); font-size: var(--text-xs); }
   .field-note { margin: 0.6rem 0 0; }
-  .field-note code { background: var(--bg); border-radius: 4px; padding: 0.05rem 0.25rem; font-size: 0.9em; }
+  .field-note code { background: var(--bg); border-radius: var(--radius-sm); padding: 0.05rem 0.25rem; font-size: 0.9em; }
   .form-error { font-size: var(--text-sm); color: var(--danger-text); border: 1px solid var(--danger-border);
-                background: var(--danger-hover-bg); border-radius: 6px; padding: 0.5rem 0.7rem; margin: 0.7rem 0 0; }
+                background: var(--danger-hover-bg); border-radius: var(--radius-md); padding: 0.5rem 0.7rem; margin: 0.7rem 0 0; }
   #add-professor-form button[type=submit] { margin-top: 0.8rem; }
 </style>
 </head>

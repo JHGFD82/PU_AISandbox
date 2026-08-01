@@ -82,15 +82,15 @@
   .section-header h2 { margin: 0; }
   select, input[type=text], textarea {
     width: 100%; padding: 0.45rem; font-size: var(--text-md); border: 1px solid var(--border);
-    border-radius: 6px; background: var(--input-bg); color: var(--text); font-family: inherit;
+    border-radius: var(--radius-md); background: var(--input-bg); color: var(--text); font-family: inherit;
   }
   .conv-item { display: flex; align-items: center; gap: 0.2rem; padding: 0.3rem 0.2rem 0.3rem 0.5rem;
-               border-radius: 6px; cursor: pointer; font-size: var(--text-md); margin-bottom: 0.2rem; position: relative; }
+               border-radius: var(--radius-md); cursor: pointer; font-size: var(--text-md); margin-bottom: 0.2rem; position: relative; }
   .conv-item:hover { background: var(--hover-bg); }
   .conv-item.active { background: var(--orange-tint); }
   .conv-item-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0.2rem 0; }
   .conv-item-title[contenteditable="true"] {
-    outline: 1px solid var(--orange); border-radius: 4px; padding: 0.15rem 0.3rem;
+    outline: 1px solid var(--orange); border-radius: var(--radius-sm); padding: 0.15rem 0.3rem;
     white-space: normal; cursor: text; background: var(--input-bg);
   }
   .conv-menu-btn {
@@ -114,31 +114,31 @@
   }
   .conv-menu {
     position: absolute; top: calc(100% + 2px); right: 0.3rem; min-width: 190px;
-    background: var(--panel-bg); border: 1px solid var(--border); border-radius: 8px;
+    background: var(--panel-bg); border: 1px solid var(--border); border-radius: var(--radius-md);
     box-shadow: 0 6px 18px var(--shadow); z-index: 30; padding: 0.25rem;
   }
   .conv-menu[hidden] { display: none; }
   .conv-menu-option {
     display: block; width: 100%; text-align: left; padding: 0.4rem 0.6rem; font-size: var(--text-sm);
-    background: transparent; color: var(--text); border: none; border-radius: 4px; cursor: pointer;
+    background: transparent; color: var(--text); border: none; border-radius: var(--radius-sm); cursor: pointer;
   }
   .conv-menu-option:hover { background: var(--hover-bg); }
   .conv-menu-option.danger { color: var(--danger-text); }
-  button { padding: 0.5rem 0.8rem; font-size: var(--text-md); background: var(--orange); color: var(--on-orange); border: none; border-radius: 6px; cursor: pointer; }
+  button { padding: 0.5rem 0.8rem; font-size: var(--text-md); background: var(--orange); color: var(--on-orange); border: none; border-radius: var(--radius-md); cursor: pointer; }
   button:hover { background: var(--orange-hover); }
   button.secondary { background: transparent; color: var(--text); border: 1px solid var(--border); }
   button.secondary:hover { background: var(--hover-bg); }
   button:disabled { opacity: 0.5; cursor: default; }
 
   .plus-btn {
-    width: 22px; height: 22px; padding: 0; border-radius: 6px; flex: none;
+    width: 22px; height: 22px; padding: 0; border-radius: var(--radius-md); flex: none;
     display: inline-flex; align-items: center; justify-content: center;
   }
   .plus-btn svg { width: 12px; height: 12px; display: block; }
 
   .icon-btn {
     display: inline-flex; align-items: center; justify-content: center;
-    width: 34px; height: 34px; padding: 0; border-radius: 6px; flex: none;
+    width: 34px; height: 34px; padding: 0; border-radius: var(--radius-md); flex: none;
     background: transparent; border: none; color: var(--text); cursor: pointer;
   }
   .icon-btn:hover { background: var(--hover-bg); }
@@ -182,16 +182,16 @@
   .combobox-toggle:hover { background: transparent; color: var(--text); }
   .combobox-list {
     position: absolute; top: calc(100% + 4px); left: 0; right: 0; max-height: 260px; overflow-y: auto;
-    background: var(--panel-bg); border: 1px solid var(--border); border-radius: 8px;
+    background: var(--panel-bg); border: 1px solid var(--border); border-radius: var(--radius-md);
     box-shadow: 0 6px 18px var(--shadow); z-index: 20; padding: 0.25rem; margin: 0;
   }
-  .combobox-option { padding: 0.4rem 0.6rem; border-radius: 4px; font-size: var(--text-md); cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .combobox-option { padding: 0.4rem 0.6rem; border-radius: var(--radius-sm); font-size: var(--text-md); cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .combobox-option:hover { background: var(--hover-bg); }
 
   .model-add { position: relative; }
   .model-add-popover {
     position: absolute; top: calc(100% + 4px); right: 0; width: 230px; display: flex; gap: 0.4rem;
-    background: var(--panel-bg); border: 1px solid var(--border); border-radius: 8px;
+    background: var(--panel-bg); border: 1px solid var(--border); border-radius: var(--radius-md);
     box-shadow: 0 6px 18px var(--shadow); z-index: 20; padding: 0.5rem;
   }
   /* Without this, [hidden] and the rule above both have equal specificity
@@ -205,7 +205,7 @@
   .sampling-options { position: relative; }
   .sampling-options-popover {
     position: absolute; top: calc(100% + 4px); right: 0; width: 240px;
-    background: var(--panel-bg); border: 1px solid var(--border); border-radius: 8px;
+    background: var(--panel-bg); border: 1px solid var(--border); border-radius: var(--radius-md);
     box-shadow: 0 6px 18px var(--shadow); z-index: 20; padding: 0.7rem 0.8rem;
   }
   .sampling-options-popover[hidden] { display: none; }
@@ -282,7 +282,7 @@
      add new ones. */
   .attachment-chip {
     display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.25rem 0.55rem;
-    border-radius: 999px; font-size: var(--text-xs); white-space: nowrap;
+    border-radius: var(--radius-pill); font-size: var(--text-xs); white-space: nowrap;
   }
   .attachment-chip svg { width: 12px; height: 12px; flex: none; }
   .msg-attachment-chip { background: var(--hover-bg); color: inherit; margin-top: var(--space-2); }
@@ -338,7 +338,7 @@
   .modal-backdrop.open { opacity: 1; }
   .modal-panel {
     width: min(760px, 92vw); height: min(85vh, 780px); background: var(--panel-bg);
-    border-radius: 12px; overflow: hidden; display: flex; flex-direction: column;
+    border-radius: var(--radius-lg); overflow: hidden; display: flex; flex-direction: column;
     box-shadow: 0 20px 60px var(--shadow); transform: scale(0.97); transition: transform 0.2s ease;
   }
   .modal-backdrop.open .modal-panel { transform: scale(1); }
@@ -353,7 +353,7 @@
   .plugin-action-wrap { position: relative; flex: none; }
   .action-picker {
     position: absolute; bottom: calc(100% + 6px); left: 0; min-width: 220px;
-    background: var(--panel-bg); border: 1px solid var(--border); border-radius: 8px;
+    background: var(--panel-bg); border: 1px solid var(--border); border-radius: var(--radius-md);
     box-shadow: 0 6px 18px var(--shadow); z-index: 30; padding: 0.25rem;
   }
   .action-picker[hidden] { display: none; }
@@ -378,7 +378,7 @@
   }
   .job-download-link {
     display: inline-flex; align-items: center; gap: 0.3rem; margin-top: 0.5rem;
-    padding: 0.35rem 0.7rem; border-radius: 6px; background: var(--orange); color: var(--on-orange);
+    padding: 0.35rem 0.7rem; border-radius: var(--radius-md); background: var(--orange); color: var(--on-orange);
     font-size: var(--text-sm); text-decoration: none;
   }
   .job-download-link:hover { background: var(--orange-hover); }
@@ -395,10 +395,10 @@
   #job-progress-box { padding: 0 1rem 0.9rem; background: var(--panel-bg); }
   #job-progress-box[hidden] { display: none; }
   .job-progress-track {
-    height: 6px; border-radius: 999px; background: var(--hover-bg); overflow: hidden;
+    height: 6px; border-radius: var(--radius-pill); background: var(--hover-bg); overflow: hidden;
   }
   .job-progress-fill {
-    height: 100%; width: 0%; background: var(--orange); border-radius: 999px;
+    height: 100%; width: 0%; background: var(--orange); border-radius: var(--radius-pill);
     transition: width 0.4s ease;
   }
   /* Before the first progress ping arrives, the total unit count isn't
@@ -461,7 +461,7 @@
   }
   .job-preview-note { flex: none; padding: 0.4rem 1rem 0; font-size: var(--text-xs); font-style: italic; color: var(--text-muted); }
   .job-preview-text {
-    flex: 1; overflow-y: auto; margin: 0; padding: 1rem; font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    flex: 1; overflow-y: auto; margin: 0; padding: 1rem; font-family: var(--font-mono);
     font-size: var(--text-sm); line-height: 1.5; white-space: pre-wrap; word-break: break-word;
   }
   .job-modal-footer {

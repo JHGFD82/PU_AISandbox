@@ -14,7 +14,7 @@
   #topbar a { color: var(--text); text-decoration: none; font-size: var(--text-md); }
   #topbar a:hover { text-decoration: underline; }
   #page { max-width: 720px; margin: 0 auto; padding: 1.5rem; display: flex; flex-direction: column; gap: 1.25rem; }
-  .card { background: var(--panel-bg); border: 1px solid var(--border); border-radius: 10px; padding: 1.25rem 1.5rem; }
+  .card { background: var(--panel-bg); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 1.25rem 1.5rem; }
   .card h2 { font-size: var(--text-lg); margin: 0 0 0.25rem; }
   .card .hint { font-size: var(--text-sm); color: var(--text-muted); margin: 0 0 1rem; line-height: 1.4; }
   .row { display: flex; align-items: center; gap: 0.6rem; padding: 0.5rem 0; border-bottom: 1px solid var(--bg); }
@@ -22,17 +22,17 @@
   .row .main { flex: 1; min-width: 0; }
   .row .name { font-size: var(--text-md); font-weight: 500; }
   .row .sub { font-size: var(--text-xs); color: var(--text-muted); }
-  .badge { font-size: var(--text-xs); padding: 0.15rem 0.5rem; border-radius: 20px; white-space: nowrap; }
+  .badge { font-size: var(--text-xs); padding: 0.15rem 0.5rem; border-radius: var(--radius-pill); white-space: nowrap; }
   .badge.set { background: var(--badge-set-bg); color: var(--badge-set-text); }
   .badge.unset { background: var(--hover-bg); color: var(--text-muted); }
   label { display: block; font-size: var(--text-xs); color: var(--text-muted); margin: 0.6rem 0 0.2rem; }
   input[type=text], input[type=password], select {
     width: 100%; padding: 0.5rem; font-size: var(--text-md); border: 1px solid var(--border);
-    border-radius: 6px; font-family: inherit; background: var(--input-bg); color: var(--text);
+    border-radius: var(--radius-md); font-family: inherit; background: var(--input-bg); color: var(--text);
   }
   form.inline { display: flex; gap: 0.5rem; align-items: flex-end; flex-wrap: wrap; margin-top: 0.75rem; }
   form.inline > div { flex: 1; min-width: 140px; }
-  button { padding: 0.45rem 0.8rem; font-size: var(--text-md); background: var(--orange); color: var(--on-orange); border: none; border-radius: 6px; cursor: pointer; white-space: nowrap; }
+  button { padding: 0.45rem 0.8rem; font-size: var(--text-md); background: var(--orange); color: var(--on-orange); border: none; border-radius: var(--radius-md); cursor: pointer; white-space: nowrap; }
   button:hover { background: #cc6600; }
   button.secondary { background: transparent; color: var(--text); border: 1px solid var(--border); }
   button.secondary:hover { background: var(--hover-bg); }
@@ -41,7 +41,7 @@
   button:disabled { opacity: 0.5; cursor: default; }
   details.manage { margin-top: 0.4rem; }
   details.manage summary { font-size: var(--text-xs); color: var(--orange); cursor: pointer; }
-  .snippet { background: var(--bg); border-radius: 6px; padding: 0.75rem; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: var(--text-xs); white-space: pre; overflow-x: auto; margin-top: 0.5rem; }
+  .snippet { background: var(--bg); border-radius: var(--radius-md); padding: 0.75rem; font-family: var(--font-mono); font-size: var(--text-xs); white-space: pre; overflow-x: auto; margin-top: 0.5rem; }
   .empty { font-size: var(--text-md); color: var(--text-muted); }
   .field-set { display: flex; gap: 0.5rem; align-items: center; }
   .field-set input { flex: 1; }
@@ -70,9 +70,9 @@
      to fit its own content and can be dragged taller, and the short ones sit at
      one line and look no different from a plain field. */
   .setting textarea {
-    width: 100%; padding: 0.5rem; border: 1px solid var(--border); border-radius: 6px;
+    width: 100%; padding: 0.5rem; border: 1px solid var(--border); border-radius: var(--radius-md);
     background: var(--input-bg); color: var(--text);
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-family: var(--font-mono);
     font-size: var(--text-xs); line-height: 1.45;
     resize: vertical; overflow: hidden; display: block;
   }
@@ -98,12 +98,12 @@
   .setting.is-new .name::after {
     content: "NEW"; margin-left: 0.5rem; font-size: var(--text-xs); font-weight: 700;
     letter-spacing: 0.04em; color: var(--orange); border: 1px solid var(--orange);
-    border-radius: 3px; padding: 0.03rem 0.25rem; vertical-align: 0.1rem;
+    border-radius: var(--radius-sm); padding: 0.03rem 0.25rem; vertical-align: 0.1rem;
   }
   .section-from { font-size: var(--text-xs); color: var(--text-muted); margin: -0.5rem 0 0.6rem; }
   .sticky-actions {
     position: sticky; bottom: 0; background: var(--panel-bg);
-    border: 1px solid var(--border); border-radius: 10px;
+    border: 1px solid var(--border); border-radius: var(--radius-lg);
     padding: 1rem 1.5rem; margin-top: 0.25rem;
   }
   .count { font-size: var(--text-sm); color: var(--text-muted); margin-left: 0.75rem; }
