@@ -118,7 +118,18 @@
        sandbox is used on wide monitors to read translations thousands of
        characters long. */
     --measure: 66ch;
+
+    /* ── The reading face, as chosen ───────────────────────────────────────
+       Which of the two faces above a reply is set in. It starts as the serif,
+       because that is what a page of translated prose wants; somebody who
+       would rather read sans can say so, and the choice is remembered.
+       Only what was written follows this — the interface stays in the
+       system's face either way, so the two never become the same thing. */
+    --font-reading: var(--font-text);
   }
+
+  /* Set on the document when somebody chooses the other one. */
+  [data-reading="sans"] { --font-reading: var(--font-ui); }
 
   [data-theme="dark"] {
     /* Against a dark panel the ordinary orange is already well clear — 5.62:1
