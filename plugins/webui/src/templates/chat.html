@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Princeton University AI Sandbox</title>
 {% include "_design-system.html" %}
+{% include "_actions.html" %}
 {% include "_markdown.html" %}
 <style>
   /* Shared by every element whose color comes from a theme variable, so
@@ -348,6 +349,18 @@
   }
   .msg-action-btn:hover { background: var(--hover-bg); }
   .msg-action-btn svg { width: 11px; height: 11px; display: block; }
+  /* The copy button holds both drawings and fades between them, the same way
+     the light/dark button does. The tick is the button answering for itself:
+     the thing you pressed says it worked, rather than a message appearing
+     somewhere else for the eye to go and find. */
+  .action-icons { width: 11px; height: 11px; }
+  .action-icons svg { width: 11px; height: 11px; }
+  .action-icons .icon-copied { opacity: 0; transform: scale(0.4); }
+  .action-icons .icon-copy { opacity: 1; transform: scale(1); }
+  .msg-action-btn.copied .action-icons .icon-copied { opacity: 1; transform: scale(1); }
+  .msg-action-btn.copied .action-icons .icon-copy { opacity: 0; transform: scale(0.4); }
+  /* It goes green only while it is a tick, so the row is not coloured at rest. */
+  .msg-action-btn.copied { color: var(--badge-set-text); }
 
   /* Attachment chips: a small "📎 filename" read-only pill rendered inside a
      message bubble for a turn that already has an attachment on it (from
@@ -2051,14 +2064,6 @@ function attachmentChipElement(filename, charCount) {
 // Copy the bubble's own text (not the whole conversation) to the clipboard —
 // a quick "grab this one reply" action distinct from the conversation-level
 // export in each conv-item's "⋮" menu.
-function copyMessageText(text, btn) {
-  navigator.clipboard.writeText(text).then(() => {
-    const original = btn.title;
-    btn.title = "Copied!";
-    setTimeout(() => { btn.title = original; }, 1200);
-  }).catch(() => alert("Couldn't copy to clipboard — your browser may be blocking clipboard access."));
-}
-
 // Downloads just this one bubble's text as a small .txt file. Deliberately
 // plain-text and single-message — the richer, whole-conversation exports
 // (Word/PDF/Markdown) live in the conversation's own "⋮" menu.
@@ -2076,12 +2081,7 @@ function messageActionsElement(m) {
   const actions = document.createElement("div");
   actions.className = "msg-actions";
 
-  const copyBtn = document.createElement("button");
-  copyBtn.type = "button"; copyBtn.className = "msg-action-btn";
-  copyBtn.title = "Copy to clipboard"; copyBtn.setAttribute("aria-label", "Copy message to clipboard");
-  copyBtn.innerHTML = '<svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.3" '
-    + 'stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="5" width="8" height="8" rx="1.2"/>'
-    + '<path d="M3.5 9.5H2.8A1.3 1.3 0 011.5 8.2V2.8A1.3 1.3 0 012.8 1.5h5.4a1.3 1.3 0 011.3 1.3v0.7"/></svg>';
+  const copyBtn = copyButtonElement("Copy to clipboard");
   copyBtn.addEventListener("click", (e) => { e.stopPropagation(); copyMessageText(m.content, copyBtn); });
 
   const exportBtn = document.createElement("button");
