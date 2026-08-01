@@ -116,8 +116,8 @@
   }
   .conv-menu {
     position: absolute; top: calc(100% + 2px); right: 0.3rem; min-width: 190px;
-    background: var(--panel-bg); border: 1px solid var(--border); border-radius: var(--radius-md);
-    box-shadow: 0 6px 18px var(--shadow); z-index: 30; padding: 0.25rem;
+    background: var(--surface-raised); border: 1px solid var(--border); border-radius: var(--radius-md);
+    box-shadow: 0 8px 24px var(--shadow-raised); z-index: 30; padding: 0.25rem;
   }
   .conv-menu[hidden] { display: none; }
   .conv-menu-option {
@@ -133,10 +133,10 @@
   button:disabled { opacity: 0.5; cursor: default; }
 
   .plus-btn {
-    width: 22px; height: 22px; padding: 0; border-radius: var(--radius-md); flex: none;
+    width: 28px; height: 28px; padding: 0; border-radius: var(--radius-md); flex: none;
     display: inline-flex; align-items: center; justify-content: center;
   }
-  .plus-btn svg { width: 12px; height: 12px; display: block; }
+  .plus-btn svg { width: 20px; height: 20px; display: block; }
 
   .icon-btn {
     display: inline-flex; align-items: center; justify-content: center;
@@ -181,11 +181,12 @@
     width: 22px; height: 22px; padding: 0; background: transparent; border: none; color: var(--text-muted);
     display: flex; align-items: center; justify-content: center; cursor: pointer;
   }
+  .combobox-toggle svg { width: 11px; height: 11px; display: block; }
   .combobox-toggle:hover { background: transparent; color: var(--text); }
   .combobox-list {
     position: absolute; top: calc(100% + 4px); left: 0; right: 0; max-height: 260px; overflow-y: auto;
-    background: var(--panel-bg); border: 1px solid var(--border); border-radius: var(--radius-md);
-    box-shadow: 0 6px 18px var(--shadow); z-index: 20; padding: 0.25rem; margin: 0;
+    background: var(--surface-raised); border: 1px solid var(--border); border-radius: var(--radius-md);
+    box-shadow: 0 8px 24px var(--shadow-raised); z-index: 20; padding: 0.25rem; margin: 0;
   }
   .combobox-option { padding: 0.4rem 0.6rem; border-radius: var(--radius-sm); font-size: var(--text-md); cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .combobox-option:hover { background: var(--hover-bg); }
@@ -193,8 +194,8 @@
   .model-add { position: relative; }
   .model-add-popover {
     position: absolute; top: calc(100% + 4px); right: 0; width: 230px; display: flex; gap: 0.4rem;
-    background: var(--panel-bg); border: 1px solid var(--border); border-radius: var(--radius-md);
-    box-shadow: 0 6px 18px var(--shadow); z-index: 20; padding: 0.5rem;
+    background: var(--surface-raised); border: 1px solid var(--border); border-radius: var(--radius-md);
+    box-shadow: 0 8px 24px var(--shadow-raised); z-index: 20; padding: 0.5rem;
   }
   /* Without this, [hidden] and the rule above both have equal specificity
      and this stylesheet's own "display: flex" (loaded after the browser's
@@ -206,9 +207,9 @@
 
   .sampling-options { position: relative; }
   .sampling-options-popover {
-    position: absolute; top: calc(100% + 4px); right: 0; width: 240px;
-    background: var(--panel-bg); border: 1px solid var(--border); border-radius: var(--radius-md);
-    box-shadow: 0 6px 18px var(--shadow); z-index: 20; padding: 0.7rem 0.8rem;
+    position: absolute; top: calc(100% + 4px); right: 0; width: 26rem; max-width: calc(100vw - 2rem);
+    background: var(--surface-raised); border: 1px solid var(--border); border-radius: var(--radius-md);
+    box-shadow: 0 8px 24px var(--shadow-raised); z-index: 20; padding: 0.7rem 0.8rem;
   }
   .sampling-options-popover[hidden] { display: none; }
   .sampling-options-popover .job-field { margin-bottom: 0.7rem; }
@@ -393,7 +394,8 @@
     flex: 1; resize: none; height: 2.6rem; max-height: 40vh; overflow-y: auto;
     font-family: var(--font-ui); line-height: 1.5;
   }
-  #composer .icon-btn { flex: none; }
+  /* Level with the box they sit beside, which is 2.6rem before it grows. */
+  #composer .icon-btn, #composer #send-btn { flex: none; height: 2.6rem; }
   /* Lining figures of one width, so a column of money reads as a column. */
   .spend-figure, .spend-row, #spend-endpoints {
     font-variant-numeric: tabular-nums;
@@ -454,8 +456,8 @@
   .plugin-action-wrap { position: relative; flex: none; }
   .action-picker {
     position: absolute; bottom: calc(100% + 6px); left: 0; min-width: 220px;
-    background: var(--panel-bg); border: 1px solid var(--border); border-radius: var(--radius-md);
-    box-shadow: 0 6px 18px var(--shadow); z-index: 30; padding: 0.25rem;
+    background: var(--surface-raised); border: 1px solid var(--border); border-radius: var(--radius-md);
+    box-shadow: 0 8px 24px var(--shadow-raised); z-index: 30; padding: 0.25rem;
   }
   .action-picker[hidden] { display: none; }
   .action-picker-empty { padding: 0.5rem 0.7rem; font-size: var(--text-sm); color: var(--text-muted); max-width: 220px; }

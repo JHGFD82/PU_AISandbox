@@ -3301,3 +3301,68 @@ class TestWhatTheModelWroteIsRendered:
         chat = self._source("chat.html")
         rule = chat.split(".code-block pre {")[1].split("}")[0]
         assert "overflow-x: auto" in rule
+
+
+class TestControlsSitProperlyTogether:
+    def _chat(self):
+        from pathlib import Path
+
+        return (Path(__file__).resolve().parents[1] / "src" / "templates" / "chat.html").read_text()
+
+    def _rule(self, selector):
+        return self._chat().split(selector)[1].split("}")[0]
+
+    def test_the_chevron_is_the_size_of_the_other_icons(self):
+        """It had no size of its own, so it filled its whole button."""
+        import re
+
+        size = int(re.search(r"width:\s*(\d+)px", self._rule(".combobox-toggle svg {")).group(1))
+        assert size == 11, f"the chevron is {size}px against 11px elsewhere"
+
+    def test_the_new_conversation_mark_has_room_for_its_plus(self):
+        """The drawing is a square with a plus inside it; at 12px the plus
+        itself was about five pixels across."""
+        import re
+
+        drawing = int(re.search(r"width:\s*(\d+)px", self._rule(".plus-btn svg {")).group(1))
+        button = int(re.search(r"width:\s*(\d+)px", self._rule(".plus-btn {")).group(1))
+        assert drawing >= 18, f"the mark is {drawing}px"
+        assert button > drawing, "the drawing would touch the button's edge"
+
+    def test_the_composer_is_level_along_its_bottom(self):
+        """The box is 2.6rem; the buttons beside it were 32.8px and 34px."""
+        box = self._rule("#composer textarea {")
+        buttons = self._rule("#composer .icon-btn, #composer #send-btn {")
+        assert "height: 2.6rem" in box
+        assert "height: 2.6rem" in buttons
+
+    def test_the_settings_popover_fits_the_sentence_inside_it(self):
+        """It holds the conversation instructions, whose own example runs to
+        about fifty characters."""
+        import re
+
+        width = self._rule(".sampling-options-popover {")
+        rem = float(re.search(r"width:\s*([0-9.]+)rem", width).group(1))
+        assert rem >= 24, f"{rem}rem is narrower than the example text it shows"
+
+    def test_a_floating_panel_can_be_told_from_what_it_covers(self):
+        """The conversation menu opens over the sidebar, and both were the same
+        colour with a faint shadow between them."""
+        for selector in (".conv-menu {", ".combobox-list {", ".model-add-popover {",
+                         ".sampling-options-popover {", ".action-picker {"):
+            rule = self._rule(selector)
+            assert "var(--surface-raised)" in rule, selector
+            assert "var(--shadow-raised)" in rule, selector
+
+    def test_the_raised_surface_actually_differs_in_the_dark_theme(self):
+        """In the light theme a shadow separates white from white; in the dark
+        theme there is no white, so the surface itself has to lift."""
+        import re
+        from pathlib import Path
+
+        system = (Path(__file__).resolve().parents[1] / "src" / "templates"
+                  / "_design-system.html").read_text()
+        dark = system.split('[data-theme="dark"]')[1].split("}")[0]
+        raised = re.search(r"--surface-raised:\s*(#[0-9a-fA-F]{6})", dark).group(1)
+        panel = re.search(r"--panel-bg:\s*(#[0-9a-fA-F]{6})", dark).group(1)
+        assert raised.lower() != panel.lower(), "a menu is the colour of what it covers"
