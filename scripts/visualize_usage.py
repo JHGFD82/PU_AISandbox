@@ -65,9 +65,14 @@ def load_all_data() -> dict:
     naturally supersedes stale local data for that professor.
     """
     result: dict = {}
-    for _label, root in get_configured_data_roots():
+    for _label, root, only_professor in get_configured_data_roots():
         tree = load_usage_tree(root)
         for prof, months in tree.items():
+            # A source stands for one person's usage unless it says otherwise,
+            # so a department folder holding three professors contributes the
+            # one it was configured for and not the other two.
+            if only_professor and prof != only_professor:
+                continue
             result.setdefault(prof, {}).update(months)
     return result
 

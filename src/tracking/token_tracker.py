@@ -114,7 +114,7 @@ def _shared_archive_path(source: "ExternalSource", netid: str, month: str) -> Pa
     return _shared_archive_dir(source, netid) / f"{month}.json"
 
 
-def get_configured_data_roots() -> list[tuple[str, Path]]:
+def get_configured_data_roots() -> list[tuple[str, Path, str | None]]:
     """Return every data-shaped directory that should be scanned when building an aggregate usage report.
 
     This is this installation's own local ``data/`` folder plus every
@@ -123,13 +123,19 @@ def get_configured_data_roots() -> list[tuple[str, Path]]:
     the web UI's spend sidebar, so that logic to combine multiple installations'
     usage history lives in exactly one place.
 
+    Each source names whose usage it holds, and only that person's is taken
+    from it. A folder shared by a department may hold several professors'
+    records while the arrangement covers one of them — following the other two
+    from there would report spending nobody agreed to share.
+
     Returns:
-        A list of ``(label, path)`` pairs, always starting with
-        ``("local", <this installation's data/ folder>)``.
+        A list of ``(label, path, professor)``, always starting with the local
+        folder. ``professor`` is ``None`` for the local folder, which holds
+        everybody here, and for a source configured before sources named one.
     """
-    roots: list[tuple[str, Path]] = [("local", data_root())]
+    roots: list[tuple[str, Path, str | None]] = [("local", data_root(), None)]
     for source in get_configured_sources():
-        roots.append((source.label, source.resolved_path()))
+        roots.append((source.label, source.resolved_path(), source.professor))
     return roots
 
 

@@ -206,7 +206,8 @@ def _build_usage_sources_subparser(usage_subparsers: argparse._SubParsersAction)
     )
     sources_add.add_argument(
         '--for-professor', dest='for_professor', type=str, default=None, metavar='PROFESSOR',
-        help='Which professor this source is for (required for --mode shared-write)',
+        help="Whose usage this source holds (netID). Required — one professor may "
+             "share a folder for work and another only for tracking.",
     )
 
     sources_remove = sources_sub.add_parser('remove', help='Remove a configured external source by label')

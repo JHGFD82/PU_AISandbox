@@ -58,6 +58,9 @@
   .form-error { font-size: var(--text-sm); color: var(--danger-text); border: 1px solid var(--danger-border);
                 background: var(--danger-hover-bg); border-radius: var(--radius-md); padding: 0.5rem 0.7rem; margin: 0.7rem 0 0; }
   #add-professor-form button[type=submit] { margin-top: 0.8rem; }
+  /* Its own row, because a path is the longest value on this page. */
+  .source-path-row { margin-top: var(--space-3); }
+  #add-source-form button[type=submit] { margin-top: var(--space-3); }
 </style>
 </head>
 <body>
@@ -223,31 +226,43 @@ default_model = "llama-3-70b-instruct"</div>
       <h2>External usage-data sources</h2>
       <p class="hint">Lets this installation combine another installation's usage data into reports — handy if you manage several professors' installations and want one combined view. This installation's own source id: <strong id="source-id"></strong></p>
       <div id="sources-list"></div>
-      <form class="inline" id="add-source-form">
-        <div>
-          <label for="source-label">Label</label>
-          <input type="text" id="source-label" placeholder="Prof. Smith" required>
+      <form id="add-source-form">
+        <!-- Two rows rather than four boxes in one. The path is the longest
+             thing here by a distance and was sharing a line with three others,
+             so it showed about a dozen characters of a folder that may be
+             nested five deep. -->
+        <div class="inline-fields">
+          <div>
+            <label for="source-label">Label</label>
+            <input type="text" id="source-label" placeholder="Prof. Smith" required>
+          </div>
+          <div>
+            <label for="source-professor">Whose usage</label>
+            <input type="text" id="source-professor" placeholder="jh43"
+                   autocapitalize="none" autocorrect="off" spellcheck="false" required>
+          </div>
+          <div>
+            <label for="source-mode">Mode</label>
+            <select id="source-mode">
+              <option value="read-only">read-only — only look</option>
+              <option value="shared-write">shared-write — also record here</option>
+            </select>
+          </div>
         </div>
-        <div>
-          <label for="source-path">Path</label>
+        <div class="source-path-row">
+          <label for="source-path">Folder</label>
           <div class="field-set">
-            <input type="text" id="source-path" placeholder="/path/to/shared/data" required>
+            <input type="text" id="source-path" placeholder="/path/to/their/data" required>
             <button type="button" class="secondary browse" data-browse="source-path" data-browse-kind="folder"
                     data-browse-prompt="Choose the usage-data folder" style="display:none">Browse…</button>
           </div>
         </div>
-        <div>
-          <label for="source-mode">Mode</label>
-          <select id="source-mode">
-            <option value="read-only">read-only</option>
-            <option value="shared-write">shared-write</option>
-          </select>
-        </div>
-        <div id="source-professor-wrap" style="display:none">
-          <label for="source-professor">For professor</label>
-          <input type="text" id="source-professor" placeholder="smith">
-        </div>
-        <button type="submit">Add source</button>
+        <p class="hint field-note">
+          A source holds one person's usage. <strong>read-only</strong> follows their
+          spending and can never write; <strong>shared-write</strong> also records this
+          installation's work for them there — so use it only where you actually work
+          under their key.
+        </p>
       </form>
     </div>
   </div>
@@ -587,10 +602,6 @@ function renderSources(data) {
   });
 }
 
-document.getElementById("source-mode").addEventListener("change", (ev) => {
-  document.getElementById("source-professor-wrap").style.display = ev.target.value === "shared-write" ? "block" : "none";
-});
-
 document.getElementById("add-source-form").addEventListener("submit", async (ev) => {
   ev.preventDefault();
   const label = document.getElementById("source-label").value;
@@ -600,7 +611,6 @@ document.getElementById("add-source-form").addEventListener("submit", async (ev)
   try {
     await api("/api/settings/sources", { method: "POST", body: JSON.stringify({ label, path, mode, professor }) });
     ev.target.reset();
-    document.getElementById("source-professor-wrap").style.display = "none";
     await loadSettings();
   } catch (e) { alert("Error adding source: " + e.message); }
 });

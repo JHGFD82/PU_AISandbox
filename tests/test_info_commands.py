@@ -335,7 +335,8 @@ class TestHandleInfoCommandsUsageSources:
     def test_sources_add_read_only_with_flags(self, capsys, tmp_path):
         args = _make_ns(command="usage", professor="testprof",
                         usage_subcommand="sources", sources_subcommand="add",
-                        label="Johnson", path=str(tmp_path), mode="read-only")
+                        label="Johnson", path=str(tmp_path), mode="read-only",
+                        for_professor="johnson")
         result = handle_info_commands(args)
         assert result is True
         out = capsys.readouterr().out
@@ -344,7 +345,8 @@ class TestHandleInfoCommandsUsageSources:
     def test_sources_add_then_list_shows_it(self, capsys, tmp_path):
         add_args = _make_ns(command="usage", professor="testprof",
                             usage_subcommand="sources", sources_subcommand="add",
-                            label="Johnson", path=str(tmp_path), mode="read-only")
+                            label="Johnson", path=str(tmp_path), mode="read-only",
+                        for_professor="johnson")
         handle_info_commands(add_args)
         capsys.readouterr()  # discard
 
@@ -376,7 +378,8 @@ class TestHandleInfoCommandsUsageSources:
     def test_sources_remove_existing(self, capsys, tmp_path):
         add_args = _make_ns(command="usage", professor="testprof",
                             usage_subcommand="sources", sources_subcommand="add",
-                            label="Johnson", path=str(tmp_path), mode="read-only")
+                            label="Johnson", path=str(tmp_path), mode="read-only",
+                        for_professor="johnson")
         handle_info_commands(add_args)
         capsys.readouterr()
 

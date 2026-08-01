@@ -399,9 +399,13 @@ class ExternalSource:
         path: The folder to read (and, in shared-write mode, also write)
               usage data in.
         mode: ``'read-only'`` (the default) or ``'shared-write'``.
-        professor: Which professor (safe-filename identifier) this source is
-                   for. Required for ``mode='shared-write'``; ``None`` for
-                   ``read-only`` sources.
+        professor: Whose usage this source holds. Required in both modes: one
+                   professor may be happy for their work to be done from here
+                   and another may want only their spending followed, and that
+                   is a decision per person rather than per folder.
+
+                   ``None`` means every professor found in the folder, which is
+                   what a source written before this was asked for will mean.
     """
     label: str
     path: str
@@ -478,18 +482,18 @@ def add_source(label: str, path: str, mode: str = "read-only", professor: str | 
         path: The folder to read (and, for shared-write, also write) usage
               data in.
         mode: ``'read-only'`` or ``'shared-write'``.
-        professor: Required when ``mode='shared-write'``.
+        professor: Whose usage this source holds. Required in both modes.
 
     Raises:
-        ValueError: If *mode* isn't recognized, or ``mode='shared-write'``
-                    was requested without a *professor*.
+        ValueError: If *mode* isn't recognized, or no *professor* was named.
     """
     if mode not in VALID_SOURCE_MODES:
         raise ValueError(f"mode must be one of {VALID_SOURCE_MODES}, got {mode!r}.")
-    if mode == "shared-write" and not professor:
+    if not professor:
         raise ValueError(
-            "shared-write sources need a professor — which professor's usage "
-            "this source holds — so TokenTracker knows whose writes to send here."
+            "A source needs a professor — whose usage it holds. One person may "
+            "be happy for work to be done from here while another wants only "
+            "their spending followed, so it is settled per person."
         )
 
     doc = _load()

@@ -176,11 +176,23 @@ class TestGetConfiguredDataRoots:
         assert roots[0][0] == "local"
 
     def test_includes_configured_external_sources(self, tmp_path):
-        fake_source = ExternalSource(label="Prof. Smith", path=str(tmp_path), mode="read-only")
+        fake_source = ExternalSource(
+            label="Prof. Smith", path=str(tmp_path), mode="read-only", professor="smith")
         with patch("src.tracking.token_tracker.get_configured_sources", return_value=[fake_source]):
             roots = get_configured_data_roots()
-        labels = [label for label, _ in roots]
+        labels = [label for label, _, _ in roots]
         assert "Prof. Smith" in labels
+
+    def test_each_root_says_whose_usage_it_holds(self, tmp_path):
+        """So a folder shared by a department contributes the one professor it
+        was configured for, and not the others in it."""
+        fake_source = ExternalSource(
+            label="Prof. Smith", path=str(tmp_path), mode="read-only", professor="smith")
+        with patch("src.tracking.token_tracker.get_configured_sources", return_value=[fake_source]):
+            roots = get_configured_data_roots()
+        by_label = {label: professor for label, _, professor in roots}
+        assert by_label["Prof. Smith"] == "smith"
+        assert by_label["local"] is None, "the local folder holds everybody here"
 
 
 # ---------------------------------------------------------------------------

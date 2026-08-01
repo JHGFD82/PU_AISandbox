@@ -152,7 +152,7 @@ python main.py jh43 usage sources remove "Prof. Smith"
 | `--label <text>` | A short name for this source, e.g. `"Prof. Smith"` |
 | `--path <path>` | The other installation's `data/` folder |
 | `--mode read-only\|shared-write` | `read-only` (default) if only the other side writes there; `shared-write` if this installation records usage there too |
-| `--for-professor <netid>` | Which person this source is for. Required with `--mode shared-write`. |
+| `--for-professor <netid>` | Whose usage this source holds. **Required in both modes** — one professor may be happy for work to be done from a shared folder while another wants only their spending followed, so it is settled per person rather than per folder. |
 
 `add` prompts for anything you don't pass as a flag.
 

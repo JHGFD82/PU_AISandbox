@@ -311,7 +311,7 @@ class TestSharedWriteSource:
         assert settings_store.get_shared_write_source("SMITH") is not None
 
     def test_read_only_source_never_matches(self):
-        settings_store.add_source("Prof. Johnson", "/tmp/johnson", mode="read-only")
+        settings_store.add_source("Prof. Johnson", "/tmp/johnson", mode="read-only", professor="smith")
         assert settings_store.get_shared_write_source("johnson") is None
 
     def test_source_for_different_professor_does_not_match(self):
@@ -321,9 +321,12 @@ class TestSharedWriteSource:
 
 class TestAddSource:
 
-    def test_add_read_only_without_professor_is_valid(self):
-        settings_store.add_source("Johnson", "/tmp/johnson", mode="read-only")
-        assert settings_store.get_configured_sources()[0].professor is None
+    def test_a_read_only_source_needs_a_professor_too(self):
+        """Whose spending is being followed is a decision per person: one may
+        be content for work to be done from a shared folder while another
+        wants only their spending seen from it."""
+        with pytest.raises(ValueError, match="professor"):
+            settings_store.add_source("Johnson", "/tmp/johnson", mode="read-only")
 
     def test_shared_write_without_professor_raises(self):
         with pytest.raises(ValueError, match="professor"):
@@ -331,17 +334,17 @@ class TestAddSource:
 
     def test_invalid_mode_raises(self):
         with pytest.raises(ValueError, match="mode"):
-            settings_store.add_source("Smith", "/tmp/smith", mode="read-write")
+            settings_store.add_source("Smith", "/tmp/smith", mode="read-write", professor="smith")
 
     def test_adding_same_label_twice_replaces(self):
-        settings_store.add_source("Smith", "/tmp/smith-v1", mode="read-only")
-        settings_store.add_source("Smith", "/tmp/smith-v2", mode="read-only")
+        settings_store.add_source("Smith", "/tmp/smith-v1", mode="read-only", professor="smith")
+        settings_store.add_source("Smith", "/tmp/smith-v2", mode="read-only", professor="smith")
         sources = settings_store.get_configured_sources()
         assert len(sources) == 1
         assert sources[0].path == "/tmp/smith-v2"
 
     def test_persists_to_disk(self):
-        settings_store.add_source("Smith", "/tmp/smith", mode="read-only")
+        settings_store.add_source("Smith", "/tmp/smith", mode="read-only", professor="smith")
         content = settings_store.SETTINGS_PATH.read_text()
         assert "Smith" in content
 
@@ -349,7 +352,7 @@ class TestAddSource:
 class TestRemoveSource:
 
     def test_remove_existing_returns_true(self):
-        settings_store.add_source("Smith", "/tmp/smith", mode="read-only")
+        settings_store.add_source("Smith", "/tmp/smith", mode="read-only", professor="smith")
         assert settings_store.remove_source("Smith") is True
         assert settings_store.get_configured_sources() == []
 
@@ -357,8 +360,8 @@ class TestRemoveSource:
         assert settings_store.remove_source("Nobody") is False
 
     def test_remove_leaves_other_sources_intact(self):
-        settings_store.add_source("Smith", "/tmp/smith", mode="read-only")
-        settings_store.add_source("Johnson", "/tmp/johnson", mode="read-only")
+        settings_store.add_source("Smith", "/tmp/smith", mode="read-only", professor="smith")
+        settings_store.add_source("Johnson", "/tmp/johnson", mode="read-only", professor="johnson")
         settings_store.remove_source("Smith")
         labels = [s.label for s in settings_store.get_configured_sources()]
         assert labels == ["Johnson"]
