@@ -3128,7 +3128,17 @@ class TestTheTranscriptIsBuiltForReading:
 
     def test_what_the_model_wrote_is_set_in_the_reading_face(self):
         chat = self._chat()
-        assert "font-family: var(--font-text)" in chat.split(".msg-body {")[1].split("}")[0]
+        assert "font-family: var(--font-reading)" in chat.split(".msg-body {")[1].split("}")[0]
+
+    def test_the_reading_face_starts_as_the_serif(self):
+        """The choice exists; the serif is what a page of prose wants until
+        somebody says otherwise."""
+        from pathlib import Path
+
+        system = (Path(__file__).resolve().parents[1] / "src" / "templates"
+                  / "_design-system.html").read_text()
+        assert "--font-reading: var(--font-text);" in system
+        assert '[data-reading="sans"] { --font-reading: var(--font-ui); }' in system
 
     def test_no_text_sits_on_the_orange(self):
         """White on it is 2.63:1 at the value this page used to carry."""
@@ -3270,11 +3280,16 @@ class TestWhatTheModelWroteIsRendered:
         application rather than part of what was written."""
         chat = self._source("chat.html")
         heading = chat.split(".md-heading {")[1].split("}")[0]
-        assert "var(--font-text)" in heading
-        assert "var(--font-ui)" not in heading
-        # And nothing inside a reply reaches for the interface's face.
+        # The reading face, whichever of the two it currently is — so a heading
+        # can never be set differently from the passage it introduces.
+        assert "var(--font-reading)" in heading
+        body = chat.split(".msg-body {")[1].split("}")[0]
+        assert "var(--font-reading)" in body
+        # And no part of a reply names a face directly, which is how one of them
+        # would stop following the choice.
         body_rules = chat.split(".msg-body {")[1].split(".code-block {")[0]
         assert "var(--font-ui)" not in body_rules, "part of a reply is set as interface"
+        assert "var(--font-text)" not in body_rules, "part of a reply ignores the choice"
 
     def test_a_code_block_can_be_taken_away(self):
         renderer = self._source("_markdown.html")
@@ -3402,3 +3417,45 @@ class TestTheSettingsPageSaysThingsOnce:
         source = self._source()
         for key in order:
             assert f'data-section="{key}"' in source, f"{key} is ordered but not on the page"
+
+
+class TestChoosingHowRepliesAreSet:
+    """Serif or sans, remembered, and only for what was written."""
+
+    def _chat(self):
+        from pathlib import Path
+
+        return (Path(__file__).resolve().parents[1] / "src" / "templates" / "chat.html").read_text()
+
+    def test_there_is_a_control_for_it(self):
+        chat = self._chat()
+        assert 'id="reading-face-btn"' in chat
+
+    def test_the_choice_is_remembered(self):
+        """Like the light/dark choice, and stored the same way."""
+        chat = self._chat()
+        assert 'localStorage.setItem("reading-face"' in chat
+        assert 'localStorage.getItem("reading-face")' in chat
+
+    def test_the_button_is_a_sample_of_what_it_does(self):
+        """Its letters are set in whichever face a reply would be set in."""
+        chat = self._chat()
+        rule = chat.split(".reading-face-mark {")[1].split("}")[0]
+        assert "var(--font-reading)" in rule
+
+    def test_it_says_which_way_it_will_switch(self):
+        chat = self._chat()
+        assert "Read replies in a serif face" in chat
+        assert "Read replies in a sans-serif face" in chat
+
+    def test_the_interface_does_not_follow_the_choice(self):
+        """Only what was written changes. If the interface followed too, the
+        two would stop being distinguishable, which was the point of having
+        two faces."""
+        from pathlib import Path
+
+        system = (Path(__file__).resolve().parents[1] / "src" / "templates"
+                  / "_design-system.html").read_text()
+        sans = system.split('[data-reading="sans"]')[1].split("}")[0]
+        assert "--font-reading" in sans
+        assert "--font-ui:" not in sans, "the choice redefines the interface's own face"
