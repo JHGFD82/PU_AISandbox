@@ -1,0 +1,293 @@
+{#
+  Turns what a model wrote into something readable.
+
+  Everything here builds elements and text nodes. Nothing is ever handed to
+  innerHTML. That is not tidiness: this text comes from a model, a model reads
+  whatever document it was given, and a document can be written by anyone. The
+  moment any of it becomes markup, a translation of somebody's PDF can put a
+  script on the page.
+
+  It is written here rather than borrowed because these pages fetch nothing —
+  no stylesheet, no script, no font — and the server answers on this machine
+  only. A vendored parser would be the first exception to that, for a job of
+  this size.
+#}
+<script>
+// ── The pieces a fenced block turns into ────────────────────────────────────
+
+// What to call a file of each kind. A fence says its language; this says what
+// that language's files are named, so the download arrives as parse.py and not
+// as snippet.txt.
+const CODE_EXTENSIONS = {
+  python: "py", py: "py", javascript: "js", js: "js", jsx: "jsx",
+  typescript: "ts", ts: "ts", tsx: "tsx", json: "json", html: "html",
+  css: "css", scss: "scss", sql: "sql", sh: "sh", bash: "sh", zsh: "sh",
+  shell: "sh", yaml: "yml", yml: "yml", toml: "toml", ini: "ini",
+  markdown: "md", md: "md", xml: "xml", csv: "csv", r: "R", ruby: "rb",
+  rb: "rb", go: "go", rust: "rs", rs: "rs", java: "java", c: "c", cpp: "cpp",
+  "c++": "cpp", "objective-c": "m", swift: "swift", kotlin: "kt", php: "php",
+  perl: "pl", lua: "lua", latex: "tex", tex: "tex", bibtex: "bib",
+  diff: "diff", patch: "diff", dockerfile: "Dockerfile", makefile: "Makefile",
+};
+
+// Turns a conversation's title into something a file system will take.
+function fileStem(title) {
+  const cleaned = (title || "").toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
+  return cleaned || "code";
+}
+
+// What the download should be called.
+//
+// A fence can name the file itself — ```python:parse.py, or just ```parse.py —
+// and if it does, that is the answer and nothing needs guessing. Otherwise the
+// language gives the extension and the conversation gives the stem, so the
+// files from one piece of work sort together instead of arriving as a pile of
+// snippet.txt.
+function codeFileName(info, conversationTitle, position) {
+  const named = (info || "").split(":").find(part => /^[\w.-]+\.[A-Za-z0-9]+$/.test(part));
+  if (named) return named;
+  const language = (info || "").split(/[:\s]/)[0].toLowerCase();
+  const extension = CODE_EXTENSIONS[language];
+  if (extension === "Dockerfile" || extension === "Makefile") return extension;
+  return `${fileStem(conversationTitle)}-${position}.${extension || "txt"}`;
+}
+
+function downloadText(text, filename) {
+  const url = URL.createObjectURL(new Blob([text], { type: "text/plain" }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function codeBlockElement(code, info, conversationTitle, position) {
+  const language = (info || "").split(/[:\s]/)[0];
+  const filename = codeFileName(info, conversationTitle, position);
+
+  const block = document.createElement("figure");
+  block.className = "code-block";
+
+  const bar = document.createElement("figcaption");
+  bar.className = "code-block-bar";
+  const label = document.createElement("span");
+  label.className = "code-block-name";
+  // The name it would be saved as, so the button holds no surprise.
+  label.textContent = filename;
+  bar.appendChild(label);
+
+  const actions = document.createElement("div");
+  actions.className = "code-block-actions";
+
+  const iconButton = (title, path) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "msg-action-btn";
+    btn.title = title;
+    btn.setAttribute("aria-label", title);
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("viewBox", "0 0 16 16");
+    svg.setAttribute("fill", "none");
+    svg.setAttribute("stroke", "currentColor");
+    svg.setAttribute("stroke-width", "1.3");
+    svg.setAttribute("stroke-linecap", "round");
+    svg.setAttribute("stroke-linejoin", "round");
+    const drawing = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    drawing.setAttribute("d", path);
+    svg.appendChild(drawing);
+    btn.appendChild(svg);
+    actions.appendChild(btn);
+    return btn;
+  };
+
+  const copyBtn = iconButton("Copy this code", "M5.5 5.5h7v7h-7z M3.5 10.5h-1v-8h8v1");
+  copyBtn.addEventListener("click", () => copyMessageText(code, copyBtn));
+  // The button says the name, so nothing arrives called something unexpected.
+  const saveBtn = iconButton(`Save as ${filename}`, "M8 2.5v7 M5 7l3 3 3-3 M3 12.5h10");
+  saveBtn.addEventListener("click", () => downloadText(code, filename));
+
+  bar.appendChild(actions);
+
+  const pre = document.createElement("pre");
+  const codeEl = document.createElement("code");
+  if (language) codeEl.className = "language-" + language;
+  codeEl.textContent = code;
+  pre.appendChild(codeEl);
+
+  block.appendChild(bar);
+  block.appendChild(pre);
+  return block;
+}
+
+// ── Inline ──────────────────────────────────────────────────────────────────
+
+// Only schemes that go somewhere. A link is the one thing here that would act
+// on being clicked, so anything that is not plainly a web or mail address is
+// left as the words it was written as.
+function safeHref(url) {
+  const trimmed = (url || "").trim();
+  return /^(https?:\/\/|mailto:)/i.test(trimmed) ? trimmed : null;
+}
+
+const INLINE = [
+  [/`([^`]+)`/, (m) => { const e = document.createElement("code"); e.textContent = m[1]; return e; }],
+  [/\*\*([^*]+)\*\*/, (m) => { const e = document.createElement("strong"); addInline(e, m[1]); return e; }],
+  [/__([^_]+)__/, (m) => { const e = document.createElement("strong"); addInline(e, m[1]); return e; }],
+  [/~~([^~]+)~~/, (m) => { const e = document.createElement("del"); addInline(e, m[1]); return e; }],
+  [/\*([^*]+)\*/, (m) => { const e = document.createElement("em"); addInline(e, m[1]); return e; }],
+  [/(?<![\w])_([^_]+)_(?![\w])/, (m) => { const e = document.createElement("em"); addInline(e, m[1]); return e; }],
+  [/\[([^\]]*)\]\(([^)\s]+)\)/, (m) => {
+    const href = safeHref(m[2]);
+    if (!href) return document.createTextNode(m[0]);
+    const a = document.createElement("a");
+    a.href = href;
+    a.target = "_blank";
+    a.rel = "noopener noreferrer";
+    addInline(a, m[1] || m[2]);
+    return a;
+  }],
+];
+
+function addInline(parent, text) {
+  let rest = text;
+  while (rest) {
+    let earliest = null;
+    for (const [pattern, build] of INLINE) {
+      const found = pattern.exec(rest);
+      if (found && (earliest === null || found.index < earliest.found.index)) {
+        earliest = { found, build };
+      }
+    }
+    if (!earliest) { parent.appendChild(document.createTextNode(rest)); return; }
+    const { found, build } = earliest;
+    if (found.index > 0) parent.appendChild(document.createTextNode(rest.slice(0, found.index)));
+    parent.appendChild(build(found));
+    rest = rest.slice(found.index + found[0].length);
+  }
+}
+
+// ── Blocks ──────────────────────────────────────────────────────────────────
+
+function renderMarkdownInto(container, text, conversationTitle) {
+  const lines = (text || "").split("\n");
+  let i = 0;
+  let codeBlocks = 0;
+
+  const paragraph = (chunk) => {
+    const p = document.createElement("p");
+    addInline(p, chunk.join("\n").trim());
+    container.appendChild(p);
+  };
+
+  while (i < lines.length) {
+    const line = lines[i];
+
+    // A fence, which runs until it is closed or the text ends. An unclosed
+    // fence is what a reply cut off mid-code looks like, and it still has to
+    // show the code rather than swallow the rest of the message.
+    const fence = /^\s*(```+|~~~+)\s*(.*)$/.exec(line);
+    if (fence) {
+      const closer = fence[1][0];
+      const info = fence[2].trim();
+      const body = [];
+      i++;
+      while (i < lines.length && !new RegExp("^\\s*" + closer + "{3,}\\s*$").test(lines[i])) {
+        body.push(lines[i]); i++;
+      }
+      i++;  // step over the closing fence, if there was one
+      codeBlocks++;
+      container.appendChild(
+        codeBlockElement(body.join("\n"), info, conversationTitle, codeBlocks));
+      continue;
+    }
+
+    const heading = /^(#{1,6})\s+(.*)$/.exec(line);
+    if (heading) {
+      // Offset by two: a reply's own headings sit inside the page, under its
+      // one real heading, so a model writing "# Notes" must not produce a
+      // second first-level heading.
+      const level = Math.min(heading[1].length + 2, 6);
+      const h = document.createElement("h" + level);
+      h.className = "md-heading";
+      addInline(h, heading[2].trim());
+      container.appendChild(h);
+      i++; continue;
+    }
+
+    if (/^\s*(-{3,}|\*{3,}|_{3,})\s*$/.test(line)) {
+      container.appendChild(document.createElement("hr"));
+      i++; continue;
+    }
+
+    if (/^\s*>/.test(line)) {
+      const quoted = [];
+      while (i < lines.length && /^\s*>/.test(lines[i])) {
+        quoted.push(lines[i].replace(/^\s*>\s?/, "")); i++;
+      }
+      const quote = document.createElement("blockquote");
+      renderMarkdownInto(quote, quoted.join("\n"), conversationTitle);
+      container.appendChild(quote);
+      continue;
+    }
+
+    const bullet = /^\s*([-*+]|\d+[.)])\s+/.exec(line);
+    if (bullet) {
+      const ordered = /\d/.test(bullet[1]);
+      const list = document.createElement(ordered ? "ol" : "ul");
+      while (i < lines.length) {
+        const item = /^\s*([-*+]|\d+[.)])\s+(.*)$/.exec(lines[i]);
+        if (!item || /\d/.test(item[1]) !== ordered) break;
+        const li = document.createElement("li");
+        addInline(li, item[2]);
+        list.appendChild(li);
+        i++;
+      }
+      container.appendChild(list);
+      continue;
+    }
+
+    // A table is a row of pipes with a rule under it. Without the rule it is
+    // just a line with pipes in, which is what a transcription of a ruled page
+    // often is.
+    if (line.includes("|") && i + 1 < lines.length && /^[\s|:-]+$/.test(lines[i + 1])
+        && lines[i + 1].includes("-")) {
+      const cells = (row) => row.replace(/^\s*\|?|\|?\s*$/g, "").split("|").map(c => c.trim());
+      const table = document.createElement("table");
+      const thead = document.createElement("thead");
+      const headRow = document.createElement("tr");
+      cells(line).forEach(c => {
+        const th = document.createElement("th"); addInline(th, c); headRow.appendChild(th);
+      });
+      thead.appendChild(headRow);
+      table.appendChild(thead);
+      i += 2;
+      const tbody = document.createElement("tbody");
+      while (i < lines.length && lines[i].includes("|") && lines[i].trim()) {
+        const tr = document.createElement("tr");
+        cells(lines[i]).forEach(c => {
+          const td = document.createElement("td"); addInline(td, c); tr.appendChild(td);
+        });
+        tbody.appendChild(tr);
+        i++;
+      }
+      table.appendChild(tbody);
+      const scroller = document.createElement("div");
+      scroller.className = "table-scroll";
+      scroller.appendChild(table);
+      container.appendChild(scroller);
+      continue;
+    }
+
+    if (!line.trim()) { i++; continue; }
+
+    const chunk = [];
+    while (i < lines.length && lines[i].trim()
+           && !/^\s*(```+|~~~+|#{1,6}\s|>|([-*+]|\d+[.)])\s)/.test(lines[i])) {
+      chunk.push(lines[i]); i++;
+    }
+    if (chunk.length) paragraph(chunk); else i++;
+  }
+  return container;
+}
+</script>
