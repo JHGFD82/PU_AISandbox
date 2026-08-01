@@ -3450,11 +3450,13 @@ class TestChoosingHowRepliesAreSet:
         assert 'localStorage.setItem("reading-face"' in chat
         assert 'localStorage.getItem("reading-face")' in chat
 
-    def test_the_button_is_a_sample_of_what_it_does(self):
-        """Its letters are set in whichever face a reply would be set in."""
+    def test_the_button_samples_the_face_you_would_get(self):
+        """Not the one you are already reading. A button showing what you
+        already have says nothing about what pressing it does."""
         chat = self._chat()
-        rule = chat.split(".reading-face-mark {")[1].split("}")[0]
-        assert "var(--font-reading)" in rule
+        # Reading the serif, the sample is the sans; the other way by default.
+        assert '[data-reading="serif"] .reading-face-mark { font-family: var(--font-ui); }' in chat
+        assert ".reading-face-mark { font-family: var(--font-text); }" in chat
 
     def test_it_says_which_way_it_will_switch(self):
         chat = self._chat()
@@ -3552,3 +3554,62 @@ class TestTheModelMenuIsGrouped:
         chat = self._chat()
         remembered = chat.split("function rememberedEndpointModels")[1].split("\n}")[0]
         assert "catch" in remembered
+
+
+class TestTheFollowUpFixesStay:
+    """Six things that were reported after a first attempt at each."""
+
+    def _source(self, name):
+        from pathlib import Path
+
+        return (Path(__file__).resolve().parents[1] / "src" / "templates" / name).read_text()
+
+    def test_hiding_the_settings_bar_beats_the_rule_that_shows_it(self):
+        """Setting the attribute was not enough: #topbar sets display, and an
+        author rule outranks the browser's meaning for [hidden]."""
+        page = self._source("settings.html")
+        assert "#topbar[hidden] { display: none; }" in page
+        assert page.index("#topbar[hidden]") < page.index("#topbar { display: flex")
+
+    def test_a_menu_row_can_be_seen_under_the_pointer(self):
+        """The ordinary hover is 1.02:1 against the raised surface a menu sits
+        on, so a menu appeared to have no hover at all."""
+        chat = self._source("chat.html")
+        assert "var(--hover-raised)" in chat.split(".conv-menu-option:hover")[1].split("}")[0]
+        assert "var(--border-raised)" in chat.split(".conv-menu-divider {")[1].split("}")[0]
+
+    def test_the_raised_hover_and_border_differ_from_the_raised_surface(self):
+        import re
+
+        system = self._source("_design-system.html")
+        dark = system.split('[data-theme="dark"]')[1].split("}")[0]
+        values = dict(re.findall(r"(--[a-z-]+):\s*(#[0-9a-fA-F]{6})", dark))
+        for key in ("--hover-raised", "--border-raised"):
+            assert values[key].lower() != values["--surface-raised"].lower(), key
+
+    def test_the_new_conversation_mark_is_not_drawn_on_its_own_colour(self):
+        """The mark is the sandbox's orange and the base button style is that
+        same orange, which put the drawing at 1.15:1 against its own button."""
+        chat = self._source("chat.html")
+        rule = chat.split(".plus-btn {")[1].split("}")[0]
+        assert "background: transparent" in rule
+
+    def test_the_add_model_box_fits_the_example_inside_it(self):
+        import re
+
+        chat = self._source("chat.html")
+        rem = float(re.search(r"width:\s*([0-9.]+)rem",
+                              chat.split(".model-add-popover {")[1].split("}")[0]).group(1))
+        placeholder = "openai/gpt-4o, or della:alibaba/qwen35"
+        # Roughly half an em per character at the box's own size, less the
+        # padding and the button beside it.
+        fits = (rem * 16 - 80) / (0.8125 * 16 * 0.5)
+        assert fits >= len(placeholder), f"{fits:.0f} characters of {len(placeholder)}"
+
+    def test_the_composer_row_really_is_level(self):
+        """Reported as looking uneven; the heights are equal and the outline on
+        the box is what reads as a difference."""
+        chat = self._source("chat.html")
+        box = chat.split("#composer textarea {")[1].split("}")[0]
+        buttons = chat.split("#composer .icon-btn, #composer #send-btn {")[1].split("}")[0]
+        assert "height: 2.6rem" in box and "height: 2.6rem" in buttons
