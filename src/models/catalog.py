@@ -211,6 +211,67 @@ def get_available_models() -> List[str]:
     return list(config["models"].keys())
 
 
+# Routes that carry another company's models. Everywhere else the part before
+# the slash is the company itself — including for a company nobody here has
+# heard of yet, which is the point: a new provider appears under its own name
+# without anyone editing this.
+_RESELLING_ROUTES = {"azure-ai", "azure-openai", "vertex-ai", "bedrock", "openrouter"}
+
+# For those routes only, who a model belongs to can be read from its name.
+_OWNER_BY_PREFIX = (
+    ("claude", "Anthropic"),
+    ("gpt", "OpenAI"), ("o1", "OpenAI"), ("o3", "OpenAI"), ("o4", "OpenAI"),
+    ("gemini", "Google"), ("gemma", "Google"), ("palm", "Google"),
+    ("llama", "Meta"),
+    ("mistral", "Mistral"), ("mixtral", "Mistral"), ("codestral", "Mistral"),
+    ("qwen", "Alibaba"), ("deepseek", "DeepSeek"), ("phi", "Microsoft"),
+    ("command", "Cohere"), ("grok", "xAI"), ("jamba", "AI21"),
+)
+
+# Tidied spellings for the routes that are a company. Anything absent is shown
+# as it is recorded, so a new one is never hidden or mislabelled.
+_ROUTE_NAMES = {
+    "openai": "OpenAI", "anthropic": "Anthropic", "google": "Google",
+    "mistral": "Mistral", "mistral-ai": "Mistral", "cohere": "Cohere",
+    "meta": "Meta", "perplexity": "Perplexity", "deepseek": "DeepSeek",
+    "alibaba": "Alibaba", "xai": "xAI", "ai21": "AI21",
+}
+
+
+def model_owner(model: str) -> str:
+    """Return whose model this is, for grouping a list of them.
+
+    Read from the route recorded against the model — the part before the slash
+    in its ``portkey_id`` — because for almost every model that route *is* the
+    company, and a company added later therefore names itself without any
+    change here.
+
+    The exception is a route that resells: Azure and Vertex carry OpenAI's,
+    Anthropic's and Meta's models alike, so a model reached that way would
+    otherwise be filed under the shop rather than the maker. For those, and for
+    a model with no route recorded at all, the name is read instead.
+
+    Args:
+        model: The model's catalog key (e.g. ``'claude-haiku-4-5'``).
+
+    Returns:
+        A name to group under. ``'Other'`` only when nothing at all is known.
+    """
+    entry = load_model_catalog()["models"].get(model)
+    route = ""
+    if isinstance(entry, dict):
+        route = str(entry.get("portkey_id", "")).split("/")[0].strip().lower()
+
+    if route and route not in _RESELLING_ROUTES:
+        return _ROUTE_NAMES.get(route, route)
+
+    lowered = model.lower()
+    for prefix, owner in _OWNER_BY_PREFIX:
+        if lowered.startswith(prefix):
+            return owner
+    return _ROUTE_NAMES.get(route, route) if route else "Other"
+
+
 def models_in_reading_order() -> List[str]:
     """Return every model in the catalog, in the order a person would look for them.
 

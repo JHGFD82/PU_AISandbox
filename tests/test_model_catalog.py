@@ -1283,3 +1283,68 @@ class TestForgettingWhatAModelRefuses:
             "empty": {"input": 1.0, "output": 2.0, "rejects": {}},
         })
         assert list(models_with_rejected_fields()) == ["fussy"]
+
+
+class TestWhoseModelIsIt:
+    """Grouping a menu by the company, not by the shop it was bought from."""
+
+    def _catalog(self, monkeypatch, models):
+        from src.models import catalog as catalog_mod
+
+        monkeypatch.setattr(catalog_mod, "load_model_catalog",
+                            lambda: {"models": models, "config": {}})
+
+    def test_the_route_is_the_company_for_almost_everything(self, monkeypatch):
+        self._catalog(monkeypatch, {"gpt-4o": {"portkey_id": "openai/gpt-4o"}})
+        from src.models.catalog import model_owner
+
+        assert model_owner("gpt-4o") == "OpenAI"
+
+    def test_a_company_nobody_has_heard_of_yet_names_itself(self, monkeypatch):
+        """The point of reading the route first: a provider added later appears
+        under its own name without anyone editing this."""
+        self._catalog(monkeypatch, {"kimi-k2": {"portkey_id": "moonshot/kimi-k2"}})
+        from src.models.catalog import model_owner
+
+        assert model_owner("kimi-k2") == "moonshot"
+
+    def test_a_reselling_route_does_not_claim_the_model(self, monkeypatch):
+        """Vertex and Azure carry other companies' models. Read literally, the
+        route would file Claude under Google."""
+        self._catalog(monkeypatch, {
+            "claude-haiku-4-5": {"portkey_id": "vertex-ai/claude-haiku-4-5"},
+            "gpt-35-turbo": {"portkey_id": "azure-openai/gpt-35-turbo"},
+            "Llama-3.3-70B-Instruct": {"portkey_id": "azure-ai/Llama-3.3-70B-Instruct"},
+        })
+        from src.models.catalog import model_owner
+
+        assert model_owner("claude-haiku-4-5") == "Anthropic"
+        assert model_owner("gpt-35-turbo") == "OpenAI"
+        assert model_owner("Llama-3.3-70B-Instruct") == "Meta"
+
+    def test_a_model_with_no_route_recorded_is_read_by_name(self, monkeypatch):
+        self._catalog(monkeypatch, {"mistral-small-2503": {"input": 1.0}})
+        from src.models.catalog import model_owner
+
+        assert model_owner("mistral-small-2503") == "Mistral"
+
+    def test_something_wholly_unknown_still_gets_a_place(self, monkeypatch):
+        """It must appear somewhere; a model that groups nowhere is a model
+        nobody can pick."""
+        self._catalog(monkeypatch, {"strange-thing": {"input": 1.0}})
+        from src.models.catalog import model_owner
+
+        assert model_owner("strange-thing") == "Other"
+
+    def test_every_model_in_this_catalogue_is_placed(self, monkeypatch):
+        from src.models.catalog import model_owner
+
+        self._catalog(monkeypatch, {
+            "gpt-4o": {"portkey_id": "openai/gpt-4o"},
+            "claude-haiku-4-5": {"portkey_id": "vertex-ai/claude-haiku-4-5"},
+            "gemma-3-4b-it": {"portkey_id": "google/gemma-3-4b-it"},
+            "mistral-small-2503": {},
+        })
+        owners = {model_owner(m) for m in
+                  ("gpt-4o", "claude-haiku-4-5", "gemma-3-4b-it", "mistral-small-2503")}
+        assert "Other" not in owners, owners
