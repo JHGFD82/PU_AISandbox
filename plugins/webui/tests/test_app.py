@@ -3238,6 +3238,44 @@ class TestWhatTheModelWroteIsRendered:
         assert ".msg-action-btn.copied .action-icons .icon-copied" in chat
         assert ".action-icons svg" in chat or ".icon-stack svg" in chat
 
+    def test_no_heading_is_smaller_than_the_text_it_introduces(self):
+        """A model writing "## Section" produced a 14px line above a 16px
+        paragraph — the one thing a heading cannot be."""
+        import re
+
+        chat = self._source("chat.html")
+        system = self._source("_design-system.html")
+        sizes = dict(re.findall(r"(--text-[a-z]+):\s*([0-9.]+)rem", system))
+        body = float(sizes["--text-body"])
+        for tag in ("h3", "h4", "h5", "h6"):
+            rule = chat.split(f".msg-body {tag}.md-heading")[1].split("}")[0]
+            token = re.search(r"var\((--text-[a-z]+)\)", rule).group(1)
+            assert float(sizes[token]) >= body, (
+                f"{tag} is {float(sizes[token]) * 16:.0f}px against body at {body * 16:.0f}px"
+            )
+
+    def test_the_headings_get_larger_the_higher_they_are(self):
+        import re
+
+        chat = self._source("chat.html")
+        sizes = dict(re.findall(r"(--text-[a-z]+):\s*([0-9.]+)rem", self._source("_design-system.html")))
+        steps = []
+        for tag in ("h3", "h4", "h5", "h6"):
+            rule = chat.split(f".msg-body {tag}.md-heading")[1].split("}")[0]
+            steps.append(float(sizes[re.search(r"var\((--text-[a-z]+)\)", rule).group(1)]))
+        assert steps == sorted(steps, reverse=True), steps
+
+    def test_a_reply_is_set_as_a_document_throughout(self):
+        """Headings in the interface's face read as furniture — part of the
+        application rather than part of what was written."""
+        chat = self._source("chat.html")
+        heading = chat.split(".md-heading {")[1].split("}")[0]
+        assert "var(--font-text)" in heading
+        assert "var(--font-ui)" not in heading
+        # And nothing inside a reply reaches for the interface's face.
+        body_rules = chat.split(".msg-body {")[1].split(".code-block {")[0]
+        assert "var(--font-ui)" not in body_rules, "part of a reply is set as interface"
+
     def test_a_code_block_can_be_taken_away(self):
         renderer = self._source("_markdown.html")
         assert "Copy this code" in renderer
