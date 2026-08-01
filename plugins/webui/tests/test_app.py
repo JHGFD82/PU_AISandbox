@@ -261,6 +261,7 @@ class TestModelsEndpoint:
         monkeypatch.setattr(app_module, "model_supports_vision", lambda m: m == "gpt-4o")
         monkeypatch.setattr(app_module, "model_accepts_sampling_params", lambda m: m != "o3-mini")
         monkeypatch.setattr(app_module, "get_model_max_completion_tokens", lambda m, d: d)
+        monkeypatch.setattr(app_module, "model_owner", lambda m: "Test")
         monkeypatch.setattr(app_module, "resolve_model", lambda **kw: "gpt-4o")
 
         resp = unlocked_client.get("/api/models", params={"professor": "heller"})
@@ -278,6 +279,7 @@ class TestModelsEndpoint:
         monkeypatch.setattr(app_module, "model_supports_vision", lambda m: False)
         monkeypatch.setattr(app_module, "model_accepts_sampling_params", lambda m: False)
         monkeypatch.setattr(app_module, "get_model_max_completion_tokens", lambda m, d: d)
+        monkeypatch.setattr(app_module, "model_owner", lambda m: "Test")
         monkeypatch.setattr(app_module, "resolve_model", lambda **kw: "some-model")
 
         resp = unlocked_client.get("/api/models", params={"professor": "heller"})
@@ -2580,18 +2582,25 @@ class TestTheModelMenuReadsInOrder:
         monkeypatch.setattr(app_module, "model_supports_vision", lambda m: True)
         monkeypatch.setattr(app_module, "model_accepts_sampling_params", lambda m: True)
         monkeypatch.setattr(app_module, "get_model_max_completion_tokens", lambda m, d: d)
+        monkeypatch.setattr(app_module, "model_owner", lambda m: "Test")
         monkeypatch.setattr(app_module, "resolve_model", lambda **kw: "gpt-4o")
         names = [m["name"] for m in
                  unlocked_client.get("/api/models?professor=heller").json()["models"]]
         assert names == ["claude-sonnet-5", "gpt-4o", "Llama-3.3-70B-Instruct"]
 
     def test_the_page_shows_them_in_the_order_it_is_given(self):
-        """The list is built by walking state.models, so the server decides."""
+        """Grouped, but not reordered: the server decides which model comes
+        before which, and the page only decides which heading they sit under."""
         from pathlib import Path
 
         page = (Path(__file__).resolve().parents[1] / "src" / "templates" / "chat.html").read_text()
-        assert "state.models.forEach" in page
-        assert ".sort(" not in page.split("function renderModelList")[1].split("}")[0]
+        assert "(state.models || []).forEach" in page
+        # Group headings are sorted here; the models under them are not, so
+        # there is one authority on which model comes before which.
+        renderer = page.split("function renderModelList")[1].split("\nfunction ")[0]
+        sorts = renderer.count(".sort(")
+        assert sorts == 1, f"{sorts} sorts in the menu builder — the models are being reordered"
+        assert "groups.get(owner).forEach" in renderer
 
 
 class TestConversationsAreGroupedByAge:
@@ -2661,6 +2670,7 @@ class TestTheModelSaysWhatItCanDo:
         monkeypatch.setattr(app_module, "model_supports_vision", lambda m: False)
         monkeypatch.setattr(app_module, "model_accepts_sampling_params", lambda m: False)
         monkeypatch.setattr(app_module, "get_model_max_completion_tokens", lambda m, d: 16000)
+        monkeypatch.setattr(app_module, "model_owner", lambda m: "Test")
         monkeypatch.setattr(app_module, "resolve_model", lambda **kw: "o3-mini")
         model = unlocked_client.get("/api/models?professor=heller").json()["models"][0]
         assert model["max_response_tokens"] == 16000
@@ -3506,3 +3516,39 @@ class TestASourceSaysWhoseUsageItHolds:
         page = self._settings()
         assert "only look" in page
         assert "can never write" in page
+
+
+class TestTheModelMenuIsGrouped:
+    def _chat(self):
+        from pathlib import Path
+
+        return (Path(__file__).resolve().parents[1] / "src" / "templates" / "chat.html").read_text()
+
+    def test_the_menu_is_told_whose_each_model_is(self, unlocked_client, monkeypatch):
+        import sys
+
+        app_module = sys.modules["_pu_webui_app"]
+        monkeypatch.setattr(app_module, "models_in_reading_order", lambda: ["gpt-4o"])
+        monkeypatch.setattr(app_module, "model_supports_vision", lambda m: True)
+        monkeypatch.setattr(app_module, "model_accepts_sampling_params", lambda m: True)
+        monkeypatch.setattr(app_module, "get_model_max_completion_tokens", lambda m, d: d)
+        monkeypatch.setattr(app_module, "model_owner", lambda m: "OpenAI")
+        monkeypatch.setattr(app_module, "resolve_model", lambda **kw: "gpt-4o")
+        model = unlocked_client.get("/api/models?professor=heller").json()["models"][0]
+        assert model["owner"] == "OpenAI"
+
+    def test_a_model_on_your_own_service_is_offered_here(self):
+        """Typed as endpoint:model — the same shape the command line takes."""
+        chat = self._chat()
+        assert "della:alibaba/qwen35" in chat, "the box does not say the syntax is allowed"
+        assert "rememberEndpointModel" in chat
+
+    def test_those_are_remembered_rather_than_retyped(self):
+        chat = self._chat()
+        assert 'localStorage.setItem("endpoint-models"' in chat
+
+    def test_a_damaged_note_of_them_does_not_empty_the_menu(self):
+        """It is a convenience kept in the browser, so it must not be load-bearing."""
+        chat = self._chat()
+        remembered = chat.split("function rememberedEndpointModels")[1].split("\n}")[0]
+        assert "catch" in remembered

@@ -59,6 +59,7 @@ from src.config import load_professor_config
 from src.errors import CLIError
 from src.models import (
     get_model_max_completion_tokens,
+    model_owner,
     model_accepts_sampling_params,
     model_supports_vision,
     models_in_reading_order,
@@ -802,6 +803,10 @@ def create_app() -> FastAPI:
                 # because a person choosing a model for a long piece of work
                 # has no other way to find out.
                 "max_response_tokens": get_model_max_completion_tokens(m, PROMPT_MAX_TOKENS),
+                # Who the model belongs to, for grouping the menu. Worked out
+                # from the route it is reached by, except where that route
+                # resells somebody else's — see model_owner().
+                "owner": model_owner(m),
             }
             for m in names
         ]

@@ -194,6 +194,15 @@
     background: var(--surface-raised); border: 1px solid var(--border); border-radius: var(--radius-md);
     box-shadow: 0 8px 24px var(--shadow-raised); z-index: 20; padding: 0.25rem; margin: 0;
   }
+  /* Whose models these are. Sticky like the conversation list's date
+     headings, and set quietly for the same reason: to be scanned past once you
+     know where you are going. */
+  .combobox-group {
+    position: sticky; top: 0; z-index: 1; background: var(--surface-raised);
+    font-size: var(--text-xs); font-weight: 600; letter-spacing: 0.04em;
+    text-transform: uppercase; color: var(--text-muted);
+    padding: var(--space-2) var(--space-2) var(--space-1);
+  }
   .combobox-option { padding: 0.4rem 0.6rem; border-radius: var(--radius-sm); font-size: var(--text-md); cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .combobox-option:hover { background: var(--hover-bg); }
 
@@ -676,7 +685,7 @@
             <svg viewBox="0 0 20.918 20.5762"><path d="M11.2305 19.5996L11.2305 0.957031C11.2305 0.439453 10.8008 0 10.2734 0C9.75586 0 9.32617 0.439453 9.32617 0.957031L9.32617 19.5996C9.32617 20.1172 9.75586 20.5566 10.2734 20.5566C10.8008 20.5566 11.2305 20.1172 11.2305 19.5996ZM0.957031 11.2305L19.5996 11.2305C20.1172 11.2305 20.5566 10.8008 20.5566 10.2832C20.5566 9.75586 20.1172 9.32617 19.5996 9.32617L0.957031 9.32617C0.439453 9.32617 0 9.75586 0 10.2832C0 10.8008 0.439453 11.2305 0.957031 11.2305Z" fill="currentColor"/></svg>
           </button>
           <div class="model-add-popover" id="model-add-popover" hidden>
-            <input type="text" id="model-add-input" placeholder="e.g. openai/gpt-4o" autocomplete="off">
+            <input type="text" id="model-add-input" placeholder="openai/gpt-4o, or della:alibaba/qwen35" autocomplete="off">
             <button type="button" id="model-add-confirm">Use</button>
           </div>
         </div>
@@ -946,19 +955,65 @@ async function loadModels() {
   }
 }
 
+// Models this person has reached on an AI service of their own. They are not
+// in the catalogue — an endpoint's models are whatever it runs, and nothing
+// here can ask it — so the ones actually used are remembered, and appear under
+// the endpoint's name the way a catalogue model appears under its company's.
+function rememberedEndpointModels() {
+  try {
+    return JSON.parse(localStorage.getItem("endpoint-models") || "[]");
+  } catch (e) {
+    return [];
+  }
+}
+
+function rememberEndpointModel(name) {
+  const kept = rememberedEndpointModels();
+  if (!kept.includes(name)) {
+    localStorage.setItem("endpoint-models", JSON.stringify([...kept, name].sort()));
+  }
+}
+
 function renderModelList() {
   const list = document.getElementById("model-list");
   list.innerHTML = "";
-  state.models.forEach(m => {
-    const opt = document.createElement("div");
-    opt.className = "combobox-option";
-    opt.textContent = m.name;
-    opt.addEventListener("click", () => {
-      document.getElementById("model-field").value = m.name;
-      applySamplingVisibility();
-      closeModelList();
-    });
-    list.appendChild(opt);
+
+  // Grouped by whose model it is, and within a group by name. The catalogue's
+  // own order was one flat run of twenty-eight, which is a lot to read when
+  // you already know whose model you want.
+  const groups = new Map();
+  (state.models || []).forEach(m => {
+    const owner = m.owner || "Other";
+    if (!groups.has(owner)) groups.set(owner, []);
+    groups.get(owner).push(m.name);
+  });
+  rememberedEndpointModels().forEach(full => {
+    const endpoint = full.split(":")[0];
+    if (!groups.has(endpoint)) groups.set(endpoint, []);
+    groups.get(endpoint).push(full);
+  });
+
+  const choose = (name) => {
+    document.getElementById("model-field").value = name;
+    applySamplingVisibility();
+    closeModelList();
+  };
+
+  [...groups.keys()].sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase())).forEach(owner => {
+    const heading = document.createElement("div");
+    heading.className = "combobox-group";
+    heading.textContent = owner;
+    list.appendChild(heading);
+    // Not re-sorted: the server already put them in reading order, and sorting
+    // again here would be a second authority on it — which is how the menu and
+    // the command line came to be ordered the same wrong way once before.
+    groups.get(owner).forEach(name => {
+        const opt = document.createElement("div");
+        opt.className = "combobox-option";
+        opt.textContent = name;
+        opt.addEventListener("click", () => choose(name));
+        list.appendChild(opt);
+      });
   });
 }
 
@@ -999,7 +1054,14 @@ function openModelAddPopover() {
 function closeModelAddPopover() { document.getElementById("model-add-popover").hidden = true; }
 function confirmModelAdd() {
   const val = document.getElementById("model-add-input").value.trim();
-  if (val) document.getElementById("model-field").value = val;
+  if (val) {
+    document.getElementById("model-field").value = val;
+    // "della:alibaba/qwen35" — an endpoint of your own, then the model on it.
+    if (val.includes(":")) {
+      rememberEndpointModel(val);
+      renderModelList();
+    }
+  }
   applySamplingVisibility();
   closeModelAddPopover();
 }
