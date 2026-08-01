@@ -61,7 +61,7 @@
 </style>
 </head>
 <body>
-  <div id="topbar">
+  <div id="topbar" hidden>
     <h1>Settings</h1>
     <a href="#" id="back-link" style="display:none">&larr; Back to chat</a>
     <button class="secondary" id="lock-btn">Lock</button>
@@ -156,8 +156,10 @@
     </div>
 
     <div class="card" id="section-shared" data-section="shared">
-      <h2>Shared settings &amp; alternate endpoints</h2>
-      <p class="hint">A shared settings file lets a group of installations (e.g. everyone you manage) use the same tuned runtime defaults. Alternate-endpoint credentials are the API keys for any non-default AI endpoints defined in settings.default.toml or preferences.toml.</p>
+      <h2>Shared settings</h2>
+      <p class="hint">A shared settings file lets a group of installations — everyone
+        you look after, say — follow the same tuned defaults, without anybody editing
+        their own copy by hand.</p>
 
       <label for="shared-path">Shared settings file path</label>
       <form class="inline" id="shared-path-form">
@@ -198,7 +200,16 @@
         does, so you can tick what the group should share. The second hands you
         the same file with everything commented out, to edit in a text editor.</p>
 
-      <div id="endpoints-list" style="margin-top:1rem"></div>
+    </div>
+
+    <div class="card" id="section-endpoints" data-section="endpoints">
+      <h2>Alternate AI endpoints</h2>
+      <p class="hint">An AI service other than the Princeton sandbox — a model on a
+        cluster, or a provider's own API. Calls to one are counted but carry no cost,
+        and are reported separately, because the sandbox's prices are the
+        university's and describe nothing else.</p>
+
+      <div id="endpoints-list"></div>
       <div class="snippet" id="endpoints-guidance"># preferences.toml
 [endpoints.my_cluster]
 name = "My HPC Cluster"
@@ -258,6 +269,11 @@ default_model = "llama-3-70b-instruct"</div>
 // rather than navigated to directly (e.g. the first-run redirect when no
 // professors are configured yet, or a bookmarked /settings URL).
 const embeddedInModal = window.self !== window.top;
+// Opened from the chat page, the modal around this already carries the word
+// "Settings" and a way out, so a second heading, a second close and a Lock
+// button underneath them are three ways of saying what is already said.
+// Opened on its own, the bar is the only one of those there is.
+document.getElementById("topbar").hidden = embeddedInModal;
 
 async function api(path, opts) {
   const res = await fetch(path, Object.assign({ headers: { "Content-Type": "application/json" } }, opts));

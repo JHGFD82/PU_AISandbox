@@ -126,8 +126,8 @@ def _get_plugins() -> dict:
 # once at least one professor exists, install-wide settings (shared
 # defaults, alternate endpoints) are what someone is more likely returning
 # to tweak, so they lead instead.
-_SETTINGS_ORDER_FIRST_RUN = ["professors", "external_sources", "webui", "shared"]
-_SETTINGS_ORDER_REPEAT = ["shared", "professors", "webui", "external_sources"]
+_SETTINGS_ORDER_FIRST_RUN = ["professors", "external_sources", "webui", "shared", "endpoints"]
+_SETTINGS_ORDER_REPEAT = ["shared", "endpoints", "professors", "webui", "external_sources"]
 
 
 class ActiveProfessorBody(BaseModel):
