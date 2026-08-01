@@ -263,14 +263,26 @@
      cost. */
   .msg-body > * { margin: 0; }
   .msg-body > * + * { margin-top: var(--space-3); }
+  /* A heading inside a reply belongs to the reply, not to the interface around
+     it, so it is set in the same reading face as the passage it introduces.
+     Setting them in the interface's face made them read as furniture — part of
+     the application rather than part of the document.
+
+     They are also all larger than the body now. They were not: the interface's
+     ordinary 14px was being used for everything below the first level, so a
+     model writing "## Section" produced a line smaller than the paragraph it
+     was introducing, which is the one thing a heading cannot be. */
   .md-heading {
-    font-family: var(--font-ui); font-weight: 600; line-height: 1.35;
+    font-family: var(--font-text);
+    font-weight: 600; line-height: 1.3;
   }
   .msg-body > * + .md-heading { margin-top: var(--space-6); }
-  .msg-body h3.md-heading { font-size: var(--text-lg); }
-  .msg-body h4.md-heading,
-  .msg-body h5.md-heading,
-  .msg-body h6.md-heading { font-size: var(--text-md); }
+  .msg-body h3.md-heading { font-size: var(--text-xxl); }
+  .msg-body h4.md-heading { font-size: var(--text-xl); }
+  .msg-body h5.md-heading { font-size: var(--text-lg); }
+  /* The deepest level shares the body's size, so weight and the space above it
+     are what set it apart — going smaller again would be the original fault. */
+  .msg-body h6.md-heading { font-size: var(--text-body); }
   .msg-body ul, .msg-body ol { padding-left: var(--space-6); }
   .msg-body li + li { margin-top: var(--space-1); }
   .msg-body blockquote {
@@ -290,12 +302,14 @@
   /* A table can be wider than the measure and must not widen the column with
      it; it scrolls inside its own box instead. */
   .table-scroll { overflow-x: auto; }
-  .msg-body table { border-collapse: collapse; font-size: var(--text-md); }
+  /* Also the document, so also the reading face. A glossary or a table of
+     readings is content, not interface. */
+  .msg-body table { border-collapse: collapse; font-size: var(--text-body); }
   .msg-body th, .msg-body td {
     border: 1px solid var(--border); padding: var(--space-1) var(--space-2);
     text-align: left; vertical-align: top;
   }
-  .msg-body th { font-family: var(--font-ui); font-weight: 600; background: var(--hover-bg); }
+  .msg-body th { font-weight: 600; background: var(--hover-bg); }
 
   /* ── A block of code ─────────────────────────────────────────────────────
      Given an edge of its own, because it is a different kind of thing from the
@@ -384,7 +398,7 @@
   .spend-figure, .spend-row, #spend-endpoints {
     font-variant-numeric: tabular-nums;
   }
-  .spend-figure { font-size: var(--text-figure); font-weight: 600; }
+  .spend-figure { font-size: var(--text-xxl); font-weight: 600; }
   .spend-label { font-size: var(--text-xs); color: var(--text-muted); }
   .spend-row { display: flex; justify-content: space-between; font-size: var(--text-md); padding: 0.2rem 0; }
   /* Instructions run long — a sentence at least, sometimes a paragraph — so

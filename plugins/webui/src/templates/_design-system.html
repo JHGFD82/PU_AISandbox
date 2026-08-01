@@ -75,15 +75,20 @@
     --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace;
 
     /* ── Type scale ────────────────────────────────────────────────────────
-       Six steps, replacing fourteen ad-hoc sizes. The floor is 12px: below
+       Seven steps, replacing fourteen ad-hoc sizes. The floor is 12px: below
        that a label stops being readable to anyone who needs it most, and this
-       interface had text at 11.2px. */
+       interface had text at 11.2px.
+
+       The steps above --text-body exist so a heading can be a heading. They
+       were missing, and the result was that a model writing "## Section"
+       produced a line at 14px introducing a paragraph at 16px. */
     --text-xs: 0.75rem;      /* 12px — labels, captions, meta */
     --text-sm: 0.8125rem;    /* 13px — secondary interface text */
     --text-md: 0.875rem;     /* 14px — the interface's ordinary size */
     --text-body: 1rem;       /* 16px — what the model wrote */
-    --text-lg: 1.125rem;     /* 18px — page and section headings */
-    --text-figure: 1.5rem;   /* 24px — the one big number, this month's spend */
+    --text-lg: 1.125rem;     /* 18px — a small heading */
+    --text-xl: 1.25rem;      /* 20px — a section heading */
+    --text-xxl: 1.5rem;      /* 24px — a reply's top heading, and the spend figure */
 
     /* ── Space ─────────────────────────────────────────────────────────────
        Six steps on a four-pixel rhythm, replacing twenty-six magnitudes that
