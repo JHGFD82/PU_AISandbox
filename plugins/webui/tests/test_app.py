@@ -2880,9 +2880,13 @@ class TestTheSuppliedButtonIcons:
         from pathlib import Path
 
         page = (Path(__file__).resolve().parents[1] / "src" / "templates" / "chat.html").read_text()
+        # The one button with no drawing of its own: the artwork supplied for a
+        # "sidebar toggle" was a second copy of the padlock, so this button —
+        # which only appears on a narrow screen — is still on a plain one.
+        awaiting_artwork = {"sidebar-toggle-btn"}
         for m in re.finditer(r'<button\b[^>]*id="([^"]+)"[^>]*>(.*?)</button>', page, re.S):
             block = m.group(2)
-            if "<svg" not in block:
+            if "<svg" not in block or m.group(1) in awaiting_artwork:
                 continue
             # The originals were drawn as strokes; every supplied one is a
             # filled shape, so a leftover would show up here.
@@ -2943,3 +2947,206 @@ class TestTheSuppliedButtonIcons:
                           "new-conv", "model-toggle-btn", "model-add-btn",
                           "job-modal-reset", "settings-modal-close", "job-modal-close"):
             assert "<rect" not in self._button(button_id), button_id
+
+
+class TestOneDesignSystem:
+    """The values are decided in one place, and the pages agree.
+
+    They did not: four pages each held their own copy and three had drifted,
+    with the Settings page painting itself a different orange from the page it
+    opens inside — under a comment promising the two were identical.
+    """
+
+    TEMPLATES = ("chat.html", "settings.html", "shared_settings.html", "unlock.html")
+
+    def _dir(self):
+        from pathlib import Path
+
+        return Path(__file__).resolve().parents[1] / "src" / "templates"
+
+    def _source(self, name):
+        return (self._dir() / name).read_text()
+
+    def _rendered(self, name):
+        from fastapi.templating import Jinja2Templates
+
+        env = Jinja2Templates(directory=str(self._dir())).env
+        return env.get_template(name).render(
+            request=None, error=None, can_reveal=True, default_sampling={}
+        )
+
+    def test_every_page_takes_its_values_from_the_one_place(self):
+        for name in self.TEMPLATES:
+            assert '{% include "_design-system.html" %}' in self._source(name), name
+
+    def test_no_page_declares_its_own(self):
+        """A second copy is how the drift started."""
+        for name in self.TEMPLATES:
+            assert "--orange:" not in self._source(name), (
+                f"{name} declares a colour of its own instead of using the shared one"
+            )
+
+    def test_the_pages_agree_on_the_accent(self):
+        accents = {name: self._rendered(name).count("--orange: #E77500")
+                   for name in self.TEMPLATES}
+        assert all(n == 1 for n in accents.values()), accents
+
+    def test_type_sizes_come_from_the_scale(self):
+        """Fourteen ad-hoc sizes, several a fraction of a pixel apart."""
+        import re
+
+        for name in self.TEMPLATES:
+            css = self._source(name).split("</style>")[0]
+            literals = re.findall(r"font-size:\s*([0-9.]+)rem", css)
+            assert not literals, f"{name} still sizes text by hand: {literals}"
+
+    def test_shapes_and_faces_come_from_the_scale_too(self):
+        """Eight corner radii, where 20px and 999px both meant "fully round"."""
+        import re
+
+        for name in self.TEMPLATES:
+            page = self._source(name)
+            radii = re.findall(r"border-radius:\s*(\d+)px", page)
+            assert not radii, f"{name} still rounds corners by hand: {radii}"
+            assert "ui-monospace" not in page, f"{name} writes out a font stack"
+
+    def test_nothing_is_smaller_than_twelve_pixels(self):
+        """It went down to 9.9px, on a badge, and 11.2px on the sidebar."""
+        import re
+
+        system = self._source("_design-system.html")
+        steps = [float(v) for v in re.findall(r"--text-[a-z]+:\s*([0-9.]+)rem", system)]
+        assert steps, "no type scale found"
+        assert min(steps) * 16 >= 12, f"the scale reaches {min(steps) * 16}px"
+
+
+class TestTheInterfaceCanBeReachedWithoutAMouse:
+    def _chat(self):
+        from pathlib import Path
+
+        return (Path(__file__).resolve().parents[1] / "src" / "templates" / "chat.html").read_text()
+
+    def test_there_is_a_focus_style_at_all(self):
+        from pathlib import Path
+
+        system = (Path(__file__).resolve().parents[1] / "src" / "templates"
+                  / "_design-system.html").read_text()
+        assert ":focus-visible" in system
+
+    def test_the_focus_ring_can_be_seen_on_every_surface(self):
+        """Princeton's orange makes 3:1 on a panel and 2.78:1 on the page.
+
+        The transcript sits on the page, so the ring is drawn in a darkened
+        orange that clears both. This is the arithmetic that caught it.
+        """
+        import re
+        from pathlib import Path
+
+        css = (Path(__file__).resolve().parents[1] / "src" / "templates"
+               / "_design-system.html").read_text()
+
+        def values(block_start):
+            segment = css.split(block_start)[1].split("}")[0]
+            return dict(re.findall(r"(--[a-z-]+):\s*(#[0-9a-fA-F]{6})", segment))
+
+        light = values(":root {")
+        dark = {**light, **values('[data-theme="dark"] {')}
+
+        def luminance(colour):
+            channels = [int(colour[i:i + 2], 16) / 255 for i in (1, 3, 5)]
+            adjusted = [c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+                        for c in channels]
+            return 0.2126 * adjusted[0] + 0.7152 * adjusted[1] + 0.0722 * adjusted[2]
+
+        for theme in (light, dark):
+            for surface in ("--bg", "--panel-bg"):
+                pair = sorted((luminance(theme["--focus-ring"]), luminance(theme[surface])),
+                              reverse=True)
+                ratio = (pair[0] + 0.05) / (pair[1] + 0.05)
+                assert ratio >= 3.0, f"the ring is {ratio:.2f}:1 against {surface}"
+
+    def test_controls_that_appear_on_hover_appear_on_focus_too(self):
+        """They stayed in the tab order while invisible."""
+        chat = self._chat()
+        assert ".conv-item:focus-within .conv-menu-btn" in chat
+        assert ".msg:focus-within .msg-actions" in chat
+
+    def test_the_smallest_controls_can_be_hit(self):
+        """The two at 20x20 were the message actions and the menu holding Delete."""
+        import re
+
+        chat = self._chat()
+        for selector in (".conv-menu-btn {", ".msg-action-btn {"):
+            rule = chat.split(selector)[1].split("}")[0]
+            size = int(re.search(r"width:\s*(\d+)px", rule).group(1))
+            assert size >= 28, f"{selector} is still {size}px"
+        assert "inset: -8px" in chat, "no expanded pointer target"
+
+    def test_the_page_says_what_it_is(self):
+        """Eight second-level headings and no first-level one."""
+        chat = self._chat()
+        assert "<h1" in chat
+
+    def test_it_has_the_regions_a_screen_reader_moves_between(self):
+        chat = self._chat()
+        for tag in ("<header", "<nav", "<main", "<aside"):
+            assert tag in chat, tag
+
+    def test_the_message_box_is_labelled_and_says_how_to_send(self):
+        """Enter sends and Shift+Enter does not; that was written nowhere."""
+        chat = self._chat()
+        assert 'for="input"' in chat
+        assert "Shift+Enter" in chat
+
+    def test_movement_stops_for_anyone_who_asked_for_less(self):
+        from pathlib import Path
+
+        system = (Path(__file__).resolve().parents[1] / "src" / "templates"
+                  / "_design-system.html").read_text()
+        assert "prefers-reduced-motion" in system
+
+
+class TestTheTranscriptIsBuiltForReading:
+    def _chat(self):
+        from pathlib import Path
+
+        return (Path(__file__).resolve().parents[1] / "src" / "templates" / "chat.html").read_text()
+
+    def test_the_measure_is_capped(self):
+        """It was 70% of an uncapped column: ~190 characters on a wide screen."""
+        chat = self._chat()
+        rule = chat.split(".msg {")[1].split("}")[0]
+        assert "var(--measure)" in rule
+        assert "70%" not in rule
+
+    def test_the_line_spacing_suits_the_scripts_it_renders(self):
+        """Transcripts here carry thousands of characters of Hangul and kana,
+        which fill their em box and need more room than Latin."""
+        chat = self._chat()
+        rule = chat.split(".msg-body {")[1].split("}")[0]
+        assert "line-height: 1.7" in rule
+
+    def test_what_the_model_wrote_is_set_in_the_reading_face(self):
+        chat = self._chat()
+        assert "font-family: var(--font-text)" in chat.split(".msg-body {")[1].split("}")[0]
+
+    def test_no_text_sits_on_the_orange(self):
+        """White on it is 2.63:1 at the value this page used to carry."""
+        chat = self._chat()
+        assert "background: var(--orange); color: white" not in chat
+
+    def test_the_orange_still_marks_your_own_turns(self):
+        """As a rule beside the words rather than a block behind them."""
+        chat = self._chat()
+        assert ".msg.user .msg-body { border-left-color: var(--orange); }" in chat
+
+    def test_the_reading_face_can_set_the_scripts_this_sandbox_sees(self):
+        """A stack that stopped at Latin would leave the browser to guess."""
+        from pathlib import Path
+
+        system = (Path(__file__).resolve().parents[1] / "src" / "templates"
+                  / "_design-system.html").read_text()
+        stack = system.split("--font-text:")[1].split(";")[0]
+        assert "Mincho" in stack, "no Japanese face"
+        assert "Songti" in stack or "SimSun" in stack, "no Chinese face"
+        assert "Myungjo" in stack or "Myeongjo" in stack or "Batang" in stack, "no Korean face"
