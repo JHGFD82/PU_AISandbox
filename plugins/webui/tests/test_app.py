@@ -3150,3 +3150,75 @@ class TestTheTranscriptIsBuiltForReading:
         assert "Mincho" in stack, "no Japanese face"
         assert "Songti" in stack or "SimSun" in stack, "no Chinese face"
         assert "Myungjo" in stack or "Myeongjo" in stack or "Batang" in stack, "no Korean face"
+
+
+class TestWhatTheModelWroteIsRendered:
+    """Markdown becomes what it means, and never becomes markup."""
+
+    def _source(self, name):
+        from pathlib import Path
+
+        return (Path(__file__).resolve().parents[1] / "src" / "templates" / name).read_text()
+
+    def test_the_renderer_is_part_of_the_page(self):
+        assert '{% include "_markdown.html" %}' in self._source("chat.html")
+
+    def test_nothing_the_model_wrote_is_ever_treated_as_markup(self):
+        """The hard requirement. This text comes from a model, a model reads
+        whatever document it was given, and a document can be written by
+        anyone — so a translation of somebody's PDF must not be able to put a
+        script on the page."""
+        import re
+
+        # The code only: the note at the top of the file says the word while
+        # promising the opposite, and an earlier version of this test failed on
+        # its own documentation.
+        renderer = self._source("_markdown.html")
+        code = renderer.split("#}", 1)[1]
+        code = re.sub(r"//.*", "", code)
+        assert not re.search(r"\.innerHTML\s*=", code), "the renderer assigns markup"
+        assert "insertAdjacentHTML" not in code
+        assert "createTextNode" in code
+
+    def test_only_addresses_that_go_somewhere_become_links(self):
+        renderer = self._source("_markdown.html")
+        scheme = renderer.split("function safeHref")[1].split("}")[0]
+        assert "https?" in scheme and "mailto" in scheme
+
+    def test_the_persons_own_words_are_left_as_they_typed_them(self):
+        """Somebody pasting source has every right to asterisks in it."""
+        chat = self._source("chat.html")
+        assert 'if (m.role === "user")' in chat
+        assert ".msg-body.verbatim { white-space: pre-wrap; }" in chat
+
+    def test_a_reply_is_only_rendered_once_it_has_finished_arriving(self):
+        """Markdown half-written is markdown half-parsed."""
+        chat = self._source("chat.html")
+        streaming = chat.split('messageLeaf("assistant", chosenModel')[1][:300]
+        assert "verbatim" in streaming
+
+    def test_a_code_block_can_be_taken_away(self):
+        renderer = self._source("_markdown.html")
+        assert "Copy this code" in renderer
+        assert "Save as ${filename}" in renderer
+
+    def test_the_saved_file_is_named_from_the_language(self):
+        """A fence says what it is; this is the table that turns that into a
+        file name, so a download arrives as parse.py rather than snippet.txt."""
+        renderer = self._source("_markdown.html")
+        table = renderer.split("CODE_EXTENSIONS = {")[1].split("};")[0]
+        for language, extension in (("python", "py"), ("typescript", "ts"),
+                                    ("sql", "sql"), ("rust", "rs")):
+            assert f'{language}: "{extension}"' in table, language
+
+    def test_a_fence_may_name_its_own_file(self):
+        renderer = self._source("_markdown.html")
+        assert "function codeFileName" in renderer
+        assert "if (named) return named;" in renderer
+
+    def test_code_is_allowed_to_be_wider_than_the_prose(self):
+        """Wrapping code at the reading measure would break lines that mean
+        something; it scrolls in its own box instead."""
+        chat = self._source("chat.html")
+        rule = chat.split(".code-block pre {")[1].split("}")[0]
+        assert "overflow-x: auto" in rule

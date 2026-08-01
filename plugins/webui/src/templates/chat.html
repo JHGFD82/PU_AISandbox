@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Princeton University AI Sandbox</title>
 {% include "_design-system.html" %}
+{% include "_markdown.html" %}
 <style>
   /* Shared by every element whose color comes from a theme variable, so
      switching data-theme fades smoothly instead of snapping instantly. */
@@ -247,10 +248,83 @@
   .msg-body {
     grid-column: 2;
     font-family: var(--font-text); font-size: var(--text-body); line-height: 1.7;
-    white-space: pre-wrap;
     padding-left: var(--space-4);
     border-left: 1px solid var(--border);
   }
+  /* Text shown exactly as it was written: the person's own words, and a reply
+     still arriving. Rendered passages use real blocks instead and would gain a
+     blank line for every newline if this applied to them. */
+  .msg-body.verbatim { white-space: pre-wrap; }
+
+  /* ── What the model wrote ────────────────────────────────────────────────
+     Spacing is set on the gaps between blocks rather than under each one, so a
+     passage does not end with a trailing gap before the line that says what it
+     cost. */
+  .msg-body > * { margin: 0; }
+  .msg-body > * + * { margin-top: var(--space-3); }
+  .md-heading {
+    font-family: var(--font-ui); font-weight: 600; line-height: 1.35;
+  }
+  .msg-body > * + .md-heading { margin-top: var(--space-6); }
+  .msg-body h3.md-heading { font-size: var(--text-lg); }
+  .msg-body h4.md-heading,
+  .msg-body h5.md-heading,
+  .msg-body h6.md-heading { font-size: var(--text-md); }
+  .msg-body ul, .msg-body ol { padding-left: var(--space-6); }
+  .msg-body li + li { margin-top: var(--space-1); }
+  .msg-body blockquote {
+    padding-left: var(--space-4); border-left: 2px solid var(--border);
+    color: var(--text-muted);
+  }
+  .msg-body hr { border: none; border-top: 1px solid var(--border); }
+  .msg-body a { color: inherit; text-underline-offset: 0.15em; }
+  /* Inline code stays in the reading column, so it takes the reading size and
+     only its face changes. */
+  .msg-body :not(pre) > code {
+    font-family: var(--font-mono); font-size: 0.9em;
+    background: var(--hover-bg); border-radius: var(--radius-sm);
+    padding: 0.05em 0.3em;
+  }
+
+  /* A table can be wider than the measure and must not widen the column with
+     it; it scrolls inside its own box instead. */
+  .table-scroll { overflow-x: auto; }
+  .msg-body table { border-collapse: collapse; font-size: var(--text-md); }
+  .msg-body th, .msg-body td {
+    border: 1px solid var(--border); padding: var(--space-1) var(--space-2);
+    text-align: left; vertical-align: top;
+  }
+  .msg-body th { font-family: var(--font-ui); font-weight: 600; background: var(--hover-bg); }
+
+  /* ── A block of code ─────────────────────────────────────────────────────
+     Given an edge of its own, because it is a different kind of thing from the
+     prose around it: something to be taken away and run, not read. It escapes
+     the reading measure — code is not prose and wrapping it at 66 characters
+     would break lines that mean something — and scrolls rather than pushing the
+     column wider. */
+  .code-block {
+    margin: var(--space-4) 0;
+    border: 1px solid var(--border); border-radius: var(--radius-md);
+    background: var(--panel-bg); overflow: hidden;
+    width: max-content; max-width: 100%; min-width: 100%;
+  }
+  .code-block-bar {
+    display: flex; align-items: center; gap: var(--space-2);
+    padding: var(--space-1) var(--space-1) var(--space-1) var(--space-3);
+    border-bottom: 1px solid var(--border); background: var(--bg);
+  }
+  .code-block-name {
+    flex: 1; min-width: 0; font-family: var(--font-mono); font-size: var(--text-xs);
+    color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  /* Always visible, unlike the row on a passage: these two are the whole point
+     of giving code a block of its own. */
+  .code-block-actions { display: flex; gap: var(--space-1); flex: none; }
+  .code-block pre {
+    margin: 0; padding: var(--space-3); overflow-x: auto;
+    font-family: var(--font-mono); font-size: var(--text-sm); line-height: 1.55;
+  }
+  .code-block code { font: inherit; }
   /* The orange still marks the person's own turns, as the filled bubble did —
      but as a rule beside the words rather than a block behind them, which is
      the one job this colour has the contrast for. */
@@ -2071,7 +2145,15 @@ function renderMessages(conv) {
       pageLabel.textContent = `Page ${m.page_number}`;
       div.appendChild(pageLabel);
     }
-    div.appendChild(document.createTextNode(m.content));
+    // What the model wrote is rendered; what the person typed is not. Somebody
+    // pasting a passage of source has every right to asterisks and underscores
+    // in it, and turning those into emphasis would quietly alter their text.
+    if (m.role === "user") {
+      div.classList.add("verbatim");
+      div.appendChild(document.createTextNode(m.content));
+    } else {
+      renderMarkdownInto(div, m.content, conv.title);
+    }
     (m.attachments || []).forEach(a => {
       if (m.content) div.appendChild(document.createElement("br"));
       div.appendChild(attachmentChipElement(a.filename, a.char_count));
@@ -2155,6 +2237,7 @@ function appendPendingMessage(text) {
   const empty = box.querySelector(".empty");
   if (empty) empty.remove();
   const { leaf, body } = messageLeaf("user", "you");
+  body.classList.add("verbatim");
   body.textContent = text;
   const meta = document.createElement("div");
   meta.className = "meta waiting";
@@ -2234,6 +2317,7 @@ async function sendMessage() {
             if (waiting) waiting.remove();
             const streaming = messageLeaf("assistant", chosenModel || "assistant");
             assistantDiv = streaming.body;
+            assistantDiv.classList.add("verbatim");
             box.appendChild(streaming.leaf);
           }
           assistantDiv.textContent += event.text;
