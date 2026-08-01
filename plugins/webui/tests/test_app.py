@@ -3197,6 +3197,47 @@ class TestWhatTheModelWroteIsRendered:
         streaming = chat.split('messageLeaf("assistant", chosenModel')[1][:300]
         assert "verbatim" in streaming
 
+    def test_both_copy_buttons_are_the_same_button(self):
+        """They were drawn in two places and drifted: same box, but the
+        drawings filled 82% and 62% of it, so one plainly looked smaller."""
+        chat = self._source("chat.html")
+        renderer = self._source("_markdown.html")
+        actions = self._source("_actions.html")
+        assert "function copyButtonElement" in actions
+        assert "copyButtonElement(" in chat, "the message row draws its own"
+        assert "copyButtonElement(" in renderer, "the code block draws its own"
+        assert "copyBtn.innerHTML" not in chat
+
+    def test_every_action_icon_is_drawn_on_the_same_grid(self):
+        """A drawing filling less of its box looks smaller at the same size."""
+        import re
+
+        for name in ("_actions.html", "_markdown.html"):
+            source = self._source(name)
+            boxes = set(re.findall(r'viewBox="([^"]+)"', source))
+            boxes |= set(re.findall(r'setAttribute\("viewBox",\s*"([^"]+)"\)', source))
+            assert boxes, f"{name} has no drawings"
+            assert boxes == {"0 0 14 14"}, f"{name} draws on {sorted(boxes)}"
+
+    def test_the_copy_button_says_it_worked(self):
+        """The thing you pressed answers, rather than a message appearing
+        elsewhere for the eye to find."""
+        actions = self._source("_actions.html")
+        assert "icon-copied" in actions
+        assert 'classList.add("copied")' in actions
+        assert "2000" in actions, "it never goes back"
+
+    def test_and_only_after_the_copy_actually_happened(self):
+        actions = self._source("_actions.html")
+        before, _, after = actions.partition("writeText(text).then(")
+        assert 'classList.add("copied")' in after
+        assert 'classList.add("copied")' not in before
+
+    def test_the_two_drawings_fade_between_each_other(self):
+        chat = self._source("chat.html")
+        assert ".msg-action-btn.copied .action-icons .icon-copied" in chat
+        assert ".action-icons svg" in chat or ".icon-stack svg" in chat
+
     def test_a_code_block_can_be_taken_away(self):
         renderer = self._source("_markdown.html")
         assert "Copy this code" in renderer
