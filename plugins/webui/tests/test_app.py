@@ -1419,7 +1419,7 @@ class TestSettingsPage:
     def test_no_professors_first_run_order(self, unlocked_client, settings_env):
         data = unlocked_client.get("/api/settings").json()
         assert data["has_professors"] is False
-        assert data["order"] == ["professors", "external_sources", "webui", "shared"]
+        assert data["order"] == ["professors", "external_sources", "webui", "shared", "endpoints"]
         assert data["professors"] == []
 
     def test_index_redirects_to_settings_with_no_professors(self, unlocked_client, settings_env):
@@ -1439,7 +1439,7 @@ class TestSettingsProfessors:
 
         data = unlocked_client.get("/api/settings").json()
         assert data["has_professors"] is True
-        assert data["order"] == ["shared", "professors", "webui", "external_sources"]
+        assert data["order"] == ["shared", "endpoints", "professors", "webui", "external_sources"]
         prof = data["professors"][0]
         assert prof == {
             "netid": "jh43", "name": "Jeff Heller",
@@ -3366,3 +3366,39 @@ class TestControlsSitProperlyTogether:
         raised = re.search(r"--surface-raised:\s*(#[0-9a-fA-F]{6})", dark).group(1)
         panel = re.search(r"--panel-bg:\s*(#[0-9a-fA-F]{6})", dark).group(1)
         assert raised.lower() != panel.lower(), "a menu is the colour of what it covers"
+
+
+class TestTheSettingsPageSaysThingsOnce:
+    def _source(self):
+        from pathlib import Path
+
+        return (Path(__file__).resolve().parents[1] / "src" / "templates" / "settings.html").read_text()
+
+    def test_the_page_carries_no_second_heading_inside_the_modal(self):
+        """The modal already says "Settings" and already has a way out; a
+        heading, a close and a Lock button under them are three ways of saying
+        what has been said."""
+        source = self._source()
+        assert 'document.getElementById("topbar").hidden = embeddedInModal;' in source
+
+    def test_but_keeps_it_when_opened_on_its_own(self):
+        """Then the bar is the only heading, and the only way to lock."""
+        source = self._source()
+        assert 'id="lock-btn"' in source
+        assert "hidden = embeddedInModal" in source
+        assert "hidden = true" not in source
+
+    def test_shared_settings_and_endpoints_are_separate(self):
+        """They are different things: one is defaults a group follows, the
+        other is another AI service to call."""
+        source = self._source()
+        assert 'data-section="shared"' in source
+        assert 'data-section="endpoints"' in source
+        assert "Shared settings &amp; alternate endpoints" not in source
+
+    def test_both_appear_in_the_order_the_server_gives(self, unlocked_client):
+        order = unlocked_client.get("/api/settings").json()["order"]
+        assert "shared" in order and "endpoints" in order
+        source = self._source()
+        for key in order:
+            assert f'data-section="{key}"' in source, f"{key} is ordered but not on the page"
