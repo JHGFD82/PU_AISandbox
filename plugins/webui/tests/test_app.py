@@ -1631,10 +1631,12 @@ class TestSettingsSources:
     def test_add_and_list_read_only_source(self, unlocked_client, settings_env):
         resp = unlocked_client.post("/api/settings/sources", json={
             "label": "Prof. Smith", "path": "/tmp/smith-data", "mode": "read-only",
+            "professor": "smith",
         })
         assert resp.status_code == 200
         sources = unlocked_client.get("/api/settings").json()["sources"]["external"]
-        assert sources == [{"label": "Prof. Smith", "path": "/tmp/smith-data", "mode": "read-only", "professor": None}]
+        assert sources == [{"label": "Prof. Smith", "path": "/tmp/smith-data",
+                            "mode": "read-only", "professor": "smith"}]
 
     def test_shared_write_without_professor_rejected(self, unlocked_client, settings_env):
         resp = unlocked_client.post("/api/settings/sources", json={
@@ -1651,6 +1653,7 @@ class TestSettingsSources:
     def test_remove_source(self, unlocked_client, settings_env):
         unlocked_client.post("/api/settings/sources", json={
             "label": "Prof. Smith", "path": "/tmp/smith-data", "mode": "read-only",
+            "professor": "smith",
         })
         resp = unlocked_client.delete("/api/settings/sources", params={"label": "Prof. Smith"})
         assert resp.status_code == 200
@@ -3459,3 +3462,47 @@ class TestChoosingHowRepliesAreSet:
         sans = system.split('[data-reading="sans"]')[1].split("}")[0]
         assert "--font-reading" in sans
         assert "--font-ui:" not in sans, "the choice redefines the interface's own face"
+
+
+class TestASourceSaysWhoseUsageItHolds:
+    """One professor may share a folder for work, another only for tracking."""
+
+    def _settings(self):
+        from pathlib import Path
+
+        return (Path(__file__).resolve().parents[1] / "src" / "templates" / "settings.html").read_text()
+
+    def test_a_read_only_source_is_refused_without_a_professor(self, unlocked_client, settings_env):
+        r = unlocked_client.post("/api/settings/sources", json={
+            "label": "Prof. Smith", "path": "/tmp/smith", "mode": "read-only",
+        })
+        assert r.status_code >= 400
+        assert "professor" in r.text.lower()
+
+    def test_both_modes_take_one(self, unlocked_client, settings_env):
+        for mode in ("read-only", "shared-write"):
+            r = unlocked_client.post("/api/settings/sources", json={
+                "label": f"Prof {mode}", "path": f"/tmp/{mode}", "mode": mode,
+                "professor": "smith",
+            })
+            assert r.status_code == 200, (mode, r.text)
+
+    def test_the_professor_box_is_always_offered(self):
+        """It used to appear only for shared-write."""
+        page = self._settings()
+        assert 'id="source-professor"' in page
+        assert "source-professor-wrap" not in page, "the box is still being hidden by mode"
+
+    def test_the_folder_gets_a_line_to_itself(self):
+        """It is the longest value on the page and was sharing a row with
+        three other boxes."""
+        page = self._settings()
+        assert 'class="source-path-row"' in page
+        path_at = page.index('id="source-path"')
+        fields_at = page.index('class="inline-fields"', page.index('id="add-source-form"'))
+        assert path_at > page.index("</div>", fields_at), "the path is still in the crowded row"
+
+    def test_the_two_modes_are_explained_where_they_are_chosen(self):
+        page = self._settings()
+        assert "only look" in page
+        assert "can never write" in page

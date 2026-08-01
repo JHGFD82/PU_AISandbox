@@ -512,10 +512,13 @@ def _add_source_interactive(args: argparse.Namespace) -> None:
         raw = input("Mode — 'read-only' or 'shared-write' [read-only]: ").strip().lower()
         mode = raw or 'read-only'
 
+    # Asked for in both modes. One professor may be content for their work to
+    # be done from a shared folder while another wants only their spending
+    # followed from it, and that is settled per person, not per folder.
     for_professor = getattr(args, 'for_professor', None)
-    if mode == 'shared-write' and not for_professor:
+    if not for_professor:
         for_professor = input(
-            "Which professor is this source for (safe name, e.g. 'smith'): "
+            "Whose usage is this source for (netID, e.g. 'jh43'): "
         ).strip()
 
     resolved_path = os.path.expanduser(path)

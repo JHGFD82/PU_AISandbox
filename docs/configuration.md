@@ -470,6 +470,8 @@ This lets one installation report on another's spending. For example: a professo
 
 Two modes:
 
+Every source names whose usage it holds, and only that person's is taken from it — a department folder may hold three professors' records while your arrangement covers one of them.
+
 - **`read-only`** (the default) — only the other installation writes there; this one just reads.
 - **`shared-write`** — both installations record usage there, one file per call, so a file-sync service never sees two conflicting edits to the same file.
 
