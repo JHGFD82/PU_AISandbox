@@ -2,32 +2,9 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Princeton AI Sandbox</title>
+<title>Princeton University AI Sandbox</title>
+{% include "_design-system.html" %}
 <style>
-  :root {
-    --orange: #F58025;
-    --border: #d2d2d7;
-    --bg: #f5f5f7;
-    --panel-bg: #ffffff;
-    --input-bg: #ffffff;
-    --text: #1d1d1f;
-    --text-muted: #6e6e73;
-    --active-bg: #fdeadb;
-    --hover-bg: #eeeef0;
-    --shadow: rgba(0, 0, 0, 0.14);
-  }
-  [data-theme="dark"] {
-    --border: #3a3a3c;
-    --bg: #1c1c1e;
-    --panel-bg: #262628;
-    --input-bg: #1c1c1e;
-    --text: #f2f2f7;
-    --text-muted: #9a9a9e;
-    --active-bg: #4a2f14;
-    --hover-bg: #333335;
-    --shadow: rgba(0, 0, 0, 0.5);
-  }
-  * { box-sizing: border-box; }
   /* Shared by every element whose color comes from a theme variable, so
      switching data-theme fades smoothly instead of snapping instantly. */
   body, #sidebar, #spend, #topbar, #composer, .msg.assistant, .conv-item,
@@ -103,7 +80,7 @@
   .conv-item { display: flex; align-items: center; gap: 0.2rem; padding: 0.3rem 0.2rem 0.3rem 0.5rem;
                border-radius: 6px; cursor: pointer; font-size: 0.85rem; margin-bottom: 0.2rem; position: relative; }
   .conv-item:hover { background: var(--hover-bg); }
-  .conv-item.active { background: var(--active-bg); }
+  .conv-item.active { background: var(--orange-tint); }
   .conv-item-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0.2rem 0; }
   .conv-item-title[contenteditable="true"] {
     outline: 1px solid var(--orange); border-radius: 4px; padding: 0.15rem 0.3rem;
@@ -132,10 +109,9 @@
     background: transparent; color: var(--text); border: none; border-radius: 4px; cursor: pointer;
   }
   .conv-menu-option:hover { background: var(--hover-bg); }
-  .conv-menu-option.danger { color: #d64545; }
-  [data-theme="dark"] .conv-menu-option.danger { color: #ff6b6b; }
+  .conv-menu-option.danger { color: var(--danger-text); }
   button { padding: 0.5rem 0.8rem; font-size: 0.85rem; background: var(--orange); color: white; border: none; border-radius: 6px; cursor: pointer; }
-  button:hover { background: #cc6600; }
+  button:hover { background: var(--orange-hover); }
   button.secondary { background: transparent; color: var(--text); border: 1px solid var(--border); }
   button.secondary:hover { background: var(--hover-bg); }
   button:disabled { opacity: 0.5; cursor: default; }
@@ -224,11 +200,52 @@
   .sampling-options-footer { display: flex; justify-content: flex-end; gap: 0.4rem; margin-top: 0.3rem; }
   .sampling-options-footer button { padding: 0.4rem 0.6rem; font-size: 0.8rem; }
 
-  #messages { flex: 1; overflow-y: auto; padding: 1.5rem; }
-  .msg { position: relative; max-width: 70%; margin-bottom: 1rem; padding: 0.7rem 0.9rem; border-radius: 10px; line-height: 1.4; white-space: pre-wrap; font-size: 0.92rem; }
-  .msg.user { background: var(--orange); color: white; margin-left: auto; }
-  .msg.assistant { background: var(--panel-bg); border: 1px solid var(--border); }
-  .msg .meta { font-size: 0.72rem; opacity: 0.7; margin-top: 0.35rem; }
+  #messages { flex: 1; overflow-y: auto; padding: var(--space-6) var(--space-4); }
+
+  /* The transcript is set as a document, not a conversation: one column of
+     leaves, each naming in its margin what produced it. That margin is the
+     point. This sandbox exists to make a piece of work citable — its folder,
+     its record of the settings behind each answer, its account of what was
+     and was not billed — and a critical edition names its witness in the
+     margin rather than in a footnote at 11px.
+
+     It also settles two faults that the bubbles caused. A bubble filled with
+     the orange put white text at 2.63:1, so the person's own words were the
+     least legible thing on screen; and a width of 70% of an uncapped column
+     ran to nearly 200 characters a line on a wide monitor, when the eye
+     loses its place past about 75. */
+  .msg {
+    display: grid;
+    grid-template-columns: 6.5rem minmax(0, var(--measure));
+    gap: 0 var(--space-4);
+    padding: var(--space-4) 0;
+    border-top: 1px solid var(--border);
+  }
+  .msg:first-child { border-top: none; }
+
+  /* Right-aligned so the names sit against the text they belong to, however
+     long the model's name happens to be. */
+  .msg-source {
+    grid-column: 1;
+    font-family: var(--font-ui); font-size: var(--text-xs); line-height: 1.7;
+    color: var(--text-muted); text-align: right; overflow-wrap: anywhere;
+  }
+  .msg-body {
+    grid-column: 2;
+    font-family: var(--font-text); font-size: var(--text-body); line-height: 1.7;
+    white-space: pre-wrap;
+    padding-left: var(--space-4);
+    border-left: 1px solid var(--border);
+  }
+  /* The orange still marks the person's own turns, as the filled bubble did —
+     but as a rule beside the words rather than a block behind them, which is
+     the one job this colour has the contrast for. */
+  .msg.user .msg-body { border-left-color: var(--orange); }
+
+  .msg .meta {
+    font-family: var(--font-ui); font-size: var(--text-xs);
+    color: var(--text-muted); margin-top: var(--space-2);
+  }
   .msg .meta.waiting { font-style: italic; }
 
   /* Per-bubble copy/export row: reserved in normal flow (so it doesn't
@@ -238,10 +255,10 @@
   .msg:hover .msg-actions { opacity: 1; }
   .msg-action-btn {
     width: 20px; height: 20px; padding: 0; border-radius: 4px; border: none;
-    background: rgba(0, 0, 0, 0.08); color: inherit; cursor: pointer;
+    background: transparent; color: var(--text-muted); cursor: pointer;
     display: flex; align-items: center; justify-content: center;
   }
-  .msg-action-btn:hover { background: rgba(0, 0, 0, 0.18); border: white solid 1px;}
+  .msg-action-btn:hover { background: var(--hover-bg); }
   .msg-action-btn svg { width: 11px; height: 11px; display: block; }
 
   /* Attachment chips: a small "📎 filename" read-only pill rendered inside a
@@ -254,8 +271,7 @@
     border-radius: 999px; font-size: 0.78rem; white-space: nowrap;
   }
   .attachment-chip svg { width: 12px; height: 12px; flex: none; }
-  .msg-attachment-chip { background: rgba(255, 255, 255, 0.25); color: inherit; margin-top: 0.4rem; }
-  .msg.assistant .msg-attachment-chip { background: var(--hover-bg); }
+  .msg-attachment-chip { background: var(--hover-bg); color: inherit; margin-top: var(--space-2); }
 
   #composer { display: flex; align-items: flex-end; gap: 0.5rem; padding: 1rem; border-top: 1px solid var(--border); background: var(--panel-bg); }
   #composer textarea { flex: 1; resize: none; height: 2.6rem; }
@@ -325,11 +341,10 @@
   /* job_result/job_error still render as bubbles in the transcript — a
      job's progress pings (job_progress) do not; those are shown only in
      #job-progress-box below the composer instead. */
-  .msg.job-result { border-color: var(--orange); }
-  .msg.job-error { border-color: #d64545; }
-  [data-theme="dark"] .msg.job-error { border-color: #ff6b6b; }
+  .msg.job-result .msg-body { border-left-color: var(--orange); }
+  .msg.job-error .msg-body { border-left-color: var(--danger-text); }
   /* job_page: one page's translated text, streamed in as the job runs. */
-  .msg.job-page { border-color: var(--border); }
+  .msg.job-page .msg-body { border-left-color: var(--border); }
   .job-page-label {
     font-size: 0.75rem; font-weight: 600; color: var(--text-muted);
     text-transform: uppercase; letter-spacing: 0.03em; margin-bottom: 0.3rem;
@@ -337,15 +352,15 @@
   /* job_notice: a one-off aside about how the job will behave (e.g. "no
      per-page preview with multiple workers") — deliberately subdued, not
      styled like an error or a real reply. */
-  .msg.job-notice {
-    border-color: var(--border); font-style: italic; color: var(--text-muted);
+  .msg.job-notice .msg-body {
+    font-style: italic; color: var(--text-muted);
   }
   .job-download-link {
     display: inline-flex; align-items: center; gap: 0.3rem; margin-top: 0.5rem;
     padding: 0.35rem 0.7rem; border-radius: 6px; background: var(--orange); color: white;
     font-size: 0.82rem; text-decoration: none;
   }
-  .job-download-link:hover { background: #cc6600; }
+  .job-download-link:hover { background: var(--orange-hover); }
 
   /* A background job is running in this conversation: composer is
      visually disabled (the "why" is explained in #job-progress-box
@@ -432,8 +447,7 @@
     flex: none; display: flex; align-items: center; gap: 0.5rem; padding: 0.7rem 1rem;
     border-top: 1px solid var(--border);
   }
-  .job-modal-error { flex: 1; font-size: 0.82rem; color: #d64545; }
-  [data-theme="dark"] .job-modal-error { color: #ff6b6b; }
+  .job-modal-error { flex: 1; font-size: var(--text-sm); color: var(--danger-text); }
 </style>
 </head>
 <body>
@@ -1957,6 +1971,25 @@ function messageActionsElement(m) {
   return actions;
 }
 
+// A leaf: what produced this passage, in the margin, and the passage itself.
+// Returns both halves because callers append to the body, never to the leaf —
+// text appended to the leaf would land in the grid as a third column.
+function messageLeaf(role, source, extraClasses) {
+  const leaf = document.createElement("div");
+  leaf.className = "msg " + role + (extraClasses ? " " + extraClasses : "");
+  const who = document.createElement("div");
+  who.className = "msg-source";
+  // The person is "you"; the machine is named, because which model wrote a
+  // passage is the thing somebody citing it needs and the thing that used to
+  // be buried under the reply at 11.5px.
+  who.textContent = source;
+  const body = document.createElement("div");
+  body.className = "msg-body";
+  leaf.appendChild(who);
+  leaf.appendChild(body);
+  return { leaf, body };
+}
+
 function renderMessages(conv) {
   const box = document.getElementById("messages");
   if (!conv) { box.innerHTML = '<div class="empty">Select or start a conversation.</div>'; return; }
@@ -1967,17 +2000,19 @@ function renderMessages(conv) {
     // as a bubble here — skip them entirely rather than rendering an
     // empty or redundant transcript entry for each one.
     if (m.kind === "job_progress") return;
-    const div = document.createElement("div");
-    // job_result/job_error/job_notice still get their own bubble style and
-    // skip the copy/export row below; they're status pings or asides, not
-    // dialogue someone would want to copy or export. job_page is the
-    // exception: it carries one page's actual translated text, shown as
-    // it's produced (see the "no messages from each page" fix) — a
-    // professor may well want to copy or export a single page the same as
-    // any other reply.
+    // job_result/job_error/job_notice still get their own marking and skip the
+    // copy/export row below; they're status pings or asides, not dialogue
+    // someone would want to copy or export. job_page is the exception: it
+    // carries one page's actual translated text, shown as it's produced (see
+    // the "no messages from each page" fix) — a professor may well want to
+    // copy or export a single page the same as any other reply.
     const isJobMessage = m.kind && m.kind !== "message";
     const isJobPage = m.kind === "job_page";
-    div.className = "msg " + m.role + (isJobMessage ? " " + m.kind.replace(/_/g, "-") : "");
+    const { leaf, body: div } = messageLeaf(
+      m.role,
+      m.role === "user" ? "you" : (m.model || "assistant"),
+      isJobMessage ? m.kind.replace(/_/g, "-") : "",
+    );
     if (isJobPage && m.page_number != null) {
       const pageLabel = document.createElement("div");
       pageLabel.className = "job-page-label";
@@ -1998,7 +2033,6 @@ function renderMessages(conv) {
       // translation or long answer may have been cut off and the cap
       // should be raised, which the dollar cost alone wouldn't reveal.
       const bits = [];
-      if (m.model) bits.push(m.model);
       bits.push(fmtMoney(m.cost));
       if (m.prompt_tokens != null && m.completion_tokens != null) {
         bits.push(`${m.prompt_tokens} in / ${m.completion_tokens} out tokens`);
@@ -2017,7 +2051,7 @@ function renderMessages(conv) {
     // or export, unlike job_progress/job_result/job_error which are status
     // pings — so it's the one job kind that still gets the action row.
     if (!isJobMessage || isJobPage) div.appendChild(messageActionsElement(m));
-    box.appendChild(div);
+    box.appendChild(leaf);
   });
   box.scrollTop = box.scrollHeight;
 }
@@ -2068,14 +2102,13 @@ function appendPendingMessage(text) {
   const box = document.getElementById("messages");
   const empty = box.querySelector(".empty");
   if (empty) empty.remove();
-  const div = document.createElement("div");
-  div.className = "msg user";
-  div.textContent = text;
+  const { leaf, body } = messageLeaf("user", "you");
+  body.textContent = text;
   const meta = document.createElement("div");
   meta.className = "meta waiting";
   meta.textContent = "waiting...";
-  div.appendChild(meta);
-  box.appendChild(div);
+  body.appendChild(meta);
+  box.appendChild(leaf);
   box.scrollTop = box.scrollHeight;
 }
 
@@ -2146,9 +2179,9 @@ async function sendMessage() {
             // First piece of the reply has arrived — the "waiting..." bubble's job is done.
             const waiting = box.querySelector(".msg.user .meta.waiting");
             if (waiting) waiting.remove();
-            assistantDiv = document.createElement("div");
-            assistantDiv.className = "msg assistant";
-            box.appendChild(assistantDiv);
+            const streaming = messageLeaf("assistant", chosenModel || "assistant");
+            assistantDiv = streaming.body;
+            box.appendChild(streaming.leaf);
           }
           assistantDiv.textContent += event.text;
           box.scrollTop = box.scrollHeight;

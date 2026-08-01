@@ -2,43 +2,9 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Shared settings — Princeton AI Sandbox</title>
+<title>Shared settings — Princeton University AI Sandbox</title>
+{% include "_design-system.html" %}
 <style>
-  /* Kept identical to chat.html's variables so this page (embedded there in
-     a modal iframe) is visually indistinguishable from the rest of the app,
-     in either theme. */
-  :root {
-    --orange: #E77500;
-    --border: #d2d2d7;
-    --bg: #f5f5f7;
-    --panel-bg: #ffffff;
-    --input-bg: #ffffff;
-    --text: #1d1d1f;
-    --text-muted: #6e6e73;
-    --hover-bg: #eeeef0;
-    --shadow: rgba(0, 0, 0, 0.14);
-    --badge-set-bg: #e5f5e6;
-    --badge-set-text: #1c7c2b;
-    --danger-text: #d70015;
-    --danger-border: #f3c6c6;
-    --danger-hover-bg: #fdf0f0;
-  }
-  [data-theme="dark"] {
-    --border: #3a3a3c;
-    --bg: #1c1c1e;
-    --panel-bg: #262628;
-    --input-bg: #1c1c1e;
-    --text: #f2f2f7;
-    --text-muted: #9a9a9e;
-    --hover-bg: #333335;
-    --shadow: rgba(0, 0, 0, 0.5);
-    --badge-set-bg: #16321a;
-    --badge-set-text: #6fd67f;
-    --danger-text: #ff6b6b;
-    --danger-border: #5c2b2b;
-    --danger-hover-bg: #3a1f1f;
-  }
-  * { box-sizing: border-box; }
   body, #topbar, .card, input, select, .badge, button.secondary, button.danger {
     transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease;
   }

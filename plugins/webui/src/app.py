@@ -458,7 +458,7 @@ def create_app() -> FastAPI:
     than a module-level ``app = FastAPI()``) so tests can build a fresh app
     instance without starting a real server.
     """
-    app = FastAPI(title="Princeton AI Sandbox")
+    app = FastAPI(title="Princeton University AI Sandbox")
 
     # A random secret is fine for this session-cookie's purpose (signing,
     # not encrypting) — worst case on restart is everyone has to unlock
