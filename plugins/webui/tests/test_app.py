@@ -2944,14 +2944,17 @@ class TestTheSuppliedButtonIcons:
         # back to sit level with the icons beside it.
         assert "scale(0.707)" in page
 
-    def test_the_new_conversation_button_is_the_sandboxs_orange(self):
+    def test_the_new_conversation_button_reads_like_the_send_button(self):
+        """It was asked for in the logo's orange, and drawn that way put an
+        orange mark on a button that is itself orange — 1.46:1 under the
+        pointer. It takes the button's own colours now, as Send does."""
         from pathlib import Path
 
         page = (Path(__file__).resolve().parents[1] / "src" / "templates" / "chat.html").read_text()
         start = page.index('id="new-conv"')
         block = page[page.rindex("<button", 0, start): page.index("</button>", start)]
-        assert "#f58025" in block
-        assert "currentColor" not in block
+        assert "currentColor" in block
+        assert "#f58025" not in block
 
     def test_no_drawing_carries_a_hidden_backing_rectangle(self):
         """Each was supplied with a fully transparent rect the size of itself."""
@@ -3587,12 +3590,14 @@ class TestTheFollowUpFixesStay:
         for key in ("--hover-raised", "--border-raised"):
             assert values[key].lower() != values["--surface-raised"].lower(), key
 
-    def test_the_new_conversation_mark_is_not_drawn_on_its_own_colour(self):
-        """The mark is the sandbox's orange and the base button style is that
-        same orange, which put the drawing at 1.15:1 against its own button."""
+    def test_the_new_conversation_button_is_coloured_like_the_send_button(self):
+        """Because the Send button reads: a solid orange with the interface's
+        dark ink on it. Every attempt at keeping the mark orange put an orange
+        shape on an orange ground."""
         chat = self._source("chat.html")
         rule = chat.split(".plus-btn {")[1].split("}")[0]
-        assert "background: transparent" in rule
+        assert "background:" not in rule, "it overrides the button colour it should take"
+        assert ":hover" not in chat.split(".plus-btn {")[0].split(".plus-btn")[-1]
 
     def test_the_add_model_box_fits_the_example_inside_it(self):
         import re
@@ -3623,20 +3628,18 @@ class TestTheNewConversationButtonReads:
 
         return (Path(__file__).resolve().parents[1] / "src" / "templates" / "chat.html").read_text()
 
-    def test_hovering_it_does_not_paint_over_its_own_mark(self):
-        """Every button here is orange by default, so the hover was painting
-        the plate the colour of the plus on top of it — 1.46:1."""
+    def test_it_takes_the_ordinary_button_colours(self):
+        """Including on hover, so the mark stays readable at the moment it is
+        pressed — which is when it used to vanish."""
         chat = self._chat()
-        rule = chat.split(".plus-btn:hover {")[1].split("}")[0]
-        assert "var(--orange" not in rule, "hovering paints it the mark's own colour again"
+        assert ".plus-btn:hover" not in chat, "it opts out of the button hover again"
+        rule = chat.split(".plus-btn {")[1].split("}")[0]
+        assert "background" not in rule
 
-    def test_the_plate_behind_the_plus_follows_the_theme(self):
-        """A flat quarter-opacity orange becomes #5a3c27 over a dark panel — a
-        muddy brown, which is what made this button look dark."""
+    def test_the_drawings_own_backing_square_is_gone(self):
+        """The button is that square. Two of them made the button look dark."""
         chat = self._chat()
-        rule = chat.split(".plus-btn .plus-plate {")[1].split("}")[0]
-        assert "var(--orange-tint)" in rule
-        assert "fill-opacity: 1" in rule
+        assert "display: none" in chat.split(".plus-btn .plus-plate {")[1].split("}")[0]
 
     def test_the_plate_is_named_in_the_drawing(self):
         chat = self._chat()
@@ -3645,8 +3648,11 @@ class TestTheNewConversationButtonReads:
         assert 'class="plus-plate"' in block
         assert block.count("<path") == 2, "the mark should still be a plate and a plus"
 
-    def test_the_plus_itself_keeps_the_colour_it_was_given(self):
+    def test_the_mark_takes_the_buttons_colour_like_every_other_icon(self):
+        """Naming a colour here is what led to a drawing fighting the thing it
+        was drawn on."""
         chat = self._chat()
         start = chat.index('id="new-conv"')
         block = chat[chat.rindex("<button", 0, start): chat.index("</button>", start)]
-        assert "#f58025" in block
+        assert 'fill="currentColor"' in block
+        assert "#f58025" not in block
