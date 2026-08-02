@@ -3613,3 +3613,40 @@ class TestTheFollowUpFixesStay:
         box = chat.split("#composer textarea {")[1].split("}")[0]
         buttons = chat.split("#composer .icon-btn, #composer #send-btn {")[1].split("}")[0]
         assert "height: 2.6rem" in box and "height: 2.6rem" in buttons
+
+
+class TestTheNewConversationButtonReads:
+    """It is the one button whose drawing is the same colour as buttons are."""
+
+    def _chat(self):
+        from pathlib import Path
+
+        return (Path(__file__).resolve().parents[1] / "src" / "templates" / "chat.html").read_text()
+
+    def test_hovering_it_does_not_paint_over_its_own_mark(self):
+        """Every button here is orange by default, so the hover was painting
+        the plate the colour of the plus on top of it — 1.46:1."""
+        chat = self._chat()
+        rule = chat.split(".plus-btn:hover {")[1].split("}")[0]
+        assert "var(--orange" not in rule, "hovering paints it the mark's own colour again"
+
+    def test_the_plate_behind_the_plus_follows_the_theme(self):
+        """A flat quarter-opacity orange becomes #5a3c27 over a dark panel — a
+        muddy brown, which is what made this button look dark."""
+        chat = self._chat()
+        rule = chat.split(".plus-btn .plus-plate {")[1].split("}")[0]
+        assert "var(--orange-tint)" in rule
+        assert "fill-opacity: 1" in rule
+
+    def test_the_plate_is_named_in_the_drawing(self):
+        chat = self._chat()
+        start = chat.index('id="new-conv"')
+        block = chat[chat.rindex("<button", 0, start): chat.index("</button>", start)]
+        assert 'class="plus-plate"' in block
+        assert block.count("<path") == 2, "the mark should still be a plate and a plus"
+
+    def test_the_plus_itself_keeps_the_colour_it_was_given(self):
+        chat = self._chat()
+        start = chat.index('id="new-conv"')
+        block = chat[chat.rindex("<button", 0, start): chat.index("</button>", start)]
+        assert "#f58025" in block
