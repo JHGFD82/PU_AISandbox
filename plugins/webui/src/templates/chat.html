@@ -145,17 +145,18 @@
   /* No fill of its own: the mark it holds is the sandbox's orange, and the
      base button style is that same orange, so the drawing was 1.15:1 against
      the thing it was drawn on — an orange square with an orange plus in it. */
-  /* The plate the plus sits on. It was a flat quarter-opacity orange, which
-     over a light panel is a pale peach and over a dark one is #5a3c27 — a
-     muddy brown, and the reason this button looked dark. It follows the theme
-     now, using the tint the design system already keeps for exactly this. */
-  .plus-btn .plus-plate { fill: var(--orange-tint); fill-opacity: 1; }
-  /* Not the orange on hover. Every button here is orange by default, so the
-     hover was painting the plate the same colour as the plus on top of it —
-     1.46:1, which is why the plus vanished exactly when the button lit up. */
-  .plus-btn:hover { background: var(--hover-bg); }
+  /* Coloured like the Send button, because the Send button reads: a solid
+     orange with the interface's dark ink on it, 5.56:1. Everything tried
+     before this kept the mark in the orange it was supplied in, which meant an
+     orange shape on an orange-ish ground — 2.25:1 at its best, and 1.46:1 the
+     moment the button lit up under the pointer.
+
+     The drawing's own backing square goes: the button is that square. What is
+     left is the plus, in the ink every other button's writing uses. */
+  /* The backing square in the supplied drawing is gone: the button is that
+     square now. */
+  .plus-btn .plus-plate { display: none; }
   .plus-btn {
-    background: transparent; border: none;
     width: 28px; height: 28px; padding: 0; border-radius: var(--radius-md); flex: none;
     display: inline-flex; align-items: center; justify-content: center;
   }
@@ -668,7 +669,7 @@
     <div class="section-header">
       <h2>Conversations</h2>
       <button id="new-conv" class="plus-btn" title="New conversation" aria-label="New conversation">
-        <svg viewBox="0 0 23.3203 22.959"><path d="M3.79883 22.959L19.1504 22.959C21.6797 22.959 22.959 21.6797 22.959 19.1992L22.959 3.76953C22.959 1.2793 21.6797 0 19.1504 0L3.79883 0C1.2793 0 0 1.26953 0 3.76953L0 19.1992C0 21.6992 1.2793 22.959 3.79883 22.959Z" fill="#f58025" fill-opacity="0.25" class="plus-plate"/><path d="M12.4121 16.4258L12.4121 6.49414C12.4121 5.92773 12.0312 5.53711 11.4648 5.53711C10.9375 5.53711 10.5566 5.9375 10.5566 6.49414L10.5566 16.4258C10.5566 16.9727 10.9375 17.373 11.4648 17.373C12.0312 17.373 12.4121 16.9824 12.4121 16.4258ZM6.52344 12.3828L16.4648 12.3828C17.002 12.3828 17.4023 12.0117 17.4023 11.4746C17.4023 10.9082 17.0117 10.5273 16.4648 10.5273L6.52344 10.5273C5.95703 10.5273 5.56641 10.9082 5.56641 11.4746C5.56641 12.0117 5.9668 12.3828 6.52344 12.3828Z" fill="#f58025"/></svg>
+        <svg viewBox="0 0 23.3203 22.959"><path d="M3.79883 22.959L19.1504 22.959C21.6797 22.959 22.959 21.6797 22.959 19.1992L22.959 3.76953C22.959 1.2793 21.6797 0 19.1504 0L3.79883 0C1.2793 0 0 1.26953 0 3.76953L0 19.1992C0 21.6992 1.2793 22.959 3.79883 22.959Z" fill="none" class="plus-plate"/><path d="M12.4121 16.4258L12.4121 6.49414C12.4121 5.92773 12.0312 5.53711 11.4648 5.53711C10.9375 5.53711 10.5566 5.9375 10.5566 6.49414L10.5566 16.4258C10.5566 16.9727 10.9375 17.373 11.4648 17.373C12.0312 17.373 12.4121 16.9824 12.4121 16.4258ZM6.52344 12.3828L16.4648 12.3828C17.002 12.3828 17.4023 12.0117 17.4023 11.4746C17.4023 10.9082 17.0117 10.5273 16.4648 10.5273L6.52344 10.5273C5.95703 10.5273 5.56641 10.9082 5.56641 11.4746C5.56641 12.0117 5.9668 12.3828 6.52344 12.3828Z" fill="currentColor"/></svg>
       </button>
     </div>
     <div id="conv-list"></div>
