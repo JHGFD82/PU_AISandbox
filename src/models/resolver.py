@@ -3,6 +3,7 @@
 import logging
 from typing import TYPE_CHECKING, Optional
 
+from ..errors import CLIError
 from . import catalog as _catalog
 from . import pricing as _pricing
 
@@ -50,19 +51,39 @@ def resolve_model(
         The name of the model to use for this request (e.g. ``'gpt-4o'``).
 
     Raises:
-        ValueError: If a model was explicitly requested but isn't valid or
-                    doesn't support image input when required, or if no
-                    usable model can be found at all.
+        CLIError: If a model was explicitly requested but isn't in the catalog
+                  or can't read images when this job needs that, or if no
+                  usable model can be found at all. A ``CLIError`` rather than
+                  a plain error because every one of these messages is written
+                  to be read by the person who hit it and says what to change:
+                  the command line prints it and stops, and the web interface
+                  shows it as the reply. Anything else is treated there as a
+                  fault in the sandbox and replaced with a reference code, so
+                  raising one would hide the explanation this already has.
     """
     preferred: list[str] = list(role.models) if role is not None else []
     require_vision = require_vision or (role.requires_vision if role is not None else False)
 
     available_models = _catalog.get_available_models()
-    compatibility_label = "vision-capable" if require_vision else "configured"
-    suggestion = (
-        "Use --list-models to see which models support vision."
+    # Two wordings of the same requirement, because they sit in different
+    # sentences: one completes "this model is not ___", the other stands alone.
+    compatibility_label = "able to read images" if require_vision else "configured"
+    none_at_all = (
+        "No model in the catalog can read images"
         if require_vision
-        else "Use --list-models to see available options."
+        else "No models are configured"
+    )
+    # What to actually do about it. The old wording said to run --list-models,
+    # which is a thing to type at a command line — and this same message is
+    # shown in the browser, where there isn't one. Both readers can act on
+    # this: it names the file, and the one line in it that decides the answer.
+    suggestion = (
+        "If it can read images, open " + str(_catalog.get_model_catalog_path())
+        + ' and set "supports_vision": true on its entry. Models added '
+        "automatically start with that turned off, because the pricing service "
+        "the sandbox reads doesn't say either way."
+        if require_vision
+        else "See model_catalog.json for the models this installation knows about."
     )
 
     def is_compatible(model_name: str) -> bool:
@@ -85,7 +106,7 @@ def resolve_model(
                         f"Auto-registered '{model_key}' from '{provider}' into model_catalog.json."
                     )
                 except Exception as e:
-                    raise ValueError(
+                    raise CLIError(
                         f"Could not auto-register '{requested_model}' from PortKey pricing catalog: {e}. "
                         "Add it to model_catalog.json manually instead."
                     ) from e
@@ -93,7 +114,7 @@ def resolve_model(
 
         # 1) requested_model (if provided and valid)
         if requested_model not in available_models:
-            raise ValueError(
+            raise CLIError(
                 f"Model '{requested_model}' is not in the catalog. "
                 "Edit model_catalog.json to add it, or use "
                 "'provider/model-name' format (e.g. 'openai/gpt-4o', "
@@ -101,7 +122,7 @@ def resolve_model(
                 "'azure-ai/Llama-3.3-70B-Instruct') to auto-register it."
             )
         if not is_compatible(requested_model):
-            raise ValueError(
+            raise CLIError(
                 f"Custom model '{requested_model}' is not {compatibility_label} for this operation. "
                 f"{suggestion}"
             )
@@ -135,8 +156,8 @@ def resolve_model(
     if cheapest and cheapest not in preferred:
         logging.warning(
             f"No preferred model was available, so '{cheapest}' was chosen as the cheapest "
-            f"{compatibility_label} model in the catalog. Name the models you want in the "
-            "owning plugin's settings to choose deliberately."
+            f"model in the catalog that is {compatibility_label}. Name the models you want "
+            "in the owning plugin's settings to choose deliberately."
         )
         return cheapest
 
@@ -149,7 +170,7 @@ def resolve_model(
         if resolved:
             return resolved
 
-    raise ValueError(
-        f"No {compatibility_label} models available. Available models: {available_models}. "
+    raise CLIError(
+        f"{none_at_all}. Available models: {available_models}. "
         "Please update model_catalog.json."
     )

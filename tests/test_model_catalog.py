@@ -4,6 +4,8 @@ import json
 import logging
 
 import pytest
+
+from src.errors import CLIError
 from unittest.mock import patch
 
 import src.models.catalog as catalog_module
@@ -329,11 +331,11 @@ class TestResolveModel:
         assert resolve_model(requested_model="gpt-5") == "gpt-5"
 
     def test_requested_model_not_in_catalog_raises(self, mock_catalog):
-        with pytest.raises(ValueError, match="not in the catalog"):
+        with pytest.raises(CLIError, match="not in the catalog"):
             resolve_model(requested_model="unknown-model")
 
     def test_requested_model_not_vision_capable_raises(self, mock_catalog):
-        with pytest.raises(ValueError, match="not vision-capable"):
+        with pytest.raises(CLIError, match="not able to read images"):
             resolve_model(requested_model="text-only-model", require_vision=True)
 
     def test_the_role_is_used_before_the_price_ranked_fallback(self, mock_catalog):
@@ -369,7 +371,7 @@ class TestResolveModel:
             },
         }
         monkeypatch.setattr(catalog_module, "load_model_catalog", lambda: all_text_catalog)
-        with pytest.raises(ValueError, match="No vision-capable models"):
+        with pytest.raises(CLIError, match="No model in the catalog can read images"):
             resolve_model(require_vision=True)
 
     def test_requested_model_takes_precedence_over_prefer(self, mock_catalog):
@@ -412,7 +414,7 @@ class TestResolveModel:
             raise RuntimeError("API down")
 
         monkeypatch.setattr(pricing_module, "add_model_to_catalog", fake_add_fail)
-        with pytest.raises(ValueError, match="Could not auto-register"):
+        with pytest.raises(CLIError, match="Could not auto-register"):
             resolve_model(requested_model="openai/ghost-model")
 
     def test_priority_candidate_skipped_in_fallback_loop_when_incompatible(
@@ -1348,3 +1350,92 @@ class TestWhoseModelIsIt:
         owners = {model_owner(m) for m in
                   ("gpt-4o", "claude-haiku-4-5", "gemma-3-4b-it", "mistral-small-2503")}
         assert "Other" not in owners, owners
+
+
+class TestAModelThatCannotReadImagesSaysSo:
+    """Reference 346a8eb5: chat refused claude-opus-4-8 and explained nothing.
+
+    The resolver raised a plain error, so the web interface treated it as a
+    fault in the sandbox and replaced it with a reference code. The message it
+    had already written — naming the model and the reason — never reached the
+    person, who saw eight hex digits instead.
+    """
+
+    def test_the_reason_is_a_user_facing_error(self, mock_catalog):
+        """A CLIError is shown as-is; anything else becomes a reference code."""
+        with pytest.raises(CLIError) as raised:
+            resolve_model(requested_model="text-only-model", require_vision=True)
+        assert "text-only-model" in str(raised.value)
+
+    def test_it_says_which_file_to_change_and_what_to_put_in_it(self, mock_catalog):
+        with pytest.raises(CLIError) as raised:
+            resolve_model(requested_model="text-only-model", require_vision=True)
+        message = str(raised.value)
+        # Asked of the code rather than spelled out here: the point is that the
+        # message names the file this installation actually reads, wherever
+        # that is, so the reader can go and open it.
+        assert str(catalog_module.get_model_catalog_path()) in message
+        assert '"supports_vision": true' in message
+
+    def test_it_does_not_tell_a_browser_to_type_a_command(self, mock_catalog):
+        """This same text is shown in the web interface, which has no command line."""
+        with pytest.raises(CLIError) as raised:
+            resolve_model(requested_model="text-only-model", require_vision=True)
+        assert "--list-models" not in str(raised.value)
+
+    def test_the_no_models_at_all_message_is_a_sentence(self, mock_catalog, monkeypatch):
+        """It read 'No able to read images models available' at one point."""
+        monkeypatch.setattr(catalog_module, "get_available_models", lambda: [])
+        monkeypatch.setattr(catalog_module, "cheapest_model", lambda **kw: None)
+        with pytest.raises(CLIError) as raised:
+            resolve_model(require_vision=True)
+        assert "No model in the catalog can read images" in str(raised.value)
+
+
+class TestAnAutoAddedModelAnnouncesWhatItCannotDo:
+    """Why every automatically added model arrives unable to read images.
+
+    PortKey's pricing service reports prices and nothing else, so the flag
+    falls back to false. Chat requires vision, so such a model is refused there
+    until someone edits the catalog — and nothing used to say so.
+    """
+
+    def test_it_warns_that_the_flag_was_assumed(self, monkeypatch, tmp_path, caplog):
+        catalog_file = tmp_path / "model_catalog.json"
+        monkeypatch.setattr(catalog_module, "get_model_catalog_path", lambda: catalog_file)
+        monkeypatch.setattr(pricing_module, "_fetch_model_pricing",
+                            lambda pm, unit: {"input": 1.0, "output": 2.0})
+        with caplog.at_level(logging.WARNING):
+            _, entry = add_model_to_catalog("openai/some-new-model")
+        assert entry["supports_vision"] is False
+        assert "supports_vision" in caplog.text
+        assert "chat" in caplog.text.lower()
+
+    def test_it_says_nothing_when_the_answer_was_reported(self, monkeypatch, tmp_path, caplog):
+        catalog_file = tmp_path / "model_catalog.json"
+        monkeypatch.setattr(catalog_module, "get_model_catalog_path", lambda: catalog_file)
+        monkeypatch.setattr(pricing_module, "_fetch_model_pricing",
+                            lambda pm, unit: {"input": 1.0, "output": 2.0,
+                                              "supports_vision": True})
+        with caplog.at_level(logging.WARNING):
+            _, entry = add_model_to_catalog("openai/seeing-model")
+        assert entry["supports_vision"] is True
+        assert "supports_vision" not in caplog.text
+
+    def test_an_answer_already_in_the_catalog_is_not_overwritten(
+        self, monkeypatch, tmp_path, caplog
+    ):
+        """Correcting the flag by hand must survive the next price refresh."""
+        catalog_file = tmp_path / "model_catalog.json"
+        catalog_file.write_text(json.dumps({
+            "config": {"pricing_unit": 1_000_000, "monthly_limit": 250.0},
+            "models": {"corrected": {"input": 1.0, "output": 2.0,
+                                     "supports_vision": True}},
+        }))
+        monkeypatch.setattr(catalog_module, "get_model_catalog_path", lambda: catalog_file)
+        monkeypatch.setattr(pricing_module, "_fetch_model_pricing",
+                            lambda pm, unit: {"input": 9.0, "output": 9.0})
+        with caplog.at_level(logging.WARNING):
+            _, entry = add_model_to_catalog("openai/corrected")
+        assert entry["supports_vision"] is True
+        assert "supports_vision" not in caplog.text
