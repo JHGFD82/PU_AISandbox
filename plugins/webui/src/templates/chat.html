@@ -566,7 +566,30 @@
      independently scrollable. */
   .job-modal-panel { width: min(1100px, 95vw); height: min(88vh, 820px); }
   .job-modal-body { flex: 1; display: flex; min-height: 0; }
-  .job-options { flex: 0 0 300px; overflow-y: auto; padding: 1.1rem 1.2rem; border-right: 1px solid var(--border); }
+  /* How wide the options are. A variable rather than a fixed 300px, because
+     the splitter beside them writes to it and the width is remembered between
+     visits. 300px is where it starts and where double-clicking puts it back. */
+  .job-modal-panel { --job-options-width: 300px; }
+  .job-options {
+    flex: 0 0 var(--job-options-width); overflow-y: auto;
+    padding: 1.1rem 1.2rem;
+  }
+  /* Two pixels of rule with eight pixels of grip either side of it. The rule
+     is what the eye follows between the two halves — it replaces the border
+     the options used to carry — and the padding is what the pointer actually
+     has to hit, since a 2px target is a target nobody hits on the first go. */
+  .job-splitter {
+    flex: none; width: 2px; cursor: col-resize; background: var(--border);
+    border-left: 8px solid transparent; border-right: 8px solid transparent;
+    background-clip: padding-box; margin: 0 -8px; z-index: 1;
+    touch-action: none;
+  }
+  .job-splitter:hover, .job-splitter:focus-visible { background: var(--orange); }
+  /* While dragging: the pointer is captured, so the rule stays lit even when
+     the pointer runs ahead of it at the ends of its travel. */
+  .job-modal-panel.is-resizing .job-splitter { background: var(--orange); }
+  /* Text selects itself all over the page when a drag crosses it otherwise. */
+  .job-modal-panel.is-resizing { user-select: none; }
   .job-field { margin-bottom: 1.15rem; }
   .job-field label { display: block; font-size: var(--text-sm); font-weight: 600; margin-bottom: 0.35rem; }
   /* The file-or-folder choice: inline, and quieter than the field's own label,
@@ -834,6 +857,16 @@
       </div>
       <div class="job-modal-body">
         <div class="job-options" id="job-options"></div>
+        <!-- Drag to give the options more room, or the preview more. A real
+             separator rather than a bare div: it is announced as one, it takes
+             focus, and the arrow keys move it, because a control that only
+             answers to a held-down mouse button is a control some people
+             don't have. Double-click puts it back. -->
+        <div class="job-splitter" id="job-splitter" role="separator"
+             tabindex="0" aria-orientation="vertical"
+             aria-label="Width of the options panel — drag, or use the arrow keys"
+             aria-valuemin="220" aria-valuemax="640" aria-valuenow="300"
+             title="Drag to resize · double-click to reset"></div>
         <div class="job-preview">
           <div class="job-preview-pane">
             <div class="job-preview-label">System prompt</div>
@@ -1511,6 +1544,10 @@ async function openJobModal(action) {
 
   const backdrop = document.getElementById("job-modal-backdrop");
   backdrop.hidden = false;
+  // Whatever width was settled on last time. Restored here rather than once at
+  // load, because the panel is rebuilt for each action and a width set for a
+  // long form should still be there when the next one opens.
+  restoreJobOptionsWidth();
   requestAnimationFrame(() => backdrop.classList.add("open"));
   refreshJobExtensionFields();
   refreshJobPreview();
@@ -1837,6 +1874,92 @@ async function startJobFromModal() {
     startBtn.disabled = false;
   }
 }
+
+// ── Sizing the options against the preview ──────────────────────────────────
+// Some plugins ask three questions and some ask fifteen, and the prompt they
+// build can be a paragraph or a page. Neither side is the one that always
+// deserves the room, so the split is left to whoever is looking at it.
+
+const JOB_OPTIONS_DEFAULT = 300;
+const JOB_OPTIONS_MIN = 220;   // narrower and the labels start wrapping mid-word
+const JOB_OPTIONS_MAX = 640;   // wider and the preview stops being a preview
+const JOB_PREVIEW_MIN = 260;   // the preview's own share, whatever the window
+
+function jobPanel() { return document.querySelector(".job-modal-panel"); }
+
+// The widest the options may get *in this window*. The panel is 95vw on a
+// small screen, where 640px of options would leave the preview a strip too
+// narrow to read — so the preview's minimum is subtracted from whatever room
+// there actually is, and that wins whenever it is the smaller number.
+function jobOptionsMax() {
+  const panel = jobPanel().getBoundingClientRect().width;
+  return Math.max(JOB_OPTIONS_MIN, Math.min(JOB_OPTIONS_MAX, panel - JOB_PREVIEW_MIN));
+}
+
+function setJobOptionsWidth(px, remember = true) {
+  const width = Math.round(Math.min(jobOptionsMax(), Math.max(JOB_OPTIONS_MIN, px)));
+  jobPanel().style.setProperty("--job-options-width", width + "px");
+  const splitter = document.getElementById("job-splitter");
+  // Said out loud as a number, because "wider" is not an answer to "how wide".
+  splitter.setAttribute("aria-valuenow", String(width));
+  splitter.setAttribute("aria-valuetext", width + " pixels");
+  splitter.setAttribute("aria-valuemax", String(Math.round(jobOptionsMax())));
+  // What gets remembered is what was asked for, not what this window could
+  // give — otherwise opening the modal once on a laptop would permanently
+  // shrink the width chosen on the big monitor.
+  if (remember) localStorage.setItem("job-options-width", String(Math.round(px)));
+  return width;
+}
+
+function restoreJobOptionsWidth() {
+  const saved = parseInt(localStorage.getItem("job-options-width"), 10);
+  // Not remembered as a fraction of the window: the options hold labelled
+  // fields, and what they need is a number of characters, not a share of
+  // whatever monitor this is being read on today.
+  setJobOptionsWidth(Number.isFinite(saved) ? saved : JOB_OPTIONS_DEFAULT, false);
+}
+
+(function wireJobSplitter() {
+  const splitter = document.getElementById("job-splitter");
+  let startX = 0, startWidth = 0;
+
+  splitter.addEventListener("pointerdown", (e) => {
+    startX = e.clientX;
+    startWidth = document.getElementById("job-options").getBoundingClientRect().width;
+    // Captured, so the drag survives the pointer outrunning the splitter —
+    // which it does the moment the width hits either end of its travel.
+    splitter.setPointerCapture(e.pointerId);
+    jobPanel().classList.add("is-resizing");
+    e.preventDefault();
+  });
+
+  splitter.addEventListener("pointermove", (e) => {
+    if (!splitter.hasPointerCapture(e.pointerId)) return;
+    setJobOptionsWidth(startWidth + (e.clientX - startX));
+  });
+
+  const stop = (e) => {
+    if (splitter.hasPointerCapture(e.pointerId)) splitter.releasePointerCapture(e.pointerId);
+    jobPanel().classList.remove("is-resizing");
+  };
+  splitter.addEventListener("pointerup", stop);
+  splitter.addEventListener("pointercancel", stop);
+
+  // Back to where it started, the way a double-click resets a column.
+  splitter.addEventListener("dblclick", () => setJobOptionsWidth(JOB_OPTIONS_DEFAULT));
+
+  splitter.addEventListener("keydown", (e) => {
+    const step = e.shiftKey ? 50 : 10;
+    const current = document.getElementById("job-options").getBoundingClientRect().width;
+    if (e.key === "ArrowLeft") setJobOptionsWidth(current - step);
+    else if (e.key === "ArrowRight") setJobOptionsWidth(current + step);
+    else if (e.key === "Home") setJobOptionsWidth(JOB_OPTIONS_MIN);
+    else if (e.key === "End") setJobOptionsWidth(jobOptionsMax());
+    else if (e.key === "Enter" || e.key === " ") setJobOptionsWidth(JOB_OPTIONS_DEFAULT);
+    else return;
+    e.preventDefault();
+  });
+})();
 
 document.getElementById("job-modal-close").addEventListener("click", () => closeJobModal());
 document.getElementById("job-modal-cancel").addEventListener("click", () => closeJobModal());

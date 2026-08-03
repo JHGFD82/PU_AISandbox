@@ -3828,3 +3828,74 @@ class TestTheConversationFolderCard:
     def test_it_shows_what_the_file_says_rather_than_what_was_clicked(self, page):
         handler = page.split("async function saveFolderChoice")[1].split("\n}")[0]
         assert "renderFolderChoices(now)" in handler
+
+
+class TestResizingTheJobModal:
+    """The splitter between a plugin's options and its prompt preview.
+
+    Some plugins ask three questions and some ask fifteen; the prompt they build
+    can be a paragraph or a page. Neither side always deserves the room, so the
+    split is left to whoever is looking at it.
+    """
+
+    @pytest.fixture
+    def chat(self):
+        return (Path(__file__).resolve().parents[1] / "src" / "templates"
+                / "chat.html").read_text()
+
+    def test_the_splitter_sits_between_the_two_halves(self, chat):
+        body = chat.split('<div class="job-modal-body">')[1].split("</div>\n      <div class=\"job-modal-footer\"")[0]
+        assert body.index('id="job-options"') < body.index('id="job-splitter"')
+        assert body.index('id="job-splitter"') < body.index('class="job-preview"')
+
+    def test_it_is_announced_as_a_separator_and_can_be_focused(self, chat):
+        tag = chat.split('id="job-splitter"')[0].rsplit("<div", 1)[1] + \
+              chat.split('id="job-splitter"')[1].split(">")[0]
+        assert 'role="separator"' in tag
+        assert 'tabindex="0"' in tag
+
+    def test_the_arrow_keys_move_it(self, chat):
+        """A control that answers only to a held-down mouse button excludes people."""
+        handler = chat.split('splitter.addEventListener("keydown"')[1].split("\n  });")[0]
+        for key in ("ArrowLeft", "ArrowRight", "Home", "End"):
+            assert key in handler
+
+    def test_the_options_width_is_a_variable_the_splitter_writes(self, chat):
+        assert "--job-options-width" in chat
+        assert "flex: 0 0 var(--job-options-width)" in chat
+
+    def test_the_preview_can_shrink(self, chat):
+        """Without min-width:0 a flex child refuses to go below its content."""
+        rule = chat.split(".job-preview {")[1].split("}")[0]
+        assert "min-width: 0" in rule
+
+    def test_the_pointer_is_captured_for_the_drag(self, chat):
+        """The pointer outruns the splitter the moment the width hits either end."""
+        assert "setPointerCapture" in chat
+        assert "releasePointerCapture" in chat
+
+    def test_a_drag_does_not_select_the_page(self, chat):
+        assert re.search(r"\.job-modal-panel\.is-resizing\s*\{[^}]*user-select:\s*none", chat)
+
+    def test_the_grip_is_wider_than_the_rule(self, chat):
+        """2px of rule is not a target anybody hits first time."""
+        rule = chat.split(".job-splitter {")[1].split("}")[0]
+        width = float(re.search(r"width:\s*([0-9.]+)px", rule).group(1))
+        grip = float(re.search(r"border-left:\s*([0-9.]+)px", rule).group(1))
+        assert grip * 2 + width >= 16
+
+    def test_the_preview_keeps_a_minimum_share(self, chat):
+        """Otherwise a small window leaves it a strip too narrow to read."""
+        fn = chat.split("function jobOptionsMax()")[1].split("\n}")[0]
+        assert "JOB_PREVIEW_MIN" in fn
+        assert "panel - JOB_PREVIEW_MIN" in fn
+
+    def test_what_is_remembered_is_what_was_asked_for(self, chat):
+        """Opening it once on a laptop must not shrink the big monitor's width."""
+        fn = chat.split("function setJobOptionsWidth")[1].split("\n}")[0]
+        saved = re.search(r'localStorage\.setItem\("job-options-width",\s*([^)]+)\)', fn)
+        assert "px" in saved.group(1), "the clamped width would be the wrong thing to keep"
+
+    def test_the_width_is_restored_when_the_modal_opens(self, chat):
+        opener = chat.split("async function openJobModal")[1].split("\n}")[0]
+        assert "restoreJobOptionsWidth()" in opener
