@@ -10,7 +10,11 @@ import tomllib
 
 import pytest
 
-from src.plugin_preferences import offer_plugin_settings
+import os
+from pathlib import Path
+from unittest import mock
+
+from src.plugin_preferences import offer_plugin_settings, set_live
 
 
 def _plugin(plugins_dir, name, body):
@@ -274,3 +278,159 @@ class TestALabWithSettingsOfItsOwn:
         before = shared.read_text()
         offer_plugin_settings(plugins)
         assert shared.read_text() == before
+
+
+class TestSettingAPreferenceFromTheInterface:
+    """Ticking a box on the settings page has to land in preferences.toml.
+
+    The file is written to be read: it carries the explanation of every setting
+    above the setting itself. So the test that matters most here is not that the
+    value changed — it is that everything else survived the write.
+    """
+
+    def test_an_offered_setting_is_taken_up_where_it_was_offered(self, tmp_path):
+        prefs = tmp_path / "preferences.toml"
+        prefs.write_text(
+            "[webui]\n"
+            "# Whether to keep each document supplied to a conversation.\n"
+            "# keep_supplied_documents = false\n"
+        )
+        set_live(prefs, "webui", "keep_supplied_documents", "true")
+        text = prefs.read_text()
+        assert "keep_supplied_documents = true" in text
+        assert "# keep_supplied_documents" not in text
+        # The explanation is what the file is for.
+        assert "Whether to keep each document supplied" in text
+        assert tomllib.loads(text)["webui"]["keep_supplied_documents"] is True
+
+    def test_a_setting_already_decided_just_changes_value(self, tmp_path):
+        prefs = tmp_path / "preferences.toml"
+        prefs.write_text("[webui]\nkeep_job_outputs = true\n")
+        set_live(prefs, "webui", "keep_job_outputs", "false")
+        assert tomllib.loads(prefs.read_text())["webui"]["keep_job_outputs"] is False
+
+    def test_a_note_the_person_wrote_on_the_line_is_left_alone(self, tmp_path):
+        prefs = tmp_path / "preferences.toml"
+        prefs.write_text("[webui]\nkeep_job_outputs = true  # asked for by the dept\n")
+        set_live(prefs, "webui", "keep_job_outputs", "false")
+        text = prefs.read_text()
+        assert "# asked for by the dept" in text
+        assert tomllib.loads(text)["webui"]["keep_job_outputs"] is False
+
+    def test_a_real_decision_wins_over_an_offer_of_the_same_setting(self, tmp_path):
+        """An offer above and a decision below: the decision is the live one."""
+        prefs = tmp_path / "preferences.toml"
+        prefs.write_text(
+            "[webui]\n# keep_job_outputs = true\nkeep_job_outputs = true\n"
+        )
+        set_live(prefs, "webui", "keep_job_outputs", "false")
+        text = prefs.read_text()
+        assert tomllib.loads(text)["webui"]["keep_job_outputs"] is False
+        # Exactly one live line for it, so the file cannot start setting it twice.
+        live = [ln for ln in text.splitlines()
+                if ln.strip().startswith("keep_job_outputs")]
+        assert len(live) == 1
+
+    def test_a_setting_nobody_mentioned_is_added_under_its_section(self, tmp_path):
+        prefs = tmp_path / "preferences.toml"
+        prefs.write_text("[webui]\ncompaction_model = \"gpt-4o-mini\"\n")
+        set_live(prefs, "webui", "keep_job_outputs", "false")
+        parsed = tomllib.loads(prefs.read_text())
+        assert parsed["webui"] == {
+            "compaction_model": "gpt-4o-mini", "keep_job_outputs": False,
+        }
+
+    def test_a_section_that_is_not_there_yet_is_made(self, tmp_path):
+        prefs = tmp_path / "preferences.toml"
+        prefs.write_text("[translation]\nworkers = 4\n")
+        set_live(prefs, "webui", "keep_job_outputs", "false")
+        parsed = tomllib.loads(prefs.read_text())
+        assert parsed["translation"]["workers"] == 4
+        assert parsed["webui"]["keep_job_outputs"] is False
+
+    def test_a_commented_out_section_heading_does_not_count_as_a_section(self, tmp_path):
+        """It is a comment. Writing under it would set nothing at all."""
+        prefs = tmp_path / "preferences.toml"
+        prefs.write_text("# [webui]\n# keep_job_outputs = true\n")
+        set_live(prefs, "webui", "keep_job_outputs", "false")
+        assert tomllib.loads(prefs.read_text())["webui"]["keep_job_outputs"] is False
+
+    def test_a_setting_of_the_same_name_in_another_section_is_untouched(self, tmp_path):
+        prefs = tmp_path / "preferences.toml"
+        prefs.write_text(
+            "[translation]\nkeep_job_outputs = true\n\n[webui]\nkeep_job_outputs = true\n"
+        )
+        set_live(prefs, "webui", "keep_job_outputs", "false")
+        parsed = tomllib.loads(prefs.read_text())
+        assert parsed["translation"]["keep_job_outputs"] is True
+        assert parsed["webui"]["keep_job_outputs"] is False
+
+    def test_there_is_no_file_yet(self, tmp_path):
+        prefs = tmp_path / "does-not-exist-yet" / "preferences.toml"
+        set_live(prefs, "webui", "keep_job_outputs", "false")
+        assert tomllib.loads(prefs.read_text())["webui"]["keep_job_outputs"] is False
+
+    def test_nothing_else_in_the_file_moves(self, tmp_path):
+        """Everything but the one line has to come out byte for byte."""
+        prefs = tmp_path / "preferences.toml"
+        original = (
+            "# My own settings.\n\n"
+            "[translation]\n"
+            "# How many pages at once.\nworkers = 4\n\n"
+            "[webui]\n"
+            "# Whether to keep the file a job produces.\n"
+            "# keep_job_outputs = true\n"
+            "compaction_model = \"gpt-4o-mini\"\n"
+        )
+        prefs.write_text(original)
+        set_live(prefs, "webui", "keep_job_outputs", "false")
+        changed = prefs.read_text()
+        assert changed == original.replace(
+            "# keep_job_outputs = true", "keep_job_outputs = false")
+
+    def test_the_file_is_never_seen_half_written(self, tmp_path):
+        """Written beside and moved into place, so a crash leaves the old one."""
+        prefs = tmp_path / "preferences.toml"
+        prefs.write_text("[webui]\nkeep_job_outputs = true\n")
+        seen = []
+        real_replace = os.replace
+
+        def watched(src, dst):
+            seen.append((Path(src).name, Path(dst).name))
+            return real_replace(src, dst)
+
+        with mock.patch("src.plugin_preferences.os.replace", watched):
+            set_live(prefs, "webui", "keep_job_outputs", "false")
+        assert seen and seen[0][1] == "preferences.toml"
+        assert seen[0][0] != "preferences.toml"
+
+    def test_the_shape_a_real_preferences_file_is_in(self, tmp_path):
+        """Offers come commented out heading and all — and the heading repeats.
+
+        This is what the file on disk actually looks like, not a contrived case:
+        one commented block per plugin, and the same section offered more than
+        once when more than one plugin writes into it. Uncommenting those
+        headings would declare [webui] twice and the file would stop parsing.
+        """
+        prefs = tmp_path / "preferences.toml"
+        prefs.write_text(
+            "[budget]\nmonthly_limit = 100\n\n"
+            "# ── webui ──────────────────────────\n"
+            "# [webui]\n"
+            "# Whether to keep the documents supplied.\n"
+            "# keep_supplied_documents = false\n\n"
+            "# ── webui ──────────────────────────\n"
+            "# [webui]\n"
+            "# Whether to keep what a job produces.\n"
+            "# keep_job_outputs = true\n"
+        )
+        set_live(prefs, "webui", "keep_supplied_documents", "true")
+        set_live(prefs, "webui", "keep_job_outputs", "false")
+        parsed = tomllib.loads(prefs.read_text())
+        assert parsed["webui"] == {
+            "keep_supplied_documents": True, "keep_job_outputs": False,
+        }
+        assert parsed["budget"]["monthly_limit"] == 100
+        # One live heading, however many times it was offered.
+        assert prefs.read_text().count("\n[webui]") == 1
+

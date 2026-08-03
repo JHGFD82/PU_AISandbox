@@ -853,3 +853,68 @@ class TestSweepStaleJobs:
         assert cleared == 2
         assert heller_store.load(c1.id).active_job_id is None
         assert smith_store.load(c2.id).active_job_id is None
+
+
+class TestWhetherTheOutputStaysWithTheConversation:
+    """The "keep the files a job produces" choice, as the job runner acts on it.
+
+    Tested through a real job rather than by calling job_output_dir() with the
+    right argument: the argument being computed correctly is the whole of what
+    this setting does, and a test that passes it by hand proves nothing about
+    whether the runner passes it at all.
+    """
+
+    def _run(self, tmp_path, store):
+        def fake_run(fields, professor, model, on_progress, output_dir):
+            from src.runtime.ui_action import UiJobResult
+            pathlib.Path(output_dir).mkdir(parents=True, exist_ok=True)
+            (pathlib.Path(output_dir) / "out.txt").write_text("translated")
+            return UiJobResult(output_path=f"{output_dir}/out.txt",
+                               output_filename="out.txt", summary="Done.")
+
+        conv = store.create(model="gpt-4o")
+        job_store = jobs.JobStore()
+        job = jobs.start_job(
+            plugins={"translate": _FakePlugin(run_ui_action=fake_run)},
+            action_id="translate", fields={}, professor="heller", model=None,
+            conversation_id=conv.id, conversation_store=store, job_store=job_store,
+        )
+        _wait_until(lambda: job_store.get(job.id).status != "running")
+        assert job_store.get(job.id).status == "done"
+        return conv, job
+
+    def test_on_it_lands_in_the_conversations_folder(self, tmp_path, monkeypatch):
+        import src.settings as core_settings
+        monkeypatch.setattr(core_settings, "_PREFERENCES_PATH", None)
+        store = _make_store(tmp_path)
+        monkeypatch.setattr(jobs, "_CONVERSATIONS_DIR", tmp_path / "conversations")
+        conv, job = self._run(tmp_path, store)
+        kept = tmp_path / "conversations" / "heller" / conv.id / "outputs" / job.id / "out.txt"
+        assert kept.exists()
+
+    def test_off_it_lands_outside_the_conversation(self, tmp_path, monkeypatch):
+        prefs = tmp_path / "preferences.toml"
+        prefs.write_text("[webui]\nkeep_job_outputs = false\n")
+        import src.settings as core_settings
+        monkeypatch.setattr(core_settings, "_PREFERENCES_PATH", prefs)
+        store = _make_store(tmp_path)
+        monkeypatch.setattr(jobs, "_CONVERSATIONS_DIR", tmp_path / "conversations")
+        conv, job = self._run(tmp_path, store)
+        assert not (tmp_path / "conversations" / "heller" / conv.id / "outputs").exists()
+        elsewhere = (tmp_path / "conversations" / "heller" / "_job_outputs"
+                     / job.id / "out.txt")
+        assert elsewhere.exists()
+
+    def test_off_the_download_link_still_works(self, tmp_path, monkeypatch):
+        """The file is not thrown away, so what the conversation says is still true."""
+        prefs = tmp_path / "preferences.toml"
+        prefs.write_text("[webui]\nkeep_job_outputs = false\n")
+        import src.settings as core_settings
+        monkeypatch.setattr(core_settings, "_PREFERENCES_PATH", prefs)
+        store = _make_store(tmp_path)
+        monkeypatch.setattr(jobs, "_CONVERSATIONS_DIR", tmp_path / "conversations")
+        conv, job = self._run(tmp_path, store)
+        found = jobs.resolve_output_path("heller", job.id, "out.txt",
+                                         conversation_id=conv.id)
+        assert found is not None and found.exists()
+        assert found.read_text() == "translated"

@@ -38,6 +38,7 @@ import tempfile
 import uuid
 from datetime import datetime
 from pathlib import Path
+from typing import Optional
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.responses import (
@@ -73,8 +74,8 @@ from src.settings import (
     PROMPT_MAX_TOKENS,
     PROMPT_TEMPERATURE,
     PROMPT_TOP_P,
-    WEBUI_KEEP_SUPPLIED_DOCUMENTS,
     WEBUI_SESSION_COOKIE_NAME,
+    is_on,
 )
 from src.tracking.token_tracker import TokenTracker
 
@@ -127,8 +128,17 @@ def _get_plugins() -> dict:
 # once at least one professor exists, install-wide settings (shared
 # defaults, alternate endpoints) are what someone is more likely returning
 # to tweak, so they lead instead.
-_SETTINGS_ORDER_FIRST_RUN = ["professors", "external_sources", "webui", "shared", "endpoints"]
-_SETTINGS_ORDER_REPEAT = ["shared", "endpoints", "professors", "webui", "external_sources"]
+#
+# "What each conversation keeps" sits low on a first run — nothing has been
+# kept yet — and near the top afterwards, because it is the one section here
+# that is about a person's own work rather than about how the sandbox is set
+# up, and it is the one they will come back to.
+_SETTINGS_ORDER_FIRST_RUN = [
+    "professors", "external_sources", "webui", "shared", "endpoints", "folder",
+]
+_SETTINGS_ORDER_REPEAT = [
+    "folder", "shared", "endpoints", "professors", "webui", "external_sources",
+]
 
 
 class ActiveProfessorBody(BaseModel):
@@ -205,6 +215,18 @@ class SharedDraftBody(BaseModel):
     """
 
     chosen: dict = {}
+
+
+class FolderChoicesBody(BaseModel):
+    """Which of the two "keep this" boxes were ticked.
+
+    Each is left out rather than sent as False when it isn't being changed, so
+    that a page showing one box can save it without having an opinion about the
+    other — which is why they are ``None`` by default and not ``False``.
+    """
+
+    keep_supplied_documents: Optional[bool] = None
+    keep_job_outputs: Optional[bool] = None
 
 
 class SettingValueBody(BaseModel):
@@ -380,7 +402,7 @@ def _keep_supplied_document(
         supplying two different documents that happen to share a name is
         ordinary, and losing the first one silently would not be.
     """
-    if not WEBUI_KEEP_SUPPLIED_DOCUMENTS or not conversation_id:
+    if not is_on("keep_supplied_documents", False) or not conversation_id:
         return None
     store = conversation.ConversationStore(professor)
     try:
@@ -685,6 +707,44 @@ def create_app() -> FastAPI:
             raise HTTPException(400, f"'{path}' is not an editable setting.")
         settings_store.unset_value(path)
         return {"ok": True}
+
+    # What a conversation's folder keeps, as two yes/no choices. They live in
+    # preferences.toml rather than settings.toml, because they are a person's
+    # own preference about their own files and not part of how this
+    # installation is set up — which also means a shared settings file can set
+    # them for a group, and this still shows what is actually in effect.
+    _FOLDER_CHOICES = {
+        "keep_supplied_documents": False,
+        "keep_job_outputs": True,
+    }
+
+    @app.get("/api/settings/conversation-folder")
+    async def api_conversation_folder_settings(request: Request):
+        """What a conversation's folder is currently set to keep."""
+        _require_unlocked(request)
+        return {key: is_on(key, default) for key, default in _FOLDER_CHOICES.items()}
+
+    @app.post("/api/settings/conversation-folder")
+    async def api_set_conversation_folder_settings(
+        request: Request, body: FolderChoicesBody
+    ):
+        """Change what a conversation's folder keeps.
+
+        Written into this person's own ``preferences.toml``, which is where
+        their adjustments to any plugin's settings go, so that the choice is
+        made in one place whether it is made here or by hand. It applies to work
+        started from now on; what is already on disk is left where it is.
+        """
+        _require_unlocked(request)
+        from src.paths import preferences_path
+        from src.plugin_preferences import set_live
+
+        path = preferences_path()
+        for key in _FOLDER_CHOICES:
+            value = getattr(body, key)
+            if value is not None:
+                set_live(path, "webui", key, "true" if value else "false")
+        return {key: is_on(key, default) for key, default in _FOLDER_CHOICES.items()}
 
     @app.get("/api/settings/shared-inventory")
     async def api_shared_settings_inventory(request: Request):

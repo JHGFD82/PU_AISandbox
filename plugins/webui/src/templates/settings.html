@@ -29,6 +29,19 @@
   .row .main { flex: 1; min-width: 0; }
   .row .name { font-size: var(--text-md); font-weight: 500; }
   .row .sub { font-size: var(--text-xs); color: var(--text-muted); }
+  /* A setting that is on or off. The whole thing is the label, so the words
+     are part of the target and not just the box beside them — the box alone is
+     13px, and a sentence explaining what it does is far easier to hit.
+     Overrides the plain `label` rule below it on class, which is why the words
+     here are not the small grey of a field's caption. */
+  .choice { display: flex; gap: 0.6rem; align-items: flex-start; padding: 0.7rem 0;
+            border-bottom: 1px solid var(--bg); margin: 0; cursor: pointer; }
+  .choice:last-of-type { border-bottom: none; }
+  .choice input { margin: 0.15rem 0 0; flex: none; accent-color: var(--orange); }
+  .choice .name { display: block; font-size: var(--text-md); font-weight: 500;
+                  color: var(--text); }
+  .choice .sub { display: block; font-size: var(--text-xs); color: var(--text-muted);
+                 margin-top: 0.15rem; max-width: 60ch; }
   .badge { font-size: var(--text-xs); padding: 0.15rem 0.5rem; border-radius: var(--radius-pill); white-space: nowrap; }
   .badge.set { background: var(--badge-set-bg); color: var(--badge-set-text); }
   .badge.unset { background: var(--hover-bg); color: var(--text-muted); }
@@ -160,6 +173,42 @@
           <button type="button" class="secondary" id="clear-session-secret-btn">Remove</button>
         </form>
       </details>
+    </div>
+
+    <div class="card" id="section-folder" data-section="folder">
+      <h2>What each conversation keeps</h2>
+      <p class="hint">Every conversation has a folder of its own on this computer,
+        holding what was said and the settings behind it. These two decide whether the
+        documents also sit there. Open a conversation's folder from the ⋯ menu beside it
+        in the list.</p>
+
+      <label class="choice">
+        <input type="checkbox" id="keep-supplied-documents">
+        <span>
+          <span class="name">Keep the documents I supply</span>
+          <span class="sub">A copy of each document handed to a translation or
+            transcription is kept in that conversation's folder. Off by default: the text
+            is read out of it and kept either way, so this is about having the original
+            to hand — worth it for work you may need to show or cite, and worth the disk
+            space it takes when it isn't.</span>
+        </span>
+      </label>
+
+      <label class="choice">
+        <input type="checkbox" id="keep-job-outputs">
+        <span>
+          <span class="name">Keep the files a job produces</span>
+          <span class="sub">A finished translation or transcription is kept in the
+            conversation's folder, so the whole piece of work — what was asked, what it
+            was given, and what came back — stays together. Turning this off does not
+            throw the file away: it goes to a shared folder of results instead, and the
+            link to download it goes on working. What changes is that deleting the
+            conversation no longer deletes it.</span>
+        </span>
+      </label>
+
+      <p class="hint" id="folder-note">Applies to work started from now on. Anything
+        already saved stays where it is.</p>
     </div>
 
     <div class="card" id="section-shared" data-section="shared">
@@ -628,6 +677,49 @@ function applyOrder(order) {
   });
 }
 
+// ── What each conversation keeps ──────────────────────────────────────────
+
+// The two boxes, by the name each is stored under.
+const FOLDER_CHOICES = {
+  keep_supplied_documents: "keep-supplied-documents",
+  keep_job_outputs: "keep-job-outputs",
+};
+
+// Saves the moment a box is ticked, rather than under a Save button. There is
+// nothing to get wrong here and nothing to review before committing to — it is
+// one word, on or off — so asking for a second action to confirm the first
+// would only be a way to lose the change by walking away from the page.
+async function saveFolderChoice(key) {
+  const box = document.getElementById(FOLDER_CHOICES[key]);
+  const note = document.getElementById("folder-note");
+  try {
+    const now = await api("/api/settings/conversation-folder", {
+      method: "POST", body: JSON.stringify({ [key]: box.checked }),
+    });
+    // Shown as the file now reads, not as the box was clicked. A shared
+    // settings file can decide this for a group, in which case a person's own
+    // preference is not the last word and the box has to say so rather than
+    // sit there showing a choice that isn't in effect.
+    renderFolderChoices(now);
+    note.textContent = "Saved. Applies to work started from now on; anything "
+      + "already saved stays where it is.";
+  } catch (e) {
+    box.checked = !box.checked;
+    note.textContent = "Could not save that: " + e.message;
+  }
+}
+
+function renderFolderChoices(state) {
+  for (const [key, id] of Object.entries(FOLDER_CHOICES)) {
+    document.getElementById(id).checked = !!state[key];
+  }
+}
+
+for (const key of Object.keys(FOLDER_CHOICES)) {
+  document.getElementById(FOLDER_CHOICES[key])
+    .addEventListener("change", () => saveFolderChoice(key));
+}
+
 async function loadSettings() {
   const data = await api("/api/settings");
   applyOrder(data.order);
@@ -636,6 +728,7 @@ async function loadSettings() {
   renderWebui(data);
   renderShared(data);
   renderSources(data);
+  renderFolderChoices(await api("/api/settings/conversation-folder"));
   // Inside the modal, chat.html's own close button already covers "go
   // back" — this link would just be a second, ambiguous way to do the
   // same thing, so it's only shown when this page was reached directly.
