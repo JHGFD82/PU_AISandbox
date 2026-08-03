@@ -3360,12 +3360,29 @@ class TestControlsSitProperlyTogether:
         assert drawing >= 18, f"the mark is {drawing}px"
         assert button > drawing, "the drawing would touch the button's edge"
 
-    def test_the_composer_is_level_along_its_bottom(self):
-        """The box is 2.6rem; the buttons beside it were 32.8px and 34px."""
-        box = self._rule("#composer textarea {")
-        buttons = self._rule("#composer .icon-btn, #composer #send-btn {")
-        assert "height: 2.6rem" in box
-        assert "height: 2.6rem" in buttons
+    def test_the_composer_buttons_are_centred_against_the_box(self):
+        """They are shorter than it, so flush-to-the-bottom left all the slack
+        above them and the row read as uneven. The margin is what centres it:
+        if either number moves without the other, this says so."""
+        import re
+
+        chat = self._chat()
+        box = float(re.search(r"height:\s*([0-9.]+)rem",
+                              chat.split("#composer textarea {")[1].split("}")[0]).group(1))
+        rule = chat.split("#composer .icon-btn, #composer #send-btn {")[1].split("}")[0]
+        button = float(re.search(r"height:\s*([0-9.]+)rem", rule).group(1))
+        below = float(re.search(r"margin-bottom:\s*([0-9.]+)rem", rule).group(1))
+        assert button < box, "the button is not shorter than the box"
+        above = box - button - below
+        assert abs(above - below) < 0.001, (
+            f"{above:.2f}rem above and {below:.2f}rem below — not centred"
+        )
+
+    def test_the_row_stays_bottom_aligned_as_the_box_grows(self):
+        """The box grows with what is pasted into it. Centring the row itself
+        would float the buttons into the middle of a tall box."""
+        chat = self._chat()
+        assert "align-items: flex-end" in chat.split("#composer {")[1].split("}")[0]
 
     def test_the_settings_popover_fits_the_sentence_inside_it(self):
         """It holds the conversation instructions, whose own example runs to
@@ -3611,13 +3628,12 @@ class TestTheFollowUpFixesStay:
         fits = (rem * 16 - 80) / (0.8125 * 16 * 0.5)
         assert fits >= len(placeholder), f"{fits:.0f} characters of {len(placeholder)}"
 
-    def test_the_composer_row_really_is_level(self):
-        """Reported as looking uneven; the heights are equal and the outline on
-        the box is what reads as a difference."""
+    def test_the_composer_row_is_settled(self):
+        """Equal heights read as uneven because the box carries an outline and
+        the buttons do not. They are shorter and centred instead."""
         chat = self._source("chat.html")
-        box = chat.split("#composer textarea {")[1].split("}")[0]
-        buttons = chat.split("#composer .icon-btn, #composer #send-btn {")[1].split("}")[0]
-        assert "height: 2.6rem" in box and "height: 2.6rem" in buttons
+        rule = chat.split("#composer .icon-btn, #composer #send-btn {")[1].split("}")[0]
+        assert "margin-bottom" in rule
 
 
 class TestTheNewConversationButtonReads:
