@@ -469,11 +469,19 @@ def _execute_translate(
     )
     workers = getattr(args, 'workers', 1)
     spread = getattr(args, 'spread', False)
+    # Asked for here rather than deeper in, because here is where there is
+    # somebody at a terminal to ask. The same translation started from the
+    # browser has nobody to ask and supplies the text with the job instead, so
+    # what travels inwards from either place is the abstract itself.
+    abstract_text = (
+        sandbox._collect_multiline("Abstract text") or None
+        if getattr(args, 'abstract', False) else None
+    )
     if args.custom_text:
         sandbox.translate_custom_text(
             source_language,
             target_language,
-            getattr(args, 'abstract', False),
+            abstract_text,
             opts,
         )
     elif args.input_file:
@@ -493,7 +501,7 @@ def _execute_translate(
                 source_language,
                 target_language,
                 getattr(args, 'page_nums', None),
-                getattr(args, 'abstract', False),
+                abstract_text,
                 opts,
                 workers=workers,
                 spread=spread,
@@ -895,6 +903,7 @@ class TranslationPlugin:
         preserve_media = _to_bool(fields.get("preserve_media"))
         page_nums = (fields.get("page_nums") or "").strip() or None
         notes = (fields.get("notes") or "").strip() or None
+        abstract_text = (fields.get("abstract") or "").strip() or None
         font = (fields.get("font") or "").strip() or None
         font_size = _to_int(fields.get("font_size"), "font size")
         workers = _to_int(fields.get("workers"), "number of parallel workers") or 1
@@ -981,6 +990,7 @@ class TranslationPlugin:
                 source_language,
                 target_language,
                 page_nums=page_nums,
+                abstract_text=abstract_text,
                 opts=opts,
                 scanned=scanned,
                 workers=workers,
@@ -1042,6 +1052,7 @@ class TranslationPlugin:
         target_language = _lang_name(fields.get("target_language"))
         scanned = str(fields.get("scanned", "")).strip().lower() in ("true", "1", "on", "yes")
         notes = (fields.get("notes") or "").strip() or None
+        abstract_text = (fields.get("abstract") or "").strip() or None
         preserve_tables = str(fields.get("preserve_tables", "")).strip().lower() in ("true", "1", "on", "yes")
         toc = str(fields.get("toc", "")).strip().lower() in ("true", "1", "on", "yes")
 
@@ -1067,7 +1078,12 @@ class TranslationPlugin:
             note = "Image content would be base64-encoded and attached to the user message"
         else:
             svc = sandbox.translation_service
-            placeholder = generate_process_text("", f"[{source_language} document text]", "")
+            # The abstract goes in as itself, the way --dry-run shows it on the
+            # command line, so the preview is the prompt that would be sent and
+            # not a version of it with the context left out.
+            placeholder = generate_process_text(
+                abstract_text or "", f"[{source_language} document text]", "",
+            )
             sys_p, usr_p = svc.build_prompts(
                 placeholder, source_language, target_language, output_format=output_format,
             )
@@ -1105,6 +1121,15 @@ ui_action = UiAction(
         UiField(
             name="file", label="Document (or select multiple images / a whole folder of scans)",
             kind="file", group="Document", allow_folder=True,
+        ),
+        UiField(
+            # The command line asks for this text at the terminal when -a is
+            # given; a browser has to be given somewhere to type it, so the
+            # field is the abstract rather than a box saying there is one.
+            name="abstract",
+            label="Abstract or summary of the whole document (optional — gives "
+                  "the model the argument each page belongs to)",
+            kind="text", required=False, group="Document",
         ),
         UiField(
             name="page_nums", label="Page range (e.g. 8-12 — leave blank for the whole document)",

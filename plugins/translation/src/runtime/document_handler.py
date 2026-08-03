@@ -221,7 +221,7 @@ class Mixin:
         source_language: str,
         target_language: str,
         page_nums: Optional[str] = None,
-        abstract: bool = False,
+        abstract_text: Optional[str] = None,
         opts: OutputOptions = OutputOptions(),
         workers: int = 1,
         spread: bool = False,
@@ -245,9 +245,15 @@ class Mixin:
             page_nums: A page selection string limiting which pages to
                        translate (e.g. ``'1-5'``, ``'3,7,10-12'``). Pass
                        ``None`` to translate the full document.
-            abstract: When ``True``, the user is prompted to type an abstract
-                      of the document before translation begins. This context
-                      can improve translation accuracy for dense academic texts.
+            abstract_text: An abstract or summary of the whole document, given
+                           to the model alongside each page so it knows what
+                           the page belongs to. This can improve accuracy for
+                           dense academic texts, where a page read on its own
+                           is missing the argument it is part of. ``None`` for
+                           no abstract, which is the ordinary case. Asking for
+                           the text is the caller's job — at a terminal, in a
+                           browser, or from a file — because this method may be
+                           running in a background job with nobody to ask.
             opts: Output and formatting options for this job, including the
                   output file path, auto-save behaviour, font, and font size.
             workers: Number of pages to translate in parallel. Defaults to
@@ -333,7 +339,6 @@ class Mixin:
                 raise CLIError(f"Error processing scanned PDF: {e}") from e
             return
 
-        abstract_text: Optional[str] = self._collect_multiline("Abstract text") or None if abstract else None  # type: ignore[attr-defined]
 
         logger.info(f"Starting translation: {source_language} → {target_language}")
 
@@ -463,7 +468,7 @@ class Mixin:
         self,
         source_language: str,
         target_language: str,
-        abstract: bool = False,
+        abstract_text: Optional[str] = None,
         opts: OutputOptions = OutputOptions(),
     ) -> None:
         """Prompt the user to type text directly in the terminal and translate it.
@@ -478,12 +483,13 @@ class Mixin:
                              (e.g. ``'Japanese'``).
             target_language: Full name of the language to translate to
                              (e.g. ``'English'``).
-            abstract: When ``True``, the user is first prompted to type an
-                      abstract for context before entering the main text.
+            abstract_text: An abstract or summary giving the model the context
+                           the typed passage came out of. ``None`` for none,
+                           which is the ordinary case. The caller asks for it,
+                           not this method.
             opts: Output and formatting options, including whether to save
                   the result and where.
         """
-        abstract_text: Optional[str] = self._collect_multiline("Abstract text") or None if abstract else None  # type: ignore[attr-defined]
 
         try:
             custom_text = self._collect_multiline(  # type: ignore[attr-defined]

@@ -50,7 +50,7 @@ class TestUiActionDeclaration:
     def test_declares_expected_fields_in_order(self, plugin_module):
         names = [f.name for f in plugin_module.ui_action.fields]
         assert names == [
-            "source_language", "target_language", "file", "page_nums",
+            "source_language", "target_language", "file", "abstract", "page_nums",
             "scanned", "spread",
             "output_format", "preserve_tables", "toc", "preserve_media", "font", "font_size",
             "workers",
@@ -786,3 +786,124 @@ class TestExtensionUiHooksIntegration:
             professor="fake", model=None,
         )
         assert calls == [{"source_language": "en", "target_language": "ja", "kanbun": "true"}]
+
+
+class TestTheAbstractReachesBothWays:
+    """-a on the command line and the Abstract box in the browser are one setting.
+
+    The command line asks for the text at a terminal; the browser is given a
+    box to type it in. What travels inwards from either is the abstract itself,
+    which is what lets a background job have one at all — before this, the
+    prompt lived deep inside the handler, where a job would have been left
+    waiting at a question nobody could see.
+    """
+
+    def test_what_is_typed_in_the_box_reaches_the_translation(
+        self, monkeypatch, plugin_module, tmp_path
+    ):
+        """The gap that made the box worth adding: it has to arrive."""
+        fake_sandbox = MagicMock()
+        fake_sandbox.translation_service = MagicMock()
+        fake_sandbox.image_translation_service = MagicMock()
+        # The real one writes the output file; run_ui_action refuses to report
+        # success without it.
+        fake_sandbox.translate_document.side_effect = (
+            lambda *a, **kw: Path(kw["opts"].output_file).write_text("done")
+        )
+        monkeypatch.setattr(
+            "src.runtime.sandbox_processor.SandboxProcessor",
+            MagicMock(return_value=fake_sandbox),
+        )
+        src_file = tmp_path / "upload.txt"
+        src_file.write_text("hello", encoding="utf-8")
+        plugin_module.plugin.run_ui_action(
+            fields={
+                "source_language": "ja", "target_language": "en",
+                "file_path": str(src_file), "file_name": "upload.txt",
+                "abstract": "  What the paper argues  ",
+            },
+            professor="fake", model=None, on_progress=None,
+            output_dir=str(tmp_path / "out"),
+        )
+        assert (fake_sandbox.translate_document.call_args.kwargs["abstract_text"]
+                == "What the paper argues")
+
+    def test_an_empty_box_is_no_abstract_rather_than_an_empty_one(
+        self, monkeypatch, plugin_module, tmp_path
+    ):
+        fake_sandbox = MagicMock()
+        fake_sandbox.translation_service = MagicMock()
+        fake_sandbox.image_translation_service = MagicMock()
+        # The real one writes the output file; run_ui_action refuses to report
+        # success without it.
+        fake_sandbox.translate_document.side_effect = (
+            lambda *a, **kw: Path(kw["opts"].output_file).write_text("done")
+        )
+        monkeypatch.setattr(
+            "src.runtime.sandbox_processor.SandboxProcessor",
+            MagicMock(return_value=fake_sandbox),
+        )
+        src_file = tmp_path / "upload.txt"
+        src_file.write_text("hello", encoding="utf-8")
+        plugin_module.plugin.run_ui_action(
+            fields={
+                "source_language": "ja", "target_language": "en",
+                "file_path": str(src_file), "file_name": "upload.txt",
+                "abstract": "   ",
+            },
+            professor="fake", model=None, on_progress=None,
+            output_dir=str(tmp_path / "out"),
+        )
+        assert fake_sandbox.translate_document.call_args.kwargs["abstract_text"] is None
+
+    def test_the_preview_shows_the_abstract_that_would_be_sent(
+        self, monkeypatch, plugin_module
+    ):
+        """A preview without the context is a preview of a different request."""
+        fake_sandbox = MagicMock()
+        fake_sandbox.translation_service = MagicMock()
+        fake_sandbox.image_translation_service = MagicMock()
+        fake_sandbox.translation_service.build_prompts.return_value = ("sys", "usr")
+        monkeypatch.setattr(
+            "src.runtime.sandbox_processor.SandboxProcessor",
+            MagicMock(return_value=fake_sandbox),
+        )
+        plugin_module.plugin.preview_ui_action(
+            {"source_language": "ja", "target_language": "en",
+             "abstract": "What the paper argues"},
+            professor="fake", model=None,
+        )
+        sent = fake_sandbox.translation_service.build_prompts.call_args.args[0]
+        assert "What the paper argues" in sent
+
+    def test_the_web_form_offers_a_box_for_the_text(self, plugin_module):
+        field = next(f for f in plugin_module.ui_action.fields if f.name == "abstract")
+        assert field.kind == "text", "a checkbox would have nowhere to type the abstract"
+        assert field.required is False
+
+    def _run_cli(self, plugin_module, has_abstract):
+        import argparse
+        sandbox = MagicMock()
+        sandbox._collect_multiline.return_value = "The paper argues X"
+        args = argparse.Namespace(
+            abstract=has_abstract, custom_text=True, input_file=None, page_nums=None,
+            workers=1, spread=False, scanned=False, output_file=None,
+            auto_save=False, progressive_save=False, custom_font=None,
+            preserve_media=False, font_size=None, dry_run=False,
+        )
+        plugin_module._execute_translate(sandbox, args, "Japanese", "English")
+        return sandbox
+
+    def test_the_command_line_still_asks_at_the_terminal(self, plugin_module):
+        """Moving the prompt outwards must not have quietly removed it."""
+        sandbox = self._run_cli(plugin_module, has_abstract=True)
+        labels = [c.args[0] for c in sandbox._collect_multiline.call_args_list]
+        assert any("Abstract" in label for label in labels)
+        # And the text it collected is what went in, not a flag.
+        assert "The paper argues X" in sandbox.translate_custom_text.call_args.args
+
+    def test_without_the_flag_nothing_is_asked(self, plugin_module):
+        sandbox = self._run_cli(plugin_module, has_abstract=False)
+        labels = [c.args[0] for c in sandbox._collect_multiline.call_args_list]
+        assert not any("Abstract" in label for label in labels)
+        assert None in sandbox.translate_custom_text.call_args.args
