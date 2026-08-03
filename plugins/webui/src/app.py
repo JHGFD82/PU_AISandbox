@@ -466,11 +466,18 @@ def _chat_error_message(error: Exception) -> str:
 
     reference = uuid.uuid4().hex[:8]
     logging.exception("Chat turn failed unexpectedly [ref %s]", reference)
+    # Named, rather than called "the server log". The reference code is only
+    # worth quoting if the person receiving it can find the traceback, and
+    # "the server log" does not say where that is.
+    try:
+        where = f"in {log_file_path()}"
+    except Exception:
+        where = "in the sandbox's log"
     return (
         "Something went wrong on the server while answering — this is a fault in "
         "the sandbox, not something you did. Please try again. If it keeps "
         f"happening, quote reference {reference} to whoever looks after this "
-        "installation; it will let them find the details in the server log."
+        f"installation; searching for it {where} will show them what happened."
     )
 
 
@@ -1475,6 +1482,60 @@ def create_app() -> FastAPI:
     return app
 
 
+def log_file_path() -> Path:
+    """Return the file the web interface writes its own log to."""
+    from src.paths import data_root
+    return data_root() / "webui.log"
+
+
+def start_logging_to_a_file() -> Optional[Path]:
+    """Start keeping the server's log where it can be read afterwards.
+
+    When something goes wrong answering a question, the browser shows a short
+    reference code and tells the professor to quote it to whoever looks after
+    the installation, so that person can find the traceback. That promise was
+    not kept: the log went to the terminal the sandbox was started from and
+    nowhere else, so closing that window — or starting the sandbox from an icon,
+    which is how most people start it — lost the only copy. The code was
+    quotable and nothing could be looked up.
+
+    So the same lines also go to a file in the data folder, alongside the usage
+    records. It is capped and rolled over rather than left to grow, because
+    nobody is going to notice a log file filling a disk.
+
+    Nothing is raised if the file can't be opened — a sandbox that will not
+    start because it could not open its log would be a worse fault than the one
+    this is here to help diagnose.
+
+    Returns:
+        The path being written to, or ``None`` if it couldn't be opened.
+    """
+    from logging.handlers import RotatingFileHandler
+    try:
+        path = log_file_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        # Two files of a megabyte: enough to hold the run a professor is
+        # reporting, and small enough to be worth nobody's attention.
+        handler = RotatingFileHandler(
+            path, maxBytes=1_000_000, backupCount=1, encoding="utf-8",
+        )
+        handler.setFormatter(logging.Formatter(
+            "%(asctime)s %(levelname)s %(name)s: %(message)s"
+        ))
+        root = logging.getLogger()
+        # The traceback behind a reference code is logged at ERROR, but the
+        # lines leading up to it are the ones that say what was being done, and
+        # those are INFO. A log that starts at the exception explains nothing.
+        if root.level > logging.INFO or root.level == logging.NOTSET:
+            root.setLevel(logging.INFO)
+        root.addHandler(handler)
+        return path
+    except OSError as e:
+        logging.warning("Could not open the log file, so this run is not being "
+                        "kept anywhere but this window: %s", e)
+        return None
+
+
 def run_server(host: str, port: int) -> None:
     """Start the local web interface and block until interrupted (Ctrl-C).
 
@@ -1485,4 +1546,7 @@ def run_server(host: str, port: int) -> None:
         port: The port to listen on.
     """
     import uvicorn
+    written_to = start_logging_to_a_file()
+    if written_to is not None:
+        print(f"Keeping a log at {written_to}")
     uvicorn.run(create_app(), host=host, port=port)
