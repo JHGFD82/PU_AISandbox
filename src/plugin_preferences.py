@@ -40,6 +40,7 @@ comment they have written, stays as it is.
 from __future__ import annotations
 
 import logging
+import os
 import tomllib
 from pathlib import Path
 from typing import Optional
@@ -108,6 +109,105 @@ def live_line(path: Path, section: str, key: str) -> Optional[str]:
         if in_section and line.split("=")[0].strip() == key:
             return line
     return None
+
+
+def set_live(path: Path, section: str, key: str, value: str) -> None:
+    """Make this setting decided, at *value*, in the person's own preferences file.
+
+    The file is written to be read afterwards, so this edits it the way a person
+    would rather than rewriting it from the parsed contents: everything else
+    stays exactly as it was, byte for byte, including the explanation the
+    plugin's author wrote above each setting and the order they appear in.
+    Rewriting from a parser would drop every one of those comments the first
+    time anybody ticked a box.
+
+    Only lines that a TOML reader would act on count as being "in" a section.
+    A file offering settings has its whole block commented out, heading
+    included — ``# [webui]`` above ``# keep_job_outputs = true`` — and a
+    commented heading opens no section at all. Uncommenting one to take up a
+    setting would be worse than useless: a file can carry that same commented
+    heading more than once, so doing it twice would declare the section twice
+    and the file would stop parsing, taking the sandbox down with it.
+
+    So there are three shapes, and all three end with a file that reads back:
+
+    * already decided — the value on that line is replaced, and any note the
+      person wrote after it on the same line is left alone;
+    * offered inside a real section — that line is uncommented and given the
+      value, so it stays under the explanation written above it;
+    * anywhere else, including offered under a commented heading — the setting
+      is added under the real section if there is one, and otherwise under a
+      new one at the end. Any commented-out offer of it stays where it is; it
+      is a comment either way, and the live line is what applies.
+
+    Args:
+        path: The person's ``preferences.toml``. Created if it isn't there.
+        section: The TOML section it belongs under, e.g. ``'webui'``.
+        key: The setting's name.
+        value: The value as it should appear in the file — TOML text, not a
+               Python value, so ``'true'`` rather than ``True`` and
+               ``'"gpt-4o"'`` with its quotes already on.
+
+    Raises:
+        OSError: If the file can't be written.
+    """
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        text = ""
+
+    lines = text.splitlines()
+    in_section = False
+    header_at: Optional[int] = None
+    offer_at: Optional[int] = None
+
+    for index, raw in enumerate(lines):
+        bare = raw.strip()
+        if bare.startswith("#"):
+            # A comment. The only one worth anything here is an offer of this
+            # setting sitting inside a section that is really open.
+            if in_section and offer_at is None \
+                    and bare.lstrip("#").split("=")[0].strip() == key:
+                offer_at = index
+            continue
+        if bare.startswith("[") and bare.endswith("]"):
+            in_section = bare[1:-1].strip() == section
+            if in_section and header_at is None:
+                header_at = index
+            continue
+        if in_section and bare.split("=")[0].strip() == key:
+            # Decided already. Only the value changes; a note the person left
+            # after it on the line is theirs and stays.
+            head, _, rest = raw.partition("=")
+            comment = rest.partition("#")[1] + rest.partition("#")[2]
+            lines[index] = (
+                f"{head.rstrip()} = {value}" + (f"  {comment.strip()}" if comment else "")
+            )
+            _write(path, lines)
+            return
+
+    if offer_at is not None:
+        blank = len(lines[offer_at]) - len(lines[offer_at].lstrip())
+        lines[offer_at] = f"{lines[offer_at][:blank]}{key} = {value}"
+    elif header_at is not None:
+        lines.insert(header_at + 1, f"{key} = {value}")
+    else:
+        lines += ["", f"[{section}]", f"{key} = {value}"]
+    _write(path, lines)
+
+
+def _write(path: Path, lines: list[str]) -> None:
+    """Save these lines as the file, replacing it in one step.
+
+    Written beside the file and then moved into place, so that a preferences
+    file is never seen half-written — an interruption partway through leaves the
+    previous one intact rather than a file that no longer parses, which would
+    take the whole sandbox down at its next start.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text("\n".join(lines).rstrip("\n") + "\n", encoding="utf-8")
+    os.replace(tmp, path)
 
 
 def _render(

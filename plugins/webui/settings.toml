@@ -22,3 +22,11 @@ compaction_model = "gpt-4o-mini"
 # itself afterwards — worth it if the conversation is something you may need to
 # show or cite, and not worth the disk if it isn't.
 keep_supplied_documents = false
+# Whether the file a job produces is kept in its conversation's own folder. On
+# by default, so that a translation sits with the conversation that asked for
+# it and the whole piece of work can be kept or cited as one thing. Turning it
+# off does not throw the file away — it is kept in a folder of job results
+# instead, and the link to download it goes on working. What changes is that it
+# no longer travels with the conversation, and deleting the conversation no
+# longer deletes it.
+keep_job_outputs = true

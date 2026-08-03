@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import re
 import sys
+import tomllib
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -68,6 +69,23 @@ def client(tmp_path, monkeypatch):
     # A loopback client address, because that's what a browser on this same
     # computer looks like — and /api/pick-path refuses anything else.
     return TestClient(app, client=("127.0.0.1", 50000))
+
+
+@pytest.fixture
+def preference_file(tmp_path, monkeypatch):
+    """A preferences.toml this test owns, with the real one out of reach.
+
+    Two places get pointed at it, because they are two different things: a
+    route writes through src.paths, and the settings layer reads a path it
+    worked out when it was first imported. In a running sandbox they are the
+    same file; here they both have to be told about this one.
+    """
+    path = tmp_path / "preferences.toml"
+    path.write_text("[webui]\n")
+    import src.paths
+    monkeypatch.setattr(src.paths, "preferences_path", lambda: path)
+    monkeypatch.setattr(core_settings_mod, "_PREFERENCES_PATH", path)
+    return path
 
 
 @pytest.fixture
@@ -1421,7 +1439,9 @@ class TestSettingsPage:
     def test_no_professors_first_run_order(self, unlocked_client, settings_env):
         data = unlocked_client.get("/api/settings").json()
         assert data["has_professors"] is False
-        assert data["order"] == ["professors", "external_sources", "webui", "shared", "endpoints"]
+        assert data["order"] == [
+            "professors", "external_sources", "webui", "shared", "endpoints", "folder",
+        ]
         assert data["professors"] == []
 
     def test_index_redirects_to_settings_with_no_professors(self, unlocked_client, settings_env):
@@ -1441,7 +1461,9 @@ class TestSettingsProfessors:
 
         data = unlocked_client.get("/api/settings").json()
         assert data["has_professors"] is True
-        assert data["order"] == ["shared", "endpoints", "professors", "webui", "external_sources"]
+        assert data["order"] == [
+            "folder", "shared", "endpoints", "professors", "webui", "external_sources",
+        ]
         prof = data["professors"][0]
         assert prof == {
             "netid": "jh43", "name": "Jeff Heller",
@@ -2446,43 +2468,44 @@ class TestKeepingSuppliedDocuments:
             "/api/conversations", json={"professor": "heller", "model": "gpt-4o"}
         ).json()["id"]
 
-    def test_nothing_is_kept_unless_it_is_asked_for(self, unlocked_client, monkeypatch):
-        import sys
+    def _set(self, preference_file, on):
+        """Turn the setting on or off the way the settings page does."""
+        from src.plugin_preferences import set_live
+        set_live(preference_file, "webui", "keep_supplied_documents",
+                 "true" if on else "false")
 
-        app_module = sys.modules["_pu_webui_app"]
-        monkeypatch.setattr(app_module, "WEBUI_KEEP_SUPPLIED_DOCUMENTS", False)
+    def test_nothing_is_kept_unless_it_is_asked_for(
+        self, unlocked_client, preference_file
+    ):
+
+        self._set(preference_file, False)
         conv_id = self._conv(unlocked_client)
         assert self._upload(unlocked_client, conv_id).json()["saved_as"] is None
 
-    def test_when_asked_for_it_sits_with_the_conversation(self, unlocked_client, monkeypatch):
+    def test_when_asked_for_it_sits_with_the_conversation(
+        self, unlocked_client, preference_file
+    ):
         import sys
 
-        app_module = sys.modules["_pu_webui_app"]
-        monkeypatch.setattr(app_module, "WEBUI_KEEP_SUPPLIED_DOCUMENTS", True)
+        self._set(preference_file, True)
         conv_id = self._conv(unlocked_client)
         assert self._upload(unlocked_client, conv_id).json()["saved_as"] == "source.txt"
         store = sys.modules["_pu_webui_conversation"].ConversationStore("heller")
         assert (store.attachments_dir(conv_id) / "source.txt").read_bytes() == b"hello"
 
     def test_a_second_document_of_the_same_name_does_not_replace_the_first(
-        self, unlocked_client, monkeypatch
+        self, unlocked_client, preference_file
     ):
-        import sys
-
-        app_module = sys.modules["_pu_webui_app"]
-        monkeypatch.setattr(app_module, "WEBUI_KEEP_SUPPLIED_DOCUMENTS", True)
+        self._set(preference_file, True)
         conv_id = self._conv(unlocked_client)
         self._upload(unlocked_client, conv_id)
         second = self._upload(unlocked_client, conv_id)
         assert second.json()["saved_as"] == "source (2).txt"
 
     def test_a_name_that_is_a_path_cannot_write_outside_the_folder(
-        self, unlocked_client, monkeypatch
+        self, unlocked_client, preference_file
     ):
-        import sys
-
-        app_module = sys.modules["_pu_webui_app"]
-        monkeypatch.setattr(app_module, "WEBUI_KEEP_SUPPLIED_DOCUMENTS", True)
+        self._set(preference_file, True)
         conv_id = self._conv(unlocked_client)
         saved = self._upload(unlocked_client, conv_id, b"../../escaped.txt").json()["saved_as"]
         assert saved == "escaped.txt"
@@ -3672,3 +3695,136 @@ class TestTheNewConversationButtonReads:
         block = chat[chat.rindex("<button", 0, start): chat.index("</button>", start)]
         assert 'fill="currentColor"' in block
         assert "#f58025" not in block
+
+
+class TestWhatEachConversationKeeps:
+    """The two boxes deciding whether a conversation's folder holds documents.
+
+    Both were reachable only by editing a file by hand before this — one of them
+    only through the shared settings editor, which writes a whole group's file,
+    and the other did not exist at all.
+    """
+
+    def test_it_says_what_is_set_now(self, unlocked_client):
+        body = unlocked_client.get("/api/settings/conversation-folder").json()
+        assert set(body) == {"keep_supplied_documents", "keep_job_outputs"}
+        assert all(isinstance(v, bool) for v in body.values())
+
+    def test_reading_requires_unlock(self, client):
+        assert client.get("/api/settings/conversation-folder").status_code == 401
+
+    def test_changing_requires_unlock(self, client):
+        resp = client.post("/api/settings/conversation-folder",
+                           json={"keep_job_outputs": False})
+        assert resp.status_code == 401
+
+    def test_ticking_a_box_writes_it_to_the_persons_preferences(
+        self, unlocked_client, preference_file
+    ):
+        resp = unlocked_client.post("/api/settings/conversation-folder",
+                                    json={"keep_supplied_documents": True})
+        assert resp.status_code == 200
+        assert tomllib.loads(preference_file.read_text())["webui"]["keep_supplied_documents"] is True
+
+    def test_a_box_not_sent_is_not_touched(self, unlocked_client, preference_file):
+        """A page saving one box must not decide the other one is off."""
+        preference_file.write_text("[webui]\nkeep_job_outputs = false\n")
+        unlocked_client.post("/api/settings/conversation-folder",
+                             json={"keep_supplied_documents": True})
+        assert tomllib.loads(preference_file.read_text())["webui"]["keep_job_outputs"] is False
+
+    def test_it_answers_with_what_the_file_now_says(self, unlocked_client, preference_file):
+        """Not with what was asked for — a shared file may have the last word."""
+        body = unlocked_client.post("/api/settings/conversation-folder",
+                                    json={"keep_job_outputs": False}).json()
+        assert body["keep_job_outputs"] is False
+
+    def test_the_setting_is_read_again_rather_than_at_startup(self, preference_file):
+        """Ticking a box and being told to restart would be no use to anyone."""
+        from src.settings import is_on
+        preference_file.write_text("[webui]\n")
+        import src.plugin_preferences as pp
+        # The webui plugin reads its own settings.toml plus preferences.toml.
+        assert is_on("keep_job_outputs", True) is True
+        pp.set_live(preference_file, "webui", "keep_job_outputs", "false")
+        assert is_on("keep_job_outputs", True) is False
+
+
+class TestWhereAJobsOutputGoes:
+    """Whether a finished job's file lands in the conversation's folder."""
+
+    def test_it_goes_in_the_conversation_by_default(self, tmp_path):
+        jobs = sys.modules["_pu_webui_jobs"]
+        path = jobs.job_output_dir("jh43", "j1", base_dir=tmp_path,
+                                   conversation_id="c_05b92b6ac41a9449")
+        assert path.parts[-3:] == ("c_05b92b6ac41a9449", "outputs", "j1")
+
+    def test_turned_off_it_goes_to_the_shared_folder_of_results(self, tmp_path):
+        jobs = sys.modules["_pu_webui_jobs"]
+        path = jobs.job_output_dir("jh43", "j1", base_dir=tmp_path,
+                                   conversation_id=None)
+        assert "_job_outputs" in path.parts
+        assert "c_05b92b6ac41a9449" not in path.parts
+
+    def test_the_download_link_still_finds_it_either_way(self, tmp_path, monkeypatch):
+        """Turning it off must not break a saved conversation's download."""
+        jobs = sys.modules["_pu_webui_jobs"]
+        monkeypatch.setattr(jobs, "_CONVERSATIONS_DIR", tmp_path)
+        outside = jobs.job_output_dir("jh43", "j1", conversation_id=None)
+        outside.mkdir(parents=True, exist_ok=True)
+        (outside / "translated.docx").write_bytes(b"result")
+        found = jobs.resolve_output_path(
+            "jh43", "j1", "translated.docx", conversation_id="c_05b92b6ac41a9449")
+        assert found is not None and found.exists()
+        assert found.read_bytes() == b"result"
+
+
+class TestTheConversationFolderCard:
+    """The settings page's own section for the two choices."""
+
+    @pytest.fixture
+    def page(self):
+        return (Path(__file__).resolve().parents[1] / "src" / "templates"
+                / "settings.html").read_text()
+
+    def card_words(self, page):
+        """The card's wording as one line, so where the HTML wraps doesn't matter."""
+        card = page.split('data-section="folder"')[1].split("</div>")[0]
+        return " ".join(card.split())
+
+    def test_both_boxes_are_on_the_page(self, page):
+        assert 'id="keep-supplied-documents"' in page
+        assert 'id="keep-job-outputs"' in page
+
+    def test_every_section_of_the_page_is_placed_in_both_orders(self, page):
+        """A section missing from an order list gets order 0 and jumps to the top."""
+        app_module = sys.modules["_pu_webui_app"]
+        on_page = set(re.findall(r'data-section="([a-z_]+)"', page))
+        for order in (app_module._SETTINGS_ORDER_FIRST_RUN,
+                      app_module._SETTINGS_ORDER_REPEAT):
+            assert set(order) == on_page
+            assert len(order) == len(set(order))
+
+    def test_turning_the_outputs_box_off_says_the_file_is_not_thrown_away(self, page):
+        """The words have to say what off means, because the name doesn't."""
+        words = self.card_words(page)
+        assert "does not throw the file away" in words
+        assert "download it goes on working" in words
+
+    def test_it_says_the_choice_is_not_retrospective(self, page):
+        assert "already saved stays where it is" in self.card_words(page)
+
+    def test_the_whole_row_is_the_target_and_not_just_the_box(self, page):
+        """A 13px box is a poor target; the sentence beside it is a good one."""
+        assert re.search(r"\.choice\s*\{[^}]*cursor:\s*pointer", page)
+        card = page.split('data-section="folder"')[1].split("</div>")[0]
+        assert card.count('<label class="choice">') == 2
+
+    def test_a_failed_save_puts_the_box_back(self, page):
+        """Otherwise the box says one thing and the file says another."""
+        handler = page.split("async function saveFolderChoice")[1].split("\n}")[0]
+        assert "box.checked = !box.checked" in handler
+
+    def test_it_shows_what_the_file_says_rather_than_what_was_clicked(self, page):
+        handler = page.split("async function saveFolderChoice")[1].split("\n}")[0]
+        assert "renderFolderChoices(now)" in handler

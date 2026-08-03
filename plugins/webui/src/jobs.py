@@ -525,7 +525,21 @@ def _run_job(
     # produced sits with the conversation that asked for it and the documents
     # it was given, rather than in a separate tree keyed by job id where
     # nobody would think to look for it.
-    output_dir = job_output_dir(professor, job.id, conversation_id=job.conversation_id)
+    #
+    # Unless someone would rather it didn't. Passing no conversation puts the
+    # file in the shared folder of job results instead — where it is still
+    # found, because resolve_output_path() looks there for anything not in the
+    # conversation's folder, so the link to download it goes on working either
+    # way. What the choice decides is whether the file is part of the
+    # conversation: whether it travels with it, and whether deleting the
+    # conversation deletes it too.
+    from src.settings import is_on
+    output_dir = job_output_dir(
+        professor, job.id,
+        conversation_id=(
+            job.conversation_id if is_on("keep_job_outputs", True) else None
+        ),
+    )
 
     # The scratch folder is this module's bookkeeping, not something a
     # plugin declared or should have to know about, so it doesn't travel
