@@ -312,20 +312,35 @@ class TestTranslateCustomText:
         assert "cancelled" in out.lower()
 
     def test_with_abstract_uses_translate_page_text(self, monkeypatch, capsys):
+        """An abstract is context, so the page-with-context call is the one used."""
         proc = _make_processor(monkeypatch)
-        # First _collect_multiline is for abstract, second for text
         call_count = [0]
         def fake_input():
             call_count[0] += 1
-            if call_count[0] <= 2:
-                return "abstract text" if call_count[0] == 1 else "---"
-            if call_count[0] == 3:
-                return "translate this"
-            return "---"
+            return "translate this" if call_count[0] == 1 else "---"
         monkeypatch.setattr("builtins.input", fake_input)
         proc.translation_service.translate_page_text.return_value = "结果"
-        proc.translate_custom_text("English", "Chinese", abstract=True)
+        proc.translate_custom_text("English", "Chinese", abstract_text="an abstract")
         proc.translation_service.translate_page_text.assert_called_once()
+        # The abstract itself is what travels, not a flag saying there is one.
+        assert proc.translation_service.translate_page_text.call_args[0][0] == "an abstract"
+
+    def test_it_never_asks_for_the_abstract_itself(self, monkeypatch):
+        """The caller asks. This may be running in a job with nobody to ask.
+
+        Before, the handler prompted at the terminal for the abstract text —
+        which is why the web form had no way to offer one at all: a background
+        job would have been left waiting at a prompt nobody can see.
+        """
+        proc = _make_processor(monkeypatch)
+        asked = []
+        monkeypatch.setattr(
+            "src.runtime.sandbox_processor.SandboxProcessor._collect_multiline",
+            lambda self, label: asked.append(label) or "---",
+        )
+        monkeypatch.setattr("builtins.input", lambda: "---")
+        proc.translate_custom_text("English", "Chinese", abstract_text="an abstract")
+        assert not any("Abstract" in label for label in asked)
 
 
 # ---------------------------------------------------------------------------
@@ -588,32 +603,46 @@ class TestTranslateCustomTextExceptionHandling:
             proc.translate_custom_text("English", "French")
 
 
-class TestTranslateDocumentAbstractFlag:
-    """abstract=True triggers _collect_multiline for abstract text."""
+class TestTranslateDocumentAbstract:
+    """The abstract given to translate_document reaches the pages."""
 
-    def test_abstract_flag_collects_abstract_then_translates(self, tmp_path, monkeypatch):
+    def _prepared(self, tmp_path, monkeypatch):
         proc = _make_processor(monkeypatch)
         f = tmp_path / "doc.txt"
         f.write_text("Main content", encoding="utf-8")
-
         monkeypatch.setattr(
             "src.runtime.sandbox_processor.SandboxProcessor._detect_and_validate_file",
             lambda self, fp: "txt",
         )
+        seen = {}
         monkeypatch.setattr(
             "src.runtime.sandbox_processor.SandboxProcessor._process_text_based_file",
-            lambda self, *a, **kw: (["Translated"], None),
+            lambda self, *a, **kw: (seen.update(args=a, kwargs=kw), (["Translated"], None))[1],
         )
-        abstract_calls = []
-        def fake_collect(self_inner, label: str) -> str:
-            abstract_calls.append(label)
-            return "Abstract text here"
+        return proc, f, seen
+
+    def test_the_abstract_is_passed_through_to_the_pages(self, tmp_path, monkeypatch):
+        proc, f, seen = self._prepared(tmp_path, monkeypatch)
+        proc.translate_document(str(f), "English", "Japanese",
+                                abstract_text="What the paper argues")
+        assert "What the paper argues" in seen["args"]
+
+    def test_no_abstract_passes_nothing(self, tmp_path, monkeypatch):
+        proc, f, seen = self._prepared(tmp_path, monkeypatch)
+        proc.translate_document(str(f), "English", "Japanese")
+        assert "What the paper argues" not in seen["args"]
+        assert None in seen["args"]
+
+    def test_it_never_asks_for_the_abstract_itself(self, tmp_path, monkeypatch):
+        """Asking belongs to whoever has somebody to ask — see the custom-text test."""
+        proc, f, _seen = self._prepared(tmp_path, monkeypatch)
+        asked = []
         monkeypatch.setattr(
             "src.runtime.sandbox_processor.SandboxProcessor._collect_multiline",
-            fake_collect,
+            lambda self, label: asked.append(label) or "",
         )
-        proc.translate_document(str(f), "English", "Japanese", abstract=True)
-        assert any("Abstract" in c for c in abstract_calls)
+        proc.translate_document(str(f), "English", "Japanese", abstract_text="an abstract")
+        assert asked == []
 
 
 class TestProcessImageTranslationFolderSequentialTranscript:
