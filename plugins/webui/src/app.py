@@ -994,6 +994,16 @@ def create_app() -> FastAPI:
 
         api_key, _ = get_api_key(professor)
         report = probe_model_capabilities(model_name, Portkey(api_key=api_key))
+        if report.missing:
+            # 410 rather than 502: there is nothing wrong with the request or
+            # the connection, the model simply isn't there any more. The page
+            # offers to take the entry out rather than doing it unasked — a
+            # model can 404 for a day while a provider is mid-change.
+            raise HTTPException(
+                410,
+                f"'{model_name}' no longer exists, so there was nothing to test. "
+                "Every request for it will fail. You can remove it from the catalogue.",
+            )
         if not report.reachable:
             raise HTTPException(
                 502,
@@ -1010,6 +1020,21 @@ def create_app() -> FastAPI:
             "unsettled": report.unsettled,
             "capabilities": _capability_summary(model_name),
         }
+
+    @app.delete("/api/settings/models/{model_name}")
+    async def api_remove_model(request: Request, model_name: str):
+        """Take a model out of the catalogue.
+
+        For an entry a provider has retired: it cannot be used, and every
+        request naming it fails. Removing is not automatic — see the note on
+        the test route.
+        """
+        _require_unlocked(request)
+        from src.models import remove_model_from_catalog
+
+        if not remove_model_from_catalog(model_name):
+            raise HTTPException(404, f"'{model_name}' isn't in the catalogue.")
+        return {"ok": True, "removed": model_name}
 
     @app.get("/api/models")
     async def api_models(request: Request, professor: str):

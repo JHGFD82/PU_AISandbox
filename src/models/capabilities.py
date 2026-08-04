@@ -32,6 +32,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
+from .catalog import is_sampling_param_deprecated_error
 from ..services.api_errors import is_transient_error, rejected_request_field
 
 logger = logging.getLogger(__name__)
@@ -52,10 +53,30 @@ _SOUNDS_LIKE_A_REFUSAL = (
     "unknown field",
     "extra inputs",
     "invalid content",
-    "invalid_request_error",
     "invalid type",
     "invalid parameter",
     "unexpected keyword",
+)
+
+# A model that isn't there. Nothing can be learned from one, and every probe
+# against it fails identically — which read as a model that refuses everything
+# and got recorded as "tested, text only", complete with a date, for three
+# models that do not exist. Checked before anything else.
+_NO_SUCH_MODEL = (
+    "model_not_found",
+    "does not exist",
+    "no such model",
+    "no longer available",
+    "has been retired",
+    "invalid target name found in the query router",
+)
+
+# The cap was too low, not the wrong name. Reasoning models spend their
+# allowance on thinking that never appears in the answer, so a very small cap
+# is refused outright — which is not an answer about anything being probed.
+_CAP_TOO_LOW = (
+    "could not finish the message",
+    "model output limit was reached",
 )
 
 # Never a refusal, whatever else the message happens to contain. Checked first,
@@ -102,9 +123,37 @@ def _is_a_refusal(error: Exception) -> bool:
     message = str(error).lower()
     if any(phrase in message for phrase in _NOT_ABOUT_THE_MODEL):
         return False
+    if model_is_missing(error) or _cap_was_too_low(error):
+        return False
+    # A model that has dropped a sampling setting altogether. Its own helper
+    # because the wording is nothing like the others — the gateway says the
+    # field is "deprecated for this model", which is a refusal and the exact
+    # answer the sampling probe is asking for.
+    if is_sampling_param_deprecated_error(str(error)):
+        return True
     if rejected_request_field(str(error)):
         return True
     return any(phrase in message for phrase in _SOUNDS_LIKE_A_REFUSAL)
+
+
+def model_is_missing(error: Exception) -> bool:
+    """Say whether the provider's answer means there is no such model.
+
+    Args:
+        error: Whatever the request raised.
+
+    Returns:
+        ``True`` if the model isn't there — retired, misspelled, or not
+        included in this installation's access. Nothing can be learned about a
+        model like that, and it needs removing rather than recording.
+    """
+    return any(phrase in str(error).lower() for phrase in _NO_SUCH_MODEL)
+
+
+def _cap_was_too_low(error: Exception) -> bool:
+    """Say whether the provider refused only because the answer had no room."""
+    return any(phrase in str(error).lower() for phrase in _CAP_TOO_LOW)
+
 
 # A one-pixel transparent PNG, small enough to sit in this file. Enough to
 # settle whether a model accepts an image at all, which is the only question
@@ -114,9 +163,25 @@ _ONE_PIXEL_PNG = (
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
 )
 
-# Asking for one token keeps a probe as cheap as a request can be. What comes
-# back is never read — only whether the provider accepted the request.
-_ONE_TOKEN = 1
+# Enough room for an answer, and no more. This was one token, which is as cheap
+# as a request gets and worked everywhere except the models most worth testing:
+# a reasoning model spends its allowance on thinking that never reaches the
+# reply, so it refuses a cap of one outright. That refusal isn't an answer about
+# anything being asked, but it arrived looking like one, and every probe after
+# it inherited a request the model had already rejected.
+_ENOUGH_TOKENS = 16
+
+# Words that mean a refusal was about the picture rather than anything else in
+# the request. Without this the vision question was answered by whatever the
+# model happened to object to.
+_ABOUT_THE_PICTURE = (
+    "image",
+    "image_url",
+    "content type",
+    "multimodal",
+    "vision",
+    "media",
+)
 
 # Said to every probe. Short, harmless, and never shown to anyone.
 _HELLO = [{"role": "user", "content": "hi"}]
@@ -137,12 +202,16 @@ class CapabilityReport:
         reachable: Whether the model could be reached at all. ``False`` means
                    nothing was learned and nothing should be written — the key
                    was refused, the network failed, or the model isn't there.
+        missing: Whether the provider says there is no such model. Separate
+                 from *reachable* because the answer is different: not "try
+                 again later" but "this entry is stale, take it out".
     """
 
     findings: Dict[str, Any] = field(default_factory=dict)
     settled: List[str] = field(default_factory=list)
     unsettled: List[str] = field(default_factory=list)
     reachable: bool = True
+    missing: bool = False
 
 
 class _Asker:
@@ -184,7 +253,7 @@ class _Asker:
         request: Dict[str, Any] = {
             "model": self.model,
             "messages": messages,
-            self.max_tokens_field: _ONE_TOKEN,
+            self.max_tokens_field: _ENOUGH_TOKENS,
             **extra,
         }
         try:
@@ -196,39 +265,45 @@ class _Asker:
             return False, str(error)
 
 
-def _probe_max_tokens_field(asker: _Asker, report: CapabilityReport) -> None:
+def _probe_max_tokens_field(asker: _Asker, report: CapabilityReport) -> bool:
     """Work out what this model wants the response-length setting called.
 
     Most models call it ``max_tokens``; some reasoning models reject that name
     and require ``max_completion_tokens`` — the same setting, spelled
     differently. This has to run first: every later probe carries this setting,
-    so getting the name wrong here would make every one of them fail for a
-    reason that has nothing to do with what it was testing.
+    so getting the name wrong here makes every one of them fail for a reason
+    that has nothing to do with what it was testing.
+
+    Returns:
+        Whether the request shape is settled well enough to go on. ``False``
+        stops the rest: a probe that can't even be addressed to the model
+        answers nothing, and the answers it appeared to give were being kept.
     """
     accepted, error = asker.ask()
     if accepted:
         report.settled.append("Response-length setting: max_tokens")
-        return
+        return True
 
     # Only worth a second try if the provider objected to that name specifically.
     if rejected_request_field(error) != "max_tokens" and "max_completion_tokens" not in error:
         report.unsettled.append(f"Could not settle the response-length setting: {error[:160]}")
-        return
+        return False
 
     asker.max_tokens_field = "max_completion_tokens"
     accepted, second_error = asker.ask()
     if accepted:
         report.findings.setdefault("prefers", {})["max_tokens_field"] = "max_completion_tokens"
         report.settled.append("Response-length setting: max_completion_tokens")
-        return
+        return True
 
     asker.max_tokens_field = "max_tokens"
     report.unsettled.append(
         f"Neither name for the response-length setting was accepted: {second_error[:160]}"
     )
+    return False
 
 
-def _probe_system_role(asker: _Asker, report: CapabilityReport) -> None:
+def _probe_system_role(asker: _Asker, report: CapabilityReport) -> bool:
     """Work out what this model calls the instruction that opens a conversation.
 
     Most take a ``system`` message. Some reasoning models require the label
@@ -244,14 +319,15 @@ def _probe_system_role(asker: _Asker, report: CapabilityReport) -> None:
                 report.findings.setdefault("prefers", {})["system_role"] = label
             report.settled.append(f"Opening instruction goes in a '{label}' message")
             asker.system_role = label
-            return
+            return True
         last_error = error
     report.unsettled.append(
         f"Could not settle what to call the opening instruction: {last_error[:160]}"
     )
+    return True
 
 
-def _probe_sampling_params(asker: _Asker, report: CapabilityReport) -> None:
+def _probe_sampling_params(asker: _Asker, report: CapabilityReport) -> bool:
     """Check whether the model accepts being told how varied its wording should be.
 
     ``temperature`` and ``top_p`` are tested one at a time, because a model can
@@ -269,9 +345,10 @@ def _probe_sampling_params(asker: _Asker, report: CapabilityReport) -> None:
             report.settled.append(f"Refuses {name} — it will be left out")
         else:
             report.unsettled.append(f"Could not settle whether {name} is accepted: {error[:140]}")
+    return True
 
 
-def _probe_vision(asker: _Asker, report: CapabilityReport) -> None:
+def _probe_vision(asker: _Asker, report: CapabilityReport) -> bool:
     """Check whether the model can look at an image.
 
     This is the question that caused the trouble: chat in the web interface
@@ -291,10 +368,24 @@ def _probe_vision(asker: _Asker, report: CapabilityReport) -> None:
     if accepted:
         report.findings["supports_vision"] = True
         report.settled.append("Can read images")
-        return
+        return True
+
+    # A refusal only answers this question if it is about the picture. This
+    # used to record "text only" for any refusal at all, which meant a model
+    # objecting to something else entirely — the name of the response-length
+    # setting, say — was written down as unable to see. That is how four
+    # perfectly capable models came to be marked text-only in one sweep.
+    if not any(word in error.lower() for word in _ABOUT_THE_PICTURE):
+        report.unsettled.append(
+            f"Could not settle whether it can read images; the refusal was about "
+            f"something else: {error[:140]}"
+        )
+        return True
+
     report.findings["supports_vision"] = False
     report.settled.append("Cannot read images — text only")
     logger.debug("Vision probe for '%s' was refused: %s", asker.model, error[:200])
+    return True
 
 
 # Run in this order because each depends on the ones before it having settled
@@ -332,8 +423,35 @@ def probe_model_capabilities(model_name: str, client: Any) -> CapabilityReport:
 
     for probe in _PROBES:
         try:
-            probe(asker, report)
+            if not probe(asker, report):
+                # The request shape itself is unsettled, so nothing addressed to
+                # this model means anything. Going on would collect refusals of
+                # a request the model has already rejected and read them as
+                # answers — which is exactly what happened.
+                logger.warning(
+                    "Stopped testing '%s': the shape of a request to it could not be "
+                    "settled, so nothing after that would have been an answer.",
+                    model_name,
+                )
+                break
         except Exception as error:
+            if model_is_missing(error):
+                # Not a failure to test — there is nothing to test. Said plainly
+                # so the entry can be taken out rather than recorded as a model
+                # that refuses everything.
+                report.missing = True
+                report.reachable = False
+                report.findings.clear()
+                report.settled.clear()
+                report.unsettled = [
+                    f"There is no such model: {str(error)[:160]}"
+                ]
+                logger.warning(
+                    "'%s' does not exist for this installation, so nothing was "
+                    "recorded against it. It can be removed from the catalogue.",
+                    model_name,
+                )
+                return report
             # A temporary failure, raised through by ask(). One is enough to
             # stop: the rest would almost certainly fail the same way, and each
             # costs a request. What was learned before this point still stands.

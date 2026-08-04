@@ -212,13 +212,18 @@ class TestFoldingTheAnswersIntoTheCatalogue:
 
 
 class TestTheCostOfTesting:
-    def test_a_probe_never_asks_for_more_than_one_token(self):
-        """These requests are billed to a professor's key."""
+    def test_a_probe_asks_for_barely_any_output(self):
+        """These requests are billed to a professor's key.
+
+        A ceiling rather than an exact figure: this asserted exactly one token,
+        which is what a reasoning model refuses outright — the assertion was
+        holding the bug in place. What matters is that it stays negligible.
+        """
         model = FakeModel()
         probe_model_capabilities("plain-model", model)
         for request in model.requests:
             length = request.get("max_tokens", request.get("max_completion_tokens"))
-            assert length == 1
+            assert 0 < length <= 32
 
     def test_an_ordinary_model_is_settled_in_a_handful_of_requests(self):
         model = FakeModel()
@@ -289,3 +294,157 @@ class TestRecordingThatATestHappened:
         merged = apply_capability_report({}, CapabilityReport(
             findings={"supports_vision": True}, settled=["Can read images"]))
         assert merged["last_tested"]
+
+
+class TestTheSweepOf2026_08_03:
+    """The three faults a real sweep of 28 models exposed, all at once.
+
+    Every one of them wrote a confident wrong answer rather than declining to
+    answer — the failure mode this module was built to prevent, arriving by
+    routes the first version didn't consider.
+    """
+
+    def test_a_refusal_about_something_else_does_not_settle_vision(self):
+        """gpt-5, gpt-5.1, gpt-5.2, gpt-5.4 and o3-mini were marked text-only.
+
+        None of them had refused an image. They had refused the *name of the
+        response-length setting*, and the vision probe recorded "cannot read
+        images" from that — an answer to a question nobody asked. So the
+        refusal here says nothing about pictures.
+        """
+        class RefusesTheImageRequestForAnotherReason:
+            def __init__(self):
+                self.chat = self
+                self.completions = self
+
+            def create(self, **kwargs):
+                carries_a_picture = any(
+                    isinstance(m.get("content"), list) for m in kwargs.get("messages", [])
+                )
+                if carries_a_picture:
+                    raise Exception(
+                        "Unsupported parameter: 'max_tokens' is not supported with "
+                        "this model."
+                    )
+                return {"choices": []}
+
+        report = probe_model_capabilities("misleading", RefusesTheImageRequestForAnotherReason())
+        assert "supports_vision" not in report.findings
+        assert any("something else" in line for line in report.unsettled)
+
+    def test_a_refusal_that_is_about_the_picture_still_settles_it(self):
+        """The fix must not make the question unanswerable."""
+        report = probe_model_capabilities("text-only", FakeModel(sees_images=False))
+        assert report.findings["supports_vision"] is False
+
+    def test_a_cap_of_one_token_is_not_read_as_a_refusal(self):
+        """A reasoning model spends its allowance before it can reply.
+
+        'Could not finish the message because max_tokens was reached' is the
+        cap being too low, not the field being wrong. Read as a refusal, it
+        made the probe give up on the request shape and mark the model as
+        refusing everything after it.
+        """
+        from src.models.capabilities import _is_a_refusal
+        assert _is_a_refusal(Exception(
+            "Error code: 400 - {'error': {'message': 'Could not finish the message "
+            "because max_tokens or model output limit was reached.', 'type': "
+            "'invalid_request_error'}}"
+        )) is False
+
+    def test_the_error_envelope_alone_is_not_a_refusal(self):
+        """'invalid_request_error' is the type on every 4xx body, 404 included.
+
+        Matching it made a missing model look like one refusing every field.
+        """
+        from src.models.capabilities import _is_a_refusal
+        assert _is_a_refusal(Exception(
+            "Error code: 404 - {'error': {'message': 'The model `gpt-35-turbo-16k` "
+            "does not exist or you do not have access to it.', 'type': "
+            "'invalid_request_error', 'code': 'model_not_found'}}"
+        )) is False
+
+    def test_a_model_that_does_not_exist_is_said_to_be_missing(self):
+        """gpt-35-turbo, gpt-35-turbo-16k and gpt-4-32k are all gone.
+
+        All three were recorded as tested and text-only, with a date, because
+        every probe failed identically and that read as a model refusing
+        everything.
+        """
+        client = AlwaysFails(Exception(
+            "Error code: 404 - The model `gpt-4-32k` does not exist or you do not "
+            "have access to it."
+        ))
+        report = probe_model_capabilities("gpt-4-32k", client)
+        assert report.missing is True
+        assert report.reachable is False
+        assert report.findings == {}
+        assert report.settled == []
+
+    def test_a_missing_model_costs_one_request_not_five(self):
+        client = AlwaysFails(Exception("Error code: 404 - model_not_found"))
+        probe_model_capabilities("gone", client)
+        assert client.calls == 1
+
+    def test_nothing_is_written_for_a_missing_model(self):
+        """Its existing entry must survive untouched, ready to be removed."""
+        entry = {"input": 1.0, "supports_vision": True}
+        report = CapabilityReport(reachable=False, missing=True)
+        assert apply_capability_report(entry, report) == entry
+
+    def test_an_unsettled_request_shape_stops_the_rest(self):
+        """Probes after an unaddressable request collect meaningless refusals.
+
+        They were being kept as answers. One request to find out, then stop.
+        """
+        class RefusesBothNames:
+            def __init__(self):
+                self.chat = self
+                self.completions = self
+                self.calls = 0
+            def create(self, **kwargs):
+                self.calls += 1
+                raise Exception("Unsupported parameter: max_tokens is not supported. "
+                                "Use 'max_completion_tokens' instead.")
+
+        client = RefusesBothNames()
+        report = probe_model_capabilities("impossible", client)
+        assert client.calls == 2
+        assert "supports_vision" not in report.findings
+
+    def test_the_cap_leaves_room_for_a_reasoning_model_to_answer(self):
+        model = FakeModel()
+        probe_model_capabilities("plain-model", model)
+        caps = [r.get("max_tokens", r.get("max_completion_tokens")) for r in model.requests]
+        assert all(c >= 16 for c in caps), caps
+
+    @pytest.mark.parametrize("message,label", [
+        ("azure-ai error: `temperature` is deprecated for this model.", "refusal"),
+        ("azure-ai error: `top_p` is deprecated for this model.", "refusal"),
+    ])
+    def test_a_dropped_sampling_setting_is_a_refusal(self, message, label):
+        """The Claude models say it this way, and it is the answer being sought.
+
+        Trimming the refusal phrases to stop a 404 matching also stopped this
+        matching, so testing gave up at the temperature probe and never reached
+        the question about images.
+        """
+        from src.models.capabilities import _is_a_refusal
+        assert _is_a_refusal(Exception(message)) is True
+
+    @pytest.mark.parametrize("message", [
+        "google error: This model models/gemini-3-pro-preview is no longer available.",
+        "The model `gpt-4-32k` does not exist or you do not have access to it.",
+        "invalid target name found in the query router",
+    ])
+    def test_every_way_a_provider_says_the_model_is_gone(self, message):
+        """Three providers, three wordings, one meaning."""
+        from src.models.capabilities import model_is_missing
+        assert model_is_missing(Exception(message)) is True
+
+    def test_a_model_that_drops_sampling_is_still_asked_about_images(self):
+        """The whole point: one refusal must not end the questioning."""
+        model = FakeModel(refuses=("temperature", "top_p"))
+        report = probe_model_capabilities("claude-like", model)
+        assert report.findings["supports_vision"] is True
+        assert set(report.findings["rejects"]) == {"temperature", "top_p"}

@@ -282,6 +282,10 @@ def _build_settings_subparser(subparsers: argparse._SubParsersAction) -> None:
         '--professor', type=str, default=None,
         help="Whose API key to test with (default: the only one, if there is only one)",
     )
+    test_model.add_argument(
+        '--remove-missing', action='store_true',
+        help="Also take out models the provider says no longer exist",
+    )
 
     list_parser = settings_sub.add_parser(
         'list', help='List optional settings.toml values and whether each is currently set',

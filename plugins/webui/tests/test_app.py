@@ -4192,3 +4192,53 @@ class TestTheModelsSectionOnThePage:
         """'openai/gpt-5.2' is not guessable from an empty box."""
         assert "openai/gpt-5.2" in page
 
+
+
+class TestAModelThatNoLongerExists:
+    """gpt-35-turbo, gpt-35-turbo-16k and gpt-4-32k had all been retired.
+
+    Testing recorded each as "tested, text only" with a date, because every
+    probe failed identically and that read as a model refusing everything. The
+    browser has to say what is actually true and offer the one useful action.
+    """
+
+    def test_it_is_reported_as_gone_not_as_a_failed_test(
+        self, unlocked_client, monkeypatch, a_catalogue
+    ):
+        from src.models.capabilities import CapabilityReport
+
+        def must_not_save(catalog):
+            raise AssertionError("a retired model was written to the catalogue")
+
+        monkeypatch.setattr("src.models.save_model_catalog", must_not_save)
+        monkeypatch.setattr("src.config.get_api_key", lambda netid: ("sk-test", "primary"))
+        monkeypatch.setattr("src.models.capabilities.probe_model_capabilities",
+                            lambda name, client: CapabilityReport(
+                                reachable=False, missing=True,
+                                unsettled=["There is no such model"]))
+
+        resp = unlocked_client.post("/api/settings/models/old-text-model/test",
+                                    json={"professor": "smith"})
+        # 410, not 502: nothing is wrong with the request or the connection.
+        assert resp.status_code == 410
+        assert "no longer exists" in resp.json()["detail"]
+
+    def test_it_can_be_removed(self, unlocked_client, a_catalogue):
+        assert unlocked_client.delete("/api/settings/models/old-text-model").status_code == 200
+        remaining = [m["name"] for m in
+                     unlocked_client.get("/api/settings/models").json()["models"]]
+        assert remaining == ["gpt-4o"]
+
+    def test_removing_one_that_is_not_there_is_a_404(self, unlocked_client, a_catalogue):
+        assert unlocked_client.delete("/api/settings/models/never-existed").status_code == 404
+
+    def test_removing_needs_an_unlocked_session(self, client):
+        assert client.delete("/api/settings/models/gpt-4o").status_code == 401
+
+    def test_the_page_offers_removal_only_for_a_model_that_is_gone(self):
+        from pathlib import Path
+        page = (Path(__file__).resolve().parents[1] / "src" / "templates"
+                / "settings.html").read_text()
+        # Hidden by default: a working model must not carry a delete button.
+        assert 'data-remove-model="${m.name}" style="display:none"' in page
+        assert "no longer exists" in page

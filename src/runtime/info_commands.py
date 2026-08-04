@@ -382,6 +382,7 @@ def _settings_test_model(args: argparse.Namespace) -> None:
     targets = [args.model] if args.model else sorted(available, key=str.lower)
 
     api_key = _key_for_testing(getattr(args, 'professor', None))
+    remove_missing = bool(getattr(args, 'remove_missing', False))
 
     from portkey_ai import Portkey
     client = Portkey(api_key=api_key)
@@ -394,9 +395,17 @@ def _settings_test_model(args: argparse.Namespace) -> None:
 
     catalog = load_model_catalog()
     changed = 0
+    gone: list[str] = []
     for name in targets:
         print(f"{name}")
         report = probe_model_capabilities(name, client)
+        if report.missing:
+            # Not a failure to test — there is nothing there to test. Named
+            # separately because the answer is different: this entry is stale
+            # and wants taking out, not trying again later.
+            gone.append(name)
+            print("  no such model — this entry is out of date")
+            continue
         if not report.reachable:
             print("  could not be reached — nothing changed")
             for line in report.unsettled:
@@ -415,6 +424,22 @@ def _settings_test_model(args: argparse.Namespace) -> None:
             print("  saved")
         else:
             print("  already recorded correctly")
+
+    if gone:
+        # Not removed on its own. A model can 404 for a day because a provider
+        # is mid-change or access was altered, and quietly deleting an entry
+        # somebody configured is not something to do on one failed request.
+        for name in gone:
+            if remove_missing:
+                catalog["models"].pop(name, None)
+                changed += 1
+        if remove_missing:
+            print(f"\nRemoved {len(gone)}: {', '.join(gone)}")
+        else:
+            print(f"\n{len(gone)} no longer exist: {', '.join(gone)}")
+            print("They cannot be used, and every request for one will fail. To take")
+            print("them out:")
+            print("  python main.py settings test-model --remove-missing")
 
     if changed:
         save_model_catalog(catalog)
