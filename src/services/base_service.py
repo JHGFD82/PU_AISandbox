@@ -27,7 +27,7 @@ from ..tracking.token_tracker import TokenTracker, TokenUsage
 from .api_errors import (
     APISignal, classify_api_error, is_transient_error, rejected_request_field,
 )
-from .constants import MAX_RETRIES, RETRY_DELAY_SECONDS
+from .constants import MAX_RETRIES, REQUEST_TIMEOUT_SECONDS, RETRY_DELAY_SECONDS
 
 if TYPE_CHECKING:  # pragma: no cover - import only for type checking
     from ..runtime.model_role import ModelRole
@@ -44,6 +44,52 @@ _REQUIRED_REQUEST_FIELDS = frozenset({"model", "messages", "stream"})
 # time; capped so a provider that objects to everything can't turn a single
 # message into an unbounded run of API calls.
 _MAX_FIELD_REFUSALS = 3
+
+
+def _client_with_a_time_limit(api_key: str) -> Portkey:
+    """Build the gateway client, with a limit on how long it will wait.
+
+    Without one, a provider that accepts a request and then stops answering
+    leaves it waiting for something that is never coming. There is no retry to
+    rescue it and no error to report: a translation simply never finishes, and
+    in the browser that is a job whose progress bar never moves again. It is
+    not a rare shape of failure — it is what a provider outage usually looks
+    like from the client's side.
+
+    Two limits, because they stop different things:
+
+    * ``request_timeout`` is sent to the gateway and asks *it* to give up. That
+      covers a gateway still talking to us while the provider behind it hangs.
+    * the HTTP client's own timeout is enforced on this computer, and is what
+      saves a request when nothing comes back at all — including when the
+      gateway itself is the thing that has gone quiet.
+
+    The connect limit is short and the read limit is long, deliberately. Being
+    unable to reach the gateway is known within seconds and there is no reason
+    to sit on it; waiting for a model to compose a full page of translated text
+    is ordinary and can genuinely take minutes, so cutting that off would break
+    real work rather than protect it.
+
+    Args:
+        api_key: The professor's API key for the gateway.
+
+    Returns:
+        A client that will eventually give up.
+    """
+    import httpx
+
+    seconds = REQUEST_TIMEOUT_SECONDS
+    return Portkey(
+        api_key=api_key,
+        # Milliseconds, unlike every other duration in this codebase, and the
+        # constructor accepts any keyword without complaint — passing seconds,
+        # or misspelling the name as `timeout`, is accepted in silence and
+        # simply does nothing. Both mistakes have been made here already.
+        request_timeout=int(seconds * 1000),
+        http_client=httpx.Client(timeout=httpx.Timeout(
+            connect=15.0, read=seconds, write=seconds, pool=15.0,
+        )),
+    )
 
 
 class BaseService:
@@ -134,7 +180,7 @@ class BaseService:
         self.custom_temperature = temperature
         self.custom_top_p = top_p
         self.custom_max_tokens = max_tokens
-        self.client = Portkey(api_key=api_key)
+        self.client = _client_with_a_time_limit(api_key)
         # Kept so that a model met for the first time can be tested with the
         # same credential the request itself is using — see resolve_model().
         self._api_key = api_key

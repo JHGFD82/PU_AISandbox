@@ -598,3 +598,86 @@ class TestLearningRefusedFields:
         with pytest.raises(Exception, match="Extra inputs"):
             svc._create_completion_stream("m", [{"role": "user", "content": "hi"}], 100)
         assert svc.client.chat.completions.create.call_count <= 4
+
+
+class TestARequestEventuallyGivesUp:
+    """Without a time limit, a provider that goes quiet hangs the work forever.
+
+    There is no retry to rescue that and no error to report: a translation
+    simply never finishes, and in the browser it is a job whose progress bar
+    never moves again. Alternate endpoints already had a limit; the gateway
+    every professor actually uses did not.
+    """
+
+    def _built(self, monkeypatch):
+        """The keyword arguments the gateway client was constructed with."""
+        import src.services.base_service as bs
+        seen = {}
+
+        class FakePortkey:
+            def __init__(self, **kwargs):
+                seen.update(kwargs)
+
+        monkeypatch.setattr(bs, "Portkey", FakePortkey)
+        bs._client_with_a_time_limit("test-key")
+        return seen
+
+    def test_the_gateway_is_asked_to_give_up(self, monkeypatch):
+        from src.settings import REQUEST_TIMEOUT_SECONDS
+        built = self._built(monkeypatch)
+        assert built["request_timeout"] == int(REQUEST_TIMEOUT_SECONDS * 1000)
+
+    def test_the_gateway_limit_is_sent_in_milliseconds(self, monkeypatch):
+        """Seconds here means giving up after a few thousandths of one.
+
+        Every other duration in this codebase is seconds, so this is the one
+        place the unit differs — and getting it wrong 408s nearly every
+        request, which has already happened once.
+        """
+        from src.settings import REQUEST_TIMEOUT_SECONDS
+        built = self._built(monkeypatch)
+        assert built["request_timeout"] > REQUEST_TIMEOUT_SECONDS
+
+    def test_there_is_a_limit_enforced_on_this_computer_too(self, monkeypatch):
+        """The gateway's own limit is no use if the gateway is what went quiet."""
+        built = self._built(monkeypatch)
+        assert "http_client" in built
+        assert built["http_client"].timeout.read is not None
+
+    def test_failing_to_connect_is_known_quickly(self, monkeypatch):
+        """No reason to sit on 'this computer cannot reach the gateway'."""
+        built = self._built(monkeypatch)
+        timeout = built["http_client"].timeout
+        assert timeout.connect < timeout.read
+
+    def test_waiting_for_a_long_page_is_not_cut_off(self, monkeypatch):
+        """A dense page can genuinely take minutes; a short limit breaks work."""
+        built = self._built(monkeypatch)
+        assert built["http_client"].timeout.read >= 120
+
+    def test_the_keyword_is_one_the_client_actually_takes(self):
+        """Portkey accepts any keyword in silence, so a wrong name does nothing.
+
+        `timeout=` is the obvious guess and is simply ignored — no error, no
+        limit, and nothing to notice until something hangs. This checks the
+        name against the real constructor rather than against a fake.
+        """
+        import inspect
+
+        from portkey_ai import Portkey
+        accepted = inspect.signature(Portkey.__init__).parameters
+        assert "request_timeout" in accepted
+        assert "timeout" not in accepted, "if this ever appears, prefer it and say so"
+
+    def test_every_service_gets_one(self, monkeypatch):
+        """Built in one place so no service can be constructed without it."""
+        import src.services.base_service as bs
+        seen = {}
+
+        class FakePortkey:
+            def __init__(self, **kwargs):
+                seen.update(kwargs)
+
+        monkeypatch.setattr(bs, "Portkey", FakePortkey)
+        bs.BaseService(api_key="test-key", professor="jh43")
+        assert "request_timeout" in seen and "http_client" in seen
