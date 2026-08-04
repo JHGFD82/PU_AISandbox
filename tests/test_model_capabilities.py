@@ -477,6 +477,22 @@ class TestOneSlowModelCannotHoldUpTheRest:
 
         assert getattr(client_for_testing("sk-test"), "request_timeout", None)
 
+    def test_the_gateway_timeout_is_sent_in_milliseconds(self):
+        """It is milliseconds here and seconds everywhere else in this codebase.
+
+        Sent as seconds, it asks the gateway to give up after sixty thousandths
+        of a second, and nearly every request fails with a 408. That is not a
+        timeout doing its job — it is a sweep that cannot test anything.
+        """
+        from src.models.capabilities import (
+            _TESTING_TIMEOUT_SECONDS, client_for_testing,
+        )
+
+        client = client_for_testing("sk-test")
+        assert client.request_timeout == int(_TESTING_TIMEOUT_SECONDS * 1000)
+        # A plain sanity floor: any real request needs more than a second.
+        assert client.request_timeout >= 1000
+
     def test_every_route_builds_it_the_same_way(self):
         """Three callers each built their own, and one forgetting is enough."""
         from pathlib import Path

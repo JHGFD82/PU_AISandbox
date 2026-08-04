@@ -429,7 +429,12 @@ def client_for_testing(api_key: str) -> Any:
     # in BaseService for an endpoint's own settings.
     return Portkey(
         api_key=api_key,
-        request_timeout=int(_TESTING_TIMEOUT_SECONDS),
+        # Milliseconds, unlike every other timeout in this codebase. Passing
+        # seconds here asks the gateway to give up after sixty *thousandths*
+        # of a second, which fails nearly every request — and the reply says
+        # so plainly ("timeout sent in the request: 60ms"), which is how it
+        # was caught.
+        request_timeout=int(_TESTING_TIMEOUT_SECONDS * 1000),
         http_client=httpx.Client(timeout=_TESTING_TIMEOUT_SECONDS),
     )
 
