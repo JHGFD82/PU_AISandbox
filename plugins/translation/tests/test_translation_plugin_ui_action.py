@@ -54,7 +54,7 @@ class TestUiActionDeclaration:
             "scanned", "spread",
             "output_format", "preserve_tables", "toc", "preserve_media", "font", "font_size",
             "workers",
-            "notes",
+            "notes", "notes_target",
         ]
 
     def test_id_and_command_are_translate(self, plugin_module):
@@ -1015,3 +1015,49 @@ class TestPastingTheTextInstead:
         plugin_module._execute_translate(sandbox, args, "Japanese", "English")
         # No text handed in, so the handler is left to ask for it as before.
         assert sandbox.translate_custom_text.call_args.kwargs.get("text") is None
+
+
+class TestWhereTheNoteLands:
+    """The form's answer has to reach the service, not just be collected."""
+
+    def _sandbox(self, monkeypatch):
+        fake = MagicMock()
+        fake.translation_service = MagicMock()
+        fake.image_translation_service = MagicMock()
+        fake.translate_custom_text.side_effect = (
+            lambda *a, **kw: Path((kw.get("opts") or a[3]).output_file).write_text("done")
+        )
+        monkeypatch.setattr(
+            "src.runtime.sandbox_processor.SandboxProcessor", MagicMock(return_value=fake),
+        )
+        return fake
+
+    def _run(self, plugin_module, tmp_path, **extra):
+        plugin_module.plugin.run_ui_action(
+            fields={"source_language": "ja", "target_language": "en",
+                    "file_text": "ある日", **extra},
+            professor="fake", model=None, on_progress=None,
+            output_dir=str(tmp_path / "out"),
+        )
+
+    def test_a_standing_instruction_reaches_only_the_system_prompt(
+        self, monkeypatch, plugin_module, tmp_path
+    ):
+        fake = self._sandbox(monkeypatch)
+        self._run(plugin_module, tmp_path, notes="romanise names", notes_target="system")
+        assert fake.translation_service.system_note == "romanise names"
+        assert fake.translation_service.user_note != "romanise names"
+
+    def test_it_reaches_the_image_path_as_well(
+        self, monkeypatch, plugin_module, tmp_path
+    ):
+        """A scanned page goes down the other service; the note still applies."""
+        fake = self._sandbox(monkeypatch)
+        self._run(plugin_module, tmp_path, notes="keep it literal", notes_target="user")
+        assert fake.image_translation_service.user_note == "keep it literal"
+
+    def test_no_answer_still_means_both(self, monkeypatch, plugin_module, tmp_path):
+        fake = self._sandbox(monkeypatch)
+        self._run(plugin_module, tmp_path, notes="a note")
+        assert fake.translation_service.system_note == "a note"
+        assert fake.translation_service.user_note == "a note"

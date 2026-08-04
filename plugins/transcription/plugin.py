@@ -124,7 +124,7 @@ from src.settings import (  # noqa: E402
 )
 from src.runtime.ui_action import (  # noqa: E402
     PageTextCallback, ProgressCallback, UiAction, UiField, UiJobResult, UiPromptPreview,
-    apply_extension_ui_hooks,
+    apply_extension_ui_hooks, apply_notes, notes_target_field,
 )
 from src.services.constants import DEFAULT_PARALLEL_WORKERS        # noqa: E402
 
@@ -549,7 +549,6 @@ class TranscriptionPlugin:
         if not file_path:
             raise CLIError("No file was attached to this transcribe job.")
         file_name = fields.get("file_name") or os.path.basename(file_path)
-        notes = (fields.get("notes") or "").strip() or None
 
         def _to_float(value, field_label: str) -> Optional[float]:
             raw = str(value if value is not None else "").strip()
@@ -597,9 +596,7 @@ class TranscriptionPlugin:
         sandbox = SandboxProcessor(
             professor, model=model, temperature=temperature, top_p=top_p, max_tokens=max_tokens,
         )
-        if notes:
-            sandbox.image_processor_service.system_note = notes
-            sandbox.image_processor_service.user_note = notes
+        apply_notes(fields, sandbox.image_processor_service)
         # A language-extension plugin's own composer fields (e.g.
         # transcription-ea's kanbun/kanbun_main/preserve_tables checkboxes)
         # — registered separately, not part of this plugin's own declared
@@ -680,13 +677,10 @@ class TranscriptionPlugin:
 
         code = (fields.get("target_language") or "").strip().lower()
         target_language = LANGUAGE_MAP.get(code, "the selected language")
-        notes = (fields.get("notes") or "").strip() or None
         vertical = str(fields.get("vertical", "")).strip().lower() in ("true", "1", "on", "yes")
 
         sandbox = SandboxProcessor(professor, model=model)
-        if notes:
-            sandbox.image_processor_service.system_note = notes
-            sandbox.image_processor_service.user_note = notes
+        apply_notes(fields, sandbox.image_processor_service)
         # Same extension-hook call run_ui_action makes (see its own comment
         # there) — so a professor previewing a Japanese/Chinese/Korean job
         # sees the kanbun/preserve-tables guidance actually reflected in the
@@ -742,6 +736,7 @@ ui_action = UiAction(
             kind="text", required=False, group="Performance",
         ),
         UiField(name="notes", label="Notes for the model", kind="text", required=False, group="Notes"),
+        notes_target_field(),
     ],
     progress_verb="Transcribing",
 )

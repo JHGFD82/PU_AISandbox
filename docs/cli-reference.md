@@ -276,6 +276,9 @@ Anything else falls back to `.txt`.
 | `-ns <text>` | Add a note to the system prompt |
 | `-nu <text>` | Add a note to the user prompt |
 | `-nb <text>` | Add the same note to both |
+
+The same three choices are in the browser: type the note in the job form's
+**Notes for the model** box, and **Add that note to** says where it goes.
 | `--dry-run` | Show the prompts without calling the API |
 
 ### Examples
@@ -320,6 +323,9 @@ python main.py jh43 transcribe <language> [options]
 | `-n`, `--notes` | Ask interactively where to add a note |
 | `-ns` / `-nu` / `-nb <text>` | Add a note to the system prompt, the user prompt, or both |
 | `--dry-run` | Show the prompts without calling the API |
+
+The same three choices are in the browser: type the note in the job form's
+**Notes for the model** box, and **Add that note to** says where it goes.
 
 ```bash
 python main.py jh43 transcribe en -i scan.png -o transcription.txt
