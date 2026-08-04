@@ -1668,25 +1668,43 @@ function buildFileModeToggle(field, input) {
   box.className = "file-mode";
   const name = jobFieldControlId(field.name) + "-mode";
 
-  const apply = (folder) => {
+  const apply = (mode) => {
     // Rebuilt rather than toggled in place: browsers are inconsistent about
     // honouring webkitdirectory once an input exists, and anything chosen in one
     // mode means nothing in the other, so clearing it is the honest behaviour.
     const current = document.getElementById(input.id);
     if (!current || !current.parentNode) return;
-    const replacement = document.createElement("input");
-    replacement.type = "file";
+    let replacement;
+    if (mode === "text") {
+      // A passage typed straight in, which is what the CLI's -c does. Taller
+      // than an ordinary field because what goes in it is a passage, not a
+      // value, and one line would misrepresent that.
+      replacement = document.createElement("textarea");
+      replacement.rows = 8;
+      replacement.placeholder = "Type or paste the passage to translate";
+      replacement.addEventListener("input", scheduleJobPreview);
+    } else {
+      replacement = document.createElement("input");
+      replacement.type = "file";
+      if (mode === "folder") {
+        replacement.multiple = true;
+        replacement.webkitdirectory = true;
+      }
+    }
     replacement.id = input.id;
     replacement.required = current.required;
-    if (folder) {
-      replacement.multiple = true;
-      replacement.webkitdirectory = true;
-    }
     current.parentNode.replaceChild(replacement, current);
+    // What was chosen in the old mode is gone, so anything the preview was
+    // showing from it is out of date the moment the mode changes.
+    scheduleJobPreview();
   };
 
-  [["file", "A single file", false], ["folder", "A whole folder", true]].forEach(
-    ([value, text, folder], index) => {
+  const modes = [["file", "A single file"]];
+  if (field.allow_folder) modes.push(["folder", "A whole folder"]);
+  if (field.allow_text) modes.push(["text", "Paste the text"]);
+
+  modes.forEach(
+    ([value, text], index) => {
       const id = `${name}-${value}`;
       const radio = document.createElement("input");
       radio.type = "radio";
@@ -1694,7 +1712,7 @@ function buildFileModeToggle(field, input) {
       radio.id = id;
       radio.value = value;
       radio.checked = index === 0;
-      radio.addEventListener("change", () => { if (radio.checked) apply(folder); });
+      radio.addEventListener("change", () => { if (radio.checked) apply(value); });
       const label = document.createElement("label");
       label.setAttribute("for", id);
       label.textContent = text;
@@ -1773,7 +1791,7 @@ function buildJobFieldControl(field) {
     input = document.createElement("input");
     input.type = "file";
     input.id = jobFieldControlId(field.name);
-    if (field.allow_folder) {
+    if (field.allow_folder || field.allow_text) {
       // webkitdirectory does not *add* folder selection, it replaces file
       // selection: an input carrying it can only ever pick a directory. Setting
       // it unconditionally is what stopped anyone choosing a single document to
@@ -1814,7 +1832,12 @@ function collectJobFieldValues(fields) {
     if (field.kind === "checkbox") {
       values[field.name] = el.checked;
     } else if (field.kind === "file") {
-      files = el.files ? Array.from(el.files) : [];
+      // In paste mode this control is a textarea, not a file input — so what
+      // it holds is the passage itself, under its own name, and no file is
+      // uploaded at all. `el.files` is the honest test: the element either is
+      // a file input or it isn't.
+      if (el.files) files = Array.from(el.files);
+      else values[field.name + "_text"] = el.value;
     } else {
       values[field.name] = el.value;
     }
@@ -1870,8 +1893,11 @@ async function startJobFromModal() {
   const fields = state.activeActionFields || action.fields;
   const { values, files } = collectJobFieldValues(fields);
   const fileField = fields.find(f => f.kind === "file");
-  if (fileField && fileField.required && files.length === 0) {
-    errorEl.textContent = fileField.allow_folder ? "Please choose a file or folder." : "Please choose a file.";
+  const pasted = fileField ? (values[fileField.name + "_text"] || "").trim() : "";
+  if (fileField && fileField.required && files.length === 0 && !pasted) {
+    errorEl.textContent = fileField.allow_text
+      ? "Please choose a file, or paste the text to translate."
+      : (fileField.allow_folder ? "Please choose a file or folder." : "Please choose a file.");
     return;
   }
   const missing = fields.filter(

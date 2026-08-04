@@ -891,10 +891,23 @@ class TranslationPlugin:
         source_language = _resolve_language(fields.get("source_language", ""), "source language")
         target_language = _resolve_language(target_code_raw, "target language")
 
+        # A passage typed into the form instead of a document chosen from disk
+        # — the browser's answer to the command line's -c/--custom. Checked
+        # first because in that mode there is no upload at all, so file_path is
+        # legitimately absent rather than missing by mistake.
+        pasted_text = (fields.get("file_text") or "").strip() or None
         file_path = fields.get("file_path")
-        if not file_path:
-            raise CLIError("No file was attached to this translate job.")
-        file_name = fields.get("file_name") or os.path.basename(file_path)
+        if not pasted_text and not file_path:
+            raise CLIError(
+                "This translate job had nothing to translate — choose a file, "
+                "or switch to 'Paste the text' and type the passage in."
+            )
+        file_name = (
+            fields.get("file_name") or (os.path.basename(file_path) if file_path else "")
+        )
+        # Narrowed for everything below: the guard above means this is a real
+        # path whenever there is no pasted text, and unused when there is.
+        document = file_path or ""
 
         scanned = _to_bool(fields.get("scanned"))
         spread = _to_bool(fields.get("spread"))
@@ -934,7 +947,10 @@ class TranslationPlugin:
         # (the normal case without that extension installed).
         apply_extension_ui_hooks("translate", target_code_raw, sandbox, fields)
 
-        base_name = os.path.splitext(file_name)[0] or "document"
+        # Pasted text has no filename to take this from, so it gets one that
+        # says what it is. Without it the output would arrive as
+        # "document_Japanese_to_English.txt" whatever was actually typed.
+        base_name = os.path.splitext(file_name)[0] or ("pasted_text" if pasted_text else "document")
         requested_format = (fields.get("output_format") or "same").strip().lower()
         _format_ext = {"docx": ".docx", "pdf": ".pdf", "txt": ".txt", "md": ".md"}
         if requested_format in _format_ext:
@@ -949,7 +965,7 @@ class TranslationPlugin:
             raise CLIError(
                 "Preserving embedded images requires a Word (.docx) output format."
             )
-        if preserve_media and os.path.isdir(file_path):
+        if preserve_media and os.path.isdir(document):
             # Mirrors run()'s own --preserve-media validation for a single
             # image file (there's no embedded media to carry over from a
             # picture) — a folder of page images is the same situation, just
@@ -978,15 +994,24 @@ class TranslationPlugin:
         # translate_document() below has no folder-handling logic of its
         # own (only single-file _detect_and_validate_file), so this must be
         # checked here first, exactly mirroring run()'s own CLI branch.
-        if os.path.isdir(file_path):
+        if pasted_text:
+            # No document, so nothing to detect the type of and no pages to
+            # split: the passage goes straight to the translation service, the
+            # same call the command line makes for -c.
+            sandbox.translate_custom_text(
+                source_language, target_language, abstract_text, opts,
+                text=pasted_text,
+            )
+            summary = f"Translated the pasted {source_language} text into {target_language}."
+        elif os.path.isdir(document):
             sandbox.process_image_translation_folder(
-                file_path, source_language, target_language, opts,
+                document, source_language, target_language, opts,
                 workers=workers, spread=spread, on_progress=on_progress, on_page_text=on_page_text,
             )
             summary = f"Translated the images in '{file_name}' from {source_language} to {target_language}."
         else:
             sandbox.translate_document(
-                file_path,
+                document,
                 source_language,
                 target_language,
                 page_nums=page_nums,
@@ -1053,6 +1078,7 @@ class TranslationPlugin:
         scanned = str(fields.get("scanned", "")).strip().lower() in ("true", "1", "on", "yes")
         notes = (fields.get("notes") or "").strip() or None
         abstract_text = (fields.get("abstract") or "").strip() or None
+        pasted_text = (fields.get("file_text") or "").strip() or None
         preserve_tables = str(fields.get("preserve_tables", "")).strip().lower() in ("true", "1", "on", "yes")
         toc = str(fields.get("toc", "")).strip().lower() in ("true", "1", "on", "yes")
 
@@ -1081,8 +1107,14 @@ class TranslationPlugin:
             # The abstract goes in as itself, the way --dry-run shows it on the
             # command line, so the preview is the prompt that would be sent and
             # not a version of it with the context left out.
+            # What was typed, when something was — so pasting a passage shows
+            # the prompt it would really be sent in, not a stand-in for it.
+            # A document is still a placeholder: it has not been read yet, and
+            # reading it here would mean opening a file on every keystroke.
             placeholder = generate_process_text(
-                abstract_text or "", f"[{source_language} document text]", "",
+                abstract_text or "",
+                pasted_text or f"[{source_language} document text]",
+                "",
             )
             sys_p, usr_p = svc.build_prompts(
                 placeholder, source_language, target_language, output_format=output_format,
@@ -1120,7 +1152,7 @@ ui_action = UiAction(
         UiField(name="target_language", label="Target language", kind="language", group="Document"),
         UiField(
             name="file", label="Document (or select multiple images / a whole folder of scans)",
-            kind="file", group="Document", allow_folder=True,
+            kind="file", group="Document", allow_folder=True, allow_text=True,
         ),
         UiField(
             # The command line asks for this text at the terminal when -a is
