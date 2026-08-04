@@ -56,7 +56,7 @@ In the `data/` folder of the person's own files folder — active: `token_usage_
 
 ### Model catalog & alternate endpoints
 - `model_catalog.json` (in the person's own files folder; created by setup from `templates/model_catalog.template.json`) holds pricing/`supports_vision` per model, keyed by `[config.provider_map]` for provider slug quirks (e.g. `google` → `vertex-ai` for PortKey).
-- `openai/model-name` or `google/model-name` passed to `-m` auto-fetches and saves pricing from PortKey on first use. Other providers must be added to the JSON by hand — there is no CLI catalog management.
+- `openai/model-name` or `google/model-name` passed to `-m` auto-fetches and saves pricing from PortKey on first use, then tests the model to fill in `supports_vision` and any `rejects`/`prefers` — see `src/models/capabilities.py`. Pricing for other providers must still be added to the JSON by hand. `settings test-model [model]` re-runs that testing on demand.
 - Colon syntax in `-m` (e.g. `-m my_cluster:llama-3-70b`) looks up the matching `[endpoints.<name>]` table (merged from `settings.*.toml`) plus its credential (`endpoints.<name>.key` in `settings.toml`) and points the OpenAI-compatible client at that alternate `base_url`, bypassing the model catalog entirely.
 
 ### Where files live

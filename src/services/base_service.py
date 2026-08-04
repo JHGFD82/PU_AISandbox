@@ -135,6 +135,9 @@ class BaseService:
         self.custom_top_p = top_p
         self.custom_max_tokens = max_tokens
         self.client = Portkey(api_key=api_key)
+        # Kept so that a model met for the first time can be tested with the
+        # same credential the request itself is using — see resolve_model().
+        self._api_key = api_key
         self.token_tracker = (
             token_tracker
             if token_tracker is not None
@@ -258,7 +261,9 @@ class BaseService:
                     "'default_model' in that endpoint's settings."
                 )
             return model
-        model = resolve_model(requested_model=self.custom_model, role=self.model_role)
+        model = resolve_model(
+            requested_model=self.custom_model, role=self.model_role, api_key=self._api_key
+        )
         maybe_sync_model_pricing(model)
         return model
 

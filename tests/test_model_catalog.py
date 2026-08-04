@@ -396,7 +396,7 @@ class TestResolveModel:
         catalog_file.write_text(json.dumps(initial_catalog))
         monkeypatch.setattr(catalog_module, "get_model_catalog_path", lambda: catalog_file)
 
-        def fake_add(provider_model):
+        def fake_add(provider_model, api_key=None, probe=True):
             cat = json.loads(catalog_file.read_text())
             cat["models"]["new-gpt"] = {"input": 1.0, "output": 3.0, "supports_vision": False}
             catalog_file.write_text(json.dumps(cat))
@@ -1408,8 +1408,10 @@ class TestAnAutoAddedModelAnnouncesWhatItCannotDo:
         with caplog.at_level(logging.WARNING):
             _, entry = add_model_to_catalog("openai/some-new-model")
         assert entry["supports_vision"] is False
-        assert "supports_vision" in caplog.text
         assert "chat" in caplog.text.lower()
+        # Names the command that settles it, rather than asking anyone to open
+        # the catalogue — which is the whole point of testing on add.
+        assert "settings test-model" in caplog.text
 
     def test_it_says_nothing_when_the_answer_was_reported(self, monkeypatch, tmp_path, caplog):
         catalog_file = tmp_path / "model_catalog.json"

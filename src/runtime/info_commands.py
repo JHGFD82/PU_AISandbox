@@ -296,6 +296,9 @@ def _handle_settings_command(args: argparse.Namespace) -> None:
     if sub == 'model-quirks':
         _settings_model_quirks(args)
         return
+    if sub == 'test-model':
+        _settings_test_model(args)
+        return
 
     raise CLIError(
         "No settings subcommand specified.\n"
@@ -306,8 +309,117 @@ def _handle_settings_command(args: argparse.Namespace) -> None:
         "       python main.py settings set <KEY>\n"
         "       python main.py settings unset <KEY>\n"
         "       python main.py settings export-shared\n"
-        "       python main.py settings model-quirks [MODEL]"
+        "       python main.py settings model-quirks [MODEL]\n"
+        "       python main.py settings test-model [MODEL]"
     )
+
+
+def _key_for_testing(requested: str | None) -> str:
+    """Return an API key to run the capability tests with.
+
+    Testing a model means making real requests, which need somebody's key. Any
+    professor's will do — the answers are about the model, not about them — so
+    this doesn't ask when there is only one person set up.
+
+    Args:
+        requested: The netID named with ``--professor``, or ``None`` to pick.
+
+    Returns:
+        The API key to use.
+
+    Raises:
+        CLIError: If nobody is set up, or if there is more than one person and
+                  none was named — with the list to choose from.
+    """
+    from ..config import get_api_key, load_professor_config
+
+    if requested:
+        key, _ = get_api_key(requested)
+        return key
+
+    people = load_professor_config()
+    if not people:
+        raise CLIError(
+            "Nobody is set up yet, and testing a model means making real requests "
+            "with somebody's API key.\nAdd someone first: python main.py settings add-professor"
+        )
+    if len(people) > 1:
+        names = ", ".join(sorted(people))
+        raise CLIError(
+            "More than one person is set up, so say whose API key to test with — the "
+            f"requests are billed to it.\nChoose from: {names}\n"
+            "  python main.py settings test-model <model> --professor <netid>"
+        )
+    key, _ = get_api_key(next(iter(people)))
+    return key
+
+
+def _settings_test_model(args: argparse.Namespace) -> None:
+    """Find out what a model can do by trying it, and save the answers.
+
+    The catalogue has to know several things about a model — whether it can
+    read images, what it wants the response-length setting called, and so on —
+    that no provider publishes anywhere readable. This settles them by sending
+    the model a few very small requests and seeing which it accepts.
+
+    With no model named, tests every model in the catalogue. That is the way to
+    correct a catalogue built before testing existed, where anything added
+    automatically was recorded as unable to read images because there was no
+    way to find out.
+    """
+    from ..console import print_banner
+    from ..models import get_available_models, load_model_catalog, save_model_catalog
+    from ..models.capabilities import apply_capability_report, probe_model_capabilities
+
+    # The name is checked before anyone is asked whose key to use: a typo is
+    # the likelier mistake, and it costs nothing to catch.
+    available = get_available_models()
+    if args.model is not None and args.model not in available:
+        raise CLIError(
+            f"'{args.model}' isn't in the catalogue, so there is nothing to test. "
+            f"Models it knows about: {', '.join(sorted(available, key=str.lower))}"
+        )
+    targets = [args.model] if args.model else sorted(available, key=str.lower)
+
+    api_key = _key_for_testing(getattr(args, 'professor', None))
+
+    from portkey_ai import Portkey
+    client = Portkey(api_key=api_key)
+
+    print_banner("TESTING WHAT THESE MODELS CAN DO")
+    print(
+        f"Trying {len(targets)} model{'s' if len(targets) != 1 else ''} with a few very "
+        "small requests each.\nThis costs a fraction of a cent and takes a moment per model.\n"
+    )
+
+    catalog = load_model_catalog()
+    changed = 0
+    for name in targets:
+        print(f"{name}")
+        report = probe_model_capabilities(name, client)
+        if not report.reachable:
+            print("  could not be reached — nothing changed")
+            for line in report.unsettled:
+                print(f"  {line}")
+            continue
+
+        before = dict(catalog["models"].get(name, {}))
+        after = apply_capability_report(before, report)
+        for line in report.settled:
+            print(f"  {line}")
+        for line in report.unsettled:
+            print(f"  (not settled) {line}")
+        if after != before:
+            catalog["models"][name] = after
+            changed += 1
+            print("  saved")
+        else:
+            print("  already recorded correctly")
+
+    if changed:
+        save_model_catalog(catalog)
+    print(f"\n{changed} of {len(targets)} updated.")
+    print("=" * 60)
 
 
 def _settings_model_quirks(args: argparse.Namespace) -> None:

@@ -269,6 +269,20 @@ def _build_settings_subparser(subparsers: argparse._SubParsersAction) -> None:
         help='netID or display name of the person to remove (see: --show-config)',
     )
 
+    test_model = settings_sub.add_parser(
+        'test-model',
+        help="Find out what a model can do by trying it, and save the answers",
+    )
+    _add_debug_flags(test_model)
+    test_model.add_argument(
+        'model', type=str, nargs='?', default=None,
+        help="Which model to test (default: every model in the catalog)",
+    )
+    test_model.add_argument(
+        '--professor', type=str, default=None,
+        help="Whose API key to test with (default: the only one, if there is only one)",
+    )
+
     list_parser = settings_sub.add_parser(
         'list', help='List optional settings.toml values and whether each is currently set',
     )
