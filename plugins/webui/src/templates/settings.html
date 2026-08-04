@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <title>Settings — Princeton University AI Sandbox</title>
 {% include "_design-system.html" %}
+{% include "_combobox.html" %}
 <style>
   body, #topbar, .card, input, select, .badge, button.secondary, button.danger {
     transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease;
@@ -327,9 +328,25 @@ default_model = "llama-3-70b-instruct"</div>
             <input type="text" id="add-model-name" placeholder="openai/gpt-5.2"
                    autocapitalize="none" autocorrect="off" spellcheck="false" required>
           </div>
-          <div id="add-model-professor-field">
-            <label for="add-model-professor">Test with whose key</label>
-            <select id="add-model-professor"></select>
+          <div id="add-model-professor-row">
+            <label for="add-model-professor-field">Test with whose key</label>
+            <!-- The same picker the chat page uses for the professor and the
+                 model, from the shared partial — not a <select>, which the
+                 browser draws at its own height with its own arrow and a list
+                 that ignores this page's theme. -->
+            <div class="combobox" id="add-model-professor-combobox">
+              <input class="combobox-field" id="add-model-professor-field" type="text"
+                     readonly autocomplete="off" role="combobox" aria-expanded="false"
+                     aria-controls="add-model-professor-list">
+              <button type="button" class="combobox-toggle"
+                      id="add-model-professor-toggle-btn"
+                      aria-label="Show the list of professors"
+                      title="Show the list of professors">
+                <svg viewBox="0 0 21.6895 12.959"><path d="M10.6641 12.959C10.9473 12.959 11.2109 12.832 11.4062 12.6172L21.0352 2.58789C21.2207 2.40234 21.3281 2.16797 21.3281 1.89453C21.3281 1.34766 20.9082 0.927734 20.3516 0.927734C20.0977 0.927734 19.8438 1.02539 19.6582 1.20117L10.0684 11.1816L11.2695 11.1816L1.66016 1.20117C1.48438 1.02539 1.24023 0.927734 0.976562 0.927734C0.419922 0.927734 0 1.34766 0 1.89453C0 2.16797 0.117188 2.40234 0.292969 2.59766L9.92188 12.627C10.1367 12.832 10.3809 12.959 10.6641 12.959Z" fill="currentColor"/></svg>
+              </button>
+              <div class="combobox-list" id="add-model-professor-list"
+                   role="listbox" hidden></div>
+            </div>
           </div>
         </div>
         <p class="hint field-note">
@@ -849,21 +866,45 @@ for (const key of Object.keys(FOLDER_CHOICES)) {
 // ── Models ──────────────────────────────────────────────────────────────────
 // Whose key the test requests are billed to. Hidden when there is only one
 // person set up, because then there is nothing to decide.
+// Whose netID the form will send. Held here rather than read back out of the
+// field, because the field shows a person's name and the request needs their
+// netID, and the two are not the same string.
+let addModelProfessor = "";
+
 function renderModelProfessors(data) {
-  const select = document.getElementById("add-model-professor");
   const field = document.getElementById("add-model-professor-field");
-  const previous = select.value;
-  select.innerHTML = "";
+  const list = document.getElementById("add-model-professor-list");
+  const row = document.getElementById("add-model-professor-row");
+  const still_there = data.professors.some(p => p.netid === addModelProfessor);
+  if (!still_there) addModelProfessor = "";
+  list.replaceChildren();
   data.professors.forEach(p => {
-    const option = document.createElement("option");
-    option.value = p.netid;
-    option.textContent = `${p.name} (${p.netid})`;
-    select.appendChild(option);
+    const label = `${p.name} (${p.netid})`;
+    const option = document.createElement("div");
+    option.className = "combobox-option";
+    option.setAttribute("role", "option");
+    option.textContent = label;
+    option.addEventListener("click", () => {
+      addModelProfessor = p.netid;
+      field.value = label;
+      closeCombobox("add-model-professor");
+    });
+    list.appendChild(option);
+    // The first is chosen by default, the way a <select> shows its first
+    // option — otherwise the box sits empty and the button looks broken.
+    if (!addModelProfessor) {
+      addModelProfessor = p.netid;
+      field.value = label;
+    } else if (p.netid === addModelProfessor) {
+      field.value = label;
+    }
   });
-  if (previous) select.value = previous;
-  field.style.display = data.professors.length > 1 ? "" : "none";
+  if (!data.professors.length) field.value = "";
+  row.style.display = data.professors.length > 1 ? "" : "none";
   document.getElementById("add-model-btn").disabled = !data.professors.length;
 }
+
+wireCombobox("add-model-professor");
 
 function modelRow(m) {
   const row = document.createElement("div");
@@ -910,7 +951,7 @@ document.getElementById("models-list").addEventListener("click", async (ev) => {
   const button = ev.target.closest("[data-test-model]");
   if (!button) return;
   const name = button.dataset.testModel;
-  const professor = document.getElementById("add-model-professor").value;
+  const professor = addModelProfessor;
   if (!professor) { alert("Add a professor first — testing a model needs an API key."); return; }
   button.disabled = true;
   button.textContent = "Testing…";
@@ -953,7 +994,7 @@ document.getElementById("add-model-form").addEventListener("submit", async (ev) 
   const button = document.getElementById("add-model-btn");
   const errorBox = document.getElementById("add-model-error");
   const provider_model = nameBox.value.trim();
-  const professor = document.getElementById("add-model-professor").value;
+  const professor = addModelProfessor;
   if (!provider_model) return;
   errorBox.style.display = "none";
   button.disabled = true;
