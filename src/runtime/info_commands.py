@@ -369,7 +369,9 @@ def _settings_test_model(args: argparse.Namespace) -> None:
     """
     from ..console import print_banner
     from ..models import get_available_models, load_model_catalog, save_model_catalog
-    from ..models.capabilities import apply_capability_report, probe_model_capabilities
+    from ..models.capabilities import (
+        apply_capability_report, client_for_testing, probe_model_capabilities,
+    )
 
     # The name is checked before anyone is asked whose key to use: a typo is
     # the likelier mistake, and it costs nothing to catch.
@@ -384,8 +386,7 @@ def _settings_test_model(args: argparse.Namespace) -> None:
     api_key = _key_for_testing(getattr(args, 'professor', None))
     remove_missing = bool(getattr(args, 'remove_missing', False))
 
-    from portkey_ai import Portkey
-    client = Portkey(api_key=api_key)
+    client = client_for_testing(api_key)
 
     print_banner("TESTING WHAT THESE MODELS CAN DO")
     print(
@@ -421,6 +422,11 @@ def _settings_test_model(args: argparse.Namespace) -> None:
         if after != before:
             catalog["models"][name] = after
             changed += 1
+            # Written now rather than at the end. A sweep of the whole
+            # catalogue is a few minutes of requests, and keeping it all until
+            # the last one means an interruption anywhere throws away every
+            # answer already paid for.
+            save_model_catalog(catalog)
             print("  saved")
         else:
             print("  already recorded correctly")
@@ -434,6 +440,7 @@ def _settings_test_model(args: argparse.Namespace) -> None:
                 catalog["models"].pop(name, None)
                 changed += 1
         if remove_missing:
+            save_model_catalog(catalog)
             print(f"\nRemoved {len(gone)}: {', '.join(gone)}")
         else:
             print(f"\n{len(gone)} no longer exist: {', '.join(gone)}")
@@ -441,8 +448,6 @@ def _settings_test_model(args: argparse.Namespace) -> None:
             print("them out:")
             print("  python main.py settings test-model --remove-missing")
 
-    if changed:
-        save_model_catalog(catalog)
     print(f"\n{changed} of {len(targets)} updated.")
     print("=" * 60)
 

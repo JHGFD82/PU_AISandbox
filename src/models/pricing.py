@@ -96,12 +96,12 @@ def _test_and_describe(
         The entry with whatever was learned applied to it, or unchanged if
         nothing could be.
     """
-    from portkey_ai import Portkey
-
-    from .capabilities import apply_capability_report, probe_model_capabilities
+    from .capabilities import (
+        apply_capability_report, client_for_testing, probe_model_capabilities,
+    )
 
     try:
-        report = probe_model_capabilities(model_name, Portkey(api_key=api_key))
+        report = probe_model_capabilities(model_name, client_for_testing(api_key))
     except Exception as error:
         # Never fatal. Adding a model that hasn't been tested is a worse
         # catalog entry, not a broken one, and this runs in the middle of

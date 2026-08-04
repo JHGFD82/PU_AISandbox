@@ -448,3 +448,48 @@ class TestTheSweepOf2026_08_03:
         report = probe_model_capabilities("claude-like", model)
         assert report.findings["supports_vision"] is True
         assert set(report.findings["rejects"]) == {"temperature", "top_p"}
+
+
+class TestOneSlowModelCannotHoldUpTheRest:
+    """A sweep stalled for seven minutes on a single unanswered request.
+
+    It would have waited indefinitely; in the browser that is a page that never
+    comes back. The client the tests go through now gives up.
+    """
+
+    def test_the_testing_client_gives_up_on_its_own(self):
+        """The client-side half, which is the one that saves us.
+
+        Written after a first attempt passed `timeout=` — a keyword Portkey's
+        constructor does not take. It was swallowed silently and did nothing,
+        so the "fix" changed no behaviour at all.
+        """
+        from src.models.capabilities import client_for_testing
+
+        client = client_for_testing("sk-test")
+        transport_timeout = getattr(getattr(client, "_client", None), "timeout", None)
+        assert transport_timeout is not None, "a probe could wait forever"
+        assert transport_timeout.read and transport_timeout.read <= 120
+
+    def test_it_also_asks_the_gateway_to_give_up(self):
+        """The other half: it stops a request the gateway is still holding."""
+        from src.models.capabilities import client_for_testing
+
+        assert getattr(client_for_testing("sk-test"), "request_timeout", None)
+
+    def test_every_route_builds_it_the_same_way(self):
+        """Three callers each built their own, and one forgetting is enough."""
+        from pathlib import Path
+
+        root = Path(__file__).resolve().parents[1]
+        sources = [
+            root / "src" / "models" / "pricing.py",
+            root / "src" / "runtime" / "info_commands.py",
+            root / "plugins" / "webui" / "src" / "app.py",
+        ]
+        for path in sources:
+            body = path.read_text()
+            if "probe_model_capabilities" not in body:
+                continue
+            assert "client_for_testing" in body, f"{path.name} builds its own client"
+            assert "Portkey(api_key" not in body, f"{path.name} still builds a raw client"

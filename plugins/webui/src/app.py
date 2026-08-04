@@ -980,12 +980,10 @@ def create_app() -> FastAPI:
         """
         _require_unlocked(request)
         professor = _validated_professor(body.professor)
-        from portkey_ai import Portkey
-
         from src.config import get_api_key
         from src.models import load_model_catalog, save_model_catalog
         from src.models.capabilities import (
-            apply_capability_report, probe_model_capabilities,
+            apply_capability_report, client_for_testing, probe_model_capabilities,
         )
 
         catalog = load_model_catalog()
@@ -993,7 +991,7 @@ def create_app() -> FastAPI:
             raise HTTPException(404, f"'{model_name}' isn't in the catalogue.")
 
         api_key, _ = get_api_key(professor)
-        report = probe_model_capabilities(model_name, Portkey(api_key=api_key))
+        report = probe_model_capabilities(model_name, client_for_testing(api_key))
         if report.missing:
             # 410 rather than 502: there is nothing wrong with the request or
             # the connection, the model simply isn't there any more. The page

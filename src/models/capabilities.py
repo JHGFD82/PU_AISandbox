@@ -398,6 +398,42 @@ _PROBES = (
 )
 
 
+# Long enough for a slow provider to answer sixteen tokens, short enough that
+# one unresponsive model cannot hold up the rest. Without it a sweep of the
+# catalogue stalled for seven minutes on a single request and would have waited
+# indefinitely — and in the browser that is a page that never comes back.
+_TESTING_TIMEOUT_SECONDS = 60.0
+
+
+def client_for_testing(api_key: str) -> Any:
+    """Build the client the capability tests are sent through.
+
+    Here rather than at each call site so the timeout can't be forgotten by one
+    of them — the command line, the browser, and adding a model each need this
+    and each used to build their own.
+
+    Args:
+        api_key: The professor's API key the test requests are billed to.
+
+    Returns:
+        A PortKey client that gives up on a request rather than waiting for one
+        that is never coming.
+    """
+    import httpx
+    from portkey_ai import Portkey
+
+    # Both halves, because they stop different things. request_timeout is sent
+    # to the gateway and asks *it* to give up; the http_client timeout is
+    # enforced here and is what saves us if nothing comes back at all — which
+    # is the case that actually stalled. The same http_client pattern is used
+    # in BaseService for an endpoint's own settings.
+    return Portkey(
+        api_key=api_key,
+        request_timeout=int(_TESTING_TIMEOUT_SECONDS),
+        http_client=httpx.Client(timeout=_TESTING_TIMEOUT_SECONDS),
+    )
+
+
 def probe_model_capabilities(model_name: str, client: Any) -> CapabilityReport:
     """Ask a model what it can do, and report the answers.
 
