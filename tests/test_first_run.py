@@ -135,3 +135,90 @@ class TestCompleteSetup:
         extras = tmp_path / "made" / "on" / "demand"
         first_run.complete_setup(extras)
         assert extras.is_dir()
+
+
+class TestAFreshInstallLeavesYouReady:
+    """What setup leaves behind, and whether a person can act on it.
+
+    Setup makes a folder and three files, none of which does anything on its
+    own: there is nobody to bill and no model to send anything to. What matters
+    is that both gaps are named, and that walking into either produces an
+    explanation rather than a fault.
+    """
+
+    def test_it_creates_a_file_for_every_template_the_package_ships(self, tmp_path):
+        """Against the real templates, not this file's stubs.
+
+        The stub fixture above ships two templates; the package ships three, and
+        the third — preferences.toml, where every plugin's adjustable settings
+        are listed for you — is the one somebody actually opens.
+        """
+        import shutil
+
+        from src import first_run, paths
+
+        real_templates = Path(__file__).resolve().parent.parent / "templates"
+        expected = {
+            "settings.template": "settings.toml",
+            "preferences.template.toml": "preferences.toml",
+            "model_catalog.template.json": "model_catalog.json",
+        }
+        for template in expected:
+            assert (real_templates / template).exists(), template
+            shutil.copy(real_templates / template, paths.TEMPLATES_DIR / template)
+
+        extras = tmp_path / "data"
+        first_run.initialize_extras(extras)
+        first_run.complete_setup(extras)
+        made = {f.name for f in extras.rglob("*") if f.is_file()}
+        assert made == set(expected.values())
+
+    def test_it_ships_no_models(self):
+        """Which models exist depends on the institution, not on this software.
+
+        Shipping a guess hands somebody names their sandbox may not offer, and
+        a price that may not be theirs.
+        """
+        import json
+        from pathlib import Path
+
+        template = (Path(__file__).resolve().parent.parent / "templates"
+                    / "model_catalog.template.json")
+        assert json.loads(template.read_text())["models"] == {}
+
+    def test_it_still_ships_the_things_that_are_not_a_guess(self):
+        """Pricing unit, budget and provider names are the same everywhere."""
+        import json
+        from pathlib import Path
+
+        template = (Path(__file__).resolve().parent.parent / "templates"
+                    / "model_catalog.template.json")
+        config = json.loads(template.read_text())["config"]
+        assert config["pricing_unit"] == 1_000_000
+        assert "monthly_limit" in config
+        assert config["provider_map"]["google"] == "vertex-ai"
+
+    def test_setup_says_what_is_still_missing_and_what_to_try(self):
+        from src.setup_prompts import _next_steps
+
+        text = _next_steps()
+        # The two gaps, in the order they are needed.
+        assert "settings add-professor" in text
+        assert text.index("add-professor") < text.index("model")
+        # Where to find out which models to add.
+        assert "documentation" in text
+        # An external endpoint needs none at all, which is easy to miss.
+        assert "external endpoint" in text
+        # Something to try, and where to read more.
+        assert "prompt" in text and "--dry-run" in text
+        assert "usage report" in text
+        assert "README.md" in text
+
+    def test_the_readme_says_the_same_thing(self):
+        """Setup's message scrolls away; the README is still there tomorrow."""
+        from pathlib import Path
+
+        readme = (Path(__file__).resolve().parent.parent / "README.md").read_text()
+        assert "A fresh copy has no models in it" in readme
+        assert "Your first five minutes" in readme
+        assert "--dry-run" in readme

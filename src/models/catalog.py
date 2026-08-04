@@ -16,6 +16,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from ..errors import CLIError
+
 MODEL_CATALOG_FILE = "model_catalog.json"
 
 # The parameters that shape how varied a model's wording is. Grouped because
@@ -159,9 +161,22 @@ def load_model_catalog() -> Dict[str, Any]:
         raise ValueError(error_msg)
 
     if not config["models"]:
-        error_msg = f"Model catalog file {catalog_file} has no models configured."
-        logging.error(error_msg)
-        raise ValueError(error_msg)
+        # A CLIError, not a ValueError, because this is an ordinary state and
+        # not a fault: a freshly set-up copy has no models until somebody adds
+        # the ones their institution offers. A ValueError here reaches the
+        # browser as an unexplained reference code, which is the worst possible
+        # answer to "I have just installed this and it does not work".
+        raise CLIError(
+            "There are no models set up yet, so there is nothing to send this "
+            "to.\n\n"
+            "Add one on the web interface's Settings page, under Models — type "
+            "a name like 'openai/gpt-4o' and it will look up the price and work "
+            "out what the model can do.\n\n"
+            "Which models you can use depends on your institution's AI sandbox. "
+            "Princeton's are listed in its own documentation; check there for "
+            "the current names.\n\n"
+            f"They are recorded in {catalog_file}, which you can also edit by hand."
+        )
 
 
     # Deliberately records the stamp taken *before* the file was read, not a

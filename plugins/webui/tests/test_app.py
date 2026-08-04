@@ -4085,8 +4085,19 @@ class TestAddingAModelFromTheBrowser:
                   unlocked_client.get("/api/settings/models").json()["models"]}
         assert models["old-text-model"]["tested"] is False
 
-    def test_a_missing_catalogue_is_an_empty_list_not_a_failure(self, unlocked_client):
-        """An ordinary state on a copy that has not been set up yet."""
+    def test_a_missing_catalogue_is_an_empty_list_not_a_failure(
+        self, unlocked_client, monkeypatch, tmp_path
+    ):
+        """An ordinary state on a copy that has not been set up yet.
+
+        Pointed at a catalogue that is not there, rather than relying on the
+        suite's fixture being empty — it is not, and a test that passes only
+        because of what another file happens to contain is not testing this.
+        """
+        import src.models.catalog as catalog_module
+
+        monkeypatch.setattr(catalog_module, "get_model_catalog_path",
+                            lambda: tmp_path / "nothing-here.json")
         resp = unlocked_client.get("/api/settings/models")
         assert resp.status_code == 200
         assert resp.json()["models"] == []

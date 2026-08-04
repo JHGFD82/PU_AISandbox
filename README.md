@@ -96,6 +96,50 @@ Either way it asks for three things:
 
 Keys are never displayed once saved — the settings page shows only whether one is set. At the command line they're typed hidden, never as a flag.
 
+### Adding a model
+
+A fresh copy has no models in it. Which ones you can use depends on your
+institution's AI sandbox rather than on this software, so the list is not
+something this repository can ship — **check Princeton's own AI Sandbox
+documentation for the models currently offered**, and add the ones you want.
+
+On the Settings page, under **Models**, type a name in the form
+`provider/model` — `openai/gpt-4o`, `anthropic/claude-opus-4-8`,
+`google/gemini-3-pro-preview` — and press *Add and test*. The price is looked
+up, and the model is then asked a few one-token questions to find out what it
+can do: whether it can read a scanned page, and which settings it turns down.
+That takes a few seconds and a fraction of a cent, once.
+
+If you only ever use an alternate endpoint of your own — a departmental cluster,
+say — you need no models here at all. See
+[Alternate endpoints](docs/configuration.md#alternate-ai-endpoints).
+
+### Your first five minutes
+
+With a person and a model added, the smallest thing that works:
+
+```bash
+source .venv/bin/activate                  # Windows: .venv\Scripts\activate
+
+python main.py jh43 prompt                 # ask a question; end with --- on its own line
+python main.py jh43 prompt --dry-run       # see what would be sent, spending nothing
+python main.py jh43 prompt -m gpt-4o-mini  # ask a particular model
+python main.py jh43 usage report           # what it has cost so far
+```
+
+Replace `jh43` with the netID you added. `--dry-run` is worth trying first: it
+shows the exact prompt the model would receive, without making a call.
+
+That is the smallest part of what this does. Translating and transcribing
+documents, per-person budgets, settings shared across a group, and models on
+your own hardware are all covered in the documentation:
+
+| | |
+|---|---|
+| [`docs/cli-reference.md`](docs/cli-reference.md) | every command and flag |
+| [`docs/configuration.md`](docs/configuration.md) | where files live, and every setting |
+| [`docs/token-usage-guide.md`](docs/token-usage-guide.md) | budgets and cost tracking |
+
 ### Using it from the command line instead
 
 The web interface is one way in; everything is also available as commands. If you prefer that, activate the environment `start.py` created and use `main.py` directly:

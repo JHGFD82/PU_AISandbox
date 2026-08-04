@@ -176,8 +176,43 @@ def run_interactive_setup(
     print_fn(f"\nCreated {chosen}")
     for name in copied:
         print_fn(f"    {name}")
-    print_fn(
-        "\nDone. Next, add the person who'll be using this:\n"
-        "    python main.py settings add-professor"
-    )
+    print_fn(_next_steps())
     return chosen
+
+
+def _next_steps() -> str:
+    """What to do now that the files exist.
+
+    Setup makes a folder and three files, none of which does anything on its
+    own: there is nobody to bill, and no model to send anything to. Ending with
+    "Done" and a path leaves a person to work that out. This says the two
+    things that are still missing, in the order they are needed, and gives
+    something small to try once they are there.
+    """
+    return (
+        "\nDone — but the sandbox cannot do anything yet. Two things are missing.\n"
+        "\n1. Whoever is using this, and their API key:\n"
+        "       python main.py settings add-professor\n"
+        "\n   It asks for their netID, their name, and their key. The key is\n"
+        "   typed at a hidden prompt, so it never reaches your shell history.\n"
+        "\n2. At least one model. Which ones you can use depends on your\n"
+        "   institution's AI sandbox — Princeton's are listed in its own\n"
+        "   documentation, so check there for the current names. Then add one:\n"
+        "\n       python main.py webui serve\n"
+        "\n   and on the Settings page, under Models, type a name like\n"
+        "   openai/gpt-4o. The price is looked up and the model is tried, so\n"
+        "   the sandbox knows what it can do. You can also add models by hand\n"
+        "   in model_catalog.json.\n"
+        "\n   (Using only an external endpoint of your own? Then you need no\n"
+        "   models here at all — see docs/configuration.md.)\n"
+        "\nThen try it:\n"
+        "       python main.py <netid> prompt\n"
+        "           Type a question, end with --- on its own line.\n"
+        "       python main.py <netid> prompt --dry-run\n"
+        "           See what would be sent, without spending anything.\n"
+        "       python main.py <netid> usage report\n"
+        "           What it has cost so far.\n"
+        "\nThat is the smallest part of what this does. Translation and\n"
+        "transcription, budgets, shared settings and alternate endpoints are\n"
+        "all in the docs — start with README.md, then docs/cli-reference.md.\n"
+    )

@@ -20,9 +20,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-import src.models.catalog as _catalog_module  # noqa: E402 — must follow sys.path setup
 
-_TEMPLATE_PATH = _REPO_ROOT / "templates" / "model_catalog.template.json"
 
 _PLUGIN_DIR = Path(__file__).resolve().parent
 
@@ -82,15 +80,6 @@ _register(
     "src.runtime.image_handler",
     "src/runtime/image_handler.py",
 )
-
-
-@pytest.fixture(autouse=True)
-def _use_template_catalog(monkeypatch):
-    """Redirect get_model_catalog_path to the template file for all tests.
-
-    This lets tests run in CI, where no real model_catalog.json exists.
-    """
-    monkeypatch.setattr(_catalog_module, "get_model_catalog_path", lambda: _TEMPLATE_PATH)
 
 
 @pytest.fixture(autouse=True)

@@ -6,9 +6,33 @@ only applies a ``conftest.py`` to the directory it sits in and below, and
 ``plugins/*/tests/`` is not below ``tests/``.
 """
 
+from pathlib import Path
+
 import pytest
 
+import src.models.catalog as _catalog_module
 from src import paths
+
+# The tests' own catalogue, not the one the product ships. Those are two
+# different decisions: a new installation starts with no models, so that nobody
+# is handed names their institution may not offer, while the tests need a
+# couple of known models at known prices. Sharing one file meant emptying the
+# shipped one broke forty-three tests that had nothing to do with it.
+_FIXTURE_CATALOG = Path(__file__).parent / "tests" / "fixtures" / "model_catalog.json"
+
+
+@pytest.fixture(autouse=True)
+def _use_fixture_catalog(monkeypatch):
+    """Point every test at the fixture catalogue, wherever the test lives.
+
+    This one is at the repository root rather than in ``tests/`` for the reason
+    given above: the plugin suites are not below ``tests/``, and they need a
+    catalogue as much as anything else does.
+
+    A test needing its own catalogue replaces this again in its own fixture;
+    the later monkeypatch wins.
+    """
+    monkeypatch.setattr(_catalog_module, "get_model_catalog_path", lambda: _FIXTURE_CATALOG)
 
 
 @pytest.fixture(autouse=True)
