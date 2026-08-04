@@ -190,3 +190,81 @@ class TestExtensionUiHooksRegistry:
         fake_sandbox = object()
         apply_extension_ui_hooks("translate", "jp", fake_sandbox, {"kanbun": "true"})
         assert calls == [(fake_sandbox, {"kanbun": "true"})]
+
+
+class TestAimingANoteAtOneSide:
+    """A note can be a standing instruction, or about the passage in hand.
+
+    The command line has said so since the beginning: -ns for the model's
+    standing instructions, -nu for the message carrying the work, -nb for both.
+    The web interface only ever did the third, so the other two could not be
+    asked for at all.
+    """
+
+    class Service:
+        system_note = None
+        user_note = None
+
+    def _applied(self, **fields):
+        from src.runtime.ui_action import apply_notes
+        service = self.Service()
+        apply_notes(fields, service)
+        return service.system_note, service.user_note
+
+    def test_both_is_what_happens_by_default(self):
+        """What the interface always did, so nothing changes without asking."""
+        assert self._applied(notes="romanise names") == ("romanise names", "romanise names")
+
+    def test_a_standing_instruction_goes_only_to_the_system_prompt(self):
+        assert self._applied(notes="romanise names", notes_target="system") == (
+            "romanise names", None)
+
+    def test_a_note_about_this_passage_goes_only_to_the_user_prompt(self):
+        assert self._applied(notes="the second column is marginalia",
+                             notes_target="user") == (
+            None, "the second column is marginalia")
+
+    def test_an_empty_box_sets_nothing_at_all(self):
+        """Not an empty note — a service tells those apart, and so should this."""
+        assert self._applied(notes="", notes_target="system") == (None, None)
+        assert self._applied(notes="   ") == (None, None)
+
+    def test_a_note_is_trimmed(self):
+        assert self._applied(notes="  keep it literal  ")[0] == "keep it literal"
+
+    def test_an_unknown_target_means_both(self):
+        """A saved job from before the question existed still means what it did."""
+        assert self._applied(notes="n", notes_target="somewhere else") == ("n", "n")
+        assert self._applied(notes="n", notes_target="") == ("n", "n")
+        assert self._applied(notes="n", notes_target=None) == ("n", "n")
+
+    def test_the_target_is_read_however_it_is_capitalised(self):
+        assert self._applied(notes="n", notes_target="SYSTEM") == ("n", None)
+
+    def test_every_service_given_gets_it(self):
+        """A job may go down either of two paths, unknown this early."""
+        from src.runtime.ui_action import apply_notes
+        one, two = self.Service(), self.Service()
+        apply_notes({"notes": "n", "notes_target": "user"}, one, two)
+        assert (one.user_note, two.user_note) == ("n", "n")
+        assert (one.system_note, two.system_note) == (None, None)
+
+    def test_the_choices_match_what_the_command_line_offers(self):
+        from src.runtime.ui_action import notes_target_field
+        values = [c["value"] for c in notes_target_field().choices]
+        assert values == ["both", "system", "user"]
+
+    def test_the_default_is_named_as_such_in_the_form(self):
+        """So nobody has to guess which one applies when they leave it alone."""
+        from src.runtime.ui_action import notes_target_field
+        first = notes_target_field().choices[0]
+        assert first["value"] == "both" and "default" in first["label"].lower()
+
+    def test_it_sits_with_the_notes_box(self):
+        from src.runtime.ui_action import notes_target_field
+        assert notes_target_field().group == "Notes"
+        assert notes_target_field(group="Elsewhere").group == "Elsewhere"
+
+    def test_answering_is_optional(self):
+        from src.runtime.ui_action import notes_target_field
+        assert notes_target_field().required is False

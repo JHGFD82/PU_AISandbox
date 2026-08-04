@@ -36,7 +36,10 @@ class TestUiActionDeclaration:
 
     def test_declares_expected_fields_in_order(self, plugin_module):
         names = [f.name for f in plugin_module.ui_action.fields]
-        assert names == ["target_language", "file", "output_format", "workers", "notes"]
+        assert names == [
+            "target_language", "file", "output_format", "workers",
+            "notes", "notes_target",
+        ]
 
     def test_file_field_allows_a_folder_of_images(self, plugin_module):
         # transcribe's CLI already accepts -i pointed at a folder of scans

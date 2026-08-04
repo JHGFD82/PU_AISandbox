@@ -328,6 +328,76 @@ def register_extension_ui_hooks(
     )
 
 
+def notes_target_field(group: str = "Notes") -> UiField:
+    """Return the field asking which prompt a note should be added to.
+
+    A note can go to the model's standing instructions, to the message carrying
+    the work, or to both. On the command line those are three separate flags
+    (``-ns``, ``-nu``, ``-nb``); in a form they are one question, because
+    two more boxes for something most people answer once is more form than the
+    answer is worth.
+
+    Offered by every action that has a notes box, and declared here rather than
+    written out by each of them, so the wording and the choices cannot come to
+    differ between one job form and the next.
+
+    Args:
+        group: Which section of the form to put it in. The same one the notes
+               box itself is in, since it is a question about that box.
+
+    Returns:
+        The field, ready to sit after a ``notes`` field in an action's list.
+    """
+    return UiField(
+        name="notes_target",
+        label="Add that note to",
+        kind="select",
+        required=False,
+        choices=[
+            {"value": "both", "label": "Both prompts (default)"},
+            {"value": "system", "label": "The model's standing instructions only"},
+            {"value": "user", "label": "The message carrying the work only"},
+        ],
+        group=group,
+    )
+
+
+def apply_notes(fields: dict, *services: Any) -> None:
+    """Put the note from a job form wherever the form said it should go.
+
+    The web interface used to hand the same note to both prompts and offer no
+    say in it, which is only one of the three things the command line can do.
+    A note meant as a standing instruction ("always romanise names this way")
+    belongs in one place; a note about the passage in hand belongs in the other,
+    and putting it in both is not the same request.
+
+    Nothing is set when the box is empty, rather than setting it to an empty
+    string: a service treats "no note" and "a note that says nothing"
+    differently, and the second is not what a blank box means.
+
+    Args:
+        fields: The submitted form values. ``notes`` is the text and
+                ``notes_target`` is one of ``'both'``, ``'system'`` or
+                ``'user'``; anything else, including nothing at all, is read as
+                ``'both'`` — the answer that was given before the question was
+                asked, so an older saved job means what it always did.
+        *services: The services to set it on. More than one where a job could
+                   go down either of two paths (a document or a picture of
+                   one), since which it will be is not known this early.
+    """
+    note = (fields.get("notes") or "").strip()
+    if not note:
+        return
+    target = str(fields.get("notes_target") or "both").strip().lower()
+    if target not in ("both", "system", "user"):
+        target = "both"
+    for service in services:
+        if target in ("both", "system"):
+            service.system_note = note
+        if target in ("both", "user"):
+            service.user_note = note
+
+
 def get_extension_ui_fields(action_id: str, token: Optional[str]) -> list[UiField]:
     """Return the extra composer fields registered for *token* under *action_id*.
 

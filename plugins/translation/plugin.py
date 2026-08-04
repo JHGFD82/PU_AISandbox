@@ -227,7 +227,7 @@ from src.processors.pdf_processor import generate_process_text    # noqa: E402
 from src.processors.txt_processor import TxtProcessor             # noqa: E402
 from src.runtime.ui_action import (  # noqa: E402
     PageTextCallback, ProgressCallback, UiAction, UiField, UiJobResult, UiPromptPreview,
-    apply_extension_ui_hooks,
+    apply_extension_ui_hooks, apply_notes, notes_target_field,
 )
 from src.services.constants import DEFAULT_PARALLEL_WORKERS       # noqa: E402
 from src.settings import DEFAULT_PAGE_SIZE                        # noqa: E402
@@ -915,7 +915,6 @@ class TranslationPlugin:
         toc = _to_bool(fields.get("toc"))
         preserve_media = _to_bool(fields.get("preserve_media"))
         page_nums = (fields.get("page_nums") or "").strip() or None
-        notes = (fields.get("notes") or "").strip() or None
         abstract_text = (fields.get("abstract") or "").strip() or None
         font = (fields.get("font") or "").strip() or None
         font_size = _to_int(fields.get("font_size"), "font size")
@@ -929,11 +928,9 @@ class TranslationPlugin:
         sandbox = SandboxProcessor(
             professor, model=model, temperature=temperature, top_p=top_p, max_tokens=max_tokens,
         )
-        if notes:
-            sandbox.translation_service.system_note = notes
-            sandbox.translation_service.user_note = notes
-            sandbox.image_translation_service.system_note = notes
-            sandbox.image_translation_service.user_note = notes
+        apply_notes(
+            fields, sandbox.translation_service, sandbox.image_translation_service,
+        )
         if preserve_tables:
             sandbox.translation_service.tables = True
             sandbox.image_translation_service.tables = True
@@ -1076,18 +1073,15 @@ class TranslationPlugin:
         source_language = _lang_name(fields.get("source_language"))
         target_language = _lang_name(fields.get("target_language"))
         scanned = str(fields.get("scanned", "")).strip().lower() in ("true", "1", "on", "yes")
-        notes = (fields.get("notes") or "").strip() or None
         abstract_text = (fields.get("abstract") or "").strip() or None
         pasted_text = (fields.get("file_text") or "").strip() or None
         preserve_tables = str(fields.get("preserve_tables", "")).strip().lower() in ("true", "1", "on", "yes")
         toc = str(fields.get("toc", "")).strip().lower() in ("true", "1", "on", "yes")
 
         sandbox = SandboxProcessor(professor, model=model)
-        if notes:
-            sandbox.translation_service.system_note = notes
-            sandbox.translation_service.user_note = notes
-            sandbox.image_translation_service.system_note = notes
-            sandbox.image_translation_service.user_note = notes
+        apply_notes(
+            fields, sandbox.translation_service, sandbox.image_translation_service,
+        )
         if preserve_tables:
             sandbox.translation_service.tables = True
             sandbox.image_translation_service.tables = True
@@ -1211,6 +1205,7 @@ ui_action = UiAction(
             kind="text", required=False, group="Performance",
         ),
         UiField(name="notes", label="Notes for the model", kind="text", required=False, group="Notes"),
+        notes_target_field(),
     ],
     progress_verb="Translating",
 )
