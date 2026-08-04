@@ -3,21 +3,15 @@
 <head>
 <meta charset="utf-8">
 <title>Settings — Princeton University AI Sandbox</title>
+{% import "_icons.html" as icons %}
 {% include "_design-system.html" %}
+{% include "_forms.html" %}
+{% include "_panels.html" %}
 {% include "_combobox.html" %}
 <style>
-  body, #topbar, .card, input, select, .badge, button.secondary, button.danger {
-    transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease;
-  }
-  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 0; background: var(--bg); color: var(--text); }
   /* Said explicitly, because the rule below sets display and would otherwise
      win against the browser's own meaning for the attribute — which is why
      hiding this bar in the modal had no effect at all. */
-  #topbar[hidden] { display: none; }
-  #topbar { display: flex; align-items: center; gap: 0.75rem; padding: 0.8rem 1.5rem; border-bottom: 1px solid var(--border); background: var(--panel-bg); }
-  #topbar h1 { font-size: var(--text-lg); margin: 0; flex: 1; }
-  #topbar a { color: var(--text); text-decoration: none; font-size: var(--text-md); }
-  #topbar a:hover { text-decoration: underline; }
   /* Same reason as #topbar above: the rule under it sets display, so the
      browser's own meaning for the attribute has to be said explicitly or the
      bar shows through before there is anything to put in it. */
@@ -43,17 +37,9 @@
      rely on — so the chosen tab is also the only one in the full-strength ink,
      and it is the only one the keyboard stops at. */
   #page { max-width: 720px; margin: 0 auto; padding: 1.5rem; display: flex; flex-direction: column; gap: 1.25rem; }
-  .card { background: var(--panel-bg); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 1.25rem 1.5rem; }
-  .card h2 { font-size: var(--text-lg); margin: 0 0 0.25rem; }
-  .card .hint { font-size: var(--text-sm); color: var(--text-muted); margin: 0 0 1rem; line-height: 1.4; }
   /* The new-tab marker: sits with the label rather than after the button, so
      the whole control reads as one thing. */
   .external-icon { margin-left: 0.35rem; vertical-align: -0.05rem; opacity: 0.8; }
-  .row { display: flex; align-items: center; gap: 0.6rem; padding: 0.5rem 0; border-bottom: 1px solid var(--bg); }
-  .row:last-child { border-bottom: none; }
-  .row .main { flex: 1; min-width: 0; }
-  .row .name { font-size: var(--text-md); font-weight: 500; }
-  .row .sub { font-size: var(--text-xs); color: var(--text-muted); }
   /* A setting that is on or off. The whole thing is the label, so the words
      are part of the target and not just the box beside them — the box alone is
      13px, and a sentence explaining what it does is far easier to hit.
@@ -67,29 +53,6 @@
                   color: var(--text); }
   .choice .sub { display: block; font-size: var(--text-xs); color: var(--text-muted);
                  margin-top: 0.15rem; max-width: 60ch; }
-  .badge { font-size: var(--text-xs); padding: 0.15rem 0.5rem; border-radius: var(--radius-pill); white-space: nowrap; }
-  .badge.set { background: var(--badge-set-bg); color: var(--badge-set-text); }
-  .badge.unset { background: var(--hover-bg); color: var(--text-muted); }
-  label { display: block; font-size: var(--text-xs); color: var(--text-muted); margin: 0.6rem 0 0.2rem; }
-  input[type=text], input[type=password], select {
-    width: 100%; padding: 0.5rem; font-size: var(--text-md); border: 1px solid var(--border);
-    border-radius: var(--radius-md); font-family: inherit; background: var(--input-bg); color: var(--text);
-  }
-  form.inline { display: flex; gap: 0.5rem; align-items: flex-end; flex-wrap: wrap; margin-top: 0.75rem; }
-  form.inline > div { flex: 1; min-width: 140px; }
-  button { padding: 0.45rem 0.8rem; font-size: var(--text-md); background: var(--orange); color: var(--on-orange); border: none; border-radius: var(--radius-md); cursor: pointer; white-space: nowrap; }
-  button:hover { background: var(--orange-hover); }
-  button.secondary { background: transparent; color: var(--text); border: 1px solid var(--border); }
-  button.secondary:hover { background: var(--hover-bg); }
-  button.danger { background: transparent; color: var(--danger-text); border: 1px solid var(--danger-border); }
-  button.danger:hover { background: var(--danger-hover-bg); }
-  button:disabled { opacity: 0.5; cursor: default; }
-  details.manage { margin-top: 0.4rem; }
-  details.manage summary { font-size: var(--text-xs); color: var(--orange); cursor: pointer; }
-  .snippet { background: var(--bg); border-radius: var(--radius-md); padding: 0.75rem; font-family: var(--font-mono); font-size: var(--text-xs); white-space: pre; overflow-x: auto; margin-top: 0.5rem; }
-  .empty { font-size: var(--text-md); color: var(--text-muted); }
-  .field-set { display: flex; gap: 0.5rem; align-items: center; }
-  .field-set input { flex: 1; }
   /* Same row-of-boxes shape as form.inline, but as a block inside a form
      that also has explanatory text and an error line under it. */
   .inline-fields { display: flex; gap: 0.5rem; align-items: flex-end; flex-wrap: wrap; margin-top: 0.75rem; }
@@ -342,7 +305,7 @@ default_model = "llama-3-70b-instruct"</div>
                       id="add-model-professor-toggle-btn"
                       aria-label="Show the list of professors"
                       title="Show the list of professors">
-                <svg viewBox="0 0 21.6895 12.959"><path d="M10.6641 12.959C10.9473 12.959 11.2109 12.832 11.4062 12.6172L21.0352 2.58789C21.2207 2.40234 21.3281 2.16797 21.3281 1.89453C21.3281 1.34766 20.9082 0.927734 20.3516 0.927734C20.0977 0.927734 19.8438 1.02539 19.6582 1.20117L10.0684 11.1816L11.2695 11.1816L1.66016 1.20117C1.48438 1.02539 1.24023 0.927734 0.976562 0.927734C0.419922 0.927734 0 1.34766 0 1.89453C0 2.16797 0.117188 2.40234 0.292969 2.59766L9.92188 12.627C10.1367 12.832 10.3809 12.959 10.6641 12.959Z" fill="currentColor"/></svg>
+                {{ icons.chevron_down() }}
               </button>
               <div class="combobox-list" id="add-model-professor-list"
                    role="listbox" hidden></div>

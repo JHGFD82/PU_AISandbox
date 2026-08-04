@@ -97,6 +97,14 @@ def unlocked_client(client):
     return client
 
 
+def _rendered_template(name: str) -> str:
+    """Any template as the browser receives it, with every {% include %} resolved."""
+    from fastapi.templating import Jinja2Templates
+
+    directory = Path(__file__).resolve().parents[1] / "src" / "templates"
+    return Jinja2Templates(directory=str(directory)).get_template(name).render(request=None)
+
+
 def _rendered_chat() -> str:
     """chat.html as the browser receives it, with every {% include %} resolved.
 
@@ -2634,9 +2642,11 @@ class TestTheModelMenuReadsInOrder:
     def test_the_page_shows_them_in_the_order_it_is_given(self):
         """Grouped, but not reordered: the server decides which model comes
         before which, and the page only decides which heading they sit under."""
-        from pathlib import Path
 
-        page = (Path(__file__).resolve().parents[1] / "src" / "templates" / "chat.html").read_text()
+        # Rendered, not read: the icons used in more than one place are macro
+        # calls in the source now, and it is the drawing that reaches the
+        # browser that these tests are about.
+        page = _rendered_chat()
         assert "(state.models || []).forEach" in page
         # Group headings are sorted here; the models under them are not, so
         # there is one authority on which model comes before which.
@@ -2894,9 +2904,11 @@ class TestTheSuppliedButtonIcons:
     """Drawings supplied for the buttons, fitted to how the buttons work here."""
 
     def _button(self, button_id):
-        from pathlib import Path
 
-        page = (Path(__file__).resolve().parents[1] / "src" / "templates" / "chat.html").read_text()
+        # Rendered, not read: the icons used in more than one place are macro
+        # calls in the source now, and it is the drawing that reaches the
+        # browser that these tests are about.
+        page = _rendered_chat()
         start = page.index(f'id="{button_id}"')
         return page[page.rindex("<button", 0, start): page.index("</button>", start)]
 
@@ -2933,9 +2945,11 @@ class TestTheSuppliedButtonIcons:
     def test_every_button_uses_the_supplied_artwork(self):
         """None left on the drawing it shipped with."""
         import re
-        from pathlib import Path
 
-        page = (Path(__file__).resolve().parents[1] / "src" / "templates" / "chat.html").read_text()
+        # Rendered, not read: the icons used in more than one place are macro
+        # calls in the source now, and it is the drawing that reaches the
+        # browser that these tests are about.
+        page = _rendered_chat()
         # The one button with no drawing of its own: the artwork supplied for a
         # "sidebar toggle" was a second copy of the padlock, so this button —
         # which only appears on a narrow screen — is still on a plain one.
@@ -2951,9 +2965,11 @@ class TestTheSuppliedButtonIcons:
     def test_the_conversation_menu_dots_stand_upright(self):
         """They are supplied in a row, and the button wants a column."""
         import re
-        from pathlib import Path
 
-        page = (Path(__file__).resolve().parents[1] / "src" / "templates" / "chat.html").read_text()
+        # Rendered, not read: the icons used in more than one place are macro
+        # calls in the source now, and it is the drawing that reaches the
+        # browser that these tests are about.
+        page = _rendered_chat()
         dots = re.search(r"menuBtn\.innerHTML = '(.*?)';", page, re.S).group(1)
         assert "icon-upright" in dots
         assert ".icon-upright { transform: rotate(90deg); }" in page
@@ -2965,9 +2981,11 @@ class TestTheSuppliedButtonIcons:
         supplied one is a wide row: fitted to that box it would come out 3px by
         0.6px, and rotating that would not help.
         """
-        from pathlib import Path
 
-        page = (Path(__file__).resolve().parents[1] / "src" / "templates" / "chat.html").read_text()
+        # Rendered, not read: the icons used in more than one place are macro
+        # calls in the source now, and it is the drawing that reaches the
+        # browser that these tests are about.
+        page = _rendered_chat()
         rule = page.split(".conv-menu-btn svg {")[1].split("}")[0]
         width = rule.split("width:")[1].split("px")[0].strip()
         height = rule.split("height:")[1].split("px")[0].strip()
@@ -2975,9 +2993,11 @@ class TestTheSuppliedButtonIcons:
 
     def test_a_cross_is_the_plus_turned(self):
         """Asked for: the same drawing, rotated, rather than a second one."""
-        from pathlib import Path
 
-        page = (Path(__file__).resolve().parents[1] / "src" / "templates" / "chat.html").read_text()
+        # Rendered, not read: the icons used in more than one place are macro
+        # calls in the source now, and it is the drawing that reaches the
+        # browser that these tests are about.
+        page = _rendered_chat()
         for button_id in ("settings-modal-close", "job-modal-close"):
             start = page.index(f'id="{button_id}"')
             block = page[page.rindex("<button", 0, start): page.index("</button>", start)]
@@ -2991,9 +3011,11 @@ class TestTheSuppliedButtonIcons:
         """It was asked for in the logo's orange, and drawn that way put an
         orange mark on a button that is itself orange — 1.46:1 under the
         pointer. It takes the button's own colours now, as Send does."""
-        from pathlib import Path
 
-        page = (Path(__file__).resolve().parents[1] / "src" / "templates" / "chat.html").read_text()
+        # Rendered, not read: the icons used in more than one place are macro
+        # calls in the source now, and it is the drawing that reaches the
+        # browser that these tests are about.
+        page = _rendered_chat()
         start = page.index('id="new-conv"')
         block = page[page.rindex("<button", 0, start): page.index("</button>", start)]
         assert "currentColor" in block
@@ -3619,10 +3641,16 @@ class TestTheFollowUpFixesStay:
 
     def test_hiding_the_settings_bar_beats_the_rule_that_shows_it(self):
         """Setting the attribute was not enough: #topbar sets display, and an
-        author rule outranks the browser's meaning for [hidden]."""
-        page = self._source("settings.html")
+        author rule outranks the browser's meaning for [hidden].
+
+        Read rendered, not as source: the bar moved into _forms.html when the
+        four pages stopped each keeping their own copy of it.
+        """
+        page = _rendered_template("settings.html")
         assert "#topbar[hidden] { display: none; }" in page
-        assert page.index("#topbar[hidden]") < page.index("#topbar { display: flex")
+        # Both rules are one selector each, so neither outranks the other and
+        # source order decides. The hiding one has to come first.
+        assert page.index("#topbar[hidden]") < re.search(r"#topbar\s*\{", page).start()
 
     def test_a_menu_row_can_be_seen_under_the_pointer(self):
         """The ordinary hover is 1.02:1 against the raised surface a menu sits
@@ -4353,7 +4381,10 @@ class TestTheProfessorPickerMatchesTheModelPicker:
         assert chat.count("function openCombobox") == 1
         assert chat.count("function wireCombobox") == 1
         # The model picker's own versions now defer rather than duplicate.
-        assert 'function openModelList() { openCombobox("model"); }' in chat
+        # openModelList() was a wrapper with no callers once the picker moved
+        # into the partial; closeModelList() still has one.
+        assert "function openModelList" not in chat
+        assert 'function closeModelList() { closeCombobox("model"); }' in chat
 
     def test_the_listener_is_wired_outside_the_loader(self, chat):
         """loadProfessors() runs twice; wiring inside it stacked the handlers."""
@@ -4588,3 +4619,102 @@ class TestNoPageInventsAColourItAlreadyHasATokenFor:
         values = re.findall(r"--orange-hover:\s*(#[0-9A-Fa-f]+)", tokens)
         assert len(values) == 2, "expected a light value and a dark one"
         assert values[0].lower() != values[1].lower()
+
+
+class TestNoRuleIsWrittenTwice:
+    """Four pages each keeping their own copy is how they drifted apart.
+
+    Before the shared partials, 39 selectors were declared in more than one
+    template and 13 of those had different rules — including button:hover, where
+    two pages wrote a colour literal that made them recede on hover in the dark
+    theme.
+    """
+
+    TEMPLATES = ["chat.html", "settings.html", "shared_settings.html", "unlock.html"]
+    PARTIALS = ["_design-system.html", "_forms.html", "_panels.html",
+                "_combobox.html"]
+
+    def _rules(self, name):
+        text = (Path(__file__).resolve().parents[1] / "src" / "templates" / name).read_text()
+        css = "\n".join(re.findall(r"<style>(.*?)</style>", text, re.S))
+        css = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+        out = {}
+        for sel, body in re.findall(r"([^{}]+)\{([^{}]*)\}", css):
+            sel = " ".join(sel.split())
+            if sel and not sel.startswith("@"):
+                out[sel] = " ".join(body.split())
+        return out
+
+    def test_no_page_repeats_a_rule_a_partial_already_gives_it(self):
+        """A copy identical to the shared one is dead weight that can drift."""
+        shared = {}
+        for partial in self.PARTIALS:
+            shared.update(self._rules(partial))
+        for name in self.TEMPLATES:
+            for sel, body in self._rules(name).items():
+                assert shared.get(sel) != body, (
+                    f"{name} repeats '{sel}' exactly as the shared partial has it"
+                )
+
+    def test_a_page_that_overrides_says_only_what_differs(self):
+        """Restating the rest is how one of them silently stops matching."""
+        shared = {}
+        for partial in self.PARTIALS:
+            shared.update(self._rules(partial))
+        for name in self.TEMPLATES:
+            for sel, body in self._rules(name).items():
+                if sel not in shared:
+                    continue
+                mine = {d.split(":")[0].strip() for d in body.split(";") if ":" in d}
+                theirs = {d.split(":")[0].strip(): d.split(":", 1)[1].strip()
+                          for d in shared[sel].split(";") if ":" in d}
+                repeated = {
+                    p for p in mine & set(theirs)
+                    if [d.split(":", 1)[1].strip() for d in body.split(";")
+                        if d.split(":")[0].strip() == p] == [theirs[p]]
+                }
+                assert not repeated, (
+                    f"{name}'s '{sel}' restates {sorted(repeated)} unchanged from the partial"
+                )
+
+    def test_the_two_settings_pages_no_longer_share_a_stylesheet(self):
+        """shared_settings.html was 68% a copy of settings.html."""
+        a, b = self._rules("settings.html"), self._rules("shared_settings.html")
+        # A selector may legitimately appear in both when the pages genuinely
+        # differ — #page is 720px on one and 1040px on the other. What must not
+        # appear in both is the same rule written out twice.
+        copies = {s for s in set(a) & set(b) if a[s] == b[s]}
+        assert not copies, f"still written out in both: {sorted(copies)}"
+
+    def test_artwork_used_twice_is_drawn_once(self):
+        """1,842 characters of path data were repeated across the templates."""
+        from collections import Counter
+        seen = Counter()
+        for name in self.TEMPLATES:
+            text = (Path(__file__).resolve().parents[1] / "src" / "templates" / name).read_text()
+            seen.update(re.findall(r'<path d="([^"]{60,})"', text))
+        repeated = {d[:40]: n for d, n in seen.items() if n > 1}
+        assert not repeated, f"path data still repeated: {list(repeated)}"
+
+    def test_an_icon_in_the_partial_is_never_also_pasted_inline(self):
+        """Counting repeats is not enough: one inline copy beside the macro
+        calls repeats nothing and still leaves two drawings to keep in step."""
+        icons = (Path(__file__).resolve().parents[1] / "src" / "templates"
+                 / "_icons.html").read_text()
+        drawn = re.findall(r'<path d="([^"]{60,})"', icons)
+        assert drawn, "no artwork found — has _icons.html moved?"
+        for name in self.TEMPLATES:
+            text = (Path(__file__).resolve().parents[1] / "src" / "templates" / name).read_text()
+            for d in drawn:
+                assert d not in text, (
+                    f"{name} draws an icon inline that _icons.html already has; "
+                    "call the macro instead"
+                )
+
+    def test_the_panels_are_only_given_to_pages_built_from_them(self):
+        """The chat page uses none of them; shipping it the rules is the same
+        waste as the duplication, moved rather than removed."""
+        for name in self.TEMPLATES:
+            source = (Path(__file__).resolve().parents[1] / "src" / "templates" / name).read_text()
+            wants = name in ("settings.html", "shared_settings.html")
+            assert ('{% include "_panels.html" %}' in source) is wants, name
