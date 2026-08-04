@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Princeton University AI Sandbox</title>
 {% include "_design-system.html" %}
+{% include "_combobox.html" %}
 {% include "_actions.html" %}
 {% include "_markdown.html" %}
 <style>
@@ -198,38 +199,7 @@
   #topbar { display: flex; align-items: center; gap: 0.5rem; padding: 0.6rem 1rem; border-bottom: 1px solid var(--border); background: var(--panel-bg); }
   .model-picker { flex: 1; display: flex; gap: 0.4rem; min-width: 0; }
 
-  /* No flex of its own. It used to carry `flex: 1`, which was written for the
-     top bar — a flex *row*, where that means "take the remaining width". The
-     sidebar is a flex column, so the same rule told the professor picker to
-     take the remaining height, and it grew to a hundred-odd pixels with its
-     chevron obediently centred in the middle of it. How much room a component
-     takes belongs to the layout using it, not to the component. */
-  .combobox { position: relative; min-width: 0; }
   .model-picker .combobox { flex: 1; }
-  .combobox input.combobox-field { padding-right: 1.9rem; cursor: pointer; }
-  .combobox-toggle {
-    position: absolute; right: 0.35rem; top: 50%; transform: translateY(-50%);
-    width: 22px; height: 22px; padding: 0; background: transparent; border: none; color: var(--text-muted);
-    display: flex; align-items: center; justify-content: center; cursor: pointer;
-  }
-  .combobox-toggle svg { width: 11px; height: 11px; display: block; }
-  .combobox-toggle:hover { background: transparent; color: var(--text); }
-  .combobox-list {
-    position: absolute; top: calc(100% + 4px); left: 0; right: 0; max-height: 260px; overflow-y: auto;
-    background: var(--surface-raised); border: 1px solid var(--border); border-radius: var(--radius-md);
-    box-shadow: 0 8px 24px var(--shadow-raised); z-index: 20; padding: 0.25rem; margin: 0;
-  }
-  /* Whose models these are. Sticky like the conversation list's date
-     headings, and set quietly for the same reason: to be scanned past once you
-     know where you are going. */
-  .combobox-group {
-    position: sticky; top: 0; z-index: 1; background: var(--surface-raised);
-    font-size: var(--text-xs); font-weight: 600; letter-spacing: 0.04em;
-    text-transform: uppercase; color: var(--text-muted);
-    padding: var(--space-2) var(--space-2) var(--space-1);
-  }
-  .combobox-option { padding: 0.4rem 0.6rem; border-radius: var(--radius-sm); font-size: var(--text-md); cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .combobox-option:hover { background: var(--hover-raised); }
 
   .model-add { position: relative; }
   .model-add-popover {
@@ -984,47 +954,6 @@ async function api(path, opts) {
 
 function fmtMoney(v) { return "$" + (v || 0).toFixed(2); }
 
-// ── Comboboxes ──────────────────────────────────────────────────────────────
-// Opening, closing and dismissing are the same for every one of these, so they
-// are written once. What differs is only what goes in the list, which is each
-// picker's own business.
-
-function comboboxList(field) {
-  return document.getElementById(field.replace("-field", "-list"));
-}
-function openCombobox(field) {
-  const list = comboboxList(field);
-  // Always the whole list: the field is read-only, so there is no typed query
-  // to narrow it by, and any leftover filtering would be a list with things
-  // missing for no reason a person could see.
-  list.querySelectorAll(".combobox-option").forEach(opt => { opt.style.display = ""; });
-  list.hidden = false;
-  document.getElementById(field).setAttribute("aria-expanded", "true");
-}
-function closeCombobox(field) {
-  comboboxList(field).hidden = true;
-  document.getElementById(field).setAttribute("aria-expanded", "false");
-}
-function toggleCombobox(field) {
-  if (comboboxList(field).hidden) openCombobox(field); else closeCombobox(field);
-}
-
-// Wired once per picker, at load. Doing this inside a loader would add another
-// set of handlers every time the loader ran — which is what the professor
-// picker used to do, and it runs twice.
-function wireCombobox(field, toggle) {
-  const open = (e) => { e.stopPropagation(); toggleCombobox(field); };
-  document.getElementById(toggle).addEventListener("click", open);
-  document.getElementById(field).addEventListener("click", open);
-  document.getElementById(field).addEventListener("keydown", (e) => {
-    if (e.key === "Escape") closeCombobox(field);
-    else if (e.key === "ArrowDown" || e.key === "Enter" || e.key === " ") {
-      openCombobox(field);
-      e.preventDefault();
-    }
-  });
-}
-
 async function loadProfessors() {
   const data = await api("/api/professors");
   const list = document.getElementById("professor-list");
@@ -1044,7 +973,7 @@ async function loadProfessors() {
 }
 
 async function chooseProfessor(netid, name) {
-  closeCombobox("professor-field");
+  closeCombobox("professor");
   if (netid === state.professor) return;
   document.getElementById("professor-field").value = name;
   stopJobPolling();
@@ -1056,7 +985,7 @@ async function chooseProfessor(netid, name) {
   renderMessages(null);
 }
 
-wireCombobox("professor-field", "professor-toggle-btn");
+wireCombobox("professor");
 
 // ── Model picker ─────────────────────────────────────────────────────────
 // A hand-rolled combobox instead of <input list="..."> + <datalist>: the
@@ -1148,10 +1077,10 @@ function renderModelList() {
 }
 
 // Both pickers behave the same way, so both go through the one helper above.
-function openModelList() { openCombobox("model-field"); }
-function closeModelList() { closeCombobox("model-field"); }
+function openModelList() { openCombobox("model"); }
+function closeModelList() { closeCombobox("model"); }
 
-wireCombobox("model-field", "model-toggle-btn");
+wireCombobox("model");
 
 // "+" next to the model field: a small in-app popover for typing a custom
 // model name, rather than relying on people discovering that the combobox
@@ -1188,8 +1117,6 @@ document.getElementById("model-add-input").addEventListener("keydown", (e) => {
 });
 
 document.addEventListener("click", (e) => {
-  if (!document.getElementById("model-combobox").contains(e.target)) closeModelList();
-  if (!document.getElementById("professor-combobox").contains(e.target)) closeCombobox("professor-field");
   if (!document.getElementById("model-add").contains(e.target)) closeModelAddPopover();
   if (!document.getElementById("plugin-action-wrap").contains(e.target)) closeActionPicker();
   if (!document.getElementById("sampling-options").contains(e.target)) closeSamplingPopover();

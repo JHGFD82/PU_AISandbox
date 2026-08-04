@@ -97,6 +97,18 @@ def unlocked_client(client):
     return client
 
 
+def _rendered_chat() -> str:
+    """chat.html as the browser receives it, with every {% include %} resolved.
+
+    Reading the file alone stopped being the same thing once the combobox moved
+    into a partial the page includes.
+    """
+    from fastapi.templating import Jinja2Templates
+
+    directory = Path(__file__).resolve().parents[1] / "src" / "templates"
+    return Jinja2Templates(directory=str(directory)).get_template("chat.html").render(request=None)
+
+
 class TestUnlock:
     def test_index_shows_unlock_page_when_locked(self, client):
         resp = client.get("/")
@@ -3069,9 +3081,7 @@ class TestOneDesignSystem:
 
 class TestTheInterfaceCanBeReachedWithoutAMouse:
     def _chat(self):
-        from pathlib import Path
-
-        return (Path(__file__).resolve().parents[1] / "src" / "templates" / "chat.html").read_text()
+        return _rendered_chat()
 
     def test_there_is_a_focus_style_at_all(self):
         from pathlib import Path
@@ -3155,9 +3165,7 @@ class TestTheInterfaceCanBeReachedWithoutAMouse:
 
 class TestTheTranscriptIsBuiltForReading:
     def _chat(self):
-        from pathlib import Path
-
-        return (Path(__file__).resolve().parents[1] / "src" / "templates" / "chat.html").read_text()
+        return _rendered_chat()
 
     def test_the_measure_is_capped(self):
         """It was 70% of an uncapped column: ~190 characters on a wide screen."""
@@ -3367,9 +3375,7 @@ class TestWhatTheModelWroteIsRendered:
 
 class TestControlsSitProperlyTogether:
     def _chat(self):
-        from pathlib import Path
-
-        return (Path(__file__).resolve().parents[1] / "src" / "templates" / "chat.html").read_text()
+        return _rendered_chat()
 
     def _rule(self, selector):
         return self._chat().split(selector)[1].split("}")[0]
@@ -3487,9 +3493,7 @@ class TestChoosingHowRepliesAreSet:
     """Serif or sans, remembered, and only for what was written."""
 
     def _chat(self):
-        from pathlib import Path
-
-        return (Path(__file__).resolve().parents[1] / "src" / "templates" / "chat.html").read_text()
+        return _rendered_chat()
 
     def test_there_is_a_control_for_it(self):
         chat = self._chat()
@@ -3573,9 +3577,7 @@ class TestASourceSaysWhoseUsageItHolds:
 
 class TestTheModelMenuIsGrouped:
     def _chat(self):
-        from pathlib import Path
-
-        return (Path(__file__).resolve().parents[1] / "src" / "templates" / "chat.html").read_text()
+        return _rendered_chat()
 
     def test_the_menu_is_told_whose_each_model_is(self, unlocked_client, monkeypatch):
         import sys
@@ -3671,9 +3673,7 @@ class TestTheNewConversationButtonReads:
     """It is the one button whose drawing is the same colour as buttons are."""
 
     def _chat(self):
-        from pathlib import Path
-
-        return (Path(__file__).resolve().parents[1] / "src" / "templates" / "chat.html").read_text()
+        return _rendered_chat()
 
     def test_it_takes_the_ordinary_button_colours(self):
         """Including on hover, so the mark stays readable at the moment it is
@@ -4326,8 +4326,7 @@ class TestTheProfessorPickerMatchesTheModelPicker:
 
     @pytest.fixture
     def chat(self):
-        return (Path(__file__).resolve().parents[1] / "src" / "templates"
-                / "chat.html").read_text()
+        return _rendered_chat()
 
     def test_the_select_is_gone(self, chat):
         assert "professor-select" not in chat
@@ -4354,17 +4353,23 @@ class TestTheProfessorPickerMatchesTheModelPicker:
         assert chat.count("function openCombobox") == 1
         assert chat.count("function wireCombobox") == 1
         # The model picker's own versions now defer rather than duplicate.
-        assert 'function openModelList() { openCombobox("model-field"); }' in chat
+        assert 'function openModelList() { openCombobox("model"); }' in chat
 
     def test_the_listener_is_wired_outside_the_loader(self, chat):
         """loadProfessors() runs twice; wiring inside it stacked the handlers."""
         loader = chat.split("async function loadProfessors")[1].split("\n}")[0]
         assert "addEventListener" not in loader or "opt.addEventListener" in loader
-        assert 'wireCombobox("professor-field", "professor-toggle-btn");' in chat
+        assert 'wireCombobox("professor");' in chat
 
-    def test_clicking_away_closes_the_professor_list_too(self, chat):
+    def test_clicking_away_closes_every_picker_on_the_page(self, chat):
+        """Written once over all of them, so a second picker gets it for free.
+
+        It used to be a line per picker in one page-wide handler, which is a
+        line somebody has to remember to add.
+        """
         handler = chat.split('document.addEventListener("click"')[1].split("\n});")[0]
-        assert "professor-combobox" in handler
+        assert "WIRED_COMBOBOXES.forEach" in handler
+        assert "professor-combobox" not in handler, "no picker should be named here"
 
     def test_choosing_the_same_professor_does_no_work(self, chat):
         """It reloaded every conversation and the usage panel for nothing."""
@@ -4439,8 +4444,7 @@ class TestTheProfessorPickerIsFieldHeight:
 
     @pytest.fixture
     def chat(self):
-        return (Path(__file__).resolve().parents[1] / "src" / "templates"
-                / "chat.html").read_text()
+        return _rendered_chat()
 
     def test_the_component_claims_no_space_of_its_own(self, chat):
         rule = chat.split(".combobox { ")[1].split("}")[0]
@@ -4462,3 +4466,78 @@ class TestTheProfessorPickerIsFieldHeight:
         """Right for a field-height box; that was never the bug."""
         rule = chat.split(".combobox-toggle {")[1].split("}")[0]
         assert "top: 50%" in rule and "translateY(-50%)" in rule
+
+
+class TestOneComboboxForEveryPage:
+    """Three pickers is where copying the markup had to stop.
+
+    A <select> is drawn by the operating system: not the height of the fields
+    around it, not the arrow used anywhere else, and a list that ignores the
+    theme — a white box out of nowhere in the dark one. Each picker that stopped
+    being a <select> had been another copy of the same CSS and the same handlers.
+    """
+
+    def _rendered(self, name):
+        from fastapi.templating import Jinja2Templates
+        directory = Path(__file__).resolve().parents[1] / "src" / "templates"
+        return Jinja2Templates(directory=str(directory)).get_template(name).render(request=None)
+
+    def test_the_partial_exists_on_its_own(self):
+        partial = (Path(__file__).resolve().parents[1] / "src" / "templates"
+                   / "_combobox.html")
+        assert partial.exists()
+
+    def test_both_pages_include_it(self):
+        for page in ("chat.html", "settings.html"):
+            source = (Path(__file__).resolve().parents[1] / "src" / "templates"
+                      / page).read_text()
+            assert '{% include "_combobox.html" %}' in source, page
+
+    def test_neither_page_keeps_its_own_copy(self):
+        """The drift this is here to prevent."""
+        for page in ("chat.html", "settings.html"):
+            source = (Path(__file__).resolve().parents[1] / "src" / "templates"
+                      / page).read_text()
+            assert ".combobox-list {" not in source, f"{page} has its own copy of the CSS"
+            assert "function wireCombobox" not in source, f"{page} has its own copy of the JS"
+
+    def test_the_settings_picker_is_no_longer_a_select(self):
+        page = self._rendered("settings.html")
+        assert '<select id="add-model-professor"' not in page
+        assert 'id="add-model-professor-combobox"' in page
+
+    def test_all_three_pickers_are_wired(self):
+        chat = self._rendered("chat.html")
+        settings = self._rendered("settings.html")
+        assert 'wireCombobox("model")' in chat
+        assert 'wireCombobox("professor")' in chat
+        assert 'wireCombobox("add-model-professor")' in settings
+
+    def test_one_prefix_finds_every_part(self):
+        """Field, list, chevron and container are all found from the one name."""
+        partial = self._rendered("chat.html")
+        fn = partial.split("function wireCombobox")[1].split("\n}")[0]
+        assert 'prefix + "-toggle-btn"' in fn
+        assert "comboboxField(prefix)" in fn
+
+    def test_dismissal_covers_every_picker_without_naming_one(self):
+        page = self._rendered("settings.html")
+        handler = page.split('document.addEventListener("click"')[1].split("\n});")[0]
+        assert "WIRED_COMBOBOXES.forEach" in handler
+
+    def test_the_component_still_claims_no_space_of_its_own(self):
+        """The sidebar bug, now in a file two pages depend on."""
+        page = self._rendered("settings.html")
+        rule = page.split(".combobox { ")[1].split("}")[0]
+        assert "flex:" not in rule
+
+    def test_the_form_sends_a_netid_and_not_a_name(self):
+        """The field shows 'Jeff Heller (jh43)'; the request needs 'jh43'."""
+        page = self._rendered("settings.html")
+        assert "const professor = addModelProfessor;" in page
+        assert 'getElementById("add-model-professor").value' not in page
+
+    def test_someone_is_chosen_to_begin_with(self):
+        """A <select> shows its first option; an empty box looks broken."""
+        fn = self._rendered("settings.html").split("function renderModelProfessors")[1]
+        assert "if (!addModelProfessor) {" in fn.split("\n}")[0]
