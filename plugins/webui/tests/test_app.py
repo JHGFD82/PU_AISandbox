@@ -4426,3 +4426,39 @@ class TestPastingTextIntoAJobForm:
         fn = chat.split("const apply = (mode) => {")[1].split("\n  };")[0]
         rows = int(re.search(r"replacement\.rows = (\d+)", fn).group(1))
         assert rows >= 5, "one line misrepresents what goes in it"
+
+
+class TestTheProfessorPickerIsFieldHeight:
+    """It stretched to about a hundred pixels tall, chevron floating mid-way.
+
+    `.combobox` carried `flex: 1`, written for the top bar — a flex row, where
+    that means "take the remaining width". The sidebar is a flex column, so the
+    same declaration told the professor picker to take the remaining *height*.
+    The chevron is positioned at top: 50%, so it centred itself in the result.
+    """
+
+    @pytest.fixture
+    def chat(self):
+        return (Path(__file__).resolve().parents[1] / "src" / "templates"
+                / "chat.html").read_text()
+
+    def test_the_component_claims_no_space_of_its_own(self, chat):
+        rule = chat.split(".combobox { ")[1].split("}")[0]
+        assert "flex:" not in rule, (
+            "a component that grows on its own stretches wherever it is put — "
+            "here, down a column"
+        )
+
+    def test_the_top_bar_still_gives_it_the_room(self, chat):
+        """Dropping the grow must not have collapsed the model field."""
+        assert ".model-picker .combobox { flex: 1; }" in chat
+
+    def test_the_sidebar_is_still_a_column(self, chat):
+        """If this ever stops being true, the rule above is why it mattered."""
+        rule = chat.split("#sidebar { ")[1].split("}")[0]
+        assert "flex-direction: column" in rule
+
+    def test_the_chevron_still_centres_on_the_field(self, chat):
+        """Right for a field-height box; that was never the bug."""
+        rule = chat.split(".combobox-toggle {")[1].split("}")[0]
+        assert "top: 50%" in rule and "translateY(-50%)" in rule

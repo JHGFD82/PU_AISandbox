@@ -198,7 +198,14 @@
   #topbar { display: flex; align-items: center; gap: 0.5rem; padding: 0.6rem 1rem; border-bottom: 1px solid var(--border); background: var(--panel-bg); }
   .model-picker { flex: 1; display: flex; gap: 0.4rem; min-width: 0; }
 
-  .combobox { position: relative; flex: 1; min-width: 0; }
+  /* No flex of its own. It used to carry `flex: 1`, which was written for the
+     top bar — a flex *row*, where that means "take the remaining width". The
+     sidebar is a flex column, so the same rule told the professor picker to
+     take the remaining height, and it grew to a hundred-odd pixels with its
+     chevron obediently centred in the middle of it. How much room a component
+     takes belongs to the layout using it, not to the component. */
+  .combobox { position: relative; min-width: 0; }
+  .model-picker .combobox { flex: 1; }
   .combobox input.combobox-field { padding-right: 1.9rem; cursor: pointer; }
   .combobox-toggle {
     position: absolute; right: 0.35rem; top: 50%; transform: translateY(-50%);
