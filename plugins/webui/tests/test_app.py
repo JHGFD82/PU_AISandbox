@@ -4242,3 +4242,71 @@ class TestAModelThatNoLongerExists:
         # Hidden by default: a working model must not carry a delete button.
         assert 'data-remove-model="${m.name}" style="display:none"' in page
         assert "no longer exists" in page
+
+
+class TestTheSettingsPageIsInThreeTabs:
+    """Seven cards in one column meant scrolling to find anything."""
+
+    ASSIGNED = {
+        "professors": "system", "shared": "system", "external_sources": "system",
+        "webui": "webui", "folder": "webui",
+        "models": "models", "endpoints": "models",
+    }
+
+    @pytest.fixture
+    def page(self):
+        return (Path(__file__).resolve().parents[1] / "src" / "templates"
+                / "settings.html").read_text()
+
+    def test_every_card_belongs_to_exactly_one_tab(self, page):
+        """A card with no tab is a card nobody can ever reach."""
+        cards = re.findall(r'data-section="([a-z_]+)"\s+data-tab="([a-z]+)"', page)
+        assert dict(cards) == self.ASSIGNED
+        assert len(cards) == len(re.findall(r'class="card"', page))
+
+    def test_the_three_tabs_are_the_ones_asked_for(self, page):
+        strip = page.split('id="tabs"')[1].split("</div>")[0]
+        assert re.findall(r'data-tab="([a-z]+)"', strip) == ["system", "webui", "models"]
+
+    def test_a_tab_is_not_dressed_as_a_button(self, page):
+        """Buttons here are orange and mean "this does something"."""
+        rule = page.split("#tabs button {")[1].split("}")[0]
+        assert "background: none" in rule
+
+    def test_the_chosen_tab_is_marked_by_more_than_colour(self, page):
+        rule = page.split('#tabs button[aria-selected="true"] {')[1].split("}")[0]
+        assert "border-bottom-color" in rule
+
+    def test_the_strip_can_be_hidden_before_there_is_anything_in_it(self, page):
+        """#tabs sets display, which beats the browser's own [hidden]."""
+        assert "#tabs[hidden] { display: none; }" in page
+
+    def test_the_arrow_keys_move_between_tabs(self, page):
+        handler = page.split('document.getElementById("tabs").addEventListener("keydown"')[1]
+        handler = handler.split("\n});")[0]
+        for key in ("ArrowLeft", "ArrowRight", "Home", "End"):
+            assert key in handler
+
+    def test_only_the_chosen_tab_is_a_tab_stop(self, page):
+        """Otherwise Tab walks through three tabs before reaching a setting."""
+        fn = page.split("function showTab")[1].split("\n}")[0]
+        assert 'setAttribute("tabindex", "-1")' in fn
+        assert 'removeAttribute("tabindex")' in fn
+
+    def test_the_panel_says_which_tab_it_belongs_to(self, page):
+        assert 'role="tabpanel"' in page
+        fn = page.split("function showTab")[1].split("\n}")[0]
+        assert "aria-labelledby" in fn
+
+    def test_the_order_the_server_sends_still_applies(self, page):
+        """Tabs decide what is shown; the server still decides the order."""
+        fn = page.split("function showTab")[1].split("\n}")[0]
+        assert "style.order" not in fn, "showTab must not take over ordering"
+        assert "function applyOrder" in page
+
+    def test_every_section_is_still_placed_in_both_orders(self, page):
+        app_module = sys.modules["_pu_webui_app"]
+        on_page = set(re.findall(r'data-section="([a-z_]+)"', page))
+        for order in (app_module._SETTINGS_ORDER_FIRST_RUN,
+                      app_module._SETTINGS_ORDER_REPEAT):
+            assert set(order) == on_page
