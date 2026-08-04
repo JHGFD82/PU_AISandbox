@@ -17,6 +17,30 @@
   #topbar h1 { font-size: var(--text-lg); margin: 0; flex: 1; }
   #topbar a { color: var(--text); text-decoration: none; font-size: var(--text-md); }
   #topbar a:hover { text-decoration: underline; }
+  /* Same reason as #topbar above: the rule under it sets display, so the
+     browser's own meaning for the attribute has to be said explicitly or the
+     bar shows through before there is anything to put in it. */
+  #tabs[hidden] { display: none; }
+  #tabs {
+    display: flex; gap: var(--space-1); max-width: 720px; margin: 0 auto;
+    padding: var(--space-4) var(--space-6) 0;
+  }
+  /* Not buttons: buttons here are orange and mean "this does something". A tab
+     names where you are, so it is quiet until chosen and then marked by the
+     one rule under it. */
+  #tabs button {
+    background: none; color: var(--text-muted); border: none;
+    border-bottom: 2px solid transparent; border-radius: 0;
+    padding: var(--space-2) var(--space-3); font-size: var(--text-md);
+    font-weight: 500; white-space: nowrap;
+  }
+  #tabs button:hover { background: var(--hover-bg); color: var(--text); }
+  #tabs button[aria-selected="true"] {
+    color: var(--text); border-bottom-color: var(--orange);
+  }
+  /* The underline is the marker, and colour alone is not a marker anyone can
+     rely on — so the chosen tab is also the only one in the full-strength ink,
+     and it is the only one the keyboard stops at. */
   #page { max-width: 720px; margin: 0 auto; padding: 1.5rem; display: flex; flex-direction: column; gap: 1.25rem; }
   .card { background: var(--panel-bg); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 1.25rem 1.5rem; }
   .card h2 { font-size: var(--text-lg); margin: 0 0 0.25rem; }
@@ -87,8 +111,20 @@
     <button class="secondary" id="lock-btn">Lock</button>
   </div>
 
-  <div id="page">
-    <div class="card" id="section-professors" data-section="professors">
+  <!-- Seven cards in one column was a page you scrolled to find things in.
+       These divide it by what a person came to do: run the installation, set
+       up the browser side, or manage which models are available. -->
+  <div id="tabs" role="tablist" aria-label="Settings sections" hidden>
+    <button type="button" role="tab" id="tab-system" data-tab="system"
+            aria-controls="page" aria-selected="true">System</button>
+    <button type="button" role="tab" id="tab-webui" data-tab="webui"
+            aria-controls="page" aria-selected="false" tabindex="-1">Web interface</button>
+    <button type="button" role="tab" id="tab-models" data-tab="models"
+            aria-controls="page" aria-selected="false" tabindex="-1">Models</button>
+  </div>
+
+  <div id="page" role="tabpanel" aria-labelledby="tab-system">
+    <div class="card" id="section-professors" data-section="professors" data-tab="system">
       <h2>Professors</h2>
       <p class="hint">Each professor needs a Princeton AI Sandbox API key (from OIT) before they can use this tool. Keys are never shown once saved — only whether one is set.</p>
       <div id="professors-list"></div>
@@ -130,7 +166,7 @@
       </form>
     </div>
 
-    <div class="card" id="section-webui" data-section="webui">
+    <div class="card" id="section-webui" data-section="webui" data-tab="webui">
       <h2>Web UI</h2>
       <p class="hint">Controls for this browser interface itself: the unlock passphrase and the session-signing secret.</p>
 
@@ -175,7 +211,7 @@
       </details>
     </div>
 
-    <div class="card" id="section-folder" data-section="folder">
+    <div class="card" id="section-folder" data-section="folder" data-tab="webui">
       <h2>What each conversation keeps</h2>
       <p class="hint">Every conversation has a folder of its own on this computer,
         holding what was said and the settings behind it. These two decide whether the
@@ -211,7 +247,7 @@
         already saved stays where it is.</p>
     </div>
 
-    <div class="card" id="section-shared" data-section="shared">
+    <div class="card" id="section-shared" data-section="shared" data-tab="system">
       <h2>Shared settings</h2>
       <p class="hint">A shared settings file lets a group of installations — everyone
         you look after, say — follow the same tuned defaults, without anybody editing
@@ -258,7 +294,7 @@
 
     </div>
 
-    <div class="card" id="section-endpoints" data-section="endpoints">
+    <div class="card" id="section-endpoints" data-section="endpoints" data-tab="models">
       <h2>Alternate AI endpoints</h2>
       <p class="hint">An AI service other than the Princeton sandbox — a model on a
         cluster, or a provider's own API. Calls to one are counted but carry no cost,
@@ -275,7 +311,7 @@ default_model = "llama-3-70b-instruct"</div>
       <p class="hint" style="margin-top:0.5rem">Endpoint definitions (base URL, timeout, etc.) aren't edited from here — add or change them by hand in settings.default.toml or preferences.toml, following the snippet above, then set the matching credential below. See docs/configuration.md for the full field reference.</p>
     </div>
 
-    <div class="card" id="section-models" data-section="models">
+    <div class="card" id="section-models" data-section="models" data-tab="models">
       <h2>Models</h2>
       <p class="hint">
         The models this sandbox can use. Adding one looks up its price and then
@@ -307,7 +343,7 @@ default_model = "llama-3-70b-instruct"</div>
       </form>
     </div>
 
-    <div class="card" id="section-external_sources" data-section="external_sources">
+    <div class="card" id="section-external_sources" data-section="external_sources" data-tab="system">
       <h2>External usage-data sources</h2>
       <p class="hint">Lets this installation combine another installation's usage data into reports — handy if you manage several professors' installations and want one combined view. This installation's own source id: <strong id="source-id"></strong></p>
       <div id="sources-list"></div>
@@ -709,6 +745,64 @@ function applyOrder(order) {
   });
 }
 
+// ── The three tabs ──────────────────────────────────────────────────────────
+// Seven cards in one column meant scrolling to find anything. These divide the
+// page by what somebody came to do — run the installation, set up the browser
+// side, or manage which models are available — without moving any of it.
+
+const TABS = ["system", "webui", "models"];
+
+function showTab(name) {
+  const chosen = TABS.includes(name) ? name : TABS[0];
+  document.querySelectorAll("#page .card").forEach(card => {
+    // The card's own order within the tab is untouched: applyOrder() still
+    // decides that, and the server still decides what applyOrder is given.
+    card.hidden = card.dataset.tab !== chosen;
+  });
+  document.querySelectorAll("#tabs button").forEach(tab => {
+    const selected = tab.dataset.tab === chosen;
+    tab.setAttribute("aria-selected", String(selected));
+    // Only the chosen tab is a tab stop. Tab moves past the whole strip and
+    // into the settings; the arrows move between the tabs themselves, which is
+    // how a tab strip is expected to behave.
+    if (selected) tab.removeAttribute("tabindex");
+    else tab.setAttribute("tabindex", "-1");
+  });
+  document.getElementById("page").setAttribute("aria-labelledby", "tab-" + chosen);
+  localStorage.setItem("settings-tab", chosen);
+}
+
+// Which tab to open on arriving. The server already says which section leads —
+// on a first run that is the professors, because nothing else can be done
+// until one exists — so the tab holding that section is the one to show. That
+// keeps the blocking step in front of somebody who has just installed this,
+// while anyone returning gets back the tab they were last in.
+function openingTab(order) {
+  const leading = document.querySelector(`[data-section="${order[0]}"]`);
+  const first = leading ? leading.dataset.tab : TABS[0];
+  const remembered = localStorage.getItem("settings-tab");
+  return TABS.includes(remembered) ? remembered : first;
+}
+
+document.getElementById("tabs").addEventListener("click", (e) => {
+  const tab = e.target.closest("button[role=tab]");
+  if (tab) showTab(tab.dataset.tab);
+});
+
+document.getElementById("tabs").addEventListener("keydown", (e) => {
+  const keys = { ArrowLeft: -1, ArrowRight: 1 };
+  let next;
+  if (e.key in keys) {
+    const here = TABS.indexOf(document.querySelector("#tabs button[aria-selected=true]").dataset.tab);
+    next = TABS[(here + keys[e.key] + TABS.length) % TABS.length];
+  } else if (e.key === "Home") next = TABS[0];
+  else if (e.key === "End") next = TABS[TABS.length - 1];
+  else return;
+  showTab(next);
+  document.getElementById("tab-" + next).focus();
+  e.preventDefault();
+});
+
 // ── What each conversation keeps ──────────────────────────────────────────
 
 // The two boxes, by the name each is stored under.
@@ -885,6 +979,8 @@ document.getElementById("add-model-form").addEventListener("submit", async (ev) 
 async function loadSettings() {
   const data = await api("/api/settings");
   applyOrder(data.order);
+  document.getElementById("tabs").hidden = false;
+  showTab(openingTab(data.order));
   showBrowseButtons(data.can_browse);
   renderProfessors(data);
   renderWebui(data);
