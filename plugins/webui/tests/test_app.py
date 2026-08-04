@@ -4310,3 +4310,67 @@ class TestTheSettingsPageIsInThreeTabs:
         for order in (app_module._SETTINGS_ORDER_FIRST_RUN,
                       app_module._SETTINGS_ORDER_REPEAT):
             assert set(order) == on_page
+
+
+class TestTheProfessorPickerMatchesTheModelPicker:
+    """It was a bare <select>: the browser draws those itself.
+
+    A different height from every other field on the page, a different chevron,
+    and a list rendered by the OS that ignores the theme entirely — which is the
+    same reason the model picker stopped being one.
+    """
+
+    @pytest.fixture
+    def chat(self):
+        return (Path(__file__).resolve().parents[1] / "src" / "templates"
+                / "chat.html").read_text()
+
+    def test_the_select_is_gone(self, chat):
+        assert "professor-select" not in chat
+        assert 'id="professor-combobox"' in chat
+
+    def test_both_pickers_are_built_from_the_same_parts(self, chat):
+        for part in ("combobox", "combobox-field", "combobox-toggle", "combobox-list"):
+            for picker in ("professor", "model"):
+                block = chat.split(f'id="{picker}-combobox"')[1].split("</div>\n")[0] \
+                    if picker == "professor" else chat.split('id="model-combobox"')[1]
+                assert part in block[:1200], f"{picker} is missing {part}"
+
+    def test_the_field_class_is_not_named_after_one_picker(self, chat):
+        """It was .model-field while two fields use it."""
+        assert "class=\"model-field\"" not in chat
+        assert ".combobox input.combobox-field" in chat
+
+    def test_both_chevrons_are_the_same_drawing(self, chat):
+        paths = re.findall(r'class="combobox-toggle"[^>]*>\s*<svg[^>]*>\s*<path d="([^"]{40,})"', chat)
+        assert len(paths) == 2 and paths[0] == paths[1]
+
+    def test_opening_and_closing_is_written_once(self, chat):
+        """Two copies is how two pickers drift apart."""
+        assert chat.count("function openCombobox") == 1
+        assert chat.count("function wireCombobox") == 1
+        # The model picker's own versions now defer rather than duplicate.
+        assert 'function openModelList() { openCombobox("model-field"); }' in chat
+
+    def test_the_listener_is_wired_outside_the_loader(self, chat):
+        """loadProfessors() runs twice; wiring inside it stacked the handlers."""
+        loader = chat.split("async function loadProfessors")[1].split("\n}")[0]
+        assert "addEventListener" not in loader or "opt.addEventListener" in loader
+        assert 'wireCombobox("professor-field", "professor-toggle-btn");' in chat
+
+    def test_clicking_away_closes_the_professor_list_too(self, chat):
+        handler = chat.split('document.addEventListener("click"')[1].split("\n});")[0]
+        assert "professor-combobox" in handler
+
+    def test_choosing_the_same_professor_does_no_work(self, chat):
+        """It reloaded every conversation and the usage panel for nothing."""
+        fn = chat.split("async function chooseProfessor")[1].split("\n}")[0]
+        assert "if (netid === state.professor) return;" in fn
+
+    def test_it_is_announced_as_a_combobox(self, chat):
+        # To the end of the combobox, not a fixed slice — the chevron's path
+        # data alone is longer than a window sized by eye.
+        block = chat.split('id="professor-combobox"')[1].split("</div>\n    </div>")[0]
+        assert 'role="combobox"' in block
+        assert 'aria-expanded' in block
+        assert 'role="listbox"' in block
