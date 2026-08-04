@@ -1,0 +1,30 @@
+{#
+  The parts only the settings pages are built from.
+
+  Split out of _forms.html rather than left in it: the chat page uses none of
+  these, and shipping a page rules for components it does not contain is the
+  same waste as the duplication this was all meant to remove — just moved.
+#}
+<style>
+  /* A row of boxes ending in a button, all sharing a baseline. */
+  form.inline { display: flex; gap: 0.5rem; align-items: flex-end; flex-wrap: wrap; margin-top: 0.75rem; }
+  form.inline > div { flex: 1; min-width: 140px; }
+  /* A box with a button beside it, rather than under it. */
+  .field-set { display: flex; gap: 0.5rem; align-items: center; }
+  .field-set input { flex: 1; }
+
+  /* ── Small parts ──────────────────────────────────────────────────────── */
+  /* Whether something is set, without ever showing what it is set to. */
+  .badge { font-size: var(--text-xs); padding: 0.15rem 0.5rem; border-radius: var(--radius-pill); white-space: nowrap; }
+  .badge.set { background: var(--badge-set-bg); color: var(--badge-set-text); }
+  .badge.unset { background: var(--hover-bg); color: var(--text-muted); }
+  /* A folded-away control, opened only by someone who came to change it. */
+  details.manage { margin-top: 0.4rem; }
+  details.manage summary { font-size: var(--text-xs); color: var(--orange); cursor: pointer; }
+  /* A block of literal text — a path, a line of TOML — shown as itself. */
+  .snippet {
+    background: var(--bg); border-radius: var(--radius-md); padding: 0.75rem;
+    font-family: var(--font-mono); font-size: var(--text-xs);
+    white-space: pre; overflow-x: auto; margin-top: 0.5rem;
+  }
+</style>

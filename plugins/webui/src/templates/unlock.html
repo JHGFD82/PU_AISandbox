@@ -5,34 +5,36 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Princeton University AI Sandbox</title>
 {% include "_design-system.html" %}
+{% include "_forms.html" %}
 <style>
+  /* One card, centred on an otherwise empty page. */
   body {
-    font-family: var(--font-ui); margin: 0; min-height: 100vh;
-    display: flex; align-items: center; justify-content: center;
-    background: var(--bg); color: var(--text);
+    min-height: 100vh; display: flex;
+    align-items: center; justify-content: center;
   }
+  /* The one card on a page with nothing else on it: wider, deeper, and
+     lifted off the background. Only what differs from the shared rule. */
   .card {
-    background: var(--panel-bg); border: 1px solid var(--border);
-    border-radius: var(--radius-lg); box-shadow: 0 20px 60px var(--shadow);
-    padding: var(--space-8); width: min(22rem, calc(100vw - var(--space-8)));
+    box-shadow: 0 20px 60px var(--shadow); padding: var(--space-8);
+    width: min(22rem, calc(100vw - var(--space-8)));
   }
   .mark {
     width: 2.6rem; height: 2.6rem; margin-bottom: var(--space-3);
     background: url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 132.96 132.11%22%3E%3Cpath fill=%22%23f58025%22 d=%22M83.45,0h0s-8.01,22.44-8.01,22.44h0s-12.39,9.79-27.75,3.46c-2.54-1.04-5.15-2.53-7.81-4.56-2.01-7.47-4.42-14.58-7.18-21.34h50.75Z%22/%3E%3Cpath fill=%22%23f58025%22 d=%22M107.6,50.88c9.25,1.17,14.35,19.41,18.36,35.04,5.02,19.6,7,39.85,7,39.85V4.19s-43.38,0-43.38,0l-8.01,22.44s1.91,15.67,17.27,22c2.53,1.04,5.44,1.83,8.76,2.25%22/%3E%3Cpath fill=%22%23f58025%22 d=%22M43.24,112.27c7.52-2.11,14.12-4.89,19.9-8.07,0,0-9.95-22.98-9.95-22.98l-23.07,9.25h0c1.8,5.33,4.22,10.85,7.42,16.48C26.31,109.9,13.44,112.46,0,114.66h0V5.2h27.46c2.76,6.76,5.17,13.86,7.18,21.34,0,0-5.18,8.57-7.67,22.41-1.28,7.11-1.85,15.6-.65,25.04l35.65-14.06h0s15.23,34.58,15.23,34.58h0c6.12-5.23,10.82-10.79,14.4-15.98,7.97-11.58,10.33-21.31,10.33-21.31,9.25,1.17,14.35,19.41,18.36,35.04,5.02,19.6,7,39.85,7,39.85H5.69v-12.14h0c13.44-2.2,26.31-4.75,37.55-7.7%22/%3E%3C/svg%3E") no-repeat center / contain;
   }
   h1 { font-size: var(--text-lg); font-weight: 600; margin: 0 0 var(--space-6); }
-  label { display: block; font-size: var(--text-xs); color: var(--text-muted); margin-bottom: var(--space-1); }
+  label { margin: 0 0 var(--space-1); }
   input[type=password] {
     width: 100%; padding: var(--space-2); font-size: var(--text-body);
     border: 1px solid var(--border); border-radius: var(--radius-sm);
     background: var(--input-bg); color: var(--text); font-family: inherit;
   }
+  /* The only thing to press on the page, so it spans the card. Its corner
+     radius follows the field above it rather than the shared button. */
   button {
     margin-top: var(--space-4); width: 100%; padding: var(--space-2);
-    font-size: var(--text-md); font-weight: 600; background: var(--orange); color: var(--on-orange);
-    border: none; border-radius: var(--radius-sm); cursor: pointer;
+    font-weight: 600; border-radius: var(--radius-sm);
   }
-  button:hover { background: var(--orange-hover); }
   .error {
     color: var(--danger-text); font-size: var(--text-sm); margin-top: var(--space-3);
     border: 1px solid var(--danger-border); background: var(--danger-hover-bg);

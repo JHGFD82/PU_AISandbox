@@ -1,0 +1,24 @@
+{#
+  Artwork used in more than one place, kept in one place.
+
+  Macros rather than an SVG sprite: a macro puts the same <path> into the page
+  that was always there, so nothing about how these draw — or how the tests that
+  check the supplied artwork read them — changes. A sprite would have turned
+  every icon into an indirection to follow.
+
+  The path data is the drawing as supplied. Replace it wholesale if the artwork
+  changes; do not edit the numbers.
+#}
+
+{# The chevron on a combobox. Used by the model picker and by both professor
+   pickers, on two different pages. #}
+{%- macro chevron_down() -%}
+<svg viewBox="0 0 21.6895 12.959"><path d="M10.6641 12.959C10.9473 12.959 11.2109 12.832 11.4062 12.6172L21.0352 2.58789C21.2207 2.40234 21.3281 2.16797 21.3281 1.89453C21.3281 1.34766 20.9082 0.927734 20.3516 0.927734C20.0977 0.927734 19.8438 1.02539 19.6582 1.20117L10.0684 11.1816L11.2695 11.1816L1.66016 1.20117C1.48438 1.02539 1.24023 0.927734 0.976562 0.927734C0.419922 0.927734 0 1.34766 0 1.89453C0 2.16797 0.117188 2.40234 0.292969 2.59766L9.92188 12.627C10.1367 12.832 10.3809 12.959 10.6641 12.959Z" fill="currentColor"/></svg>
+{%- endmacro -%}
+
+{# One drawing doing two jobs: the plus that adds a custom model, and the same
+   plus turned 45 degrees by .icon-as-cross to read as a close button. Pass
+   "icon-as-cross" for the second. #}
+{%- macro plus(css_class="") -%}
+<svg{% if css_class %} class="{{ css_class }}"{% endif %} viewBox="0 0 20.918 20.5762"><path d="M11.2305 19.5996L11.2305 0.957031C11.2305 0.439453 10.8008 0 10.2734 0C9.75586 0 9.32617 0.439453 9.32617 0.957031L9.32617 19.5996C9.32617 20.1172 9.75586 20.5566 10.2734 20.5566C10.8008 20.5566 11.2305 20.1172 11.2305 19.5996ZM0.957031 11.2305L19.5996 11.2305C20.1172 11.2305 20.5566 10.8008 20.5566 10.2832C20.5566 9.75586 20.1172 9.32617 19.5996 9.32617L0.957031 9.32617C0.439453 9.32617 0 9.75586 0 10.2832C0 10.8008 0.439453 11.2305 0.957031 11.2305Z" fill="currentColor"/></svg>
+{%- endmacro -%}

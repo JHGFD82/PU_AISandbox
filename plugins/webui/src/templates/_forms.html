@@ -1,0 +1,91 @@
+{#
+  The chrome every page is built from: buttons, fields, cards and rows.
+  What only the settings pages use is in _panels.html beside this.
+
+  _design-system.html says what the colours and sizes are called. This says what
+  the components made of them look like. The split matters: a page needing a
+  button should not be choosing its padding, and four pages each choosing were
+  how settings.html came to hover a different orange from chat.html.
+
+  Twenty-eight rules were declared in more than one page before this existed,
+  and thirteen of those had drifted apart. A page still overrides what is
+  genuinely its own — the unlock screen's button really is full-width, and the
+  chat page's top bar really is tighter than the settings pages' — but it does
+  so by changing the one or two declarations that differ, in the same file as
+  the reason.
+#}
+<style>
+  /* What every page is, before it decides how it is laid out. The font was
+     written out in full on three of the four, which is the same mistake as a
+     colour literal: --font-ui already names it. */
+  body {
+    font-family: var(--font-ui); margin: 0;
+    background: var(--bg); color: var(--text);
+  }
+
+  /* Anything that changes colour with the theme, eased rather than snapped. */
+  body, #topbar, .card, input, select, .badge, button.secondary, button.danger {
+    transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+  }
+
+  /* ── Buttons ──────────────────────────────────────────────────────────── */
+  button {
+    padding: 0.45rem 0.8rem; font-size: var(--text-md);
+    background: var(--orange); color: var(--on-orange);
+    border: none; border-radius: var(--radius-md);
+    cursor: pointer; white-space: nowrap;
+  }
+  /* The token, never the value it happens to have in one theme. The dark
+     theme's orange-hover is *lighter*, because darkening an orange on a dark
+     panel moves it towards the background rather than away from it — so a page
+     that wrote the light value here made its buttons recede on hover. */
+  button:hover { background: var(--orange-hover); }
+  button:disabled { opacity: 0.5; cursor: default; }
+  button.secondary {
+    background: transparent; color: var(--text); border: 1px solid var(--border);
+  }
+  button.secondary:hover { background: var(--hover-bg); }
+  button.danger {
+    background: transparent; color: var(--danger-text);
+    border: 1px solid var(--danger-border);
+  }
+  button.danger:hover { background: var(--danger-hover-bg); }
+
+  /* ── Fields ───────────────────────────────────────────────────────────── */
+  input[type=text], input[type=password], select {
+    width: 100%; padding: 0.5rem; font-size: var(--text-md);
+    border: 1px solid var(--border); border-radius: var(--radius-md);
+    font-family: inherit; background: var(--input-bg); color: var(--text);
+  }
+  label {
+    display: block; font-size: var(--text-xs); color: var(--text-muted);
+    margin: 0.6rem 0 0.2rem;
+  }
+  /* ── Cards and the rows inside them ───────────────────────────────────── */
+  .card {
+    background: var(--panel-bg); border: 1px solid var(--border);
+    border-radius: var(--radius-lg); padding: 1.25rem 1.5rem;
+  }
+  .card h2 { font-size: var(--text-lg); margin: 0 0 0.25rem; }
+  .card .hint { font-size: var(--text-sm); color: var(--text-muted); margin: 0 0 1rem; line-height: 1.4; }
+  .row { display: flex; align-items: center; gap: 0.6rem; padding: 0.5rem 0; border-bottom: 1px solid var(--bg); }
+  .row:last-child { border-bottom: none; }
+  .row .main { flex: 1; min-width: 0; }
+  .row .name { font-size: var(--text-md); font-weight: 500; }
+  .row .sub { font-size: var(--text-xs); color: var(--text-muted); }
+
+  .empty { font-size: var(--text-md); color: var(--text-muted); }
+
+  /* ── The bar across the top ───────────────────────────────────────────── */
+  /* Said explicitly, because the rule below sets display and would otherwise
+     win against the browser's own meaning for the attribute — which is why
+     hiding this bar inside the modal once had no effect at all. */
+  #topbar[hidden] { display: none; }
+  #topbar {
+    display: flex; align-items: center; gap: 0.75rem; padding: 0.8rem 1.5rem;
+    border-bottom: 1px solid var(--border); background: var(--panel-bg);
+  }
+  #topbar h1 { font-size: var(--text-lg); margin: 0; flex: 1; }
+  #topbar a { color: var(--text); text-decoration: none; font-size: var(--text-md); }
+  #topbar a:hover { text-decoration: underline; }
+</style>
