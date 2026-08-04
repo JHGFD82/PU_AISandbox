@@ -93,6 +93,17 @@ class UiField:
                       by default so a single-document upload (e.g.
                       translate's own document field) still only ever
                       accepts one file.
+        allow_text: For ``kind='file'`` only — when ``True``, one of the modes
+                    offered is typing the passage in instead of choosing a
+                    file at all, which is what the CLI's ``-c/--custom`` does.
+                    What gets typed reaches ``run_ui_action`` as
+                    ``fields['<name>_text']`` — ``fields['file_text']`` for a
+                    field named ``file`` — and no file is uploaded in that
+                    mode, so ``fields['file_path']`` is absent. A plugin
+                    offering this should check for the text first and fall
+                    back to the file. Like ``allow_folder`` this *adds* a
+                    mode rather than replacing one, and is ignored for every
+                    other kind.
     """
 
     name: str
@@ -102,6 +113,7 @@ class UiField:
     choices: Optional[list[dict]] = None
     group: Optional[str] = None
     allow_folder: bool = False
+    allow_text: bool = False
 
 
 @dataclass

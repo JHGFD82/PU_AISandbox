@@ -287,7 +287,7 @@ class TestRunUiAction:
 
     def test_missing_file_raises_cli_error(self, monkeypatch, plugin_module, tmp_path):
         self._patch_sandbox(monkeypatch)
-        with pytest.raises(CLIError, match="No file was attached"):
+        with pytest.raises(CLIError, match="nothing to translate"):
             plugin_module.plugin.run_ui_action(
                 fields={"source_language": "ja", "target_language": "en"},
                 professor="fake", model=None, on_progress=None, output_dir=str(tmp_path / "out"),
@@ -907,3 +907,111 @@ class TestTheAbstractReachesBothWays:
         labels = [c.args[0] for c in sandbox._collect_multiline.call_args_list]
         assert not any("Abstract" in label for label in labels)
         assert None in sandbox.translate_custom_text.call_args.args
+
+
+class TestPastingTheTextInstead:
+    """-c/--custom in the browser: a passage typed in, with no file at all.
+
+    The web form required a file, so there was no way to translate a paragraph
+    someone had in front of them without saving it to disk first.
+    """
+
+    def _sandbox(self, monkeypatch, tmp_path):
+        fake = MagicMock()
+        fake.translation_service = MagicMock()
+        fake.image_translation_service = MagicMock()
+        # opts travels positionally on this call and by keyword on the other.
+        fake.translate_custom_text.side_effect = (
+            lambda *a, **kw: Path((kw.get("opts") or a[3]).output_file).write_text("done")
+        )
+        monkeypatch.setattr(
+            "src.runtime.sandbox_processor.SandboxProcessor", MagicMock(return_value=fake),
+        )
+        return fake
+
+    def _run(self, plugin_module, tmp_path, **extra):
+        return plugin_module.plugin.run_ui_action(
+            fields={"source_language": "ja", "target_language": "en", **extra},
+            professor="fake", model=None, on_progress=None,
+            output_dir=str(tmp_path / "out"),
+        )
+
+    def test_the_form_offers_pasting(self, plugin_module):
+        field = next(f for f in plugin_module.ui_action.fields if f.name == "file")
+        assert field.allow_text is True
+        assert field.allow_folder is True, "pasting must not have replaced a mode"
+
+    def test_the_passage_is_translated_without_any_file(
+        self, monkeypatch, plugin_module, tmp_path
+    ):
+        fake = self._sandbox(monkeypatch, tmp_path)
+        self._run(plugin_module, tmp_path, file_text="  月日は百代の過客にして  ")
+        fake.translate_document.assert_not_called()
+        assert fake.translate_custom_text.call_args.kwargs["text"] == "月日は百代の過客にして"
+
+    def test_the_result_is_not_called_document(self, monkeypatch, plugin_module, tmp_path):
+        """With no filename to take one from, it needs a name of its own."""
+        self._sandbox(monkeypatch, tmp_path)
+        result = self._run(plugin_module, tmp_path, file_text="ある日")
+        assert "pasted_text" in result.output_filename
+        assert "document" not in result.output_filename
+
+    def test_an_empty_box_is_not_something_to_translate(
+        self, monkeypatch, plugin_module, tmp_path
+    ):
+        self._sandbox(monkeypatch, tmp_path)
+        with pytest.raises(CLIError, match="nothing to translate"):
+            self._run(plugin_module, tmp_path, file_text="   ")
+
+    def test_the_error_says_both_ways_out(self, monkeypatch, plugin_module, tmp_path):
+        self._sandbox(monkeypatch, tmp_path)
+        with pytest.raises(CLIError) as caught:
+            self._run(plugin_module, tmp_path)
+        assert "choose a file" in str(caught.value)
+        assert "Paste the text" in str(caught.value)
+
+    def test_a_file_still_wins_nothing_and_still_works(
+        self, monkeypatch, plugin_module, tmp_path
+    ):
+        """The ordinary path must be untouched by any of this."""
+        fake = self._sandbox(monkeypatch, tmp_path)
+        fake.translate_document.side_effect = (
+            lambda *a, **kw: Path(kw["opts"].output_file).write_text("translated")
+        )
+        src = tmp_path / "upload.txt"
+        src.write_text("hello", encoding="utf-8")
+        self._run(plugin_module, tmp_path, file_path=str(src), file_name="upload.txt")
+        fake.translate_document.assert_called_once()
+        fake.translate_custom_text.assert_not_called()
+
+    def test_the_preview_shows_what_was_pasted(self, monkeypatch, plugin_module):
+        """Otherwise it previews a prompt about a document that does not exist."""
+        fake = MagicMock()
+        fake.translation_service = MagicMock()
+        fake.image_translation_service = MagicMock()
+        fake.translation_service.build_prompts.return_value = ("sys", "usr")
+        monkeypatch.setattr(
+            "src.runtime.sandbox_processor.SandboxProcessor", MagicMock(return_value=fake),
+        )
+        plugin_module.plugin.preview_ui_action(
+            {"source_language": "ja", "target_language": "en", "file_text": "月日は百代"},
+            professor="fake", model=None,
+        )
+        sent = fake.translation_service.build_prompts.call_args.args[0]
+        assert "月日は百代" in sent
+        assert "document text" not in sent
+
+    def test_the_command_line_still_asks_at_the_terminal(self, plugin_module):
+        """Passing the text in must not have removed the interactive path."""
+        import argparse
+        sandbox = MagicMock()
+        sandbox._collect_multiline.return_value = "typed at the terminal"
+        args = argparse.Namespace(
+            abstract=False, custom_text=True, input_file=None, page_nums=None,
+            workers=1, spread=False, scanned=False, output_file=None,
+            auto_save=False, progressive_save=False, custom_font=None,
+            preserve_media=False, font_size=None, dry_run=False,
+        )
+        plugin_module._execute_translate(sandbox, args, "Japanese", "English")
+        # No text handed in, so the handler is left to ask for it as before.
+        assert sandbox.translate_custom_text.call_args.kwargs.get("text") is None

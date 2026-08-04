@@ -470,8 +470,9 @@ class Mixin:
         target_language: str,
         abstract_text: Optional[str] = None,
         opts: OutputOptions = OutputOptions(),
+        text: Optional[str] = None,
     ) -> None:
-        """Prompt the user to type text directly in the terminal and translate it.
+        """Translate a passage given directly, rather than a document on disk.
 
         Collects multi-line input interactively (the user ends input with
         ``---``), then sends the text to the translation service. The
@@ -489,10 +490,13 @@ class Mixin:
                            not this method.
             opts: Output and formatting options, including whether to save
                   the result and where.
+            text: The passage to translate. ``None`` means ask for it at the
+                  terminal, which is what the command line does; the browser
+                  has nobody to ask and supplies it here instead.
         """
 
         try:
-            custom_text = self._collect_multiline(  # type: ignore[attr-defined]
+            custom_text = text if text is not None else self._collect_multiline(  # type: ignore[attr-defined]
                 f"Enter the {source_language} text you want to translate to {target_language}"
             )
 

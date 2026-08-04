@@ -905,6 +905,7 @@ class TestPluginActionExtensionFields:
             "fields": [{
                 "name": "kanbun", "label": "Use Kanbun conventions", "kind": "checkbox",
                 "required": False, "choices": None, "group": None, "allow_folder": False,
+                "allow_text": False,
             }]
         }
 
@@ -1797,7 +1798,7 @@ class TestFileOrFolderPicker:
         page = self._page()
         for match in re.finditer(r"webkitdirectory = true", page):
             before = page[max(0, match.start() - 400):match.start()]
-            assert "if (folder)" in before, (
+            assert 'mode === "folder"' in before, (
                 "webkitdirectory must only be set for the folder mode; setting it "
                 "on every file field is what removed single-file selection"
             )
@@ -1806,7 +1807,10 @@ class TestFileOrFolderPicker:
         """The commoner case, and the one that broke."""
         page = self._page()
         assert "radio.checked = index === 0" in page
-        assert '[["file", "A single file", false], ["folder", "A whole folder", true]]' in page
+        # The modes are built up rather than written as one literal now, so that
+        # a field can offer folders, pasted text, both or neither — but a single
+        # file is always the first, and therefore the default.
+        assert 'const modes = [["file", "A single file"]];' in page
 
     def test_the_rebuilt_input_keeps_the_field_id(self):
         """collect, restore and submit all look the field up by this id."""
@@ -4374,3 +4378,51 @@ class TestTheProfessorPickerMatchesTheModelPicker:
         assert 'role="combobox"' in block
         assert 'aria-expanded' in block
         assert 'role="listbox"' in block
+
+
+class TestPastingTextIntoAJobForm:
+    """The browser side of -c/--custom: a third mode on the file field."""
+
+    @pytest.fixture
+    def chat(self):
+        return (Path(__file__).resolve().parents[1] / "src" / "templates"
+                / "chat.html").read_text()
+
+    def test_pasting_is_offered_as_a_mode(self, chat):
+        assert 'if (field.allow_text) modes.push(["text", "Paste the text"]);' in chat
+
+    def test_it_adds_a_mode_rather_than_replacing_one(self, chat):
+        """A single file must stay first, and therefore the default."""
+        assert 'const modes = [["file", "A single file"]];' in chat
+        assert 'if (field.allow_folder) modes.push(' in chat
+
+    def test_the_toggle_appears_for_text_alone(self, chat):
+        """A field offering only pasting still needs somewhere to choose it."""
+        assert "if (field.allow_folder || field.allow_text) {" in chat
+
+    def test_pasted_text_travels_as_a_value_not_a_file(self, chat):
+        fn = chat.split("function collectJobFieldValues")[1].split("\n}")[0]
+        assert 'values[field.name + "_text"] = el.value;' in fn
+        # The element either is a file input or it is not; that is the honest test.
+        assert "if (el.files)" in fn
+
+    def test_a_pasted_passage_satisfies_a_required_file_field(self, chat):
+        """Otherwise the form refuses to start a job it has everything for."""
+        assert 'files.length === 0 && !pasted' in chat
+
+    def test_the_refusal_names_both_ways_out(self, chat):
+        assert "or paste the text to translate" in chat
+
+    def test_switching_mode_refreshes_the_preview(self, chat):
+        """What was chosen in the old mode is gone, so the preview is stale."""
+        fn = chat.split("const apply = (mode) => {")[1].split("\n  };")[0]
+        assert "scheduleJobPreview()" in fn
+
+    def test_typing_refreshes_the_preview(self, chat):
+        fn = chat.split("const apply = (mode) => {")[1].split("\n  };")[0]
+        assert 'replacement.addEventListener("input", scheduleJobPreview)' in fn
+
+    def test_the_box_is_big_enough_for_a_passage(self, chat):
+        fn = chat.split("const apply = (mode) => {")[1].split("\n  };")[0]
+        rows = int(re.search(r"replacement\.rows = (\d+)", fn).group(1))
+        assert rows >= 5, "one line misrepresents what goes in it"
