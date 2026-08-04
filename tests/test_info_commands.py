@@ -332,78 +332,6 @@ class TestHandleInfoCommandsUsageSources:
         out = capsys.readouterr().out
         assert "No external usage-data sources configured" in out
 
-    def test_sources_add_read_only_with_flags(self, capsys, tmp_path):
-        args = _make_ns(command="usage", professor="testprof",
-                        usage_subcommand="sources", sources_subcommand="add",
-                        label="Johnson", path=str(tmp_path), mode="read-only",
-                        for_professor="johnson")
-        result = handle_info_commands(args)
-        assert result is True
-        out = capsys.readouterr().out
-        assert "Added source 'Johnson'" in out
-
-    def test_sources_add_then_list_shows_it(self, capsys, tmp_path):
-        add_args = _make_ns(command="usage", professor="testprof",
-                            usage_subcommand="sources", sources_subcommand="add",
-                            label="Johnson", path=str(tmp_path), mode="read-only",
-                        for_professor="johnson")
-        handle_info_commands(add_args)
-        capsys.readouterr()  # discard
-
-        list_args = _make_ns(command="usage", professor="testprof",
-                             usage_subcommand="sources", sources_subcommand="list")
-        handle_info_commands(list_args)
-        out = capsys.readouterr().out
-        assert "Johnson" in out
-
-    def test_sources_add_shared_write_requires_for_professor_prompt(self, capsys, tmp_path, monkeypatch):
-        monkeypatch.setattr("builtins.input", lambda *_: "smith")
-        args = _make_ns(command="usage", professor="testprof",
-                        usage_subcommand="sources", sources_subcommand="add",
-                        label="Smith", path=str(tmp_path), mode="shared-write", for_professor=None)
-        handle_info_commands(args)
-        out = capsys.readouterr().out
-        assert "Add this on the other installation" in out
-        assert "--for-professor smith" in out
-
-    def test_sources_add_shared_write_with_for_professor_flag_skips_prompt(self, capsys, tmp_path):
-        args = _make_ns(command="usage", professor="testprof",
-                        usage_subcommand="sources", sources_subcommand="add",
-                        label="Smith", path=str(tmp_path), mode="shared-write", for_professor="smith")
-        handle_info_commands(args)
-        out = capsys.readouterr().out
-        assert "smiths-imac" not in out  # sanity: no leftover placeholder text
-        assert "--for-professor smith" in out
-
-    def test_sources_remove_existing(self, capsys, tmp_path):
-        add_args = _make_ns(command="usage", professor="testprof",
-                            usage_subcommand="sources", sources_subcommand="add",
-                            label="Johnson", path=str(tmp_path), mode="read-only",
-                        for_professor="johnson")
-        handle_info_commands(add_args)
-        capsys.readouterr()
-
-        remove_args = _make_ns(command="usage", professor="testprof",
-                               usage_subcommand="sources", sources_subcommand="remove",
-                               label="Johnson")
-        handle_info_commands(remove_args)
-        out = capsys.readouterr().out
-        assert "Removed source 'Johnson'" in out
-
-    def test_sources_remove_missing_reports_not_found(self, capsys):
-        args = _make_ns(command="usage", professor="testprof",
-                        usage_subcommand="sources", sources_subcommand="remove",
-                        label="Nobody")
-        handle_info_commands(args)
-        out = capsys.readouterr().out
-        assert "No configured source named 'Nobody'" in out
-
-    def test_sources_invalid_subcommand_raises(self):
-        args = _make_ns(command="usage", professor="testprof",
-                        usage_subcommand="sources", sources_subcommand="bogus")
-        with pytest.raises(CLIError, match="Invalid usage sources subcommand"):
-            handle_info_commands(args)
-
     def test_sources_does_not_construct_token_tracker(self, capsys):
         """'usage sources' shouldn't need a working professor config at all."""
         with patch("src.runtime.info_commands.TokenTracker") as mock_cls:
@@ -555,58 +483,6 @@ class TestHandleInfoCommandsSettings:
                         netid="Jeff Heller", name="Jeff Heller")
         with pytest.raises(CLIError, match="netID"):
             handle_info_commands(args)
-
-    def test_remove_professor_confirmed(self, capsys, monkeypatch):
-        monkeypatch.setattr("getpass.getpass", lambda *_: "sk-test-key")
-        handle_info_commands(_make_ns(command="settings", settings_subcommand="add-professor",
-                                      netid="jh43", name="Jeff Heller"))
-        capsys.readouterr()
-
-        monkeypatch.setattr("builtins.input", lambda *_: "y")
-        args = _make_ns(command="settings", settings_subcommand="remove-professor", identifier="jh43")
-        handle_info_commands(args)
-        out = capsys.readouterr().out
-        assert "Removed professor 'Jeff Heller'" in out
-
-    def test_remove_professor_declined(self, capsys, monkeypatch):
-        monkeypatch.setattr("getpass.getpass", lambda *_: "sk-test-key")
-        handle_info_commands(_make_ns(command="settings", settings_subcommand="add-professor",
-                                      netid="jh43", name="Jeff Heller"))
-        capsys.readouterr()
-
-        monkeypatch.setattr("builtins.input", lambda *_: "n")
-        args = _make_ns(command="settings", settings_subcommand="remove-professor", identifier="jh43")
-        handle_info_commands(args)
-        out = capsys.readouterr().out
-        assert "Cancelled" in out
-
-    def test_remove_unknown_professor_raises_cli_error(self, monkeypatch):
-        monkeypatch.setattr("builtins.input", lambda *_: "y")
-        args = _make_ns(command="settings", settings_subcommand="remove-professor", identifier="nobody")
-        with pytest.raises(CLIError, match="No configured professor"):
-            handle_info_commands(args)
-
-    def test_set_secret_value_hides_it_in_output(self, capsys, monkeypatch):
-        monkeypatch.setattr("getpass.getpass", lambda *_: "super-secret")
-        args = _make_ns(command="settings", settings_subcommand="set", key="webui.session_secret", generate=False)
-        handle_info_commands(args)
-        out = capsys.readouterr().out
-        assert "super-secret" not in out
-        assert "hidden" in out
-
-    def test_set_generate_produces_a_value_without_prompting(self, capsys, monkeypatch):
-        def _boom(*_a, **_k):
-            raise AssertionError("should not prompt when --generate is used")
-        monkeypatch.setattr("getpass.getpass", _boom)
-        args = _make_ns(command="settings", settings_subcommand="set", key="webui.session_secret", generate=True)
-        handle_info_commands(args)
-        assert settings_store_mod.get_value("webui.session_secret")
-
-    def test_unset_removes_value(self, monkeypatch):
-        monkeypatch.setattr("getpass.getpass", lambda *_: "some-value")
-        handle_info_commands(_make_ns(command="settings", settings_subcommand="set", key="webui.session_secret"))
-        handle_info_commands(_make_ns(command="settings", settings_subcommand="unset", key="webui.session_secret"))
-        assert settings_store_mod.get_value("webui.session_secret") is None
 
     def test_no_subcommand_raises_cli_error(self):
         args = _make_ns(command="settings", settings_subcommand=None)

@@ -133,7 +133,12 @@ class WebUiPlugin:
 
         webui_sub.add_parser(
             "set-passphrase",
-            help="Set the web UI unlock passphrase (writes webui.passphrase_hash to settings.toml)",
+            help="Set the web UI unlock passphrase (hashes it into settings.toml)",
+        )
+
+        webui_sub.add_parser(
+            "set-session-secret",
+            help="Make a new session-signing secret (generated, not typed)",
         )
 
     def run(
@@ -165,6 +170,8 @@ class WebUiPlugin:
         subcommand = getattr(args, "webui_subcommand", None)
         if subcommand == "set-passphrase":
             _print_passphrase_hash()
+        elif subcommand == "set-session-secret":
+            _generate_session_secret()
         elif subcommand == "setup":
             _serve_setup(args)
         elif subcommand == "serve":
@@ -309,6 +316,33 @@ def _serve(args: argparse.Namespace) -> None:
     print(f"Starting Princeton AI Sandbox web interface at http://{host}:{port}")
     print(f"  Access: {reach} — {gate}")
     app_module.run_server(host=host, port=port)
+
+
+def _generate_session_secret() -> None:
+    """Put a fresh random session-signing secret into settings.toml.
+
+    The secret keeps browser sessions signed in across restarts of the server.
+    Its only requirement is that it be long and unguessable, so it is generated
+    here rather than asked for: a value somebody made up is the one case this
+    setting can be got wrong, and there is nothing to be gained by typing one.
+
+    Generated rather than left to the file for the same reason the passphrase is
+    hashed rather than stored — the value is not something a person is meant to
+    choose. Anyone who would rather use their own can still put it in
+    settings.toml by hand.
+
+    Replacing an existing secret signs everyone out of the browser, which is
+    said out loud rather than discovered.
+    """
+    import secrets
+
+    from src import settings_store
+
+    already = settings_store.get_value("webui.session_secret")
+    settings_store.set_value("webui.session_secret", secrets.token_urlsafe(32))
+    print("A new session-signing secret is in settings.toml (the value is not shown).")
+    if already:
+        print("There was one already, so any open browser session is now signed out.")
 
 
 def _print_passphrase_hash() -> None:

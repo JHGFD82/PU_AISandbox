@@ -81,20 +81,26 @@ python main.py "Jeff Heller" usage report   # error: that's a display name
 
 ### Editing it from the command line
 
-Rather than hand-editing the file, the built-in `settings` command adds and removes people and sets any dotted-path value. Unlike every other command, `settings` never needs a netID first — you need it precisely when nobody is configured yet:
+You change these by opening the file. There is no command for it: anyone
+comfortable typing one can open `settings.toml`, and anyone who would rather not
+has the web interface's **Settings** page, which reaches every value in it.
+
+What the `settings` command still does is the handful of things an editor
+cannot:
 
 ```bash
-python main.py settings setup                    # choose where your files live
-python main.py settings add-professor            # prompts for netID, name and keys
-python main.py settings remove-professor jh43    # asks to confirm first
-python main.py settings list                     # the optional-settings list
-python main.py settings set webui.session_secret            # prompts for a value
-python main.py settings set webui.session_secret --generate  # or generate one
-python main.py settings unset webui.session_secret
-python main.py settings export-shared           # a draft for a group to follow
+python main.py settings setup            # make the files in the first place
+python main.py settings add-professor    # asks for netID, name and keys at a hidden prompt
+python main.py settings list             # which optional values are set — never their values
+python main.py settings export-shared    # build a settings file for a group to follow
+python main.py webui set-passphrase      # asked twice, hidden, then hashed
+python main.py webui set-session-secret  # generated, because nobody should invent one
 ```
 
-Secrets are always entered at a hidden prompt, never accepted as a command-line flag, so they can't end up in shell history or be seen by another process listing running commands.
+API keys are only ever taken at a hidden prompt, never as a command-line flag,
+so they cannot end up in your shell history or in a process listing. That is
+the reason `add-professor` exists rather than being one more line to type into
+the file — though you can put a key in `settings.toml` by hand if you prefer.
 
 ### Optional values
 
@@ -103,9 +109,9 @@ A plugin can declare its own optional dotted-path setting with `register_setting
 | Dotted path | Set by | Purpose |
 |-------------|--------|---------|
 | `webui.passphrase_hash` | `webui set-passphrase` | Unlock-gate passphrase for the web interface |
-| `webui.session_secret` | `settings set webui.session_secret` (or `--generate`) | Keeps browser sessions signed in across server restarts |
-| `shared_settings.path` | `settings set shared_settings.path` | Path to a shared settings file — see [How settings layer](#how-settings-layer) |
-| `endpoints.<name>.key` | `settings set endpoints.my_cluster.key` | API key for an alternate endpoint — see [Alternate AI endpoints](#alternate-ai-endpoints) |
+| `webui.session_secret` | `webui set-session-secret`, or by hand | Keeps browser sessions signed in across server restarts |
+| `shared_settings.path` | By hand, or the web interface's Settings page | Path to a shared settings file — see [How settings layer](#how-settings-layer) |
+| `endpoints.<name>.key` | By hand, or the web interface's Settings page | API key for an alternate endpoint — see [Alternate AI endpoints](#alternate-ai-endpoints) |
 
 All are optional. Leaving them unset means no unlock gate, a fresh session secret each restart, no shared settings, and no alternate endpoints.
 
@@ -353,7 +359,12 @@ A synced folder, a network share, anywhere every member can read.
 *At the command line:*
 
 ```bash
-python main.py settings set shared_settings.path /path/to/whatever-you-called-it.toml
+Add this to `settings.toml`:
+
+```toml
+[shared_settings]
+path = "/path/to/whatever-you-called-it.toml"
+```
 ```
 
 That is the only step each member does, and they only do it once.
@@ -470,7 +481,12 @@ key = "sk-..."
 ```
 
 ```bash
-python main.py settings set endpoints.my_cluster.key
+Put the key in `settings.toml`:
+
+```toml
+[endpoints.my_cluster]
+key = "…"
+```
 ```
 
 ### Using it
@@ -511,10 +527,23 @@ Every source names whose usage it holds, and only that person's is taken from it
 
 ```bash
 python main.py jh43 usage sources list
-python main.py jh43 usage sources add --label "Prof. Smith" --path /path/to/shared/data --mode read-only
-python main.py jh43 usage sources add --label "This installation" --path /path/to/shared/data --mode shared-write --for-professor jh43
-python main.py jh43 usage sources remove "Prof. Smith"
 ```
+
+Sources are added and removed on the web interface's **Settings** page, or by
+writing them into `settings.toml` yourself:
+
+```toml
+[usage_sources."Prof. Smith"]
+path = "/path/to/shared/data"
+mode = "read-only"
+professor = "jh43"
+
+[usage_sources."This installation"]
+path = "/path/to/shared/data"
+mode = "shared-write"
+professor = "jh43"
+```
+
 
 `add` prompts for anything you don't pass as a flag. A netID is required on the command line for consistency with every other `usage` subcommand, even though the source list itself isn't scoped to one person — see `src/settings_store.py`.
 
@@ -607,15 +636,15 @@ pip install openpyxl
 |---|---|---|---|---|---|
 | Names and API keys | `settings.toml`, your files folder | No — never sync `settings.toml` | N/A | ✅ `settings add-professor` / `remove-professor` | ✅ `/settings` — add, remove, replace primary or backup key |
 | Web UI passphrase | `settings.toml` (`webui.passphrase_hash`) | No | N/A | ✅ `webui set-passphrase` | ✅ `/settings` — hashed server-side, never shown |
-| Web UI session secret | `settings.toml` (`webui.session_secret`) | No | N/A | ✅ `settings set` / `--generate` | ✅ `/settings` |
-| Shared-settings pointer | `settings.toml` (`shared_settings.path`) | No — it's just a path | N/A | ✅ `settings set` / `unset` | ✅ `/settings` |
+| Web UI session secret | `settings.toml` (`webui.session_secret`) | No | N/A | ✅ by hand or in the browser / `--generate` | ✅ `/settings` |
+| Shared-settings pointer | `settings.toml` (`shared_settings.path`) | No — it's just a path | N/A | ✅ by hand or in the browser / `unset` | ✅ `/settings` |
 | A shared-settings draft to edit and place | Nowhere — handed to you, never saved | ✅ that's the point; you place it | N/A | ✅ `settings export-shared` | ✅ `/settings` → Choose settings for the group, or download the whole file |
-| Endpoint API keys | `settings.toml` (`endpoints.<name>.key`) | No | N/A | ✅ `settings set` / `unset` | ✅ `/settings` — one field per endpoint already defined |
+| Endpoint API keys | `settings.toml` (`endpoints.<name>.key`) | No | N/A | ✅ by hand or in the browser / `unset` | ✅ `/settings` — one field per endpoint already defined |
 | Endpoint definitions | `settings.default.toml`, a shared file, or `preferences.toml` | ✅ definitions may live in the tracked file or a shared one | ✅ `preferences.toml` wins | ❌ hand-edit TOML | ❌ read-only on `/settings`, with a copyable snippet |
 | Model pricing | `model_catalog.json`, your files folder | Not designed for it — kept separate precisely to avoid concurrent-write conflicts | N/A | Indirectly: `-m provider/model` registers pricing | ❌ |
 | Runtime defaults | `settings.default.toml`, in the package | N/A — this is the shared baseline | ✅ `preferences.toml` | ❌ hand-edit TOML | ❌ |
-| Shared runtime defaults | Wherever `shared_settings.path` points | ✅ that's the point | ✅ `preferences.toml` still wins | Pointer only (`settings set shared_settings.path`) | Pointer only, via `/settings` |
+| Shared runtime defaults | Wherever `shared_settings.path` points | ✅ that's the point | ✅ `preferences.toml` still wins | Pointer only, by hand | Pointer only, via `/settings` |
 | Plugin defaults | Each plugin's own directory, tracked by git | N/A | ❌ no per-plugin override file | ❌ hand-edit TOML | ❌ |
-| External usage sources | `settings.toml` (`[usage_sources]`) | ✅ that's the point — it points at another installation's `data/` folder | N/A | ✅ `usage sources add/list/remove` | ✅ `/settings` |
+| External usage sources | `settings.toml` (`[usage_sources]`) | ✅ that's the point — it points at another installation's `data/` folder | N/A | ✅ `usage sources list`; add and remove by hand | ✅ `/settings` |
 
 Every "✅ `/settings`" row is served by the web interface's `/settings` route (`plugins/webui/src/templates/settings.html` and the `/api/settings/*` routes in `plugins/webui/src/app.py`), behind the same unlock passphrase as the rest of it. A first-time visitor with nobody configured is sent straight there rather than to an empty chat screen, and the section order flips depending on whether anyone is configured yet — people first on an empty installation, shared settings first once there's at least one person, since that's the more likely thing to come back and adjust.

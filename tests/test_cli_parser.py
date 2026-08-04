@@ -121,42 +121,11 @@ class TestUsageSourcesSubcommand:
         assert args.usage_subcommand == "sources"
         assert args.sources_subcommand == "list"
 
-    def test_sources_add_flags_parse(self, parser):
-        args = parser.parse_args([
-            "heller", "usage", "sources", "add",
-            "--label", "Prof. Smith", "--path", "/tmp/shared",
-            "--mode", "shared-write", "--for-professor", "smith",
-        ])
-        assert args.label == "Prof. Smith"
-        assert args.path == "/tmp/shared"
-        assert args.mode == "shared-write"
-        assert args.for_professor == "smith"
-
-    def test_sources_add_flags_default_none(self, parser):
-        args = parser.parse_args(["heller", "usage", "sources", "add"])
-        assert args.label is None
-        assert args.path is None
-        assert args.mode is None
-        assert args.for_professor is None
-
     def test_sources_add_rejects_invalid_mode(self, parser):
         with pytest.raises(SystemExit):
             parser.parse_args([
                 "heller", "usage", "sources", "add", "--mode", "read-write",
             ])
-
-    def test_sources_remove_requires_label(self, parser):
-        args = parser.parse_args(["heller", "usage", "sources", "remove", "Johnson"])
-        assert args.label == "Johnson"
-
-    def test_professor_flag_not_shadowed_by_for_professor(self, parser):
-        """--for-professor must not collide with the top-level positional professor."""
-        args = parser.parse_args([
-            "heller", "usage", "sources", "add", "--for-professor", "smith",
-        ])
-        assert args.professor == "heller"
-        assert args.for_professor == "smith"
-
 
 class TestSettingsSubcommand:
 
@@ -177,24 +146,6 @@ class TestSettingsSubcommand:
     def test_env_add_professor_name_flag(self, parse_professor_optional):
         args = parse_professor_optional(["settings", "add-professor", "--name", "Jeff Heller"])
         assert args.name == "Jeff Heller"
-
-    def test_settings_remove_professor_requires_identifier(self, parse_professor_optional):
-        args = parse_professor_optional(["settings", "remove-professor", "heller"])
-        assert args.identifier == "heller"
-
-    def test_settings_set_requires_key(self, parse_professor_optional):
-        args = parse_professor_optional(["settings", "set", "WEBUI_SESSION_SECRET"])
-        assert args.key == "WEBUI_SESSION_SECRET"
-        assert args.generate is False
-
-    def test_settings_set_generate_flag(self, parse_professor_optional):
-        args = parse_professor_optional(["settings", "set", "WEBUI_SESSION_SECRET", "--generate"])
-        assert args.generate is True
-
-    def test_settings_unset_requires_key(self, parse_professor_optional):
-        args = parse_professor_optional(["settings", "unset", "WEBUI_SESSION_SECRET"])
-        assert args.key == "WEBUI_SESSION_SECRET"
-
 
 class TestGlobalFlagsBeforeProfessorlessCommand:
     """A global flag typed before a professor-less command must not break it.
@@ -314,3 +265,86 @@ class TestGlobalFlags:
         # Should not raise even with no args
         args = parser.parse_args([])
         assert args.professor is None
+
+
+class TestSettingsAreEditedInFilesNotByCommand:
+    """The command line stopped being a settings editor.
+
+    Anyone comfortable typing these commands can open settings.toml, and anyone
+    who would rather not has the web interface's settings page. What survived is
+    only what an editor cannot do: make the files in the first place, take an
+    API key at a hidden prompt, hash a passphrase, generate a secret, or find
+    something out from a provider and write down the answer.
+    """
+
+    GONE = [
+        ["settings", "set", "webui.session_secret"],
+        ["settings", "unset", "webui.session_secret"],
+        ["settings", "remove-professor", "jh43"],
+        ["jh43", "usage", "sources", "add"],
+        ["jh43", "usage", "sources", "remove", "lab"],
+    ]
+
+    KEPT = [
+        ["settings", "setup"],
+        ["settings", "add-professor"],
+        ["settings", "list"],
+        ["settings", "export-shared"],
+        ["settings", "test-model"],
+        ["settings", "model-quirks"],
+        ["webui", "set-passphrase"],
+        ["webui", "set-session-secret"],
+        ["jh43", "usage", "sources", "list"],
+        ["jh43", "usage", "report"],
+    ]
+
+    @pytest.mark.parametrize("argv", GONE)
+    def test_the_editing_commands_are_gone(self, parse_professor_optional, argv):
+        with pytest.raises(SystemExit):
+            parse_professor_optional(argv)
+
+    @pytest.mark.parametrize("argv", KEPT)
+    def test_what_earns_its_place_still_parses(self, parse_professor_optional, argv):
+        parse_professor_optional(argv)
+
+    def test_a_secret_is_generated_rather_than_typed(self, parse_professor_optional):
+        """Its only requirement is being unguessable, so nobody should choose it."""
+        args = parse_professor_optional(["webui", "set-session-secret"])
+        assert args.webui_subcommand == "set-session-secret"
+
+    def test_the_help_says_where_settings_are_edited_instead(self):
+        """Removing a command without saying so leaves someone hunting for it."""
+        from src.cli import _available_commands_hint
+
+        text = _available_commands_hint({})
+        assert "settings.toml" in text and "preferences.toml" in text
+        assert "web interface" in text
+
+    def test_reading_is_still_offered(self, parse_professor_optional):
+        """'list' says whether a secret is set; opening the file shows the secret."""
+        args = parse_professor_optional(["settings", "list"])
+        assert args.settings_subcommand == "list"
+
+
+class TestTheDocsDoNotNameACommandThatIsGone:
+    """A reference telling someone to run a command that no longer exists is
+    worse than no reference: they will assume they typed it wrong."""
+
+    GONE = ["settings set ", "settings unset", "settings remove-professor",
+            "usage sources add", "usage sources remove"]
+
+    def test_no_document_names_a_removed_command(self):
+        root = Path(__file__).resolve().parent.parent
+        offenders = []
+        for f in list((root / "docs").glob("*.md")) + [root / "README.md"]:
+            for number, line in enumerate(f.read_text().splitlines(), 1):
+                for gone in self.GONE:
+                    if gone in line:
+                        offenders.append(f"{f.name}:{number} {line.strip()[:70]}")
+        assert not offenders, "\n".join(offenders)
+
+    def test_the_reference_says_where_settings_are_edited_instead(self):
+        root = Path(__file__).resolve().parent.parent
+        text = (root / "docs" / "cli-reference.md").read_text()
+        assert "There is no command for changing a setting" in text
+        assert "preferences.toml" in text

@@ -192,27 +192,6 @@ def _build_usage_sources_subparser(usage_subparsers: argparse._SubParsersAction)
     sources_list = sources_sub.add_parser('list', help='List configured external sources')
     _add_debug_flags(sources_list)
 
-    sources_add = sources_sub.add_parser(
-        'add',
-        help='Add an external usage-data source (prompts interactively for anything not passed as a flag)',
-    )
-    _add_debug_flags(sources_add)
-    sources_add.add_argument('--label', type=str, default=None, help="A short name for this source, e.g. 'Prof. Smith'")
-    sources_add.add_argument('--path', type=str, default=None, help="The other installation's data/ folder")
-    sources_add.add_argument(
-        '--mode', type=str, choices=['read-only', 'shared-write'], default=None,
-        help="'read-only' (default) if only the other side writes there; 'shared-write' if this "
-             "installation records usage there too",
-    )
-    sources_add.add_argument(
-        '--for-professor', dest='for_professor', type=str, default=None, metavar='PROFESSOR',
-        help="Whose usage this source holds (netID). Required — one professor may "
-             "share a folder for work and another only for tracking.",
-    )
-
-    sources_remove = sources_sub.add_parser('remove', help='Remove a configured external source by label')
-    _add_debug_flags(sources_remove)
-    sources_remove.add_argument('label', type=str, help='The label of the source to remove (see: usage sources list)')
 
 
 def _build_settings_subparser(subparsers: argparse._SubParsersAction) -> None:
@@ -262,12 +241,6 @@ def _build_settings_subparser(subparsers: argparse._SubParsersAction) -> None:
     )
     _add_debug_flags(setup_parser)
 
-    remove_prof = settings_sub.add_parser('remove-professor', help='Remove a configured professor')
-    _add_debug_flags(remove_prof)
-    remove_prof.add_argument(
-        'identifier', type=str,
-        help='netID or display name of the person to remove (see: --show-config)',
-    )
 
     test_model = settings_sub.add_parser(
         'test-model',
@@ -292,19 +265,6 @@ def _build_settings_subparser(subparsers: argparse._SubParsersAction) -> None:
     )
     _add_debug_flags(list_parser)
 
-    set_parser = settings_sub.add_parser(
-        'set',
-        help='Set an optional settings.toml value (prompts for it; hidden input for secrets)',
-    )
-    _add_debug_flags(set_parser)
-    set_parser.add_argument(
-        'key', type=str,
-        help="Dotted path to set, e.g. webui.session_secret or endpoints.hpc_cluster.key",
-    )
-    set_parser.add_argument(
-        '--generate', action='store_true',
-        help='Auto-generate a random value instead of prompting (secrets only)',
-    )
 
     export_shared = settings_sub.add_parser(
         'export-shared',
@@ -330,9 +290,6 @@ def _build_settings_subparser(subparsers: argparse._SubParsersAction) -> None:
         help="Forget what this model was found to refuse. Omit to list what is known.",
     )
 
-    unset_parser = settings_sub.add_parser('unset', help='Remove an optional settings.toml value')
-    _add_debug_flags(unset_parser)
-    unset_parser.add_argument('key', type=str, help='The variable to remove')
 
 
 def create_argument_parser(
@@ -441,10 +398,16 @@ def _available_commands_hint(plugins: dict[str, ModePlugin]) -> str:
         "  usage report [YYYY-MM] [--all-time]  Token usage report",
         "  usage months                         List archived month files",
         "  usage daily [YYYY-MM-DD]             Daily usage",
-        "  settings add-professor                  Add someone (no netID needed first)",
-        "  settings remove-professor <identifier>  Remove someone configured",
-        "  settings list                           List optional settings.toml values and their status",
-        "  settings set <path> / settings unset <path>   Set or remove an optional settings.toml value",
+        "  settings setup                       Choose where your files are kept",
+        "  settings add-professor               Add someone and take their API key",
+        "  settings list                        Which optional settings are set (never their values)",
+        "  settings test-model [MODEL]          Find out what a model can do, and record it",
+        "  settings model-quirks [MODEL]        What models have refused; forget it to re-learn",
+        "  settings export-shared               Build a settings file for a group to follow",
+        "",
+        "Everything else in settings.toml and preferences.toml is edited in those",
+        "files, or on the web interface's settings page. There are no commands for",
+        "it: if you are comfortable typing these, you can open the files.",
     ]
     if plugins:
         lines.append("\nPlugin commands: " + ", ".join(sorted(plugins)))
