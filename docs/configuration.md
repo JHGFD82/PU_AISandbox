@@ -165,20 +165,52 @@ Each list is tried in order, and if none of the models in it are left the sandbo
 
 ### Adding models
 
-**OpenAI or Google** — use `provider/model-name` with `-m` on any command. The price is fetched from PortKey and saved automatically:
+**In the web interface** — open **Settings → Models**, type the model's name as
+its provider and then the model separated by a slash (for example
+`openai/gpt-5.2`), and choose whose API key to test it with. Nothing else is
+needed: its price is looked up, and what it can do is worked out by trying it.
+
+**From the command line** — use `provider/model-name` with `-m` on any command,
+and the same thing happens:
 
 ```bash
 python main.py jh43 prompt -m openai/gpt-4o-new
 python main.py jh43 prompt -m google/gemini-2.5-pro
 ```
 
-**Any other provider** — add the entry by hand. There is no CLI for managing the catalogue:
+Either way, adding a model sends it a handful of one-token requests to settle
+what no provider publishes anywhere readable:
+
+| Question | Saved as |
+|---|---|
+| Can it read images and scanned pages? | `supports_vision` |
+| What does it call the response-length setting? | `prefers.max_tokens_field` |
+| What label does it want on an opening instruction? | `prefers.system_role` |
+| Does it accept `temperature` and `top_p`? | `rejects` |
+
+This matters because chat needs a model that can read images — a question typed
+in the browser may carry a document — so a model whose capabilities were never
+established is offered in the picker and then refused when you use it.
+
+Anything that can't be settled is left alone rather than guessed at, and said
+so. A model that couldn't be reached at all changes nothing.
+
+**Testing a model again** — providers change, and a catalogue built before any
+of this existed holds models that were only ever assumed to be text-only. In
+the web interface, press **Test** beside the model. From the command line:
+
+```bash
+python main.py settings test-model gpt-5.1        # one model
+python main.py settings test-model                # the whole catalogue
+```
+
+**A provider PortKey doesn't price** — add the entry by hand, then test it to
+fill in the rest:
 
 ```json
 "mistral-small": {
   "input": 0.1,
-  "output": 0.3,
-  "supports_vision": false
+  "output": 0.3
 }
 ```
 

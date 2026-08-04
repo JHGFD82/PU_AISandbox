@@ -16,6 +16,7 @@ def resolve_model(
     *,
     role: Optional["ModelRole"] = None,
     require_vision: bool = False,
+    api_key: Optional[str] = None,
 ) -> str:
     """Decide which AI model to actually use, given what was requested and what's preferred.
 
@@ -46,6 +47,10 @@ def resolve_model(
                         *role*; passed directly only by callers that have no
                         role, such as the web interface picking a default for a
                         conversation that may carry a document.
+        api_key: The key to use if a model has to be registered on the spot,
+                 so that what it can do is settled by testing it rather than
+                 assumed. Passed by services, which have one; left out by
+                 callers that are only reading the catalog.
 
     Returns:
         The name of the model to use for this request (e.g. ``'gpt-4o'``).
@@ -100,7 +105,7 @@ def resolve_model(
             provider, model_key = requested_model.split("/", 1)
             if model_key not in available_models:
                 try:
-                    _pricing.add_model_to_catalog(requested_model)
+                    _pricing.add_model_to_catalog(requested_model, api_key=api_key)
                     available_models = _catalog.get_available_models()
                     logging.info(
                         f"Auto-registered '{model_key}' from '{provider}' into model_catalog.json."

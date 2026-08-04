@@ -11,7 +11,7 @@ import json
 import logging
 import urllib.request
 from datetime import datetime, timedelta
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 from . import catalog as _catalog
 
@@ -76,7 +76,50 @@ def _fetch_model_pricing(provider_model: str, pricing_unit: int) -> Dict[str, An
     }
 
 
-def add_model_to_catalog(provider_model: str) -> Tuple[str, Dict[str, Any]]:
+def _test_and_describe(
+    model_name: str, entry: Dict[str, Any], api_key: str
+) -> Dict[str, Any]:
+    """Ask a model what it can do and fold the answers into its catalog entry.
+
+    Kept apart from ``add_model_to_catalog()`` so that a model already in the
+    catalog can be re-tested without its price being fetched again, and so that
+    a failure to test never stops a model being added: a model with unknown
+    quirks is still usable, and the alternative is refusing to add it at all.
+
+    Args:
+        model_name: The model to test, as the sandbox names it.
+        entry: Its catalog entry so far.
+        api_key: A professor's API key, used to make the test requests. They
+                 are billed to whoever's key this is — a few tokens in total.
+
+    Returns:
+        The entry with whatever was learned applied to it, or unchanged if
+        nothing could be.
+    """
+    from .capabilities import (
+        apply_capability_report, client_for_testing, probe_model_capabilities,
+    )
+
+    try:
+        report = probe_model_capabilities(model_name, client_for_testing(api_key))
+    except Exception as error:
+        # Never fatal. Adding a model that hasn't been tested is a worse
+        # catalog entry, not a broken one, and this runs in the middle of
+        # somebody's first request for that model.
+        logger.warning("Could not test '%s': %s", model_name, error)
+        return entry
+
+    for line in report.settled:
+        logger.info("%s: %s", model_name, line)
+    for line in report.unsettled:
+        logger.warning("%s: %s", model_name, line)
+
+    return apply_capability_report(entry, report)
+
+
+def add_model_to_catalog(
+    provider_model: str, api_key: Optional[str] = None, probe: bool = True
+) -> Tuple[str, Dict[str, Any]]:
     """Look up a new model's pricing from PortKey and save it to the local catalog.
 
     This is what runs automatically the first time someone requests a model
@@ -92,16 +135,21 @@ def add_model_to_catalog(provider_model: str) -> Tuple[str, Dict[str, Any]]:
                          ``'azure-ai/Llama-3.3-70B-Instruct'``. The catalog
                          entry is stored under just the part after the slash
                          (e.g. ``'gpt-4o'``).
+        api_key: A professor's API key, used to test what the model can do —
+                 a handful of very small requests, billed to that key. Without
+                 one the model is still added, but its capabilities stay
+                 unknown and a warning says so.
+        probe: Set ``False`` to add the model without testing it, for when the
+               answers are already known or a test would be unwelcome.
 
     Returns:
         A two-item tuple of ``(model_name, entry)``: the model's catalog key
         (e.g. ``'gpt-4o'``) and the full pricing entry that was saved,
-        including whether it supports image input (``supports_vision``).
-        PortKey's pricing service reports prices only, so a model added here
-        is always recorded as unable to read images and a warning says so.
-        Correct it by setting ``"supports_vision": true`` on that entry in
-        ``model_catalog.json`` — until then the model cannot be used for
-        chat, which needs to read attached documents.
+        including whatever testing settled about it: whether it can read
+        images (``supports_vision``), and any quirks under ``rejects`` and
+        ``prefers``. Where testing couldn't run — no key, or the model
+        couldn't be reached — the model is still added, but it is recorded as
+        unable to read images and a warning names the command that settles it.
 
     Raises:
         ValueError: If ``provider_model`` isn't in ``provider/model-name``
@@ -141,27 +189,25 @@ def add_model_to_catalog(provider_model: str) -> Tuple[str, Dict[str, Any]]:
     # Taken from the response when it says — which the PortKey pricing endpoint
     # currently never does, since it reports prices and nothing else. The branch
     # stays because the answer belongs there if it ever arrives.
-    #
-    # Failing that, recorded as unable to read images. That is the safe way to
-    # be wrong: sending a picture to a model that cannot see gets an error from
-    # the provider, while the opposite only means the model isn't offered yet.
-    #
-    # Safe, but wrong often enough to matter, and until now silently: most
-    # current models do read images, and the web interface's chat requires it,
-    # so every automatically added model is refused there until somebody edits
-    # this file. Nothing said so, and the refusal arrived as an unexplained
-    # failure mid-conversation. Hence the warning.
     if "supports_vision" not in entry and "supports_vision" in fetched:
         entry["supports_vision"] = fetched["supports_vision"]
+
+    # Then ask the model itself. This is the part that keeps anyone from having
+    # to open this file: a few tiny requests settle what the pricing service
+    # can't say, and whatever they settle is saved here. Without a key to ask
+    # with, or if the model can't be reached, the questions stay unanswered —
+    # see below for what that costs and why it is still better than guessing.
+    if api_key and probe:
+        entry = _test_and_describe(model_name, entry, api_key)
 
     if "supports_vision" not in entry:
         entry["supports_vision"] = False
         logger.warning(
-            "Added '%s' with supports_vision false — the pricing service does not "
-            "say whether a model can read images, so the sandbox assumes not. If "
-            "it can, set \"supports_vision\": true on its entry in %s; until then "
-            "it cannot be used for chat, which needs to read attached documents.",
-            model_name, catalog_file,
+            "Added '%s' without testing whether it can read images, so the sandbox "
+            "has assumed it cannot — that is the safe way to be wrong, but it means "
+            "the model cannot be used for chat, which needs to read attached "
+            "documents. Run 'python main.py settings test-model %s' to settle it.",
+            model_name, model_name,
         )
 
     catalog["models"][model_name] = entry

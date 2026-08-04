@@ -1442,7 +1442,8 @@ class TestSettingsPage:
         data = unlocked_client.get("/api/settings").json()
         assert data["has_professors"] is False
         assert data["order"] == [
-            "professors", "external_sources", "webui", "shared", "endpoints", "folder",
+            "professors", "external_sources", "webui", "shared", "endpoints", "models",
+            "folder",
         ]
         assert data["professors"] == []
 
@@ -1464,7 +1465,8 @@ class TestSettingsProfessors:
         data = unlocked_client.get("/api/settings").json()
         assert data["has_professors"] is True
         assert data["order"] == [
-            "folder", "shared", "endpoints", "professors", "webui", "external_sources",
+            "folder", "shared", "endpoints", "models", "professors", "webui",
+            "external_sources",
         ]
         prof = data["professors"][0]
         assert prof == {
@@ -3986,3 +3988,257 @@ class TestTheReferenceCodeCanActuallyBeLookedUp:
             logging.getLogger().handlers = [
                 h for h in logging.getLogger().handlers if h not in handlers
             ]
+
+
+@pytest.fixture
+def a_catalogue(monkeypatch, tmp_path):
+    """A small real catalogue on disk, read through the ordinary path.
+
+    One model tested and able to read images, one recorded as text-only by the
+    old assumption with nothing to show it was ever asked.
+    """
+    import json
+
+    import src.models.catalog as catalog_module
+
+    path = tmp_path / "model_catalog.json"
+    path.write_text(json.dumps({
+        "config": {"pricing_unit": 1_000_000, "monthly_limit": 250.0},
+        "models": {
+            "gpt-4o": {"input": 2.5, "output": 10.0, "supports_vision": True,
+                       "portkey_id": "openai/gpt-4o",
+                       "rejects": {"top_p": "tested on add: refused"}},
+            "old-text-model": {"input": 1.0, "output": 2.0, "supports_vision": False,
+                               "portkey_id": "openai/old-text-model"},
+        },
+    }))
+    monkeypatch.setattr(catalog_module, "get_model_catalog_path", lambda: path)
+    return path
+
+
+class TestAddingAModelFromTheBrowser:
+    """Adding a model without opening a terminal or a JSON file.
+
+    The point of the section is the testing that follows the add: a model whose
+    capabilities were never established is recorded as unable to read images,
+    and chat requires that — so before this, a model added anywhere but the
+    command line would be offered in the picker and then refused on use.
+    """
+
+    def test_it_needs_an_unlocked_session(self, client):
+        assert client.get("/api/settings/models").status_code == 401
+        assert client.post("/api/settings/models", json={
+            "provider_model": "openai/gpt-4o", "professor": "smith",
+        }).status_code == 401
+
+    def test_the_catalogue_is_listed_with_what_each_model_can_do(
+        self, unlocked_client, a_catalogue
+    ):
+        models = unlocked_client.get("/api/settings/models").json()["models"]
+        assert [m["name"] for m in models] == ["gpt-4o", "old-text-model"]
+        seen = {m["name"]: m for m in models}
+        assert seen["gpt-4o"]["supports_vision"] is True
+        assert seen["old-text-model"]["supports_vision"] is False
+        assert seen["gpt-4o"]["input"] == 2.5
+
+    def test_a_model_nobody_has_tested_is_not_called_text_only(
+        self, unlocked_client, a_catalogue
+    ):
+        """The distinction the whole section turns on.
+
+        old-text-model has supports_vision false because nothing ever asked,
+        not because anything found out. The page needs to be able to say so.
+        """
+        models = {m["name"]: m for m in
+                  unlocked_client.get("/api/settings/models").json()["models"]}
+        assert models["old-text-model"]["tested"] is False
+
+    def test_a_missing_catalogue_is_an_empty_list_not_a_failure(self, unlocked_client):
+        """An ordinary state on a copy that has not been set up yet."""
+        resp = unlocked_client.get("/api/settings/models")
+        assert resp.status_code == 200
+        assert resp.json()["models"] == []
+
+    def test_a_name_without_a_provider_is_refused_before_anything_is_billed(
+        self, unlocked_client, monkeypatch
+    ):
+        """'gpt-5.2' alone can't be looked up, and saying so costs nothing."""
+        import src.models.pricing as pricing_module
+
+        def must_not_run(*args, **kwargs):
+            raise AssertionError("the provider was contacted for a name that can't work")
+
+        monkeypatch.setattr(pricing_module, "add_model_to_catalog", must_not_run)
+        resp = unlocked_client.post("/api/settings/models", json={
+            "provider_model": "gpt-5.2", "professor": "smith",
+        })
+        assert resp.status_code == 400
+        assert "slash" in resp.json()["detail"]
+
+    def test_an_unknown_professor_is_refused(self, unlocked_client):
+        resp = unlocked_client.post("/api/settings/models", json={
+            "provider_model": "openai/gpt-4o", "professor": "nobody",
+        })
+        assert resp.status_code == 400
+
+    def test_adding_tests_the_model_and_reports_what_it_found(
+        self, unlocked_client, monkeypatch
+    ):
+        app_module = sys.modules["_pu_webui_app"]
+        captured = {}
+
+        def fake_add(provider_model, api_key=None, probe=True):
+            captured["provider_model"] = provider_model
+            captured["api_key"] = api_key
+            return "gpt-5.2", {"input": 1.0, "output": 2.0, "supports_vision": True}
+
+        monkeypatch.setattr("src.models.add_model_to_catalog", fake_add)
+        monkeypatch.setattr(app_module, "_capability_summary",
+                            lambda m: {"supports_vision": True, "refuses": [],
+                                       "prefers": {}, "tested": True})
+        monkeypatch.setattr("src.config.get_api_key", lambda netid: ("sk-test", "primary"))
+
+        resp = unlocked_client.post("/api/settings/models", json={
+            "provider_model": "openai/gpt-5.2", "professor": "smith",
+        })
+        assert resp.status_code == 200
+        assert captured["provider_model"] == "openai/gpt-5.2"
+        # The key has to reach the add, or the model arrives untested — which
+        # is the whole failure this section exists to prevent.
+        assert captured["api_key"] == "sk-test"
+        assert resp.json()["capabilities"]["supports_vision"] is True
+
+
+class TestTestingAModelAgainFromTheBrowser:
+    """Correcting an entry recorded before any testing existed."""
+
+    def _fake_report(self, **kw):
+        from src.models.capabilities import CapabilityReport
+        return CapabilityReport(**kw)
+
+    def test_a_model_not_in_the_catalogue_is_a_404(self, unlocked_client, monkeypatch):
+        monkeypatch.setattr("src.models.load_model_catalog",
+                            lambda: {"config": {}, "models": {}})
+        resp = unlocked_client.post("/api/settings/models/no-such-model/test",
+                                    json={"professor": "smith"})
+        assert resp.status_code == 404
+
+    def test_a_successful_test_saves_and_reports(
+        self, unlocked_client, monkeypatch, a_catalogue
+    ):
+        """A model recorded as text-only by assumption is corrected in place."""
+        saved = {}
+        monkeypatch.setattr("src.models.save_model_catalog",
+                            lambda c: saved.update(c["models"]))
+        monkeypatch.setattr("src.config.get_api_key", lambda netid: ("sk-test", "primary"))
+        monkeypatch.setattr("src.models.capabilities.probe_model_capabilities",
+                            lambda name, client: self._fake_report(
+                                findings={"supports_vision": True},
+                                settled=["Can read images"]))
+
+        resp = unlocked_client.post("/api/settings/models/old-text-model/test",
+                                    json={"professor": "smith"})
+        assert resp.status_code == 200
+        assert resp.json()["settled"] == ["Can read images"]
+        assert saved["old-text-model"]["supports_vision"] is True
+        # The price it already had is not lost to a test about capabilities.
+        assert saved["old-text-model"]["input"] == 1.0
+
+    def test_a_model_that_cannot_be_reached_changes_nothing(
+        self, unlocked_client, monkeypatch, a_catalogue
+    ):
+        """The restraint that matters, carried through to the browser.
+
+        A model that couldn't be tested must not come back recorded as unable
+        to read images — that is indistinguishable from having tested it.
+        """
+        def must_not_save(catalog):
+            raise AssertionError("a failed test wrote to the catalogue")
+
+        monkeypatch.setattr("src.models.save_model_catalog", must_not_save)
+        monkeypatch.setattr("src.config.get_api_key", lambda netid: ("sk-test", "primary"))
+        monkeypatch.setattr("src.models.capabilities.probe_model_capabilities",
+                            lambda name, client: self._fake_report(
+                                reachable=False, unsettled=["Testing stopped early: timed out"]))
+
+        resp = unlocked_client.post("/api/settings/models/gpt-4o/test",
+                                    json={"professor": "smith"})
+        assert resp.status_code == 502
+        assert "could not be reached" in resp.json()["detail"]
+
+
+class TestTheModelsSectionOnThePage:
+    @pytest.fixture
+    def page(self):
+        from pathlib import Path
+        return (Path(__file__).resolve().parents[1] / "src" / "templates"
+                / "settings.html").read_text()
+
+    def test_untested_is_shown_as_its_own_state(self, page):
+        """Three states, not two.
+
+        'Cannot read images' is a fact about the model; 'not tested yet' is a
+        job to do. Showing them identically is what made a capable model look
+        broken with no hint that anything could be done about it.
+        """
+        assert "Not tested yet" in page
+
+    def test_it_says_the_testing_costs_something(self, page):
+        """The requests are billed to a professor's key, so it says so."""
+        assert "fraction of a cent" in page
+        assert "billed to the key you choose" in page
+
+    def test_it_shows_how_a_model_is_named(self, page):
+        """'openai/gpt-5.2' is not guessable from an empty box."""
+        assert "openai/gpt-5.2" in page
+
+
+
+class TestAModelThatNoLongerExists:
+    """gpt-35-turbo, gpt-35-turbo-16k and gpt-4-32k had all been retired.
+
+    Testing recorded each as "tested, text only" with a date, because every
+    probe failed identically and that read as a model refusing everything. The
+    browser has to say what is actually true and offer the one useful action.
+    """
+
+    def test_it_is_reported_as_gone_not_as_a_failed_test(
+        self, unlocked_client, monkeypatch, a_catalogue
+    ):
+        from src.models.capabilities import CapabilityReport
+
+        def must_not_save(catalog):
+            raise AssertionError("a retired model was written to the catalogue")
+
+        monkeypatch.setattr("src.models.save_model_catalog", must_not_save)
+        monkeypatch.setattr("src.config.get_api_key", lambda netid: ("sk-test", "primary"))
+        monkeypatch.setattr("src.models.capabilities.probe_model_capabilities",
+                            lambda name, client: CapabilityReport(
+                                reachable=False, missing=True,
+                                unsettled=["There is no such model"]))
+
+        resp = unlocked_client.post("/api/settings/models/old-text-model/test",
+                                    json={"professor": "smith"})
+        # 410, not 502: nothing is wrong with the request or the connection.
+        assert resp.status_code == 410
+        assert "no longer exists" in resp.json()["detail"]
+
+    def test_it_can_be_removed(self, unlocked_client, a_catalogue):
+        assert unlocked_client.delete("/api/settings/models/old-text-model").status_code == 200
+        remaining = [m["name"] for m in
+                     unlocked_client.get("/api/settings/models").json()["models"]]
+        assert remaining == ["gpt-4o"]
+
+    def test_removing_one_that_is_not_there_is_a_404(self, unlocked_client, a_catalogue):
+        assert unlocked_client.delete("/api/settings/models/never-existed").status_code == 404
+
+    def test_removing_needs_an_unlocked_session(self, client):
+        assert client.delete("/api/settings/models/gpt-4o").status_code == 401
+
+    def test_the_page_offers_removal_only_for_a_model_that_is_gone(self):
+        from pathlib import Path
+        page = (Path(__file__).resolve().parents[1] / "src" / "templates"
+                / "settings.html").read_text()
+        # Hidden by default: a working model must not carry a delete button.
+        assert 'data-remove-model="${m.name}" style="display:none"' in page
+        assert "no longer exists" in page

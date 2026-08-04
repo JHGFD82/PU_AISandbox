@@ -133,11 +133,14 @@ def _get_plugins() -> dict:
 # kept yet — and near the top afterwards, because it is the one section here
 # that is about a person's own work rather than about how the sandbox is set
 # up, and it is the one they will come back to.
+# Models sits next to endpoints in both, since the two are the same question —
+# what this sandbox can send work to. It is late on a first run because adding
+# one needs a professor's key, which on a first run doesn't exist yet.
 _SETTINGS_ORDER_FIRST_RUN = [
-    "professors", "external_sources", "webui", "shared", "endpoints", "folder",
+    "professors", "external_sources", "webui", "shared", "endpoints", "models", "folder",
 ]
 _SETTINGS_ORDER_REPEAT = [
-    "folder", "shared", "endpoints", "professors", "webui", "external_sources",
+    "folder", "shared", "endpoints", "models", "professors", "webui", "external_sources",
 ]
 
 
@@ -251,6 +254,17 @@ class PickPathBody(BaseModel):
     prompt: str = "Choose a folder"
 
 
+class AddModelBody(BaseModel):
+    # 'provider/model-name', the same form the -m flag takes.
+    provider_model: str
+    # Whose API key the tests are billed to. A few tokens in total.
+    professor: str
+
+
+class TestModelBody(BaseModel):
+    professor: str
+
+
 # Dotted paths the /settings page may write directly via the generic
 # value/generate/unset endpoints. webui.passphrase_hash is deliberately
 # excluded — a passphrase must only ever be written pre-hashed, through the
@@ -261,6 +275,73 @@ def _directly_editable_paths() -> set[str]:
         path for path, _label, _section, _secret in list_optional_settings()
         if path != "webui.passphrase_hash"
     }
+
+
+def _capability_summary(model: str) -> dict:
+    """Describe what one model can do, in terms the settings page can show.
+
+    Args:
+        model: The model's name as the catalogue holds it.
+
+    Returns:
+        What the page needs to render one row: whether it can read images,
+        what it is known to refuse, and whether anyone has ever found out.
+    """
+    from src.models import load_model_catalog, model_preferences, model_rejected_fields
+
+    rejects = model_rejected_fields(model)
+    prefers = model_preferences(model)
+    try:
+        entry = load_model_catalog()["models"].get(model, {})
+    except Exception:
+        entry = {}
+    return {
+        "supports_vision": model_supports_vision(model),
+        # Sorted so the row doesn't reshuffle between page loads.
+        "refuses": sorted(rejects),
+        "prefers": prefers,
+        # A model nobody has tested looks exactly like one tested and found
+        # unable to read images. The page has to tell those apart, because the
+        # first is a job to do and the second is simply a fact about the model.
+        # Taken from when it was last tested rather than inferred from what was
+        # found, since a model can be tested and turn out to have no quirks at
+        # all — which would otherwise read as never having been asked.
+        "tested": bool(isinstance(entry, dict) and entry.get("last_tested")),
+        "last_tested": entry.get("last_tested") if isinstance(entry, dict) else None,
+    }
+
+
+def _models_with_capabilities() -> list[dict]:
+    """List every catalogue model with its price and what it can do.
+
+    Returns:
+        One entry per model, or an empty list if there is no catalogue yet —
+        which is an ordinary state on a copy that hasn't been set up, and not
+        a reason for the settings page to fail to load.
+    """
+    from src.models import get_model_pricing
+
+    try:
+        names = models_in_reading_order()
+    except (FileNotFoundError, ValueError):
+        return []
+
+    models = []
+    for name in names:
+        try:
+            pricing = get_model_pricing(name)
+        except Exception:
+            # A hand-edited entry can be missing its price. That is a reason to
+            # show the model without one, not to fail the whole list.
+            pricing = {}
+        models.append({
+            "name": name,
+            "owner": model_owner(name),
+            "input": pricing.get("input"),
+            "output": pricing.get("output"),
+            **_capability_summary(name),
+        })
+    return models
 
 
 def _settings_snapshot() -> dict:
@@ -848,6 +929,110 @@ def create_app() -> FastAPI:
         if not settings_store.remove_source(label):
             raise HTTPException(404, f"No configured source named '{label}'.")
         return {"ok": True}
+
+    # ── Models ───────────────────────────────────────────────────────────────
+    # Adding a model means two things the browser has to wait for: looking its
+    # price up, and finding out what it can do by trying it. The second is why
+    # this exists at all — a model whose capabilities are unknown is recorded
+    # as unable to read images, and chat needs that, so it would be added and
+    # then refused. See src/models/capabilities.py.
+
+    @app.get("/api/settings/models")
+    async def api_settings_models(request: Request):
+        """List every model in the catalogue with what is known about each."""
+        _require_unlocked(request)
+        return {"models": _models_with_capabilities()}
+
+    # Sync, like /api/pick-path above and for the same reason: testing a model
+    # is several requests to a provider end to end, and awaiting it on the
+    # event loop would freeze every other request the browser makes — the
+    # settings page would stop responding while it ran.
+    @app.post("/api/settings/models")
+    def api_add_model(request: Request, body: AddModelBody):
+        """Add a model by name, then find out what it can do and record that."""
+        _require_unlocked(request)
+        professor = _validated_professor(body.professor)
+        name = body.provider_model.strip()
+        if "/" not in name:
+            raise HTTPException(
+                400,
+                "A model is named as its provider and then the model, separated by a "
+                "slash — for example openai/gpt-5.2 or anthropic/claude-opus-4-8.",
+            )
+        from src.config import get_api_key
+        from src.models import add_model_to_catalog
+
+        api_key, _ = get_api_key(professor)
+        try:
+            model_name, _entry = add_model_to_catalog(name, api_key=api_key)
+        except Exception as e:
+            # Almost always the price lookup: a misspelled name, or a provider
+            # PortKey doesn't price. Either way the model was not added.
+            raise HTTPException(400, str(e)) from e
+        return {"model": model_name, "capabilities": _capability_summary(model_name)}
+
+    @app.post("/api/settings/models/{model_name}/test")
+    def api_test_model(request: Request, model_name: str, body: TestModelBody):
+        """Try a model already in the catalogue again and save what comes back.
+
+        The way to correct an entry recorded before any of this existed, when
+        a model added automatically was simply assumed unable to read images.
+        """
+        _require_unlocked(request)
+        professor = _validated_professor(body.professor)
+        from src.config import get_api_key
+        from src.models import load_model_catalog, save_model_catalog
+        from src.models.capabilities import (
+            apply_capability_report, client_for_testing, probe_model_capabilities,
+        )
+
+        catalog = load_model_catalog()
+        if model_name not in catalog.get("models", {}):
+            raise HTTPException(404, f"'{model_name}' isn't in the catalogue.")
+
+        api_key, _ = get_api_key(professor)
+        report = probe_model_capabilities(model_name, client_for_testing(api_key))
+        if report.missing:
+            # 410 rather than 502: there is nothing wrong with the request or
+            # the connection, the model simply isn't there any more. The page
+            # offers to take the entry out rather than doing it unasked — a
+            # model can 404 for a day while a provider is mid-change.
+            raise HTTPException(
+                410,
+                f"'{model_name}' no longer exists, so there was nothing to test. "
+                "Every request for it will fail. You can remove it from the catalogue.",
+            )
+        if not report.reachable:
+            raise HTTPException(
+                502,
+                "That model could not be reached, so nothing was changed. "
+                + (report.unsettled[0] if report.unsettled else ""),
+            )
+        catalog["models"][model_name] = apply_capability_report(
+            catalog["models"][model_name], report
+        )
+        save_model_catalog(catalog)
+        return {
+            "model": model_name,
+            "settled": report.settled,
+            "unsettled": report.unsettled,
+            "capabilities": _capability_summary(model_name),
+        }
+
+    @app.delete("/api/settings/models/{model_name}")
+    async def api_remove_model(request: Request, model_name: str):
+        """Take a model out of the catalogue.
+
+        For an entry a provider has retired: it cannot be used, and every
+        request naming it fails. Removing is not automatic — see the note on
+        the test route.
+        """
+        _require_unlocked(request)
+        from src.models import remove_model_from_catalog
+
+        if not remove_model_from_catalog(model_name):
+            raise HTTPException(404, f"'{model_name}' isn't in the catalogue.")
+        return {"ok": True, "removed": model_name}
 
     @app.get("/api/models")
     async def api_models(request: Request, professor: str):

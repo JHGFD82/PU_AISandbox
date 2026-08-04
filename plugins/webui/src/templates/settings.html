@@ -275,6 +275,38 @@ default_model = "llama-3-70b-instruct"</div>
       <p class="hint" style="margin-top:0.5rem">Endpoint definitions (base URL, timeout, etc.) aren't edited from here — add or change them by hand in settings.default.toml or preferences.toml, following the snippet above, then set the matching credential below. See docs/configuration.md for the full field reference.</p>
     </div>
 
+    <div class="card" id="section-models" data-section="models">
+      <h2>Models</h2>
+      <p class="hint">
+        The models this sandbox can use. Adding one looks up its price and then
+        finds out what it can do — whether it can read images and scanned pages,
+        and which settings it turns down — by trying it. That takes a few seconds
+        and a fraction of a cent, and it only happens once.
+      </p>
+      <div id="models-list"></div>
+      <form id="add-model-form">
+        <div class="inline-fields">
+          <div>
+            <label for="add-model-name">Model</label>
+            <input type="text" id="add-model-name" placeholder="openai/gpt-5.2"
+                   autocapitalize="none" autocorrect="off" spellcheck="false" required>
+          </div>
+          <div id="add-model-professor-field">
+            <label for="add-model-professor">Test with whose key</label>
+            <select id="add-model-professor"></select>
+          </div>
+        </div>
+        <p class="hint field-note">
+          Named as the provider and then the model, separated by a slash — for
+          example <code>openai/gpt-5.2</code>, <code>anthropic/claude-opus-4-8</code>
+          or <code>google/gemini-3-pro-preview</code>. The few small test requests
+          are billed to the key you choose.
+        </p>
+        <p class="form-error" id="add-model-error" style="display:none"></p>
+        <button type="submit" id="add-model-btn">Add and test</button>
+      </form>
+    </div>
+
     <div class="card" id="section-external_sources" data-section="external_sources">
       <h2>External usage-data sources</h2>
       <p class="hint">Lets this installation combine another installation's usage data into reports — handy if you manage several professors' installations and want one combined view. This installation's own source id: <strong id="source-id"></strong></p>
@@ -720,6 +752,136 @@ for (const key of Object.keys(FOLDER_CHOICES)) {
     .addEventListener("change", () => saveFolderChoice(key));
 }
 
+// ── Models ──────────────────────────────────────────────────────────────────
+// Whose key the test requests are billed to. Hidden when there is only one
+// person set up, because then there is nothing to decide.
+function renderModelProfessors(data) {
+  const select = document.getElementById("add-model-professor");
+  const field = document.getElementById("add-model-professor-field");
+  const previous = select.value;
+  select.innerHTML = "";
+  data.professors.forEach(p => {
+    const option = document.createElement("option");
+    option.value = p.netid;
+    option.textContent = `${p.name} (${p.netid})`;
+    select.appendChild(option);
+  });
+  if (previous) select.value = previous;
+  field.style.display = data.professors.length > 1 ? "" : "none";
+  document.getElementById("add-model-btn").disabled = !data.professors.length;
+}
+
+function modelRow(m) {
+  const row = document.createElement("div");
+  row.className = "row";
+  const price = (m.input != null && m.output != null)
+    ? `$${m.input}/$${m.output} per million tokens` : "no price recorded";
+  // Three states, not two. "Cannot read images" is a fact about the model;
+  // "not tested yet" is a job to do, and showing them the same way is what
+  // made a perfectly capable model look broken.
+  const vision = m.supports_vision
+    ? "Can read images"
+    : (m.tested ? "Text only" : "Not tested yet — assumed text only");
+  const refuses = m.refuses.length ? ` · turns down ${m.refuses.join(", ")}` : "";
+  row.innerHTML = `
+    <div class="main">
+      <div class="name">${m.name} <span class="sub">(${m.owner})</span></div>
+      <div class="sub">${price} · ${vision}${refuses}</div>
+    </div>
+    <span class="badge ${m.supports_vision ? "set" : "unset"}">${m.supports_vision ? "images" : "text"}</span>
+    <button type="button" class="secondary" data-test-model="${m.name}">Test</button>
+    <button type="button" class="danger" data-remove-model="${m.name}" style="display:none">Remove</button>
+  `;
+  return row;
+}
+
+async function loadModels() {
+  const list = document.getElementById("models-list");
+  try {
+    const data = await api("/api/settings/models");
+    list.innerHTML = "";
+    if (!data.models.length) {
+      list.innerHTML = '<div class="empty">No models in the catalogue yet.</div>';
+      return;
+    }
+    data.models.forEach(m => list.appendChild(modelRow(m)));
+  } catch (e) {
+    list.innerHTML = '<div class="empty">Could not read the model catalogue.</div>';
+  }
+}
+
+// One handler on the list rather than one per row: the rows are replaced every
+// time a test finishes, and listeners attached to them would go with them.
+document.getElementById("models-list").addEventListener("click", async (ev) => {
+  const button = ev.target.closest("[data-test-model]");
+  if (!button) return;
+  const name = button.dataset.testModel;
+  const professor = document.getElementById("add-model-professor").value;
+  if (!professor) { alert("Add a professor first — testing a model needs an API key."); return; }
+  button.disabled = true;
+  button.textContent = "Testing…";
+  try {
+    const result = await api(`/api/settings/models/${encodeURIComponent(name)}/test`,
+                             { method: "POST", body: JSON.stringify({ professor }) });
+    await loadModels();
+    const unsettled = result.unsettled.length
+      ? "\n\nNot settled:\n" + result.unsettled.join("\n") : "";
+    alert(`${name}\n\n${result.settled.join("\n")}${unsettled}`);
+  } catch (e) {
+    button.disabled = false;
+    button.textContent = "Test";
+    // 410 means the model is gone, not that the test went wrong. Offer to take
+    // the entry out rather than leaving a row that can never work.
+    if (String(e.message || "").includes("410") || /no longer exists/.test(readableError(e))) {
+      const remove = button.parentElement.querySelector("[data-remove-model]");
+      if (remove) remove.style.display = "";
+      alert(readableError(e));
+      return;
+    }
+    alert("Could not test that model: " + readableError(e));
+  }
+});
+
+document.getElementById("models-list").addEventListener("click", async (ev) => {
+  const button = ev.target.closest("[data-remove-model]");
+  if (!button) return;
+  const name = button.dataset.removeModel;
+  if (!confirm(`Remove ${name} from the catalogue?\n\nIt no longer exists, so every request naming it fails. Adding it back later is one line in the box below.`)) return;
+  try {
+    await api(`/api/settings/models/${encodeURIComponent(name)}`, { method: "DELETE" });
+    await loadModels();
+  } catch (e) { alert("Could not remove that model: " + readableError(e)); }
+});
+
+document.getElementById("add-model-form").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const nameBox = document.getElementById("add-model-name");
+  const button = document.getElementById("add-model-btn");
+  const errorBox = document.getElementById("add-model-error");
+  const provider_model = nameBox.value.trim();
+  const professor = document.getElementById("add-model-professor").value;
+  if (!provider_model) return;
+  errorBox.style.display = "none";
+  button.disabled = true;
+  button.textContent = "Adding and testing…";
+  try {
+    const result = await api("/api/settings/models",
+                             { method: "POST", body: JSON.stringify({ provider_model, professor }) });
+    nameBox.value = "";
+    await loadModels();
+    const caps = result.capabilities;
+    alert(`${result.model} was added.\n\n` +
+          (caps.supports_vision ? "It can read images." : "It cannot read images — text only.") +
+          (caps.refuses.length ? `\nIt turns down: ${caps.refuses.join(", ")}.` : ""));
+  } catch (e) {
+    errorBox.textContent = readableError(e);
+    errorBox.style.display = "";
+  } finally {
+    button.disabled = false;
+    button.textContent = "Add and test";
+  }
+});
+
 async function loadSettings() {
   const data = await api("/api/settings");
   applyOrder(data.order);
@@ -728,7 +890,12 @@ async function loadSettings() {
   renderWebui(data);
   renderShared(data);
   renderSources(data);
+  renderModelProfessors(data);
   renderFolderChoices(await api("/api/settings/conversation-folder"));
+  // Fetched separately, and not awaited with the rest: the catalogue is read
+  // from disk per model and this section is far down the page. Letting it
+  // arrive late keeps the settings anyone actually came for on screen first.
+  loadModels();
   // Inside the modal, chat.html's own close button already covers "go
   // back" — this link would just be a second, ambiguous way to do the
   // same thing, so it's only shown when this page was reached directly.
