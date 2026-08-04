@@ -4541,3 +4541,50 @@ class TestOneComboboxForEveryPage:
         """A <select> shows its first option; an empty box looks broken."""
         fn = self._rendered("settings.html").split("function renderModelProfessors")[1]
         assert "if (!addModelProfessor) {" in fn.split("\n}")[0]
+
+
+class TestNoPageInventsAColourItAlreadyHasATokenFor:
+    """A literal where a token belongs stops following the theme.
+
+    settings.html and shared_settings.html both hardcoded #cc6600 for
+    button:hover. That is --orange-hover's *light* value; in the dark theme the
+    token is #ff8f2e, deliberately lighter, because darkening an orange on a
+    dark panel moves it towards the background rather than away from it. So on
+    those two pages, in dark mode, hovering a button made it recede — the exact
+    thing the design system's own comment says not to do.
+    """
+
+    TEMPLATES = ["chat.html", "settings.html", "shared_settings.html", "unlock.html"]
+
+    def _template(self, name):
+        return (Path(__file__).resolve().parents[1] / "src" / "templates" / name).read_text()
+
+    def test_no_page_repeats_a_value_the_design_system_names(self):
+        tokens = self._template("_design-system.html")
+        # Every colour the token layer defines, as written there.
+        defined = set(re.findall(r"--[\w-]+:\s*(#[0-9A-Fa-f]{3,8})\s*;", tokens))
+        assert defined, "no colours found — has the token layer moved?"
+        for name in self.TEMPLATES:
+            body = re.sub(r"/\*.*?\*/", "", self._template(name), flags=re.S)
+            for colour in defined:
+                assert colour.lower() not in body.lower(), (
+                    f"{name} writes {colour} itself; the token layer already names it, "
+                    "and a literal stops following the theme"
+                )
+
+    def test_the_hover_follows_the_theme_on_every_page(self):
+        for name in self.TEMPLATES:
+            body = self._template(name)
+            # The bare element rule, not "#tabs button:hover" — a tab is not
+            # an orange button and is right to hover differently.
+            found = re.search(r"^\s*button:hover\s*\{([^}]*)\}", body, re.M)
+            if not found:
+                continue
+            assert "var(--orange-hover)" in found.group(1), f"{name} does not use the token"
+
+    def test_the_token_really_does_differ_between_themes(self):
+        """If it ever stops differing, the bug above stops being possible."""
+        tokens = self._template("_design-system.html")
+        values = re.findall(r"--orange-hover:\s*(#[0-9A-Fa-f]+)", tokens)
+        assert len(values) == 2, "expected a light value and a dark one"
+        assert values[0].lower() != values[1].lower()
