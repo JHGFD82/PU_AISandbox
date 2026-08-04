@@ -267,3 +267,25 @@ class TestTheRefusalTestItself:
     def test_everything_else_does_not(self, message):
         from src.models.capabilities import _is_a_refusal
         assert _is_a_refusal(Exception(message)) is False
+
+
+class TestRecordingThatATestHappened:
+    """Telling "found to be text-only" apart from "nobody ever asked".
+
+    Every other field looks identical in those two cases. Without this the
+    settings page cannot offer to test the second, because it cannot see it.
+    """
+
+    def test_a_completed_test_is_dated(self):
+        report = CapabilityReport(findings={"supports_vision": False})
+        assert apply_capability_report({}, report)["last_tested"]
+
+    def test_a_model_that_could_not_be_reached_is_not(self):
+        report = CapabilityReport(reachable=False)
+        assert "last_tested" not in apply_capability_report({}, report)
+
+    def test_a_tested_model_with_no_quirks_at_all_still_counts_as_tested(self):
+        """Nothing found is a result, not an absence of one."""
+        merged = apply_capability_report({}, CapabilityReport(
+            findings={"supports_vision": True}, settled=["Can read images"]))
+        assert merged["last_tested"]

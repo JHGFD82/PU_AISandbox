@@ -29,6 +29,7 @@ unanswered and reported as untested.
 
 import logging
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from ..services.api_errors import is_transient_error, rejected_request_field
@@ -358,15 +359,21 @@ def apply_capability_report(entry: Dict[str, Any], report: CapabilityReport) -> 
         report: What the testing found.
 
     Returns:
-        The entry with the findings applied. An answer that was already in the
-        entry and is still true is left alone; ``rejects`` and ``prefers``
-        merge rather than replace, so a quirk learned from a real refusal
-        isn't dropped by a later test that didn't happen to hit it.
+        The entry with the findings applied, and ``last_tested`` set to when
+        that happened. An answer that was already in the entry and is still
+        true is left alone; ``rejects`` and ``prefers`` merge rather than
+        replace, so a quirk learned from a real refusal isn't dropped by a
+        later test that didn't happen to hit it.
     """
     if not report.reachable:
         return dict(entry)
 
     updated = dict(entry)
+    # Recorded so that "tested, and it genuinely cannot read images" can be
+    # told apart from "nobody ever asked". Those look identical in every other
+    # field, and confusing them is how a capable model came to look broken
+    # with nothing to suggest anything could be done about it.
+    updated["last_tested"] = datetime.now().isoformat(timespec="seconds")
     for key, value in report.findings.items():
         if key in ("rejects", "prefers") and isinstance(value, dict):
             merged = dict(updated.get(key) or {})
