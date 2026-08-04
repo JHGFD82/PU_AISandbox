@@ -36,7 +36,13 @@ class SettingField:
     Attributes:
         key: The dotted path the value lives at in ``settings.toml``
              (e.g. ``'webui.session_secret'``).
-        label: A short, plain-English description shown next to it in
+        set_with: The command that sets this value, when one exists — e.g.
+              ``'webui set-passphrase'`` for a value that has to be hashed.
+              ``None``, the ordinary case, means it is changed by opening
+              ``settings.toml`` (or on the web interface's settings page).
+              Declared by whoever owns the setting, so that listing them does
+              not mean core knowing which plugin needs a command.
+    label: A short, plain-English description shown next to it in
                ``--show-config`` (e.g. ``'Session signing secret'``).
         section: A group heading used to cluster related values when they're
                  displayed (e.g. ``'Web UI plugin'``).
@@ -48,13 +54,17 @@ class SettingField:
     label: str
     section: str = "Other"
     secret: bool = False
+    set_with: str | None = None
 
 
 # Populated by plugins (and core) at import time via register_setting().
 _SETTING_FIELDS: dict[str, SettingField] = {}
 
 
-def register_setting(key: str, label: str, *, section: str = "Other", secret: bool = False) -> None:
+def register_setting(
+    key: str, label: str, *, section: str = "Other", secret: bool = False,
+    set_with: str | None = None,
+) -> None:
     """Declare an optional ``settings.toml`` value so it shows up in ``--show-config`` and ``settings list``.
 
     Call this once, at import time, for every optional value a plugin reads
@@ -72,8 +82,14 @@ def register_setting(key: str, label: str, *, section: str = "Other", secret: bo
                 password, a signing secret — so its value is never printed
                 or echoed back, only whether it's currently set. Defaults to
                 ``False``.
+        set_with: The command that sets it, if it needs one — a value that is
+                  hashed or generated cannot simply be typed into the file.
+                  Leave it out for anything a person can write themselves,
+                  which is nearly everything.
     """
-    _SETTING_FIELDS[key] = SettingField(key=key, label=label, section=section, secret=secret)
+    _SETTING_FIELDS[key] = SettingField(
+        key=key, label=label, section=section, secret=secret, set_with=set_with,
+    )
 
 
 def get_registered_settings() -> list[SettingField]:

@@ -91,15 +91,20 @@ from src.settings import CHAT_ROLE, TITLE_ROLE  # noqa: E402
 # specifically — see register_setting()'s docstring in src/config.py.
 register_setting(
     "webui.passphrase_hash",
-    "Unlock passphrase hash (generate via 'webui set-passphrase')",
+    "Passphrase for the browser's unlock screen",
     section="Web UI plugin",
     secret=True,
+    # Stored as a bcrypt hash, so there is nothing a person could type here.
+    set_with="webui set-passphrase",
 )
 register_setting(
     "webui.session_secret",
-    "Session signing secret (any long random string; 'settings set webui.session_secret --generate' works)",
+    "Keeps browser sessions signed in across restarts of the server",
     section="Web UI plugin",
     secret=True,
+    # Only has to be long and unguessable, so it is generated rather than
+    # invented — though anyone who would rather use their own can write it in.
+    set_with="webui set-session-secret",
 )
 
 
