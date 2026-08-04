@@ -237,6 +237,7 @@ default_system_prompt = "You are a helpful assistant."
 page_delay_seconds = 3.0
 max_retries = 10
 retry_delay_seconds = 5.0
+request_timeout_seconds = 300.0
 
 [processing]
 default_parallel_workers = 1
@@ -267,6 +268,7 @@ warning_threshold_pct = 80
 | `page_delay_seconds` | `3.0` | Pause between pages when processing one at a time |
 | `max_retries` | `10` | How many times to retry after a temporary failure or a content-filter refusal |
 | `retry_delay_seconds` | `5.0` | How long to wait between those attempts — the same every time |
+| `request_timeout_seconds` | `300.0` | How long to wait on a provider that has gone quiet before giving up. Raise it if long pages are being cut off mid-translation; lower it if you would rather hear about an outage sooner |
 
 ### `[processing]`
 

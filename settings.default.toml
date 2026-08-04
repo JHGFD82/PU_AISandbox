@@ -20,6 +20,12 @@ default_system_prompt = "You are a helpful assistant."
 page_delay_seconds = 3.0   # Seconds to pause between pages in sequential mode
 max_retries = 10           # Maximum retry attempts on transient errors or content filter
 retry_delay_seconds = 5.0  # Flat seconds to wait between retries (not doubled each time)
+# How long to wait for a provider that has gone quiet before giving up on a
+# request. Generous, because a full page of dense text can genuinely take
+# minutes to come back and cutting that off would break real work — but not
+# unlimited, because without it a provider that simply stops answering leaves a
+# translation waiting for something that is never coming.
+request_timeout_seconds = 300.0
 
 [processing]
 default_parallel_workers = 1  # Default -w/--workers value; 1 = sequential (safe default)

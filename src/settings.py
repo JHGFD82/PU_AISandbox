@@ -235,6 +235,11 @@ MAX_RETRIES: int = _s["retry"]["max_retries"]
 # How long to wait between retries, in seconds. The same every time.
 RETRY_DELAY_SECONDS: float = _s["retry"]["retry_delay_seconds"]
 
+# How long to wait on a provider that has gone quiet before giving up.
+# In seconds here, like everything else in this file; the gateway wants it in
+# milliseconds, and the one place that talks to the gateway converts it.
+REQUEST_TIMEOUT_SECONDS: float = _s["retry"].get("request_timeout_seconds", 300.0)
+
 # ── Parallelism & document processing ─────────────────────────────────────────
 DEFAULT_PARALLEL_WORKERS: int = _s["processing"]["default_parallel_workers"]
 DEFAULT_PAGE_SIZE: int = _s["processing"]["default_page_size"]
