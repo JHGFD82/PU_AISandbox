@@ -15,6 +15,8 @@ from typing import Any, Dict, Tuple
 
 from . import catalog as _catalog
 
+logger = logging.getLogger(__name__)
+
 # Keeps track, in memory, of when each model's price was last refreshed —
 # this is a temporary record that exists only while the program is running,
 # and it prevents every worker thread from separately re-reading the catalog
@@ -94,9 +96,12 @@ def add_model_to_catalog(provider_model: str) -> Tuple[str, Dict[str, Any]]:
     Returns:
         A two-item tuple of ``(model_name, entry)``: the model's catalog key
         (e.g. ``'gpt-4o'``) and the full pricing entry that was saved,
-        including whether it supports image input (``supports_vision``,
-        which defaults to ``False`` unless PortKey reports otherwise — edit
-        ``model_catalog.json`` directly to correct it if needed).
+        including whether it supports image input (``supports_vision``).
+        PortKey's pricing service reports prices only, so a model added here
+        is always recorded as unable to read images and a warning says so.
+        Correct it by setting ``"supports_vision": true`` on that entry in
+        ``model_catalog.json`` — until then the model cannot be used for
+        chat, which needs to read attached documents.
 
     Raises:
         ValueError: If ``provider_model`` isn't in ``provider/model-name``
@@ -133,10 +138,31 @@ def add_model_to_catalog(provider_model: str) -> Tuple[str, Dict[str, Any]]:
     entry["input"] = fetched["input"]
     entry["output"] = fetched["output"]
     entry["last_sync"] = datetime.now().isoformat(timespec="seconds")
+    # Taken from the response when it says — which the PortKey pricing endpoint
+    # currently never does, since it reports prices and nothing else. The branch
+    # stays because the answer belongs there if it ever arrives.
+    #
+    # Failing that, recorded as unable to read images. That is the safe way to
+    # be wrong: sending a picture to a model that cannot see gets an error from
+    # the provider, while the opposite only means the model isn't offered yet.
+    #
+    # Safe, but wrong often enough to matter, and until now silently: most
+    # current models do read images, and the web interface's chat requires it,
+    # so every automatically added model is refused there until somebody edits
+    # this file. Nothing said so, and the refusal arrived as an unexplained
+    # failure mid-conversation. Hence the warning.
     if "supports_vision" not in entry and "supports_vision" in fetched:
         entry["supports_vision"] = fetched["supports_vision"]
 
-    entry.setdefault("supports_vision", False)
+    if "supports_vision" not in entry:
+        entry["supports_vision"] = False
+        logger.warning(
+            "Added '%s' with supports_vision false — the pricing service does not "
+            "say whether a model can read images, so the sandbox assumes not. If "
+            "it can, set \"supports_vision\": true on its entry in %s; until then "
+            "it cannot be used for chat, which needs to read attached documents.",
+            model_name, catalog_file,
+        )
 
     catalog["models"][model_name] = entry
     _catalog.save_model_catalog(catalog)

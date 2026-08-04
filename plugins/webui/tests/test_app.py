@@ -8,6 +8,8 @@ are made (the /api/chat route's SandboxProcessor is monkeypatched).
 from __future__ import annotations
 
 import json
+import logging
+import logging.handlers
 import re
 import sys
 import tomllib
@@ -3899,3 +3901,88 @@ class TestResizingTheJobModal:
     def test_the_width_is_restored_when_the_modal_opens(self, chat):
         opener = chat.split("async function openJobModal")[1].split("\n}")[0]
         assert "restoreJobOptionsWidth()" in opener
+
+
+class TestTheReferenceCodeCanActuallyBeLookedUp:
+    """The browser tells a professor to quote a code. Someone has to find it.
+
+    The message promised the details were "in the server log". There was no
+    server log: everything went to the terminal the sandbox was started from,
+    so starting it from an icon, or closing that window, lost the only copy.
+    """
+
+    def test_the_traceback_and_the_code_land_in_the_file(self, tmp_path, monkeypatch):
+        app_module = sys.modules["_pu_webui_app"]
+        import src.paths
+        monkeypatch.setattr(src.paths, "data_root", lambda: tmp_path)
+        path = app_module.start_logging_to_a_file()
+        assert path is not None
+        try:
+            # Raised and caught, because that is how it is called (app.py's
+            # streaming path, inside `except Exception as e`). logging.exception
+            # only records a traceback from inside an except block — calling it
+            # bare writes the line and no traceback at all.
+            try:
+                raise RuntimeError("the provider said no")
+            except RuntimeError as e:
+                message = app_module._chat_error_message(e)
+        finally:
+            logging.getLogger().handlers = [
+                h for h in logging.getLogger().handlers
+                if not isinstance(h, logging.handlers.RotatingFileHandler)
+            ]
+        reference = re.search(r"reference ([0-9a-f]{8})", message).group(1)
+        written = path.read_text(encoding="utf-8")
+        # The code the professor quotes, and the error behind it.
+        assert reference in written
+        assert "the provider said no" in written
+        assert "Traceback" in written
+
+    def test_the_message_says_where_to_look(self, tmp_path, monkeypatch):
+        app_module = sys.modules["_pu_webui_app"]
+        import src.paths
+        monkeypatch.setattr(src.paths, "data_root", lambda: tmp_path)
+        message = app_module._chat_error_message(RuntimeError("boom"))
+        assert str(tmp_path / "webui.log") in message
+
+    def test_it_keeps_what_led_up_to_the_error_too(self, tmp_path, monkeypatch):
+        """A log that starts at the exception explains nothing."""
+        app_module = sys.modules["_pu_webui_app"]
+        import src.paths
+        monkeypatch.setattr(src.paths, "data_root", lambda: tmp_path)
+        monkeypatch.setattr(logging.getLogger(), "level", logging.WARNING)
+        path = app_module.start_logging_to_a_file()
+        try:
+            logging.getLogger("x").info("asked gpt-4o to translate page 12")
+        finally:
+            logging.getLogger().handlers = [
+                h for h in logging.getLogger().handlers
+                if not isinstance(h, logging.handlers.RotatingFileHandler)
+            ]
+        assert "asked gpt-4o to translate page 12" in path.read_text(encoding="utf-8")
+
+    def test_a_log_that_cannot_be_opened_does_not_stop_the_sandbox(
+        self, tmp_path, monkeypatch
+    ):
+        """Refusing to start because of the log would be worse than the bug."""
+        app_module = sys.modules["_pu_webui_app"]
+        import src.paths
+        monkeypatch.setattr(src.paths, "data_root", lambda: tmp_path / "nope")
+        monkeypatch.setattr(Path, "mkdir",
+                            lambda *a, **kw: (_ for _ in ()).throw(OSError("read-only")))
+        assert app_module.start_logging_to_a_file() is None
+
+    def test_it_is_rolled_over_rather_than_left_to_grow(self, tmp_path, monkeypatch):
+        app_module = sys.modules["_pu_webui_app"]
+        import src.paths
+        monkeypatch.setattr(src.paths, "data_root", lambda: tmp_path)
+        app_module.start_logging_to_a_file()
+        handlers = [h for h in logging.getLogger().handlers
+                    if isinstance(h, logging.handlers.RotatingFileHandler)]
+        try:
+            assert handlers and handlers[-1].maxBytes > 0
+            assert handlers[-1].backupCount >= 1
+        finally:
+            logging.getLogger().handlers = [
+                h for h in logging.getLogger().handlers if h not in handlers
+            ]
