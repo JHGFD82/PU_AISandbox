@@ -68,6 +68,11 @@ _PAGE = """<!doctype html>
 <title>Set up the PU AI Sandbox</title>
 <style>
   :root {{ color-scheme: light dark; }}
+  /* Width means the whole thing, padding and border included. Without this a
+     browser measures a text input's width *inside* its padding and a select's
+     around it, so the same "width: 100%" made the model box overhang its panel
+     while the picker under it fitted exactly. */
+  *, *::before, *::after {{ box-sizing: border-box; }}
   body {{
     font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     max-width: 40rem; margin: 3rem auto; padding: 0 1.25rem;

@@ -534,3 +534,22 @@ class TestAskingWhoIsUsingThisAndWhatTheyMaySendTo:
         page = client.get("/people").text
         assert "Add more if you need to" not in page
         assert "or carry on" not in page
+
+    def test_a_field_is_as_wide_as_it_says_it_is(self, client_and_result):
+        """The model box overhung its panel while the picker below it fitted.
+
+        Both said width: 100%. A browser measures a text input's width inside
+        its padding and a select's around it, so the same declaration produced
+        two different widths — and the wider one ran past the edge of the box.
+        """
+        _client, _chosen, page = self._at_step_two(client_and_result)
+        # Set on everything, not patched onto the one field that showed it.
+        assert "*, *::before, *::after { box-sizing: border-box; }" in page
+
+    def test_the_two_fields_are_declared_the_same_width(self, client_and_result):
+        client, _chosen, _page = self._at_step_two(client_and_result)
+        client.post("/people", json={"netid": "jh43", "name": "J", "key": "sk-t"})
+        page = client.get("/models").text
+        for selector in ("input[type=text]", "select"):
+            rule = page.split(selector + " {")[1].split("}")[0]
+            assert "width: 100%" in rule, selector
