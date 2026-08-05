@@ -137,25 +137,57 @@ class TestLoadModelCatalog:
         with pytest.raises(ValueError, match="'models' section"):
             load_model_catalog()
 
-    def test_an_empty_catalogue_says_what_to_do_about_it(self, monkeypatch, tmp_path):
-        """A CLIError, not a ValueError — this is a state, not a fault.
+    def test_reading_an_empty_catalogue_is_allowed(self, monkeypatch, tmp_path):
+        """Because adding the first model has to read the file before writing it.
 
-        A freshly set-up copy has no models until somebody adds the ones their
-        institution offers. Raised as an ordinary exception it reaches the
-        browser as an unexplained reference code, which is the worst possible
-        answer to "I have just installed this and it does not work".
+        Objecting here made the first model impossible to add: the web
+        interface's Add-and-test loads the catalogue, puts the new entry in, and
+        saves it — and the load raised before it got that far. An empty
+        catalogue is an ordinary state on a copy that has just been set up.
         """
         catalog = tmp_path / "model_catalog.json"
         catalog.write_text(json.dumps({"config": {}, "models": {}}))
         monkeypatch.setattr(catalog_module, "get_model_catalog_path", lambda: catalog)
+        assert load_model_catalog()["models"] == {}
+
+    def test_asking_for_a_model_to_send_to_says_there_is_nothing(self, monkeypatch, tmp_path):
+        """The complaint belongs where a model is *needed*, not where one is listed.
+
+        Listing what exists and needing something to send to are different
+        questions. A settings page showing an empty list is doing its job.
+
+        A CLIError, not a ValueError: raised as an ordinary exception it reaches
+        the browser as an unexplained reference code, which is the worst
+        possible answer to "I just installed this and it doesn't work".
+        """
+        catalog = tmp_path / "model_catalog.json"
+        catalog.write_text(json.dumps({"config": {}, "models": {}}))
+        monkeypatch.setattr(catalog_module, "get_model_catalog_path", lambda: catalog)
+        # Listing is fine with none.
+        assert catalog_module.get_available_models() == []
+        # Wanting one to send to is not.
+        from src.models.resolver import resolve_model
         with pytest.raises(CLIError) as caught:
-            load_model_catalog()
+            resolve_model(None)
         message = str(caught.value)
         assert "no models set up yet" in message
         # Where to add one, both ways, and where to look up what to add.
         assert "Settings page" in message
         assert "documentation" in message
         assert str(catalog) in message
+
+    def test_the_first_model_can_actually_be_added(self, monkeypatch, tmp_path):
+        """The whole point: read an empty catalogue, add to it, save, use it."""
+        catalog = tmp_path / "model_catalog.json"
+        catalog.write_text(json.dumps(
+            {"config": {"pricing_unit": 1000000}, "models": {}}))
+        monkeypatch.setattr(catalog_module, "get_model_catalog_path", lambda: catalog)
+        loaded = load_model_catalog()
+        loaded["models"]["gpt-4o"] = {"input": 2.5, "output": 10.0,
+                                      "supports_vision": True}
+        catalog_module.save_model_catalog(loaded)
+        monkeypatch.setattr(catalog_module, "_catalog_cache", None)
+        assert catalog_module.get_available_models() == ["gpt-4o"]
 
     def test_valid_catalog_returns_dict(self, monkeypatch, tmp_path):
         catalog = tmp_path / "model_catalog.json"
@@ -1397,12 +1429,34 @@ class TestAModelThatCannotReadImagesSaysSo:
         assert "--list-models" not in str(raised.value)
 
     def test_the_no_models_at_all_message_is_a_sentence(self, mock_catalog, monkeypatch):
-        """It read 'No able to read images models available' at one point."""
-        monkeypatch.setattr(catalog_module, "get_available_models", lambda: [])
+        """It read 'No able to read images models available' at one point.
+
+        Reached when models exist and none of them can read images — a real
+        search that found nothing. An empty catalogue is a different answer
+        (see below), because there was nothing to search.
+        """
+        # Models exist; none of them can read images. That is a search that
+        # found nothing, which is what this message is for.
+        monkeypatch.setattr(catalog_module, "model_supports_vision", lambda _m: False)
         monkeypatch.setattr(catalog_module, "cheapest_model", lambda **kw: None)
         with pytest.raises(CLIError) as raised:
             resolve_model(require_vision=True)
         assert "No model in the catalog can read images" in str(raised.value)
+
+    def test_an_empty_catalogue_is_told_apart_from_a_search_that_failed(
+        self, mock_catalog, monkeypatch
+    ):
+        """"None of them can read images" is no use when there are none at all.
+
+        The second says what to do; the first sends somebody looking through a
+        catalogue that is empty.
+        """
+        monkeypatch.setattr(catalog_module, "get_available_models", lambda: [])
+        with pytest.raises(CLIError) as raised:
+            resolve_model(require_vision=True)
+        message = str(raised.value)
+        assert "no models set up yet" in message
+        assert "can read images" not in message
 
 
 class TestAnAutoAddedModelAnnouncesWhatItCannotDo:
