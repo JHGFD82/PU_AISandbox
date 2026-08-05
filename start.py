@@ -47,6 +47,49 @@ def say(message):
     sys.stdout.flush()
 
 
+def read_one_key():
+    """Return a single keypress, without waiting for return and without echoing it.
+
+    A choice between two things is one keypress. Typing a letter, watching it
+    appear at the end of the prompt and then pressing return is the gesture for
+    entering text, and this is not text.
+
+    The terminal is put into cbreak mode rather than raw: cbreak stops it
+    waiting for a whole line, while leaving Ctrl-C to interrupt as it always
+    does. Whatever happens, the old settings go back — a terminal left in
+    cbreak outlives this program and breaks the shell it was run from.
+
+    Returns:
+        The character pressed, or ``None`` if this terminal cannot be read a
+        key at a time — in which case the caller should ask for a whole line
+        instead.
+    """
+    if os.name == "nt":
+        try:
+            import msvcrt
+        except ImportError:
+            return None
+        return msvcrt.getwch()
+
+    try:
+        import termios
+        import tty
+    except ImportError:
+        # Not a terminal this can be done on. Say so rather than guessing.
+        return None
+
+    fd = sys.stdin.fileno()
+    try:
+        saved = termios.tcgetattr(fd)
+    except termios.error:
+        return None
+    try:
+        tty.setcbreak(fd)
+        return sys.stdin.read(1)
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, saved)
+
+
 def wait_for_go_ahead():
     """Stop and let the person read before several minutes of installing begins.
 
@@ -55,10 +98,12 @@ def wait_for_go_ahead():
     around 180 lines for a first install, so the explanation scrolls away before
     anyone has read it.
 
-    Anything other than Q carries on, so the obvious thing — pressing return —
-    is the one that works. Deciding not to install is not a mistake, so it is
-    not treated as one: nothing has happened yet, and running this again picks
-    up exactly here.
+    Return starts, Q stops, and every other key is ignored rather than being
+    answered with a complaint — there are two things to do here and no way to
+    get them wrong.
+
+    Deciding not to install is not a mistake, so it is not treated as one:
+    nothing has happened yet, and running this again picks up exactly here.
 
     Returns:
         True to go ahead, False if the person would rather not.
@@ -69,14 +114,34 @@ def wait_for_go_ahead():
     if not sys.stdin.isatty():
         return True
 
+    sys.stdout.write("[Press return to install, or Q to quit.] ")
+    sys.stdout.flush()
     try:
-        answer = input("[Press return to install, or Q to quit.] ")
+        while True:
+            key = read_one_key()
+            if key is None:
+                # This terminal will not give up one key at a time. Fall back
+                # to a typed line, which works anywhere.
+                say("")
+                return input("[Type q to quit, or press return to install.] "
+                             ).strip().lower() != "q"
+            if key in ("\r", "\n"):
+                say("")
+                return True
+            if key in ("q", "Q"):
+                say("")
+                return False
+            # Ctrl-C and Ctrl-D reach here as characters when the terminal is
+            # not generating signals, and mean what Q means. An empty string is
+            # the end of the input: reading again would only return it again,
+            # so treating it as "anything else" would spin here forever.
+            if key in ("", "\x03", "\x04"):
+                say("")
+                return False
+            # Anything else: not an answer to this question, so wait for one.
     except (EOFError, KeyboardInterrupt):
-        # Ctrl-D or Ctrl-C at the prompt means the same as Q, and the newline
-        # keeps the next line from starting halfway across the screen.
         say("")
         return False
-    return answer.strip().lower() != "q"
 
 
 def venv_python():
