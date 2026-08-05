@@ -119,12 +119,10 @@ say — you need no models here at all. See
 With a person and a model added, the smallest thing that works:
 
 ```bash
-source .venv/bin/activate                  # Windows: .venv\Scripts\activate
-
-python main.py jh43 prompt                 # ask a question; end with --- on its own line
-python main.py jh43 prompt --dry-run       # see what would be sent, spending nothing
-python main.py jh43 prompt -m gpt-4o-mini  # ask a particular model
-python main.py jh43 usage report           # what it has cost so far
+python3 main.py jh43 prompt                 # ask a question; end with --- on its own line
+python3 main.py jh43 prompt --dry-run       # see what would be sent, spending nothing
+python3 main.py jh43 prompt -m gpt-4o-mini  # ask a particular model
+python3 main.py jh43 usage report           # what it has cost so far
 ```
 
 Replace `jh43` with the netID you added. `--dry-run` is worth trying first: it
@@ -142,7 +140,15 @@ your own hardware are all covered in the documentation:
 
 ### Using it from the command line instead
 
-The web interface is one way in; everything is also available as commands. If you prefer that, activate the environment `start.py` created and use `main.py` directly:
+The web interface is one way in; everything is also available as commands.
+Nothing has to be activated first — `main.py` finds the environment `start.py`
+built and runs itself in it:
+
+```bash
+python3 main.py --help
+```
+
+If you would rather activate it, that works too and nothing extra happens:
 
 ```bash
 source .venv/bin/activate      # Windows: .venv\Scripts\activate
@@ -154,7 +160,7 @@ python main.py --help
 If you plan to *change* the sandbox rather than use it, also install the development tools — a linter, a type checker and the test runner:
 
 ```bash
-source .venv/bin/activate
+source .venv/bin/activate      # for pip and pytest, which are not main.py
 pip install -r requirements-dev.txt
 ```
 
