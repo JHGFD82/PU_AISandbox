@@ -4808,3 +4808,64 @@ class TestTheWebFirstRunExplainsItself:
         failure = fn.split("catch")[1]
         assert "note.hidden = true;" in failure
         assert "Could not read the model catalogue" in failure
+
+
+class TestAddingTheFirstModel:
+    """The one thing a new installation must be able to do.
+
+    Adding a model reads the catalogue, puts the entry in, and saves it. While
+    an empty catalogue refused to be read, that first step raised — so the very
+    situation the Models panel exists for was the one it could not handle, and
+    the person was told "there are no models set up yet" while trying to set
+    one up.
+    """
+
+    def _empty_catalogue(self, monkeypatch, tmp_path):
+        import src.models.catalog as catalog_module
+        path = tmp_path / "model_catalog.json"
+        path.write_text(json.dumps(
+            {"config": {"pricing_unit": 1000000, "provider_map": {}}, "models": {}}))
+        monkeypatch.setattr(catalog_module, "get_model_catalog_path", lambda: path)
+        monkeypatch.setattr(catalog_module, "_catalog_cache", None)
+        return path
+
+    def test_the_models_panel_loads_with_none(
+        self, unlocked_client, monkeypatch, tmp_path
+    ):
+        self._empty_catalogue(monkeypatch, tmp_path)
+        resp = unlocked_client.get("/api/settings/models")
+        assert resp.status_code == 200
+        assert resp.json()["models"] == []
+
+    def test_the_settings_page_still_answers(
+        self, unlocked_client, monkeypatch, tmp_path
+    ):
+        """It reports has_models, which means reading a catalogue with none."""
+        self._empty_catalogue(monkeypatch, tmp_path)
+        resp = unlocked_client.get("/api/settings")
+        assert resp.status_code == 200
+        assert resp.json()["has_models"] is False
+
+    def test_adding_one_gets_past_reading_the_catalogue(
+        self, unlocked_client, monkeypatch, tmp_path, settings_env
+    ):
+        """Not a test of the provider call — of the step that used to raise first.
+
+        Whatever the request to the provider does, it has to be *reached*.
+        While an empty catalogue refused to be read, it never was.
+        """
+        self._empty_catalogue(monkeypatch, tmp_path)
+        settings_store_mod.add_professor("jh43", "Jeff Heller", "a-key")
+        reached = {}
+        import src.models as models_module
+
+        def add(name, *a, **kw):
+            reached["name"] = name
+            raise ValueError("stop here — the point is that we got this far")
+
+        monkeypatch.setattr(models_module, "add_model_to_catalog", add)
+        unlocked_client.post("/api/settings/models",
+                             json={"provider_model": "openai/gpt-4o", "professor": "jh43"})
+        assert reached.get("name") == "openai/gpt-4o", (
+            "the catalogue read raised before the model could be looked up"
+        )

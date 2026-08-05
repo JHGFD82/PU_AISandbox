@@ -16,7 +16,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from ..errors import CLIError
 
 MODEL_CATALOG_FILE = "model_catalog.json"
 
@@ -160,23 +159,11 @@ def load_model_catalog() -> Dict[str, Any]:
         logging.error(error_msg)
         raise ValueError(error_msg)
 
-    if not config["models"]:
-        # A CLIError, not a ValueError, because this is an ordinary state and
-        # not a fault: a freshly set-up copy has no models until somebody adds
-        # the ones their institution offers. A ValueError here reaches the
-        # browser as an unexplained reference code, which is the worst possible
-        # answer to "I have just installed this and it does not work".
-        raise CLIError(
-            "There are no models set up yet, so there is nothing to send this "
-            "to.\n\n"
-            "Add one on the web interface's Settings page, under Models — type "
-            "a name like 'openai/gpt-4o' and it will look up the price and work "
-            "out what the model can do.\n\n"
-            "Which models you can use depends on your institution's AI sandbox. "
-            "Princeton's are listed in its own documentation; check there for "
-            "the current names.\n\n"
-            f"They are recorded in {catalog_file}, which you can also edit by hand."
-        )
+    # No check that there are any models. An empty catalogue is an ordinary
+    # state — a freshly set-up copy has none until somebody adds the ones their
+    # institution offers — and objecting here would make adding the first one
+    # impossible, since adding reads the file before writing it. The complaint
+    # belongs where a model is actually needed: see no_models_message().
 
 
     # Deliberately records the stamp taken *before* the file was read, not a
@@ -220,10 +207,39 @@ def save_model_catalog(config: Dict[str, Any]) -> None:
         raise
 
 
+def no_models_message() -> str:
+    """Explain that no models are set up, and what to do about it.
+
+    Said in one place because it is said from several: resolving a model to
+    send to, listing what is available, and anywhere else that needs a model
+    and finds none.
+
+    Returns:
+        The explanation, naming both ways to add one and where to find out
+        which to add.
+    """
+    return (
+        "There are no models set up yet, so there is nothing to send this to.\n\n"
+        "Add one on the web interface's Settings page, under Models — type a "
+        "name like 'openai/gpt-4o' and it will look up the price and work out "
+        "what the model can do.\n\n"
+        "Which models you can use depends on your institution's AI sandbox. "
+        "Princeton's are listed in its own documentation; check there for the "
+        "current names.\n\n"
+        f"They are recorded in {get_model_catalog_path()}, which you can also "
+        "edit by hand."
+    )
+
+
 def get_available_models() -> List[str]:
-    """Get available models from the model catalog."""
-    config = load_model_catalog()
-    return list(config["models"].keys())
+    """Return the models this installation can use, which may be none.
+
+    A reader, and only that. Listing what exists and needing something to send
+    to are different questions: a settings page showing an empty list is doing
+    its job, while a chat turn with nothing to send to is not. The complaint
+    lives with the second — see ``resolve_model()``.
+    """
+    return list(load_model_catalog()["models"].keys())
 
 
 # Routes that carry another company's models. Everywhere else the part before

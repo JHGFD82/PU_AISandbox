@@ -47,6 +47,38 @@ def say(message):
     sys.stdout.flush()
 
 
+def wait_for_go_ahead():
+    """Stop and let the person read before several minutes of installing begins.
+
+    The lines above this explain what is about to happen and roughly how long
+    it takes. Without a pause they are on screen for about a second: pip prints
+    around 180 lines for a first install, so the explanation scrolls away before
+    anyone has read it.
+
+    Anything other than Q carries on, so the obvious thing — pressing return —
+    is the one that works. Deciding not to install is not a mistake, so it is
+    not treated as one: nothing has happened yet, and running this again picks
+    up exactly here.
+
+    Returns:
+        True to go ahead, False if the person would rather not.
+    """
+    # Nothing to ask when there is nobody to answer. Run from a script, a
+    # scheduled job or a continuous-integration runner, stdin is not a
+    # terminal, and waiting for a keypress there is a hang with no explanation.
+    if not sys.stdin.isatty():
+        return True
+
+    try:
+        answer = input("[Press return to install, or Q to quit.] ")
+    except (EOFError, KeyboardInterrupt):
+        # Ctrl-D or Ctrl-C at the prompt means the same as Q, and the newline
+        # keeps the next line from starting halfway across the screen.
+        say("")
+        return False
+    return answer.strip().lower() != "q"
+
+
 def venv_python():
     """Return the path to the Python inside the sandbox's own environment."""
     if os.name == "nt":
@@ -163,9 +195,6 @@ def build_environment(python):
             say("Check you can write to that folder, then run this again.")
             return False
 
-    say("Installing what the sandbox needs. This takes a few minutes the")
-    say("first time — about 200 MB is downloaded — and is instant after that.")
-    say("")
     try:
         subprocess.check_call(
             [venv_python(), "-m", "pip", "install", "--upgrade", "pip", "--quiet"]
@@ -223,6 +252,14 @@ def main():
         return 1
 
     if not environment_is_ready():
+        say("Installing what the sandbox needs. This takes a few minutes the")
+        say("first time — about 200 MB is downloaded — and is instant after")
+        say("that. You will see each piece arrive as it downloads.")
+        say("")
+        if not wait_for_go_ahead():
+            say("Nothing was installed. Run this again when you are ready.")
+            return 0
+        say("")
         if not build_environment(python):
             return 1
         say("")

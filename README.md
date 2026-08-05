@@ -64,7 +64,7 @@ python3 start.py
 
 That's it. `start.py` does everything else: finds a Python new enough to run the sandbox, installs what it needs, asks where to keep your files, and opens the web interface in your browser.
 
-The first time, a page opens asking where to keep your files. Answer it and the same window moves straight on to the sandbox. (If you would rather answer at the command line, `python main.py settings setup` asks the same thing — but nothing makes you.)
+The first time, it tells you what it is about to install and waits for you to press return, so nothing several minutes long starts by surprise. Then a page opens asking where to keep your files. Answer it and the same window moves straight on to the sandbox. (If you would rather answer at the command line, `python main.py settings setup` asks the same thing — but nothing makes you.)
 
 The first run takes a few minutes — about 200 MB of software is downloaded. Every run after that reaches the web interface in about a second, so this is also the normal way to open the sandbox day to day.
 

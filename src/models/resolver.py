@@ -70,6 +70,12 @@ def resolve_model(
     require_vision = require_vision or (role.requires_vision if role is not None else False)
 
     available_models = _catalog.get_available_models()
+    # Nothing at all is its own answer, and not the same as "nothing that
+    # fits": there is no catalogue to search rather than a search that failed.
+    # Said here rather than when the file is read, because reading it is what
+    # adding the very first model has to do.
+    if not available_models:
+        raise CLIError(_catalog.no_models_message())
     # Two wordings of the same requirement, because they sit in different
     # sentences: one completes "this model is not ___", the other stands alone.
     compatibility_label = "able to read images" if require_vision else "configured"

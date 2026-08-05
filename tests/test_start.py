@@ -129,3 +129,81 @@ class TestSkippingWorkAlreadyDone:
         monkeypatch.setattr(start, "STAMP", str(stamp))
         stamp.write_text("a fingerprint from an older requirements.txt", encoding="utf-8")
         assert start.environment_is_ready() is False
+
+
+class TestThePauseBeforeInstalling:
+    """Several minutes of installing begins with a keypress, not by surprise.
+
+    The lines above the prompt say what is about to happen and roughly how long
+    it takes. Without a pause they are on screen for about a second: a first
+    install prints around 180 lines, so the explanation scrolls away before
+    anyone has read it.
+    """
+
+    def _answer(self, start, monkeypatch, typed):
+        monkeypatch.setattr(start.sys.stdin, "isatty", lambda: True)
+        monkeypatch.setattr("builtins.input", lambda _prompt: typed)
+        return start.wait_for_go_ahead()
+
+    def test_return_goes_ahead(self, start, monkeypatch):
+        assert self._answer(start, monkeypatch, "") is True
+
+    @pytest.mark.parametrize("typed", ["q", "Q", "  q  ", "\tQ\n"])
+    def test_q_stops(self, start, monkeypatch, typed):
+        assert self._answer(start, monkeypatch, typed) is False
+
+    @pytest.mark.parametrize("typed", ["y", "yes", "ok", "1"])
+    def test_anything_else_goes_ahead(self, start, monkeypatch, typed):
+        """Pressing return is the obvious thing, so it must be the one that works.
+
+        Only Q stops, rather than only an exact word starting, so somebody who
+        types anything at all is not told they got it wrong.
+        """
+        assert self._answer(start, monkeypatch, typed) is True
+
+    @pytest.mark.parametrize("interrupt", [EOFError, KeyboardInterrupt])
+    def test_ctrl_c_and_ctrl_d_mean_the_same_as_q(self, start, monkeypatch, interrupt):
+        monkeypatch.setattr(start.sys.stdin, "isatty", lambda: True)
+
+        def raises(_prompt):
+            raise interrupt
+
+        monkeypatch.setattr("builtins.input", raises)
+        assert start.wait_for_go_ahead() is False
+
+    def test_it_does_not_ask_when_there_is_nobody_to_answer(self, start, monkeypatch):
+        """Run from a script or a CI runner, waiting for a keypress is a hang."""
+        monkeypatch.setattr(start.sys.stdin, "isatty", lambda: False)
+
+        def asked(_prompt):
+            raise AssertionError("asked for a keypress with no terminal attached")
+
+        monkeypatch.setattr("builtins.input", asked)
+        assert start.wait_for_go_ahead() is True
+
+    def test_the_prompt_says_both_ways_out(self, start, monkeypatch):
+        seen = {}
+        monkeypatch.setattr(start.sys.stdin, "isatty", lambda: True)
+        monkeypatch.setattr("builtins.input", lambda prompt: seen.setdefault("p", prompt) and "")
+        start.wait_for_go_ahead()
+        assert "return" in seen["p"].lower()
+        assert "q" in seen["p"].lower()
+
+    def test_declining_is_not_an_error(self, start, monkeypatch, capsys):
+        """Nothing has happened yet, so there is nothing to have gone wrong."""
+        monkeypatch.setattr(start, "find_python", lambda: "python3")
+        monkeypatch.setattr(start, "environment_is_ready", lambda: False)
+        monkeypatch.setattr(start, "wait_for_go_ahead", lambda: False)
+
+        def never(*_a, **_k):
+            raise AssertionError("installed anyway")
+
+        monkeypatch.setattr(start, "build_environment", never)
+        assert start.main() == 0
+        assert "Nothing was installed" in capsys.readouterr().out
+
+    def test_the_explanation_comes_before_the_prompt(self):
+        """Otherwise it is a question about something not yet explained."""
+        source = _START.read_text()
+        body = source.split("def main(")[1]
+        assert body.index("Installing what the sandbox needs") < body.index("wait_for_go_ahead")
