@@ -114,8 +114,7 @@ def wait_for_go_ahead():
     if not sys.stdin.isatty():
         return True
 
-    sys.stdout.write("[Press return to install, or Q to quit.] ")
-    sys.stdout.flush()
+    say("[Press return to install, or Q to quit.] ")
     try:
         while True:
             key = read_one_key()
@@ -123,7 +122,7 @@ def wait_for_go_ahead():
                 # This terminal will not give up one key at a time. Fall back
                 # to a typed line, which works anywhere.
                 say("")
-                return input("[Type q to quit, or press return to install.] "
+                return input("[Press return to install, or Q to quit.] "
                              ).strip().lower() != "q"
             if key in ("\r", "\n"):
                 say("")
@@ -203,18 +202,20 @@ def explain_missing_python():
     """Say plainly that a newer Python is needed, and how to get one."""
     running = "%d.%d.%d" % sys.version_info[:3]
     say("")
-    say("The sandbox needs Python %s or newer, and this computer only has %s."
-        % (MINIMUM_TEXT, running))
+    say("The Princeton University AI Sandbox needs Python %s or newer, "
+        % MINIMUM_TEXT)
+    say("and this computer only has %s."
+        % running)
     say("")
     say("Macs come with an older Python that can't run it. Installing a newer")
     say("one alongside is safe — it won't disturb anything already there.")
     say("")
     say("  The simplest way: download the latest installer from")
     say("      https://www.python.org/downloads/")
-    say("  and run it. Then run this again:")
+    say("  Run the installer, and then run this again:")
     say("      python3 start.py")
     say("")
-    say("  If you use Homebrew, this does the same thing:")
+    say("  If you use Homebrew, you can install it with:")
     say("      brew install python@3.13")
     say("")
 
@@ -272,7 +273,7 @@ def build_environment(python):
         )
     except (OSError, subprocess.CalledProcessError):
         say("")
-        say("Could not download what the sandbox needs.")
+        say("Could not download the necessary files for the sandbox.")
         say("This is almost always the network — a dropped connection, or a")
         say("university proxy. Check you can reach the internet and run this")
         say("again; it will pick up where it left off.")
@@ -308,7 +309,7 @@ def open_browser_shortly(url):
 
 def main():
     say("")
-    say("Princeton AI Sandbox")
+    say("Princeton University AI Sandbox")
     say("=" * 60)
 
     python = find_python()
@@ -317,9 +318,9 @@ def main():
         return 1
 
     if not environment_is_ready():
-        say("Installing what the sandbox needs. This takes a few minutes the")
-        say("first time — about 200 MB is downloaded — and is instant after")
-        say("that. You will see each piece arrive as it downloads.")
+        say("Installing dependencies for the sandbox. About 200 MB will be")
+        say("automatically downloaded and installed. This can take several minutes,")
+        say("depending on your internet connection.")
         say("")
         if not wait_for_go_ahead():
             say("Nothing was installed. Run this again when you are ready.")
@@ -352,12 +353,7 @@ def main():
         # is still there — `python main.py settings setup` — but this file
         # is the route for someone who just wants to open the sandbox.
         say("")
-        say("This sandbox hasn't been set up on this computer yet.")
-        say("Setup will open in your browser. It asks where your files should")
-        say("go, who will be using this, and which models they may send to.")
-        say("You will need an API key to hand — Princeton faculty get one")
-        say("from OIT — and Princeton's own AI Sandbox documentation lists")
-        say("the models it currently offers.")
+        say("Setup will continue in your browser. Please have your API key ready.")
         say("")
         open_browser_shortly(url)
         setup = subprocess.call([venv_python(), sandbox, "webui", "setup"])

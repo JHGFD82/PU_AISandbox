@@ -11,6 +11,12 @@ python main.py webui <subcommand>
 
 `settings` and `webui` don't take a netID, since you need them precisely when nobody is configured yet.
 
+Nothing has to be activated first. `main.py` finds the environment `start.py`
+built in `.venv` and runs itself in it, so `python3 main.py …` works from a
+plain terminal — including on the older Python a Mac ships with. Activating
+that environment yourself also works and changes nothing.
+
+
 If you'd rather not use the command line at all, `python3 start.py` sets everything up and opens the web interface instead. See the [README](../README.md).
 
 ---

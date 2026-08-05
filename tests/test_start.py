@@ -279,10 +279,17 @@ class TestThePauseBeforeInstalling:
         assert "Nothing was installed" in capsys.readouterr().out
 
     def test_the_explanation_comes_before_the_prompt(self):
-        """Otherwise it is a question about something not yet explained."""
-        source = _START.read_text()
-        body = source.split("def main(")[1]
-        assert body.index("Installing what the sandbox needs") < body.index("wait_for_go_ahead")
+        """Otherwise it is a question about something not yet explained.
+
+        Anchored on the shape rather than the words: the lines above the prompt
+        are meant to be rewritten, and a test that breaks when somebody
+        improves the wording is a test that discourages improving it.
+        """
+        body = _START.read_text().split("def main(")[1]
+        asked = body.index("wait_for_go_ahead")
+        # Something is said between deciding to install and asking about it.
+        between = body[body.index("if not environment_is_ready():"):asked]
+        assert between.count("say(") >= 2, "the prompt arrives unexplained"
 
     def test_the_end_of_the_input_does_not_spin(self, start, monkeypatch):
         """A read at the end of input returns "", every time it is asked.

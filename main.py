@@ -1,7 +1,67 @@
 #!/usr/bin/env python3
 """Entry point for the PU AI Sandbox CLI. See README.md for full usage."""
 
+import os
 import sys
+
+# Everything down to the end of _use_the_sandboxes_own_python() is deliberately
+# written without any modern syntax, so that it still runs on an old Python
+# rather than failing to parse before it can explain itself. Macs ship 3.9.
+
+# Set when this file has already handed over to the sandbox's own Python, so a
+# second handover cannot happen. Setting it yourself is also the way to stop
+# this happening at all — useful if you are deliberately running against some
+# other environment.
+_HANDED_OVER = "PU_AISANDBOX_PYTHON_CHOSEN"
+
+
+def _sandboxes_own_python():
+    """Return the Python inside the sandbox's own environment, if it is there."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    if os.name == "nt":
+        candidate = os.path.join(here, ".venv", "Scripts", "python.exe")
+    else:
+        candidate = os.path.join(here, ".venv", "bin", "python")
+    return candidate if os.path.exists(candidate) else None
+
+
+def _use_the_sandboxes_own_python():
+    """Re-run this command under the sandbox's own Python, if it isn't already.
+
+    ``start.py`` builds an environment in ``.venv`` and installs everything the
+    sandbox needs into it. Nothing outside that environment has those packages,
+    so every command used to have to begin with activating it — and forgetting
+    was answered with a missing-module error naming a package nobody had heard
+    of, rather than "you forgot to activate".
+
+    There is no reason to ask. The environment is in a known place, this file
+    knows where it is, and handing the command over costs nothing. Somebody who
+    has activated it already is running that same Python, so nothing happens.
+
+    Does nothing, rather than complaining, when there is no such environment:
+    that is a copy nobody has run ``start.py`` on yet, and the version check
+    below has better things to say about it.
+    """
+    if os.environ.get(_HANDED_OVER):
+        return
+    own = _sandboxes_own_python()
+    if own is None:
+        return
+    running = sys.executable
+    if running and os.path.realpath(running) == os.path.realpath(own):
+        return
+
+    os.environ[_HANDED_OVER] = "1"
+    try:
+        os.execv(own, [own, os.path.abspath(__file__)] + sys.argv[1:])
+    except OSError:
+        # The environment is there but cannot be run — half-built, or moved
+        # from another computer. Carry on under whatever is running this and
+        # let the version check, or the missing package, say so.
+        del os.environ[_HANDED_OVER]
+
+
+_use_the_sandboxes_own_python()
 
 # Checked before anything else is imported, and deliberately written without
 # any modern syntax so that it still runs on an old Python rather than
