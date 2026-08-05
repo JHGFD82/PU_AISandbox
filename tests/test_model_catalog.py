@@ -137,12 +137,25 @@ class TestLoadModelCatalog:
         with pytest.raises(ValueError, match="'models' section"):
             load_model_catalog()
 
-    def test_empty_models_section_raises_value_error(self, monkeypatch, tmp_path):
+    def test_an_empty_catalogue_says_what_to_do_about_it(self, monkeypatch, tmp_path):
+        """A CLIError, not a ValueError — this is a state, not a fault.
+
+        A freshly set-up copy has no models until somebody adds the ones their
+        institution offers. Raised as an ordinary exception it reaches the
+        browser as an unexplained reference code, which is the worst possible
+        answer to "I have just installed this and it does not work".
+        """
         catalog = tmp_path / "model_catalog.json"
         catalog.write_text(json.dumps({"config": {}, "models": {}}))
         monkeypatch.setattr(catalog_module, "get_model_catalog_path", lambda: catalog)
-        with pytest.raises(ValueError, match="no models"):
+        with pytest.raises(CLIError) as caught:
             load_model_catalog()
+        message = str(caught.value)
+        assert "no models set up yet" in message
+        # Where to add one, both ways, and where to look up what to add.
+        assert "Settings page" in message
+        assert "documentation" in message
+        assert str(catalog) in message
 
     def test_valid_catalog_returns_dict(self, monkeypatch, tmp_path):
         catalog = tmp_path / "model_catalog.json"

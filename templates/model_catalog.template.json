@@ -7,19 +7,5 @@
       "mistral": "mistral-ai"
     }
   },
-  "models": {
-    "gpt-4o": {
-      "input": 2.5,
-      "output": 10.0,
-      "supports_vision": true,
-      "portkey_id": "openai/gpt-4o",
-      "last_sync": "2026-08-03T18:19:02"
-    },
-    "gpt-4o-mini": {
-      "input": 0.0,
-      "output": 0.0,
-      "supports_vision": true,
-      "portkey_id": "openai/gpt-4o-mini"
-    }
-  }
+  "models": {}
 }
