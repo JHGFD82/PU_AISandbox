@@ -31,7 +31,7 @@ import threading
 from pathlib import Path
 
 from fastapi import FastAPI, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel
 
 from src import first_run, paths
@@ -84,6 +84,17 @@ _PAGE = """<!doctype html>
   button {{ font: inherit; padding: .6rem 1.4rem; border-radius: 6px; border: 0; background: #2b6cb0; color: #fff; cursor: pointer; }}
   button:disabled {{ opacity: .55; cursor: default; }}
   button.browse, button.secondary {{ background: transparent; color: inherit; border: 1px solid #999; padding: .5rem 1rem; }}
+  /* How far through setup this is. Quiet by design — a reassurance rather
+     than the thing on the page worth looking at. */
+  .progress {{ margin: 0 0 1.75rem; }}
+  .progress-bar {{ height: 3px; background: rgba(128,128,128,.22); border-radius: 2px; }}
+  .progress-bar span {{ display: block; height: 100%; background: #2b6cb0;
+                        border-radius: 2px; transition: width .3s ease; }}
+  .progress-label {{ margin: .35rem 0 0; font-size: .8rem; color: #666; }}
+  @media (prefers-color-scheme: dark) {{
+    .progress-bar span {{ background: #7aa7dd; }}
+    .progress-label {{ color: #9aa4ad; }}
+  }}
   /* A panel holding something that has to be filled in before setup can end.
      The colour is a reminder, not the message: "Required" is written inside it
      as well, because a border somebody cannot distinguish is no signal at all.
@@ -238,7 +249,7 @@ def _render(error: str = "") -> str:
             f'<input type="hidden" name="acknowledged" value="{safe_path}">'
             "</fieldset>"
             f"{_sync_note(candidate.path)}"
-            "<button type=\"submit\">Use these files</button>"
+            "<button type=\"submit\">Use these files, then continue to step 2</button>"
             "</form>"
             "<details><summary>My files are somewhere else</summary>"
             '<form method="post" action="/">'
@@ -255,7 +266,7 @@ def _render(error: str = "") -> str:
         )
         # Files already here means the two questions after this one are very
         # likely answered too — the people and the models are in them.
-        lede = "One button, and then a check that nothing is missing."
+        lede = "Your files are already here."
     else:
         default = paths.DEFAULT_EXTRAS_ROOT
         body = (
@@ -271,13 +282,13 @@ def _render(error: str = "") -> str:
             "</fieldset>"
             f"{_sync_note(default)}"
             f'<input type="hidden" name="acknowledged" value="{html.escape(str(default))}">'
-            '<button type="submit">Create these files</button>'
+            '<button type="submit">Create these files, then continue to step 2</button>'
             "</form>"
         )
-        lede = "Three questions: where your files go, who is using this, and what they may send to."
+        lede = "Where should your files be kept?"
 
     return _PAGE.format(
-        body=body,
+        body=_progress(1) + body,
         lede=lede,
         script=_BROWSE_SCRIPT if file_picker.available() else "",
         error=(f'<div class="error">{html.escape(error, quote=False)}</div>'
@@ -314,137 +325,168 @@ def _render_sync_confirm(chosen: Path, warning: str) -> str:
     return _PAGE.format(body=body, lede="One thing to check first.", script="", error="")
 
 
-def _render_people_and_models(where: Path) -> str:
-    """The second question: who is using this, and what may they send to.
+def _progress(step: int) -> str:
+    """A quiet indication of how far through setup this is.
 
-    Setup used to end once the folder existed. That left a person with three
-    files and nothing that worked: no API key to bill, and no model to send
-    anything to. Both have to be asked for, and neither can be guessed — a key
-    is a private credential, and which models exist depends on the institution's
-    own AI sandbox.
-
-    Both panels are marked as required until they hold something. The border is
-    a reminder rather than the message: colour alone excludes anyone who cannot
-    tell these two apart, so each panel also says so in words, and says how many
-    it has once it has any.
+    Three questions, and "how much more of this is there" should not have to be
+    guessed at. Understated on purpose: it is a reassurance, not the thing on
+    the page worth looking at.
 
     Args:
-        where: The folder just created, named so the page can say where the
-               keys about to be typed will be kept.
+        step: Which question this page is, counting from one.
 
     Returns:
-        The page, ready to serve.
+        The bar and its label, as HTML.
     """
-    safe = html.escape(str(where))
-    body = f"""
-<p>Your files are in <code>{safe}</code>. Two more things and the sandbox is
-ready to use. Both are needed, and neither can be filled in for you.</p>
+    filled = int(round(step / 3 * 100))
+    return (
+        '<div class="progress">'
+        f'<div class="progress-bar"><span style="width: {filled}%"></span></div>'
+        f'<p class="progress-label">Step {step} of 3</p>'
+        "</div>"
+    )
 
-<fieldset id="people" class="needed">
-  <legend>Who will be using this <span class="required-flag" id="people-flag">Required</span></legend>
+
+def _people_so_far() -> list:
+    """Return the people already configured, worded as the page shows them."""
+    from src.config import load_professor_config
+
+    try:
+        return [f"{entry['name']} ({netid})"
+                for netid, entry in sorted(load_professor_config().items())]
+    except Exception:
+        return []
+
+
+def _models_so_far() -> list:
+    """Return the models already in the catalogue, or none if it cannot be read."""
+    from src.models import get_available_models
+
+    try:
+        return sorted(get_available_models())
+    except Exception:
+        return []
+
+
+def _as_list(items: list, nothing_yet: str) -> str:
+    """Render what has been added so far, or say that nothing has."""
+    if not items:
+        return f'<ul class="added"><li class="waiting">{nothing_yet}</li></ul>'
+    rows = "".join(f"<li>{html.escape(item)}</li>" for item in items)
+    return f'<ul class="added">{rows}</ul>'
+
+
+def _panel_state(count: int):
+    """Return the panel's class and its wording, given how many it holds."""
+    if count == 0:
+        return "needed", "Required"
+    return "satisfied", ("1 added" if count == 1 else f"{count} added")
+
+
+def _render_people(where) -> str:
+    """Step two: who is using this, and the key their work is billed to.
+
+    Its own page rather than half of one. Two questions on a page meant the
+    second had to be kept in step with the first in the browser, and that is
+    exactly where the picker came to be emptied of the name just added. A page
+    that asks one thing is drawn from what is on disk each time it is asked
+    for, and so has nothing to keep in step.
+    """
+    people = _people_so_far()
+    state, wording = _panel_state(len(people))
+    safe = html.escape(str(where))
+    carry_on = "" if people else "disabled"
+    hint = ("Add more if you need to, or carry on." if people
+            else "Add at least one person first.")
+    body = f"""
+{_progress(2)}
+<p>Your files are in <code>{safe}</code>. Now, who will be using this?</p>
+
+<fieldset id="people" class="{state}">
+  <legend>People <span class="required-flag">{wording}</span></legend>
   <p>Each person needs their own Princeton AI Sandbox API key, which they get
      from OIT. Keys are kept in <code>{safe}</code> and are never shown again
-     once saved.</p>
-  <ul class="added" id="people-list"><li class="waiting">Nobody added yet.</li></ul>
-  <label for="netid">NetID <span class="waiting">— the university username, e.g. jh43</span></label>
+     once saved. Add as many as you like; at least one is needed.</p>
+  {_as_list(people, "Nobody added yet.")}
+  <label for="netid">NetID <span class="waiting">&mdash; the university username, e.g. jh43</span></label>
   <input type="text" id="netid" autocapitalize="none" autocorrect="off" spellcheck="false">
-  <label for="fullname">Display name <span class="waiting">— e.g. Jeff Heller</span></label>
+  <label for="fullname">Display name <span class="waiting">&mdash; e.g. Jeff Heller</span></label>
   <input type="text" id="fullname">
   <label for="apikey">API key</label>
   <input type="password" id="apikey" autocomplete="off">
-  <label for="backupkey">Backup key <span class="waiting">— optional; used if the first stops working</span></label>
+  <label for="backupkey">Backup key <span class="waiting">&mdash; optional; used if the first stops working</span></label>
   <input type="password" id="backupkey" autocomplete="off">
   <p class="row-error" id="people-error" hidden></p>
-  <p><button type="button" id="add-person">Add this person</button>
-     <span class="waiting" id="people-busy" hidden>Saving…</span></p>
+  <p><button type="button" id="add-person" class="secondary">Add this person</button>
+     <span class="waiting" id="people-busy" hidden>Saving&hellip;</span></p>
 </fieldset>
 
-<fieldset id="models" class="needed">
-  <legend>Models <span class="required-flag" id="models-flag">Required</span></legend>
+<p><button type="button" id="continue" {carry_on}>Continue to step 3</button>
+   <span class="waiting" id="continue-hint">{hint}</span></p>
+"""
+    return _PAGE.format(body=body, lede="Who will be using this sandbox?",
+                        error="", script=_PEOPLE_SCRIPT)
+
+
+def _render_models(where) -> str:
+    """Step three: what those people may send their work to."""
+    from src.config import load_professor_config
+
+    models = _models_so_far()
+    people = _people_so_far()
+    state, wording = _panel_state(len(models))
+    # Built from what is on disk, so there is no list held in the browser to
+    # keep in step with anything.
+    options = "".join(
+        f'<option value="{html.escape(netid)}">{html.escape(entry["name"])} '
+        f'({html.escape(netid)})</option>'
+        for netid, entry in sorted(load_professor_config().items())
+    )
+    finish = "" if models else "disabled"
+    hint = ("Add more if you need to, or finish." if models
+            else "Add at least one model first.")
+    who = "person" if len(people) == 1 else "people"
+    body = f"""
+{_progress(3)}
+<p>{len(people)} {who} added. Last question: what may they send work to?</p>
+
+<fieldset id="models" class="{state}">
+  <legend>Models <span class="required-flag">{wording}</span></legend>
   <p>Which models you can use depends on Princeton's AI Sandbox rather than on
      this software, so none are included here. <strong>Check Princeton's own AI
      Sandbox documentation</strong> for the models it currently offers, then add
-     one below — named as its provider and then the model, like
+     one below &mdash; named as its provider and then the model, like
      <code>openai/gpt-4o</code>.</p>
   <p>Adding one looks up its price and then asks it a few one-token questions to
      find out what it can do. That takes a few seconds and a fraction of a cent,
      billed to the key you pick, and happens once.</p>
-  <ul class="added" id="models-list"><li class="waiting">Nothing added yet.</li></ul>
+  {_as_list(models, "Nothing added yet.")}
   <label for="modelname">Model</label>
   <input type="text" id="modelname" placeholder="openai/gpt-4o"
          autocapitalize="none" autocorrect="off" spellcheck="false">
   <label for="modelprof">Test with whose key</label>
-  <select id="modelprof"><option value="">Add someone above first</option></select>
+  <select id="modelprof">{options}</select>
   <p class="row-error" id="models-error" hidden></p>
-  <p><button type="button" id="add-model" disabled>Add and test</button>
-     <span class="waiting" id="models-busy" hidden>Asking the model what it can do…</span></p>
+  <p><button type="button" id="add-model" class="secondary">Add and test</button>
+     <span class="waiting" id="models-busy" hidden>Asking the model what it can do&hellip;</span></p>
 </fieldset>
 
-<p><button type="button" id="finish" disabled>Finish setup</button>
-   <span class="waiting" id="finish-hint">Add at least one person and one model first.</span></p>
+<p><button type="button" id="finish" {finish}>Finish setup</button>
+   <span class="waiting" id="finish-hint">{hint}</span></p>
+<p><a href="/people">Back to step 2</a></p>
 """
-    return _PAGE.format(
-        body=body,
-        lede="Two more things, then you're done.",
-        error="",
-        script=_STEP_TWO_SCRIPT,
-    )
+    return _PAGE.format(body=body, lede="What may they send work to?",
+                        error="", script=_MODELS_SCRIPT)
 
 
-_STEP_TWO_SCRIPT = """
-<script>
-// The page keeps its own count of what has been added, because that is what
-// decides whether setup may end. The server is the authority on whether an
-// addition worked; this only reflects what it said.
-const state = { people: [], models: [] };
-
-function show(id, on) { document.getElementById(id).hidden = !on; }
+# Shared by both pages: sending one thing, and saying so when it did not work.
+_SEND = """
+function show(id, on) { const n = document.getElementById(id); if (n) n.hidden = !on; }
 
 function fail(where, message) {
   const box = document.getElementById(where + "-error");
   box.textContent = message;
   box.hidden = false;
-}
-
-function clearFailure(where) { document.getElementById(where + "-error").hidden = true; }
-
-function paint() {
-  for (const which of ["people", "models"]) {
-    const held = state[which];
-    const panel = document.getElementById(which);
-    // Red until it holds something, then grey. Both classes are named, rather
-    // than one being the absence of the other, so the fade has something to
-    // fade between.
-    panel.classList.toggle("needed", held.length === 0);
-    panel.classList.toggle("satisfied", held.length > 0);
-    const flag = document.getElementById(which + "-flag");
-    flag.textContent = held.length === 0
-      ? "Required"
-      : (held.length === 1 ? "1 added" : held.length + " added");
-    const list = document.getElementById(which + "-list");
-    list.replaceChildren();
-    if (!held.length) {
-      const empty = document.createElement("li");
-      empty.className = "waiting";
-      empty.textContent = which === "people" ? "Nobody added yet." : "Nothing added yet.";
-      list.appendChild(empty);
-    } else {
-      held.forEach(text => {
-        const row = document.createElement("li");
-        row.textContent = text;
-        list.appendChild(row);
-      });
-    }
-  }
-  // A model is tested with somebody's key, so there has to be somebody first.
-  document.getElementById("add-model").disabled = state.people.length === 0;
-  const ready = state.people.length > 0 && state.models.length > 0;
-  document.getElementById("finish").disabled = !ready;
-  document.getElementById("finish-hint").textContent = ready
-    ? "You can add more of either, or finish now."
-    : (state.people.length === 0
-        ? "Add at least one person and one model first."
-        : "Now add at least one model.");
 }
 
 async function send(path, payload) {
@@ -457,9 +499,11 @@ async function send(path, payload) {
   if (!res.ok) throw new Error(body.detail || body.error || res.statusText);
   return body;
 }
+"""
 
+_PEOPLE_SCRIPT = "<script>" + _SEND + """
 document.getElementById("add-person").addEventListener("click", async () => {
-  clearFailure("people");
+  document.getElementById("people-error").hidden = true;
   const netid = document.getElementById("netid").value.trim();
   const name = document.getElementById("fullname").value.trim();
   const key = document.getElementById("apikey").value;
@@ -470,33 +514,25 @@ document.getElementById("add-person").addEventListener("click", async () => {
   }
   show("people-busy", true);
   try {
-    const added = await send("/people", { netid, name, key, backup_key: backup });
-    state.people.push(added.label);
-    const picker = document.getElementById("modelprof");
-    // The placeholder goes before the first real name arrives, not after —
-    // clearing the list afterwards took the new name with it, which is why
-    // there was never anybody to choose.
-    if (state.people.length === 1) picker.replaceChildren();
-    const option = document.createElement("option");
-    option.value = added.netid;
-    option.textContent = added.label;
-    picker.appendChild(option);
-    // The first person added is the one it will be billed to unless somebody
-    // says otherwise. Leaving it unselected means pressing Add and being told
-    // to choose something when there is only one thing to choose.
-    if (state.people.length === 1) picker.value = added.netid;
-    ["netid", "fullname", "apikey", "backupkey"].forEach(
-      id => { document.getElementById(id).value = ""; });
-    paint();
+    await send("/people", { netid, name, key, backup_key: backup });
+    // Asking for the page again rather than patching it here. The page is
+    // built from what is on disk, so a reload shows exactly what was saved —
+    // nothing to keep in step, and nothing to get wrong keeping it.
+    location.reload();
   } catch (e) {
     fail("people", e.message);
-  } finally {
     show("people-busy", false);
   }
 });
 
+document.getElementById("continue").addEventListener("click", () => {
+  location.href = "/models";
+});
+</script>"""
+
+_MODELS_SCRIPT = "<script>" + _SEND + """
 document.getElementById("add-model").addEventListener("click", async () => {
-  clearFailure("models");
+  document.getElementById("models-error").hidden = true;
   const model = document.getElementById("modelname").value.trim();
   const professor = document.getElementById("modelprof").value;
   if (!model) { fail("models", "Type a model name, like openai/gpt-4o."); return; }
@@ -504,36 +540,32 @@ document.getElementById("add-model").addEventListener("click", async () => {
   show("models-busy", true);
   document.getElementById("add-model").disabled = true;
   try {
-    const added = await send("/models", { provider_model: model, professor });
-    state.models.push(added.label);
-    document.getElementById("modelname").value = "";
-    paint();
+    await send("/models", { provider_model: model, professor });
+    location.reload();
   } catch (e) {
     fail("models", e.message);
-  } finally {
     show("models-busy", false);
-    document.getElementById("add-model").disabled = state.people.length === 0;
+    document.getElementById("add-model").disabled = false;
   }
 });
 
 document.getElementById("finish").addEventListener("click", async () => {
-  document.getElementById("finish").disabled = true;
-  document.getElementById("finish-hint").textContent = "Starting the sandbox…";
+  const button = document.getElementById("finish");
+  button.disabled = true;
+  document.getElementById("finish-hint").textContent = "Starting the sandbox\u2026";
   try {
     await send("/finish", {});
     const heading = document.createElement("h1");
     heading.textContent = "All set";
     const said = document.createElement("p");
     said.textContent =
-      "The sandbox is starting now — this page will move to it in a moment.";
+      "The sandbox is starting now \u2014 this page will move to it in a moment.";
     document.body.replaceChildren(heading, said);
     // This page outlives the server that sent it: finishing stops setup, and
     // the sandbox proper starts on the same address a second or two later. How
     // long that takes depends on the computer, so the page asks until someone
-    // answers rather than guessing a number and landing on an error when the
-    // guess is short. The first wait is for the setup server to finish going
-    // away — while it is still up it would answer, and the answer would be
-    // this same page again.
+    // answers rather than guessing a number and landing on an error page when
+    // the guess is short.
     setTimeout(function () {
       (function ask() {
         fetch("/", { method: "HEAD", cache: "no-store" })
@@ -542,14 +574,11 @@ document.getElementById("finish").addEventListener("click", async () => {
       })();
     }, 1500);
   } catch (e) {
-    document.getElementById("finish").disabled = false;
+    button.disabled = false;
     document.getElementById("finish-hint").textContent = e.message;
   }
 });
-
-paint();
-</script>
-"""
+</script>"""
 
 
 # There is no separate "all set" page any more. Setup no longer ends when the
@@ -646,7 +675,21 @@ def create_setup_app(on_complete) -> FastAPI:
         # has to end with — the other two are somebody to bill and something to
         # send to, and neither can be guessed. Setup carries on to ask for them
         # rather than handing over a sandbox that cannot do anything.
-        return _render_people_and_models(chosen)
+        return _render_people(chosen)
+
+    @app.get("/people", response_class=HTMLResponse)
+    async def people_page() -> str:
+        """Step two, drawn from what is on disk right now."""
+        return _render_people(paths.extras_root())
+
+    @app.get("/models", response_class=HTMLResponse)
+    async def models_page():
+        """Step three. Sent back a step if there is nobody to bill a test to."""
+        from src.config import load_professor_config
+
+        if not load_professor_config():
+            return RedirectResponse("/people", status_code=303)
+        return HTMLResponse(_render_models(paths.extras_root()))
 
     @app.post("/people")
     async def add_person(body: NewPersonBody) -> JSONResponse:

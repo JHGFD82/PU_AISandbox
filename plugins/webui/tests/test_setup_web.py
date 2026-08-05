@@ -70,7 +70,8 @@ class TestAskingWhereFilesGo:
         target = paths.DEFAULT_EXTRAS_ROOT
         resp = client.post("/", data={"folder": str(target)})
         assert resp.status_code == 200
-        assert "All set" in resp.text
+        # Setup carries on to step 2 rather than ending here.
+        assert "Step 2 of 3" in resp.text
         assert (target / paths.SETTINGS_FILENAME).is_file()
         assert (target / paths.DATA_DIRNAME).is_dir()
         assert paths.is_installed() is True
@@ -151,7 +152,8 @@ class TestCarryingForwardAnExistingSetup:
         client, _ = client_and_result
         resp = client.post("/", data={"folder": str(real)})
         assert resp.status_code == 200
-        assert "All set" in resp.text
+        # Setup carries on to step 2 rather than ending here.
+        assert "Step 2 of 3" in resp.text
         assert paths.read_install_marker() == real
         assert (real / paths.SETTINGS_FILENAME).read_bytes() == before
 
@@ -201,7 +203,8 @@ class TestCloudSyncWarning:
         monkeypatch.setattr(paths, "DEFAULT_EXTRAS_ROOT", synced)
         client, _ = client_and_result
         resp = client.post("/", data={"folder": str(synced), "acknowledged": str(synced)})
-        assert "All set" in resp.text
+        # Setup carries on to step 2 rather than ending here.
+        assert "Step 2 of 3" in resp.text
         assert paths.read_install_marker() == synced
 
     def test_a_synced_folder_someone_chose_themselves_is_queried(
@@ -225,7 +228,8 @@ class TestCloudSyncWarning:
         resp = client.post(
             "/", data={"folder": str(synced), "acknowledged": str(synced)}
         )
-        assert "All set" in resp.text
+        # Setup carries on to step 2 rather than ending here.
+        assert "Step 2 of 3" in resp.text
         assert paths.read_install_marker() == synced
         assert (synced / paths.SETTINGS_FILENAME).is_file()
 
@@ -245,7 +249,8 @@ class TestCloudSyncWarning:
         plain = tmp_path / "somewhere ordinary"
         client, _ = client_and_result
         resp = client.post("/", data={"folder": str(plain)})
-        assert "All set" in resp.text
+        # Setup carries on to step 2 rather than ending here.
+        assert "Step 2 of 3" in resp.text
         assert paths.read_install_marker() == plain
 
 
@@ -323,12 +328,23 @@ class TestAskingWhoIsUsingThisAndWhatTheyMaySendTo:
         assert page.status_code == 200
         return client, chosen, page.text
 
-    def test_both_panels_start_marked_as_required(self, client_and_result):
+    def test_the_panel_starts_marked_as_required(self, client_and_result):
         _client, _chosen, page = self._at_step_two(client_and_result)
-        assert page.count('class="needed"') == 2
+        assert 'class="needed"' in page
         # Colour is a reminder, not the message: it says so in words as well.
-        assert page.count('class="required-flag"') == 2
+        assert 'class="required-flag"' in page
         assert "Required" in page
+
+    def test_each_step_says_where_it_is(self, client_and_result):
+        client, _chosen, page = self._at_step_two(client_and_result)
+        assert "Step 2 of 3" in page
+        assert 'class="progress-bar"' in page
+        client.post("/people", json={"netid": "jh43", "name": "J", "key": "sk-t"})
+        assert "Step 3 of 3" in client.get("/models").text
+
+    def test_the_button_says_what_it_leads_to(self, client_and_result):
+        _client, _chosen, page = self._at_step_two(client_and_result)
+        assert "Continue to step 3" in page
 
     def test_the_border_is_told_to_fade_rather_than_snap(self, client_and_result):
         _client, _chosen, page = self._at_step_two(client_and_result)
@@ -418,12 +434,19 @@ class TestAskingWhoIsUsingThisAndWhatTheyMaySendTo:
             time.sleep(0.05)
         assert chosen == [paths.DEFAULT_EXTRAS_ROOT]
 
-    def test_a_model_cannot_be_added_before_anyone_is(self, client_and_result):
-        """Its few test requests are billed to somebody's key, so there has to
-        be a somebody. The page disables the button; this is the same rule."""
-        _client, _chosen, page = self._at_step_two(client_and_result)
-        assert 'id="add-model" disabled' in page
-        assert "Add someone above first" in page
+    def test_step_three_is_not_reachable_before_step_two_is_answered(
+        self, client_and_result
+    ):
+        """A model is tested with somebody's key, so there has to be a somebody.
+
+        Separating the questions makes this a matter of which page you are on
+        rather than a control to keep disabled, which is one fewer thing that
+        can be wrong.
+        """
+        client, _chosen, _page = self._at_step_two(client_and_result)
+        sent_back = client.get("/models", follow_redirects=False)
+        assert sent_back.status_code == 303
+        assert sent_back.headers["location"] == "/people"
 
     def test_the_state_sits_at_the_right_hand_edge_of_the_panel(self, client_and_result):
         """Not trailing the words. It describes the box, so it belongs on it."""
@@ -432,24 +455,29 @@ class TestAskingWhoIsUsingThisAndWhatTheyMaySendTo:
         assert "justify-content: space-between" in rule
         assert "width: calc(100% - " in rule
 
-    def test_the_picker_is_not_emptied_by_the_repaint(self, client_and_result):
-        """The reported fault: nobody could be chosen to test a model with.
+    def test_the_picker_is_built_from_what_is_on_disk(self, client_and_result):
+        """The reported fault, and why it cannot happen this way.
 
-        The handler appended the new name and then repainted; the repaint saw
-        the placeholder still first in the list and cleared the whole thing —
-        taking the name with it. The clearing belongs before the first name
-        arrives, not after.
+        The two questions used to share a page, so the picker had to be kept in
+        step with the list beside it in the browser — and it was that keeping in
+        step that emptied it of the name just added. A page asking one thing is
+        rendered from the settings file each time it is asked for, so there is
+        nothing to keep in step.
         """
-        _client, _chosen, page = self._at_step_two(client_and_result)
-        paint = page.split("function paint()")[1].split("\n}")[0]
-        assert "modelprof" not in paint, "the repaint must not touch the picker's contents"
-        handler = page.split('document.getElementById("add-person")')[1].split("\n});")[0]
-        assert "picker.replaceChildren()" in handler
-        assert handler.index("replaceChildren") < handler.index("appendChild")
+        client, _chosen, _page = self._at_step_two(client_and_result)
+        client.post("/people", json={"netid": "jh43", "name": "Jeff Heller", "key": "sk-t"})
+        client.post("/people", json={"netid": "tconlan", "name": "T Conlan", "key": "sk-2"})
+        page = client.get("/models").text
+        assert 'value="jh43"' in page
+        assert 'value="tconlan"' in page
+        # Whoever comes first is what a browser selects; nothing has to say so.
+        assert page.index('value="jh43"') < page.index('value="tconlan"')
 
-    def test_the_first_person_added_is_the_one_it_bills(self, client_and_result):
-        """Otherwise pressing Add is answered by "choose somebody" when there
-        is exactly one somebody to choose."""
-        _client, _chosen, page = self._at_step_two(client_and_result)
-        handler = page.split('document.getElementById("add-person")')[1].split("\n});")[0]
-        assert "picker.value = added.netid" in handler
+    def test_adding_someone_shows_them_on_the_page(self, client_and_result):
+        client, _chosen, _page = self._at_step_two(client_and_result)
+        client.post("/people", json={"netid": "jh43", "name": "Jeff Heller", "key": "sk-t"})
+        page = client.get("/people").text
+        assert "Jeff Heller (jh43)" in page
+        # And the panel stops asking for one.
+        assert 'class="satisfied"' in page
+        assert "1 added" in page
