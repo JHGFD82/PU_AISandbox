@@ -138,56 +138,132 @@ class TestThePauseBeforeInstalling:
     it takes. Without a pause they are on screen for about a second: a first
     install prints around 180 lines, so the explanation scrolls away before
     anyone has read it.
+
+    One keypress, because this is a choice between two things and not text.
+    Typing a letter, watching it appear at the end of the prompt and then
+    pressing return is the gesture for entering something.
     """
 
-    def _answer(self, start, monkeypatch, typed):
+    def _pressing(self, start, monkeypatch, keys):
+        """Answer the prompt with these keys, in order."""
         monkeypatch.setattr(start.sys.stdin, "isatty", lambda: True)
-        monkeypatch.setattr("builtins.input", lambda _prompt: typed)
+        pressed = list(keys)
+        monkeypatch.setattr(start, "read_one_key", lambda: pressed.pop(0))
         return start.wait_for_go_ahead()
 
-    def test_return_goes_ahead(self, start, monkeypatch):
-        assert self._answer(start, monkeypatch, "") is True
+    @pytest.mark.parametrize("key", ["\r", "\n"])
+    def test_return_starts_it(self, start, monkeypatch, key):
+        assert self._pressing(start, monkeypatch, [key]) is True
 
-    @pytest.mark.parametrize("typed", ["q", "Q", "  q  ", "\tQ\n"])
-    def test_q_stops(self, start, monkeypatch, typed):
-        assert self._answer(start, monkeypatch, typed) is False
+    @pytest.mark.parametrize("key", ["q", "Q"])
+    def test_q_in_either_case_stops(self, start, monkeypatch, key):
+        assert self._pressing(start, monkeypatch, [key]) is False
 
-    @pytest.mark.parametrize("typed", ["y", "yes", "ok", "1"])
-    def test_anything_else_goes_ahead(self, start, monkeypatch, typed):
-        """Pressing return is the obvious thing, so it must be the one that works.
+    def test_every_other_key_is_ignored(self, start, monkeypatch):
+        """Not answered with a complaint: there is no way to get this wrong.
 
-        Only Q stops, rather than only an exact word starting, so somebody who
-        types anything at all is not told they got it wrong.
+        The old version took a whole typed line, so anything that was not "q"
+        counted as yes — including a stray character before the return.
         """
-        assert self._answer(start, monkeypatch, typed) is True
+        assert self._pressing(start, monkeypatch, ["x", "7", " ", "\r"]) is True
+        assert self._pressing(start, monkeypatch, ["z", "z", "q"]) is False
 
-    @pytest.mark.parametrize("interrupt", [EOFError, KeyboardInterrupt])
-    def test_ctrl_c_and_ctrl_d_mean_the_same_as_q(self, start, monkeypatch, interrupt):
+    @pytest.mark.parametrize("key", ["\x03", "\x04"])
+    def test_ctrl_c_and_ctrl_d_mean_the_same_as_q(self, start, monkeypatch, key):
+        """They arrive as characters when the terminal is not making signals."""
+        assert self._pressing(start, monkeypatch, [key]) is False
+
+    def test_an_interrupt_still_means_the_same(self, start, monkeypatch):
         monkeypatch.setattr(start.sys.stdin, "isatty", lambda: True)
 
-        def raises(_prompt):
-            raise interrupt
+        def interrupted():
+            raise KeyboardInterrupt
 
-        monkeypatch.setattr("builtins.input", raises)
+        monkeypatch.setattr(start, "read_one_key", interrupted)
         assert start.wait_for_go_ahead() is False
+
+    def test_nothing_is_echoed(self, start, monkeypatch):
+        """The point of the change: a keypress leaves no letter behind."""
+        monkeypatch.setattr(start.sys.stdin, "isatty", lambda: True)
+        monkeypatch.setattr(start, "read_one_key", lambda: "q")
+        written = []
+        monkeypatch.setattr(start.sys.stdout, "write", lambda s: written.append(s))
+        monkeypatch.setattr(start.sys.stdout, "flush", lambda: None)
+        start.wait_for_go_ahead()
+        # The prompt and a newline, and nothing that looks like what was typed.
+        assert any("Q to quit" in piece for piece in written)
+        assert "q" not in "".join(w for w in written if "Q to quit" not in w)
+
+    def test_a_terminal_that_will_not_give_one_key_still_works(self, start, monkeypatch):
+        """Then it asks for a whole line, which works anywhere."""
+        monkeypatch.setattr(start.sys.stdin, "isatty", lambda: True)
+        monkeypatch.setattr(start, "read_one_key", lambda: None)
+        monkeypatch.setattr("builtins.input", lambda _prompt: "q")
+        assert start.wait_for_go_ahead() is False
+        monkeypatch.setattr("builtins.input", lambda _prompt: "")
+        assert start.wait_for_go_ahead() is True
 
     def test_it_does_not_ask_when_there_is_nobody_to_answer(self, start, monkeypatch):
         """Run from a script or a CI runner, waiting for a keypress is a hang."""
         monkeypatch.setattr(start.sys.stdin, "isatty", lambda: False)
 
-        def asked(_prompt):
+        def asked():
             raise AssertionError("asked for a keypress with no terminal attached")
 
-        monkeypatch.setattr("builtins.input", asked)
+        monkeypatch.setattr(start, "read_one_key", asked)
         assert start.wait_for_go_ahead() is True
 
     def test_the_prompt_says_both_ways_out(self, start, monkeypatch):
-        seen = {}
+        seen = []
         monkeypatch.setattr(start.sys.stdin, "isatty", lambda: True)
-        monkeypatch.setattr("builtins.input", lambda prompt: seen.setdefault("p", prompt) and "")
+        monkeypatch.setattr(start.sys.stdout, "write", lambda s: seen.append(s))
+        monkeypatch.setattr(start.sys.stdout, "flush", lambda: None)
+        monkeypatch.setattr(start, "read_one_key", lambda: "\r")
         start.wait_for_go_ahead()
-        assert "return" in seen["p"].lower()
-        assert "q" in seen["p"].lower()
+        prompt = "".join(seen).lower()
+        assert "return" in prompt and "q" in prompt
+
+    def test_the_terminal_is_put_back_however_the_read_ends(self, start, monkeypatch):
+        """A terminal left in cbreak outlives this program and breaks the shell.
+
+        Checked for both endings, because the one that matters is the one
+        nobody plans for.
+        """
+        import sys as _sys
+        import termios
+        from unittest import mock
+
+        restored = []
+        fake_termios = mock.MagicMock()
+        fake_termios.tcgetattr.return_value = ["ORIGINAL"]
+        fake_termios.error = termios.error
+        fake_termios.tcsetattr.side_effect = lambda fd, when, val: restored.append(val)
+
+        for reader, label in ((lambda _n: "q", "an ordinary read"),
+                              (mock.Mock(side_effect=KeyboardInterrupt), "an interrupted read")):
+            restored.clear()
+            with mock.patch.dict(_sys.modules,
+                                 {"termios": fake_termios, "tty": mock.MagicMock()}), \
+                 mock.patch.object(start.sys.stdin, "fileno", lambda: 0), \
+                 mock.patch.object(start.sys.stdin, "read", reader):
+                try:
+                    start.read_one_key()
+                except KeyboardInterrupt:
+                    pass
+            assert restored == [["ORIGINAL"]], label
+
+    def test_a_terminal_that_refuses_is_reported_rather_than_forced(self, start):
+        import sys as _sys
+        import termios
+        from unittest import mock
+
+        fake_termios = mock.MagicMock()
+        fake_termios.error = termios.error
+        fake_termios.tcgetattr.side_effect = termios.error("not a terminal")
+        with mock.patch.dict(_sys.modules,
+                             {"termios": fake_termios, "tty": mock.MagicMock()}), \
+             mock.patch.object(start.sys.stdin, "fileno", lambda: 0):
+            assert start.read_one_key() is None
 
     def test_declining_is_not_an_error(self, start, monkeypatch, capsys):
         """Nothing has happened yet, so there is nothing to have gone wrong."""
@@ -207,3 +283,14 @@ class TestThePauseBeforeInstalling:
         source = _START.read_text()
         body = source.split("def main(")[1]
         assert body.index("Installing what the sandbox needs") < body.index("wait_for_go_ahead")
+
+    def test_the_end_of_the_input_does_not_spin(self, start, monkeypatch):
+        """A read at the end of input returns "", every time it is asked.
+
+        Treating that as "some other key" and asking again is an endless loop
+        with nothing on screen — found by making the same mistake with the
+        cannot-read-a-key case and watching the test run hang instead of fail.
+        """
+        monkeypatch.setattr(start.sys.stdin, "isatty", lambda: True)
+        monkeypatch.setattr(start, "read_one_key", lambda: "")
+        assert start.wait_for_go_ahead() is False
