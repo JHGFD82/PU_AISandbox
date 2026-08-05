@@ -105,20 +105,33 @@ def _print_optional_settings() -> None:
     automatically once a plugin registers them, no separate "what's new"
     tracking needed.
     """
-    fields = list_optional_settings()
+    from .. import paths
+    from ..config import get_registered_settings
+
+    fields = get_registered_settings()
     if not fields:
         return
 
     print("\n" + "=" * 60)
-    print("Optional settings (all unset by default — see templates/settings.template):")
+    print("Optional settings — whether each is set, never what it is set to:")
     current_section = None
-    for path, label, section, _secret in fields:
-        if section != current_section:
-            print(f"\n  [{section}]")
-            current_section = section
-        status = "set" if settings_store.get_value(path) else "not set"
-        print(f"    {path}  ({status})  {label}")
-    print("\nSet one with: python main.py settings set <dotted.path>")
+    for field in fields:
+        if field.section != current_section:
+            print(f"\n  [{field.section}]")
+            current_section = field.section
+        status = "set" if settings_store.get_value(field.key) else "not set"
+        print(f"    {field.key}  ({status})")
+        print(f"        {field.label}")
+        # How to change it: a command where the value cannot simply be typed —
+        # a hash, or something that should be generated — and the file
+        # otherwise. Said per setting rather than once at the bottom, because
+        # the answer is not the same for all of them.
+        if field.set_with:
+            print(f"        Change it with: python main.py {field.set_with}")
+        else:
+            print("        Change it by editing settings.toml, or on the web "
+                  "interface's settings page.")
+    print(f"\nThat file is {paths.settings_path()}")
 
 
 def list_available_models() -> None:

@@ -351,3 +351,70 @@ class TestSettingFieldRegistry:
 
     def test_empty_registry_returns_empty_list(self):
         assert get_registered_settings() == []
+
+
+class TestASettingSaysHowItIsChanged:
+    """Listing a setting without saying how to change it leaves a dead end.
+
+    Most are changed by opening settings.toml. A few cannot be — a passphrase is
+    stored as a bcrypt hash, a session secret should be generated rather than
+    invented — and those have a command. Which is which is declared by whoever
+    owns the setting, so core never has to know that the web interface needs one.
+    """
+
+    def test_a_setting_may_declare_the_command_that_sets_it(self):
+        from src.config import get_registered_settings, register_setting
+
+        register_setting("test.hashed", "A value nobody can type",
+                         section="Test", secret=True, set_with="thing set-hashed")
+        field = next(f for f in get_registered_settings() if f.key == "test.hashed")
+        assert field.set_with == "thing set-hashed"
+
+    def test_declaring_one_is_optional(self):
+        """Nearly every setting is just a line in a file."""
+        from src.config import get_registered_settings, register_setting
+
+        register_setting("test.plain", "An ordinary value", section="Test")
+        field = next(f for f in get_registered_settings() if f.key == "test.plain")
+        assert field.set_with is None
+
+    def test_the_settings_that_need_a_command_have_one(self):
+        """Both are stored as something other than what you would type."""
+        from pathlib import Path
+
+        from src.config import get_registered_settings
+        from src.runtime import load_plugins
+
+        load_plugins(Path(__file__).resolve().parent.parent / "plugins")
+        by_key = {f.key: f for f in get_registered_settings()}
+        assert by_key["webui.passphrase_hash"].set_with == "webui set-passphrase"
+        assert by_key["webui.session_secret"].set_with == "webui set-session-secret"
+        assert by_key["shared_settings.path"].set_with is None
+
+    def test_the_listing_says_which_way_for_each(self, capsys):
+        from pathlib import Path
+
+        from src.runtime import load_plugins
+        from src.runtime.info_commands import _print_optional_settings
+
+        load_plugins(Path(__file__).resolve().parent.parent / "plugins")
+        _print_optional_settings()
+        out = capsys.readouterr().out
+        assert "Change it with: python main.py webui set-passphrase" in out
+        assert "Change it by editing settings.toml" in out
+        # And it names the file, so nobody has to work out where it is.
+        assert "settings.toml" in out
+
+    def test_the_listing_never_prints_a_value(self, capsys, monkeypatch):
+        from pathlib import Path
+
+        from src import settings_store
+        from src.runtime import load_plugins
+        from src.runtime.info_commands import _print_optional_settings
+
+        load_plugins(Path(__file__).resolve().parent.parent / "plugins")
+        monkeypatch.setattr(settings_store, "get_value", lambda p: "s3cret-value")
+        _print_optional_settings()
+        out = capsys.readouterr().out
+        assert "s3cret-value" not in out
+        assert "(set)" in out
