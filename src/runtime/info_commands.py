@@ -3,8 +3,6 @@
 import argparse
 import getpass
 import logging
-import os
-import secrets
 from datetime import datetime
 
 from .. import settings_store
@@ -13,10 +11,8 @@ from ..errors import CLIError
 from ..models.catalog import get_pricing_unit, load_model_catalog
 from ..services.api_config import credential_path_for_endpoint, list_apis
 from ..settings_store import (
-    add_source,
     get_configured_sources,
     get_source_id,
-    remove_source,
 )
 from ..tracking.token_tracker import TokenTracker, get_archive_dir, get_usage_data_path
 
@@ -261,13 +257,21 @@ def handle_info_commands(args: argparse.Namespace) -> bool:
 
 
 def _handle_settings_command(args: argparse.Namespace) -> None:
-    """Handle 'settings add-professor/remove-professor/list/set/unset'.
+    """Handle the settings subcommands.
 
-    This is the CLI-side half of directly editing ``settings.toml`` — see
-    ``src/settings_store.py`` for why writing to it directly is safe here
-    (every edit is triggered by a person typing a command at their own
-    keyboard, never over a network call or as part of syncing between
-    machines).
+    What is here and what is not follows one rule: a command earns its place by
+    doing something opening ``settings.toml`` in an editor cannot. Setup makes
+    the file in the first place; adding a professor takes their key at a hidden
+    prompt, so it never reaches shell history or a process listing; export-shared
+    gathers every plugin's settings and the explanations their authors wrote;
+    test-model and model-quirks find things out by asking a provider and write
+    down the answers.
+
+    Plain reading and writing of a value went the other way. Anyone comfortable
+    typing these commands can open the file, and every one of these settings is
+    also on the web interface's settings page for anyone who would rather not.
+    ``list`` stays because it reports whether a secret is set without printing
+    it, which reading the file does not do.
     """
     sub = getattr(args, 'settings_subcommand', None)
 
@@ -278,17 +282,8 @@ def _handle_settings_command(args: argparse.Namespace) -> None:
     if sub == 'add-professor':
         _settings_add_professor_interactive(args)
         return
-    if sub == 'remove-professor':
-        _settings_remove_professor(args)
-        return
     if sub == 'list':
         _print_optional_settings()
-        return
-    if sub == 'set':
-        _settings_set_value(args)
-        return
-    if sub == 'unset':
-        _settings_unset_value(args)
         return
     if sub == 'export-shared':
         _settings_export_shared(args)
@@ -304,10 +299,7 @@ def _handle_settings_command(args: argparse.Namespace) -> None:
         "No settings subcommand specified.\n"
         "Usage: python main.py settings setup\n"
         "       python main.py settings add-professor\n"
-        "       python main.py settings remove-professor <identifier>\n"
         "       python main.py settings list\n"
-        "       python main.py settings set <KEY>\n"
-        "       python main.py settings unset <KEY>\n"
         "       python main.py settings export-shared\n"
         "       python main.py settings model-quirks [MODEL]\n"
         "       python main.py settings test-model [MODEL]"
@@ -540,65 +532,6 @@ def _settings_add_professor_interactive(args: argparse.Namespace) -> None:
     print(f"Try it out: python main.py {netid} usage report")
 
 
-def _settings_remove_professor(args: argparse.Namespace) -> None:
-    """Remove a professor by safe name or display name, after a yes/no confirmation.
-
-    Confirmation matters here specifically because this deletes real key
-    material from settings.toml, not just a display entry.
-    """
-    identifier = args.identifier
-    confirm = input(
-        f"Remove professor '{identifier}' from settings.toml? This deletes their API key(s). [y/N]: "
-    ).strip().lower()
-    if confirm not in ("y", "yes"):
-        print("Cancelled — nothing was removed.")
-        return
-    try:
-        removed_name = settings_store.remove_professor(identifier)
-    except ValueError as e:
-        raise CLIError(str(e)) from e
-    print(f"Removed professor '{removed_name}'.")
-
-
-def _settings_set_value(args: argparse.Namespace) -> None:
-    """Set an optional ``settings.toml`` value, prompting for it (hidden input if it's a secret).
-
-    *key* is a dotted path (e.g. ``webui.session_secret``,
-    ``endpoints.hpc_cluster.key``), not an environment-variable name.
-    Unregistered paths are treated as secret by default — hiding input when
-    it wasn't necessary is a minor inconvenience; echoing a value that
-    turns out to be a key would not be.
-    """
-    path = args.key.strip()
-    known_secrets = {k: secret for k, _label, _section, secret in list_optional_settings()}
-    is_secret = known_secrets.get(path, True)
-
-    if getattr(args, 'generate', False):
-        if not is_secret:
-            raise CLIError(
-                f"--generate is only for secret values; '{path}' isn't registered as one. "
-                f"Use 'python main.py settings set {path}' instead."
-            )
-        value = secrets.token_urlsafe(32)
-    else:
-        prompt = f"Value for {path}: "
-        value = getpass.getpass(prompt) if is_secret else input(prompt).strip()
-
-    try:
-        settings_store.set_value(path, value)
-    except ValueError as e:
-        raise CLIError(str(e)) from e
-
-    print(f"\n{path} set (value hidden)." if is_secret else f"\n{path}={value}")
-
-
-def _settings_unset_value(args: argparse.Namespace) -> None:
-    """Remove an optional ``settings.toml`` value."""
-    path = args.key.strip()
-    settings_store.unset_value(path)
-    print(f"{path} removed (if it was set).")
-
-
 def _handle_usage_sources(args: argparse.Namespace) -> None:
     """Handle 'usage sources list/add/remove'.
 
@@ -615,19 +548,11 @@ def _handle_usage_sources(args: argparse.Namespace) -> None:
         _print_configured_sources()
         return
 
-    if sub == 'remove':
-        label = args.label
-        if remove_source(label):
-            print(f"Removed source '{label}'.")
-        else:
-            print(f"No configured source named '{label}'. Run 'usage sources list' to see what's configured.")
-        return
-
-    if sub == 'add':
-        _add_source_interactive(args)
-        return
-
-    raise CLIError("Invalid usage sources subcommand. Use 'list', 'add', or 'remove'.")
+    raise CLIError(
+        "Usage: python main.py <professor> usage sources list\n"
+        "\nExternal sources are added and removed on the web interface's settings\n"
+        "page, or by editing [usage_sources] in settings.toml yourself."
+    )
 
 
 def _print_configured_sources() -> None:
@@ -642,53 +567,6 @@ def _print_configured_sources() -> None:
     for s in sources:
         prof_note = f", for={s.professor}" if s.professor else ""
         print(f"  {s.label}  [{s.mode}{prof_note}]  {s.path}")
-
-
-def _add_source_interactive(args: argparse.Namespace) -> None:
-    """Add a source, prompting interactively for any value not already passed as a flag."""
-    label = getattr(args, 'label', None) or input("Label for this source (e.g. 'Prof. Smith'): ").strip()
-    path = getattr(args, 'path', None) or input("Path to the other installation's data/ folder: ").strip()
-
-    mode = getattr(args, 'mode', None)
-    if not mode:
-        raw = input("Mode — 'read-only' or 'shared-write' [read-only]: ").strip().lower()
-        mode = raw or 'read-only'
-
-    # Asked for in both modes. One professor may be content for their work to
-    # be done from a shared folder while another wants only their spending
-    # followed from it, and that is settled per person, not per folder.
-    for_professor = getattr(args, 'for_professor', None)
-    if not for_professor:
-        for_professor = input(
-            "Whose usage is this source for (netID, e.g. 'jh43'): "
-        ).strip()
-
-    resolved_path = os.path.expanduser(path)
-    if not os.path.exists(resolved_path):
-        print(
-            f"Note: '{resolved_path}' doesn't exist yet. That's fine if it will appear once the "
-            f"other side syncs — just double check the path if that's unexpected."
-        )
-
-    try:
-        add_source(label=label, path=path, mode=mode, professor=for_professor)
-    except ValueError as e:
-        raise CLIError(str(e)) from e
-
-    print(f"\nAdded source '{label}' ({mode}) -> {path}")
-
-    if mode == 'shared-write':
-        this_source_id = get_source_id()
-        print(
-            "\nAdd this on the other installation so both sides see each other's activity:\n\n"
-            f"    python main.py {for_professor} usage sources add \\\n"
-            f"        --label \"This installation\" \\\n"
-            f"        --path \"{path}\" \\\n"
-            f"        --mode shared-write \\\n"
-            f"        --for-professor {for_professor}\n"
-            f"\n(This installation's own source id is '{this_source_id}' — every usage record "
-            f"it writes from now on will be tagged with that.)"
-        )
 
 
 def _settings_export_shared(args: argparse.Namespace) -> None:

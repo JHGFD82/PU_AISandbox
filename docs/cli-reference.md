@@ -50,24 +50,54 @@ python main.py --list-models
 
 ---
 
-## `settings` — people, keys and optional values
+## `settings` — the things a text editor cannot do
+
+There is no command for changing a setting. Settings live in two files, and you
+change them by opening those files — or, if you would rather not, on the web
+interface's **Settings** page, which can reach all of them:
+
+| File | Holds |
+|---|---|
+| `settings.toml` in your files folder | who uses this installation, their API keys, alternate endpoints, web-interface secrets, external usage sources |
+| `preferences.toml` beside it | every adjustable setting each plugin ships, listed for you and commented out — uncomment a line to take it over |
+
+The commands below are the ones that survive that rule, because each does
+something opening a file cannot.
 
 ```bash
-python main.py settings setup                     # choose where your files live
-python main.py settings add-professor             # prompts for netID, name and keys
+python main.py settings setup                     # make those files in the first place
+python main.py settings add-professor             # asks for netID, name, and keys at a hidden prompt
 python main.py settings add-professor --netid jh43 --name "Jeff Heller"
-python main.py settings remove-professor jh43     # asks to confirm first
-python main.py settings list                      # optional values and whether each is set
-python main.py settings set webui.session_secret            # prompts for a value
-python main.py settings set webui.session_secret --generate  # or generate one
-python main.py settings unset webui.session_secret
-python main.py settings export-shared            # draft a settings file for a group
+python main.py settings list                      # which optional values are set — never their values
+python main.py settings export-shared             # build a settings file for a group to follow
 python main.py settings export-shared --from /path/to/shared-settings.toml
-python main.py settings model-quirks             # what models have refused
-python main.py settings model-quirks gpt-4o      # have one worked out again
-python main.py settings test-model              # find out what every model can do
-python main.py settings test-model gpt-5.1      # or just the one
+python main.py settings model-quirks              # what models have been found to refuse
+python main.py settings model-quirks gpt-4o       # forget one, so it is worked out again
+python main.py settings test-model                # find out what every model can do, by asking it
+python main.py settings test-model gpt-5.1        # or just the one
 ```
+
+**Why each one is here.** `setup` makes the files, so there is nothing to edit
+until it has run. `add-professor` takes API keys at a hidden prompt, so they
+never reach your shell history or a process listing — typing a key as part of a
+command would leave it in both. `list` says *whether* a secret is set without
+printing it, which reading the file does not do. `export-shared` gathers every
+installed plugin's settings and the explanations their authors wrote, and builds
+a file from them. `test-model` and `model-quirks` find things out from a
+provider and write the answers down; that is not a setting anyone could have
+known to type.
+
+Two settings are not typed at all, because their value is not something a person
+should choose:
+
+```bash
+python main.py webui set-passphrase        # asked twice, hidden, then hashed
+python main.py webui set-session-secret    # generated; replacing it signs everyone out
+```
+
+A passphrase is stored as a bcrypt hash, so there is no hand-editing it. A
+session secret only has to be long and unguessable, so it is generated rather
+than invented.
 
 | Subcommand | What it does |
 |------------|--------------|
@@ -146,18 +176,21 @@ Registers another installation's `data/` folder so its usage appears in this one
 
 ```bash
 python main.py jh43 usage sources list
-python main.py jh43 usage sources add --label "Prof. Smith" --path /path/to/data --mode read-only
-python main.py jh43 usage sources remove "Prof. Smith"
 ```
 
-| Flag | Description |
-|------|-------------|
-| `--label <text>` | A short name for this source, e.g. `"Prof. Smith"` |
-| `--path <path>` | The other installation's `data/` folder |
-| `--mode read-only\|shared-write` | `read-only` (default) if only the other side writes there; `shared-write` if this installation records usage there too |
-| `--for-professor <netid>` | Whose usage this source holds. **Required in both modes** — one professor may be happy for work to be done from a shared folder while another wants only their spending followed, so it is settled per person rather than per folder. |
+Sources are added and removed on the web interface's **Settings** page, or by
+editing `[usage_sources]` in `settings.toml` yourself:
 
-`add` prompts for anything you don't pass as a flag.
+```toml
+[usage_sources."Prof. Smith"]
+path = "/path/to/their/data"
+mode = "read-only"        # or "shared-write" if this installation writes there too
+professor = "jh43"        # whose usage this source holds — required in both modes
+```
+
+`read-only` means only the other side writes there. `shared-write` means this
+installation records usage there as well. `professor` is required either way:
+one person may share a folder for work and another only for tracking.
 
 ---
 
