@@ -424,3 +424,32 @@ class TestAskingWhoIsUsingThisAndWhatTheyMaySendTo:
         _client, _chosen, page = self._at_step_two(client_and_result)
         assert 'id="add-model" disabled' in page
         assert "Add someone above first" in page
+
+    def test_the_state_sits_at_the_right_hand_edge_of_the_panel(self, client_and_result):
+        """Not trailing the words. It describes the box, so it belongs on it."""
+        _client, _chosen, page = self._at_step_two(client_and_result)
+        rule = page.split("fieldset.needed > legend")[1].split("}}")[0]
+        assert "justify-content: space-between" in rule
+        assert "width: calc(100% - " in rule
+
+    def test_the_picker_is_not_emptied_by_the_repaint(self, client_and_result):
+        """The reported fault: nobody could be chosen to test a model with.
+
+        The handler appended the new name and then repainted; the repaint saw
+        the placeholder still first in the list and cleared the whole thing —
+        taking the name with it. The clearing belongs before the first name
+        arrives, not after.
+        """
+        _client, _chosen, page = self._at_step_two(client_and_result)
+        paint = page.split("function paint()")[1].split("\n}")[0]
+        assert "modelprof" not in paint, "the repaint must not touch the picker's contents"
+        handler = page.split('document.getElementById("add-person")')[1].split("\n});")[0]
+        assert "picker.replaceChildren()" in handler
+        assert handler.index("replaceChildren") < handler.index("appendChild")
+
+    def test_the_first_person_added_is_the_one_it_bills(self, client_and_result):
+        """Otherwise pressing Add is answered by "choose somebody" when there
+        is exactly one somebody to choose."""
+        _client, _chosen, page = self._at_step_two(client_and_result)
+        handler = page.split('document.getElementById("add-person")')[1].split("\n});")[0]
+        assert "picker.value = added.netid" in handler

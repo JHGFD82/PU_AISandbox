@@ -91,6 +91,12 @@ _PAGE = """<!doctype html>
      just pressed Add and is looking at the list, not at the edge. */
   fieldset.needed {{ border: 2px solid #c0392b; }}
   fieldset.satisfied {{ border: 2px solid #ccc; transition: border-color .5s ease; }}
+  /* The legend spans the box so the state can sit at its right-hand edge,
+     against the border it describes, rather than trailing the words. */
+  fieldset.needed > legend, fieldset.satisfied > legend {{
+    display: flex; justify-content: space-between; align-items: baseline;
+    width: calc(100% - .8rem); gap: 1rem;
+  }}
   .required-flag {{ color: #c0392b; font-weight: 600; font-size: .85rem; }}
   fieldset.satisfied .required-flag {{ color: #3f7a45; }}
   .added {{ margin: .5rem 0 0; padding-left: 1.2rem; }}
@@ -431,7 +437,6 @@ function paint() {
     }
   }
   // A model is tested with somebody's key, so there has to be somebody first.
-  const picker = document.getElementById("modelprof");
   document.getElementById("add-model").disabled = state.people.length === 0;
   const ready = state.people.length > 0 && state.models.length > 0;
   document.getElementById("finish").disabled = !ready;
@@ -440,10 +445,6 @@ function paint() {
     : (state.people.length === 0
         ? "Add at least one person and one model first."
         : "Now add at least one model.");
-  if (state.people.length && picker.options.length
-      && picker.options[0].value === "") {
-    picker.replaceChildren();
-  }
 }
 
 async function send(path, payload) {
@@ -471,10 +472,19 @@ document.getElementById("add-person").addEventListener("click", async () => {
   try {
     const added = await send("/people", { netid, name, key, backup_key: backup });
     state.people.push(added.label);
+    const picker = document.getElementById("modelprof");
+    // The placeholder goes before the first real name arrives, not after —
+    // clearing the list afterwards took the new name with it, which is why
+    // there was never anybody to choose.
+    if (state.people.length === 1) picker.replaceChildren();
     const option = document.createElement("option");
     option.value = added.netid;
     option.textContent = added.label;
-    document.getElementById("modelprof").appendChild(option);
+    picker.appendChild(option);
+    // The first person added is the one it will be billed to unless somebody
+    // says otherwise. Leaving it unselected means pressing Add and being told
+    // to choose something when there is only one thing to choose.
+    if (state.people.length === 1) picker.value = added.netid;
     ["netid", "fullname", "apikey", "backupkey"].forEach(
       id => { document.getElementById(id).value = ""; });
     paint();
