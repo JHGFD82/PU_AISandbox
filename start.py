@@ -288,7 +288,11 @@ def main():
         # is the route for someone who just wants to open the sandbox.
         say("")
         say("This sandbox hasn't been set up on this computer yet.")
-        say("Setup will open in your browser: it's one question.")
+        say("Setup will open in your browser. It asks where your files should")
+        say("go, who will be using this, and which models they may send to.")
+        say("You will need an API key to hand — Princeton faculty get one")
+        say("from OIT — and Princeton's own AI Sandbox documentation lists")
+        say("the models it currently offers.")
         say("")
         open_browser_shortly(url)
         setup = subprocess.call([venv_python(), sandbox, "webui", "setup"])

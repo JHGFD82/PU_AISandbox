@@ -70,3 +70,23 @@ def _isolated_extras_folder(tmp_path_factory, monkeypatch):
     marker = package / ".installation"
     marker.write_text(f"{extras}\n", encoding="utf-8")
     monkeypatch.setattr(paths, "INSTALL_MARKER", marker)
+
+
+@pytest.fixture(autouse=True)
+def _no_settings_path_left_behind():
+    """Take SETTINGS_PATH back out of settings_store after each test.
+
+    ``settings_store`` has a module-level ``__getattr__``, so asking for
+    ``SETTINGS_PATH`` always answers with something even when nothing is set.
+    ``monkeypatch.setattr`` reads that as "the attribute exists", records the
+    computed value as the original, and on teardown puts it *back* — leaving a
+    concrete path sitting in the module's globals where there had been none.
+
+    Every later test then writes to, and reads from, whichever temporary file
+    belonged to whichever test patched it last. That is invisible while each
+    file is run on its own and only appears when the whole suite runs together,
+    which is the worst way for it to appear.
+    """
+    yield
+    import src.settings_store as store
+    store.__dict__.pop("SETTINGS_PATH", None)
