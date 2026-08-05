@@ -451,9 +451,16 @@ class TestAskingWhoIsUsingThisAndWhatTheyMaySendTo:
     def test_the_state_sits_at_the_right_hand_edge_of_the_panel(self, client_and_result):
         """Not trailing the words. It describes the box, so it belongs on it."""
         _client, _chosen, page = self._at_step_two(client_and_result)
-        rule = page.split("fieldset.needed > legend")[1].split("}}")[0]
-        assert "justify-content: space-between" in rule
+        rule = page.split("fieldset.needed > legend")[1].split("}")[0]
         assert "width: calc(100% - " in rule
+
+    def test_the_box_line_carries_on_between_the_two(self, client_and_result):
+        """Otherwise they are two labels floating in a gap in the border."""
+        _client, _chosen, page = self._at_step_two(client_and_result)
+        assert '<span class="rule"></span>' in page
+        rule = page.split("legend .rule")[1].split("}")[0]
+        assert "flex: 1" in rule
+        assert "border-top" in rule
 
     def test_the_picker_is_built_from_what_is_on_disk(self, client_and_result):
         """The reported fault, and why it cannot happen this way.
@@ -481,3 +488,49 @@ class TestAskingWhoIsUsingThisAndWhatTheyMaySendTo:
         # And the panel stops asking for one.
         assert 'class="satisfied"' in page
         assert "1 added" in page
+
+    def test_whoever_was_chosen_stays_chosen(self, client_and_result):
+        """Adding a model reloads the page. Without carrying the choice, the
+        browser picks whichever name sorts first — quietly moving whose key the
+        next test is billed to, which is not a thing to change for somebody."""
+        client, _chosen, _page = self._at_step_two(client_and_result)
+        for netid, name in (("jh43", "Jeff Heller"), ("tconlan", "T Conlan")):
+            client.post("/people", json={"netid": netid, "name": name, "key": "sk-" + netid})
+
+        page = client.get("/models", params={"billed_to": "tconlan"}).text
+        assert '<option value="tconlan" selected>' in page
+        assert '<option value="jh43">' in page
+
+    def test_with_nobody_named_the_browser_decides_as_it_always_did(self, client_and_result):
+        client, _chosen, _page = self._at_step_two(client_and_result)
+        client.post("/people", json={"netid": "jh43", "name": "J", "key": "sk-t"})
+        assert "selected" not in client.get("/models").text
+
+    def test_a_name_that_is_not_there_reaches_the_page_as_nothing(self, client_and_result):
+        """It arrives in the address bar, so it is not to be trusted.
+
+        What keeps it harmless is that it is only ever compared against the
+        netIDs already configured — never written into the page. This pins that
+        property rather than a check that could be removed without effect.
+        """
+        client, _chosen, _page = self._at_step_two(client_and_result)
+        client.post("/people", json={"netid": "jh43", "name": "J", "key": "sk-t"})
+        page = client.get("/models", params={"billed_to": "<script>x</script>"}).text
+        assert "<script>x</script>" not in page
+        assert "selected" not in page
+
+    def test_the_reload_carries_the_choice(self, client_and_result):
+        client, _chosen, _page = self._at_step_two(client_and_result)
+        client.post("/people", json={"netid": "jh43", "name": "J", "key": "sk-t"})
+        page = client.get("/models").text
+        assert 'billed_to=" + encodeURIComponent(professor)' in page
+
+    def test_no_line_explains_that_the_button_may_be_pressed(self, client_and_result):
+        """Once it works, pressing it is the answer."""
+        client, _chosen, empty = self._at_step_two(client_and_result)
+        # While it is still needed, it says what is missing.
+        assert "Add at least one person first" in empty
+        client.post("/people", json={"netid": "jh43", "name": "J", "key": "sk-t"})
+        page = client.get("/people").text
+        assert "Add more if you need to" not in page
+        assert "or carry on" not in page

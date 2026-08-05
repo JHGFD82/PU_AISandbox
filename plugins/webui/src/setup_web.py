@@ -104,11 +104,16 @@ _PAGE = """<!doctype html>
   fieldset.satisfied {{ border: 2px solid #ccc; transition: border-color .5s ease; }}
   /* The legend spans the box so the state can sit at its right-hand edge,
      against the border it describes, rather than trailing the words. */
+  /* The legend spans the box so the state can sit at its right-hand edge,
+     against the border it describes. The rule between the two carries the
+     box's own line across the gap, so the shape reads as unbroken rather than
+     as two labels floating in a hole in the border. */
   fieldset.needed > legend, fieldset.satisfied > legend {{
-    display: flex; justify-content: space-between; align-items: baseline;
-    width: calc(100% - .8rem); gap: 1rem;
+    display: flex; align-items: center; width: calc(100% - .8rem); gap: .6rem;
   }}
-  .required-flag {{ color: #c0392b; font-weight: 600; font-size: .85rem; }}
+  legend .rule {{ flex: 1; height: 0; border-top: 2px solid #c0392b; }}
+  fieldset.satisfied legend .rule {{ border-top-color: #ccc; transition: border-color .5s ease; }}
+  .required-flag {{ color: #c0392b; font-weight: 600; font-size: .85rem; white-space: nowrap; }}
   fieldset.satisfied .required-flag {{ color: #3f7a45; }}
   .added {{ margin: .5rem 0 0; padding-left: 1.2rem; }}
   .added li {{ margin: .15rem 0; }}
@@ -134,6 +139,8 @@ _PAGE = """<!doctype html>
     fieldset.needed {{ border-color: #e07a6a; }}
     fieldset.satisfied {{ border-color: #333; }}
     .required-flag, .row-error {{ color: #e07a6a; }}
+    legend .rule {{ border-top-color: #e07a6a; }}
+    fieldset.satisfied legend .rule {{ border-top-color: #333; }}
     fieldset.satisfied .required-flag {{ color: #8fc493; }}
     .waiting {{ color: #9aa4ad; }}
     input[type=password], select {{ background: #1d2126; color: #e6e6e6; border-color: #444; }}
@@ -396,14 +403,15 @@ def _render_people(where) -> str:
     state, wording = _panel_state(len(people))
     safe = html.escape(str(where))
     carry_on = "" if people else "disabled"
-    hint = ("Add more if you need to, or carry on." if people
-            else "Add at least one person first.")
+    # Nothing to say once the button works: pressing it is the answer, and a
+    # line explaining that you may press it is one more thing to read past.
+    hint = "" if people else "Add at least one person first."
     body = f"""
 {_progress(2)}
 <p>Your files are in <code>{safe}</code>. Now, who will be using this?</p>
 
 <fieldset id="people" class="{state}">
-  <legend>People <span class="required-flag">{wording}</span></legend>
+  <legend>People <span class="rule"></span><span class="required-flag">{wording}</span></legend>
   <p>Each person needs their own Princeton AI Sandbox API key, which they get
      from OIT. Keys are kept in <code>{safe}</code> and are never shown again
      once saved. Add as many as you like; at least one is needed.</p>
@@ -428,8 +436,18 @@ def _render_people(where) -> str:
                         error="", script=_PEOPLE_SCRIPT)
 
 
-def _render_models(where) -> str:
-    """Step three: what those people may send their work to."""
+def _render_models(where, billed_to: str = "") -> str:
+    """Step three: what those people may send their work to.
+
+    Args:
+        where: The folder holding this installation's files.
+        billed_to: Whose key was chosen last time, so the page comes back with
+                   the same one still picked. Adding a model reloads this page,
+                   and without this the browser would select whichever name
+                   sorts first — quietly changing whose key the next test is
+                   billed to, which is not a thing to change on somebody's
+                   behalf.
+    """
     from src.config import load_professor_config
 
     models = _models_so_far()
@@ -438,20 +456,20 @@ def _render_models(where) -> str:
     # Built from what is on disk, so there is no list held in the browser to
     # keep in step with anything.
     options = "".join(
-        f'<option value="{html.escape(netid)}">{html.escape(entry["name"])} '
-        f'({html.escape(netid)})</option>'
+        f'<option value="{html.escape(netid)}"'
+        f'{" selected" if netid == billed_to else ""}>'
+        f'{html.escape(entry["name"])} ({html.escape(netid)})</option>'
         for netid, entry in sorted(load_professor_config().items())
     )
     finish = "" if models else "disabled"
-    hint = ("Add more if you need to, or finish." if models
-            else "Add at least one model first.")
+    hint = "" if models else "Add at least one model first."
     who = "person" if len(people) == 1 else "people"
     body = f"""
 {_progress(3)}
 <p>{len(people)} {who} added. Last question: what may they send work to?</p>
 
 <fieldset id="models" class="{state}">
-  <legend>Models <span class="required-flag">{wording}</span></legend>
+  <legend>Models <span class="rule"></span><span class="required-flag">{wording}</span></legend>
   <p>Which models you can use depends on Princeton's AI Sandbox rather than on
      this software, so none are included here. <strong>Check Princeton's own AI
      Sandbox documentation</strong> for the models it currently offers, then add
@@ -541,7 +559,10 @@ document.getElementById("add-model").addEventListener("click", async () => {
   document.getElementById("add-model").disabled = true;
   try {
     await send("/models", { provider_model: model, professor });
-    location.reload();
+    // Reloaded with the same person still chosen. A plain reload would leave
+    // the browser to pick whichever name sorts first, quietly moving whose key
+    // the next test is billed to.
+    location.href = "/models?billed_to=" + encodeURIComponent(professor);
   } catch (e) {
     fail("models", e.message);
     show("models-busy", false);
@@ -683,13 +704,23 @@ def create_setup_app(on_complete) -> FastAPI:
         return _render_people(paths.extras_root())
 
     @app.get("/models", response_class=HTMLResponse)
-    async def models_page():
-        """Step three. Sent back a step if there is nobody to bill a test to."""
+    async def models_page(billed_to: str = ""):
+        """Step three. Sent back a step if there is nobody to bill a test to.
+
+        Args:
+            billed_to: Carried in the address when this page reloads itself, so
+                       whoever was chosen stays chosen.
+        """
         from src.config import load_professor_config
 
         if not load_professor_config():
             return RedirectResponse("/people", status_code=303)
-        return HTMLResponse(_render_models(paths.extras_root()))
+        # billed_to comes from the address bar and is passed on unchecked,
+        # which is safe for the one reason that matters: it is only ever
+        # compared against the netIDs already configured, and never written
+        # into the page. A name that is not one of them simply matches nothing
+        # and no option is marked as chosen.
+        return HTMLResponse(_render_models(paths.extras_root(), billed_to))
 
     @app.post("/people")
     async def add_person(body: NewPersonBody) -> JSONResponse:
