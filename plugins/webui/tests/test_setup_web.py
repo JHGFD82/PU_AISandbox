@@ -8,6 +8,7 @@ what must never be overwritten.
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -26,7 +27,10 @@ def _isolate(tmp_path, monkeypatch):
     templates.mkdir(parents=True)
     (templates / "settings.template").write_text("# starting point\n", encoding="utf-8")
     (templates / "preferences.template.toml").write_text("# preferences\n", encoding="utf-8")
-    (templates / "model_catalog.template.json").write_text('{"models": {}}\n', encoding="utf-8")
+    # Shaped like the real template: a catalogue is a config section and a
+    # models section, and code that reads one is entitled to expect both.
+    (templates / "model_catalog.template.json").write_text(
+        '{"config": {"pricing_unit": 1000000}, "models": {}}\n', encoding="utf-8")
     monkeypatch.setattr(paths, "PACKAGE_ROOT", package)
     monkeypatch.setattr(paths, "TEMPLATES_DIR", templates)
     monkeypatch.setattr(paths, "INSTALL_MARKER", package / ".installation")
@@ -78,17 +82,21 @@ class TestAskingWhereFilesGo:
         mode = (paths.DEFAULT_EXTRAS_ROOT / paths.SETTINGS_FILENAME).stat().st_mode & 0o777
         assert mode == 0o600
 
-    def test_it_reports_back_which_folder_was_chosen(self, client_and_result):
-        client, chosen = client_and_result
-        client.post("/", data={"folder": str(paths.DEFAULT_EXTRAS_ROOT)})
-        # The callback is fired on a short timer so the page can finish
-        # rendering first; wait for it rather than racing it.
+    def test_choosing_the_folder_does_not_end_setup(self, client_and_result):
+        """It used to. The folder is the first of three things, not the last.
+
+        Ending here handed somebody three files and nothing that worked: no key
+        to bill and no model to send to. Setup carries on and asks.
+        """
         import time
-        for _ in range(40):
-            if chosen:
-                break
-            time.sleep(0.05)
-        assert chosen == [paths.DEFAULT_EXTRAS_ROOT]
+
+        client, chosen = client_and_result
+        page = client.post("/", data={"folder": str(paths.DEFAULT_EXTRAS_ROOT)})
+        assert page.status_code == 200
+        assert "Who will be using this" in page.text
+        # Long enough that the old timer would have fired by now.
+        time.sleep(0.8)
+        assert chosen == [], "setup ended before asking who is using this"
 
 
 class TestCarryingForwardAnExistingSetup:
@@ -299,3 +307,120 @@ class TestBrowseButton:
         resp = elsewhere.post("/pick", json={"start": None})
         assert resp.status_code == 403
         assert opened == []
+
+
+class TestAskingWhoIsUsingThisAndWhatTheyMaySendTo:
+    """The second page: the two things setup cannot guess.
+
+    An API key is a private credential, and which models exist depends on the
+    institution's own AI sandbox. Neither can be shipped or invented, so both
+    have to be asked for — and setup is not finished until both are answered.
+    """
+
+    def _at_step_two(self, client_and_result):
+        client, chosen = client_and_result
+        page = client.post("/", data={"folder": str(paths.DEFAULT_EXTRAS_ROOT)})
+        assert page.status_code == 200
+        return client, chosen, page.text
+
+    def test_both_panels_start_marked_as_required(self, client_and_result):
+        _client, _chosen, page = self._at_step_two(client_and_result)
+        assert page.count('class="needed"') == 2
+        # Colour is a reminder, not the message: it says so in words as well.
+        assert page.count('class="required-flag"') == 2
+        assert "Required" in page
+
+    def test_the_border_is_told_to_fade_rather_than_snap(self, client_and_result):
+        _client, _chosen, page = self._at_step_two(client_and_result)
+        assert "transition: border-color" in page
+
+    def test_a_person_can_be_added(self, client_and_result):
+        client, _chosen, _page = self._at_step_two(client_and_result)
+        resp = client.post("/people", json={
+            "netid": "jh43", "name": "Jeff Heller", "key": "sk-test", "backup_key": "",
+        })
+        assert resp.status_code == 200
+        assert resp.json()["netid"] == "jh43"
+        assert "jh43" in resp.json()["label"]
+
+    def test_more_than_one_person_can_be_added(self, client_and_result):
+        """One is required; a shared installation may have several."""
+        client, _chosen, _page = self._at_step_two(client_and_result)
+        for netid in ("jh43", "tconlan"):
+            resp = client.post("/people", json={
+                "netid": netid, "name": netid.upper(), "key": "sk-" + netid,
+            })
+            assert resp.status_code == 200
+        from src.config import load_professor_config
+        assert set(load_professor_config()) == {"jh43", "tconlan"}
+
+    def test_a_bad_netid_is_explained_rather_than_crashing(self, client_and_result):
+        client, _chosen, _page = self._at_step_two(client_and_result)
+        resp = client.post("/people", json={
+            "netid": "not a netid!", "name": "Someone", "key": "sk-test",
+        })
+        assert resp.status_code == 400
+        assert resp.json()["detail"]
+
+    def test_a_model_needs_a_provider_in_its_name(self, client_and_result):
+        client, _chosen, _page = self._at_step_two(client_and_result)
+        client.post("/people", json={"netid": "jh43", "name": "J", "key": "sk-t"})
+        resp = client.post("/models", json={"provider_model": "gpt-4o", "professor": "jh43"})
+        assert resp.status_code == 400
+        assert "slash" in resp.json()["detail"]
+
+    def test_finishing_is_refused_with_nobody_added(self, client_and_result):
+        """Checked here, not only in the browser: a disabled button is not a rule."""
+        client, chosen, _page = self._at_step_two(client_and_result)
+        resp = client.post("/finish", json={})
+        assert resp.status_code == 400
+        assert "person" in resp.json()["detail"]
+        assert chosen == []
+
+    def test_finishing_is_refused_with_no_models(self, client_and_result, monkeypatch):
+        import src.models.catalog as catalog_module
+
+        client, chosen, _page = self._at_step_two(client_and_result)
+        # The catalogue setup just made, not the suite's fixture one — this is
+        # about what a brand-new installation holds.
+        monkeypatch.setattr(
+            catalog_module, "get_model_catalog_path",
+            lambda: paths.DEFAULT_EXTRAS_ROOT / "model_catalog.json")
+        monkeypatch.setattr(catalog_module, "_catalog_cache", None)
+        client.post("/people", json={"netid": "jh43", "name": "J", "key": "sk-t"})
+        resp = client.post("/finish", json={})
+        assert resp.status_code == 400
+        assert "model" in resp.json()["detail"]
+        assert chosen == []
+
+    def test_finishing_works_once_both_are_there(self, client_and_result, monkeypatch):
+        import time
+
+        client, chosen, _page = self._at_step_two(client_and_result)
+        client.post("/people", json={"netid": "jh43", "name": "J", "key": "sk-t"})
+        # The model is put in the catalogue directly: adding one through the
+        # route would call a provider, and what is being tested here is the
+        # ending, not the looking-up.
+        import src.models.catalog as catalog_module
+        catalog = paths.DEFAULT_EXTRAS_ROOT / "model_catalog.json"
+        catalog.write_text(json.dumps(
+            {"config": {"pricing_unit": 1000000},
+             "models": {"gpt-4o": {"input": 1.0, "output": 2.0, "supports_vision": True}}}
+        ))
+        monkeypatch.setattr(catalog_module, "get_model_catalog_path", lambda: catalog)
+        monkeypatch.setattr(catalog_module, "_catalog_cache", None)
+
+        resp = client.post("/finish", json={})
+        assert resp.status_code == 200
+        for _ in range(40):
+            if chosen:
+                break
+            time.sleep(0.05)
+        assert chosen == [paths.DEFAULT_EXTRAS_ROOT]
+
+    def test_a_model_cannot_be_added_before_anyone_is(self, client_and_result):
+        """Its few test requests are billed to somebody's key, so there has to
+        be a somebody. The page disables the button; this is the same rule."""
+        _client, _chosen, page = self._at_step_two(client_and_result)
+        assert 'id="add-model" disabled' in page
+        assert "Add someone above first" in page
