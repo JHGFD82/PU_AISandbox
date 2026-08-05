@@ -3493,7 +3493,10 @@ class TestTheSettingsPageSaysThingsOnce:
         source = self._source()
         assert 'id="lock-btn"' in source
         assert "hidden = embeddedInModal" in source
-        assert "hidden = true" not in source
+        # The bar specifically. Other things on this page are hidden and shown
+        # by their own logic — an empty-catalogue note, for one — and reading
+        # any of those as this rule made the check fail for the wrong reason.
+        assert not re.search(r'getElementById\("topbar"\)\.hidden\s*=\s*(true|false)', source)
 
     def test_shared_settings_and_endpoints_are_separate(self):
         """They are different things: one is defaults a group follows, the
@@ -4729,3 +4732,79 @@ class TestNoRuleIsWrittenTwice:
             source = (Path(__file__).resolve().parents[1] / "src" / "templates" / name).read_text()
             wants = name in ("settings.html", "shared_settings.html")
             assert ('{% include "_panels.html" %}' in source) is wants, name
+
+
+class TestTheWebFirstRunExplainsItself:
+    """Walking in with nothing configured, and being told what is missing.
+
+    A new installation has two things to do before it can be used: somebody to
+    bill, and a model to send to. Neither can be shipped — one is a private
+    credential, the other depends on the institution's own AI sandbox — so what
+    matters is that both are named before anything is typed.
+    """
+
+    def _no_models(self, monkeypatch, tmp_path):
+        import src.models.catalog as catalog_module
+        monkeypatch.setattr(catalog_module, "get_model_catalog_path",
+                            lambda: tmp_path / "not-here.json")
+
+    def test_with_no_professor_the_chat_page_is_not_offered(
+        self, unlocked_client, settings_env
+    ):
+        resp = unlocked_client.get("/", follow_redirects=False)
+        assert resp.status_code == 303
+        assert resp.headers["location"] == "/settings"
+
+    def test_with_no_models_the_chat_page_is_not_offered_either(
+        self, unlocked_client, monkeypatch, tmp_path, settings_env
+    ):
+        """The gap this closes: a chat window that looks ready and fails on the
+        first message, because there is nothing to send it to."""
+        self._no_models(monkeypatch, tmp_path)
+        settings_store_mod.add_professor("jh43", "Jeff Heller", "k")
+        resp = unlocked_client.get("/", follow_redirects=False)
+        assert resp.status_code == 303
+        assert resp.headers["location"] == "/settings"
+
+    def test_the_settings_page_says_which_of_the_two_is_outstanding(
+        self, unlocked_client, monkeypatch, tmp_path, settings_env
+    ):
+        self._no_models(monkeypatch, tmp_path)
+        body = unlocked_client.get("/api/settings").json()
+        assert body["has_professors"] is False
+        assert body["has_models"] is False
+        settings_store_mod.add_professor("jh43", "Jeff Heller", "k")
+        body = unlocked_client.get("/api/settings").json()
+        assert body["has_professors"] is True
+        assert body["has_models"] is False
+
+    def test_the_page_opens_on_whichever_step_is_left(self):
+        """Adding the professor moves it on to Models by itself."""
+        page = _rendered_template("settings.html")
+        fn = page.split("function openingTab")[1].split("\n}")[0]
+        assert 'if (!data.has_professors) return "system";' in fn
+        assert 'if (!data.has_models) return "models";' in fn
+        # And once neither is outstanding, it goes back to remembering.
+        assert 'localStorage.getItem("settings-tab")' in fn
+
+    def test_an_empty_catalogue_says_where_to_find_out_what_to_add(self):
+        page = _rendered_template("settings.html")
+        note = page.split('id="models-empty-note"')[1].split("</p>")[0]
+        words = " ".join(note.split())
+        assert "nothing can be sent anywhere" in words
+        assert "AI Sandbox documentation" in words
+        # An external endpoint needs none at all, which is easy to miss.
+        assert "alternate endpoint" in words
+
+    def test_that_note_is_shown_only_while_there_are_none(self):
+        page = _rendered_template("settings.html")
+        fn = page.split("async function loadModels")[1].split("\n}")[0]
+        assert "note.hidden = data.models.length > 0;" in fn
+
+    def test_a_catalogue_that_would_not_load_is_a_different_thing(self):
+        """Not the same as having none, and it must not read as advice."""
+        page = _rendered_template("settings.html")
+        fn = page.split("async function loadModels")[1].split("\n}")[0]
+        failure = fn.split("catch")[1]
+        assert "note.hidden = true;" in failure
+        assert "Could not read the model catalogue" in failure

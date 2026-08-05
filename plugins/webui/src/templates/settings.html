@@ -283,6 +283,19 @@ default_model = "llama-3-70b-instruct"</div>
         and which settings it turns down — by trying it. That takes a few seconds
         and a fraction of a cent, and it only happens once.
       </p>
+      <!-- Shown only while there are none. Which models exist depends on the
+           institution rather than on this software, so nothing can be shipped
+           and nothing can be guessed for somebody — but leaving them with an
+           empty list and a box is not an answer either. -->
+      <p class="hint" id="models-empty-note" hidden>
+        <strong>There are none yet, so nothing can be sent anywhere.</strong>
+        Which models you can use depends on your institution's AI sandbox rather
+        than on this software, so none are included here. Check
+        <strong>Princeton's own AI Sandbox documentation</strong> for the models
+        it currently offers, then add one below.
+        Using only an alternate endpoint of your own? Then you need none here —
+        see the <em>Alternate AI endpoints</em> panel.
+      </p>
       <div id="models-list"></div>
       <form id="add-model-form">
         <div class="inline-fields">
@@ -752,13 +765,19 @@ function showTab(name) {
   localStorage.setItem("settings-tab", chosen);
 }
 
-// Which tab to open on arriving. The server already says which section leads —
-// on a first run that is the professors, because nothing else can be done
-// until one exists — so the tab holding that section is the one to show. That
-// keeps the blocking step in front of somebody who has just installed this,
-// while anyone returning gets back the tab they were last in.
-function openingTab(order) {
-  const leading = document.querySelector(`[data-section="${order[0]}"]`);
+// Which tab to open on arriving.
+//
+// A new installation has two things to do before it can be used: somebody to
+// bill, and a model to send to. Whichever is outstanding is the tab to show —
+// so adding the professor moves this on to Models by itself, rather than
+// leaving a person on a page that looks finished.
+//
+// Once both are done there is no blocking step, so the server's own ordering
+// decides, and anyone returning gets back the tab they were last in.
+function openingTab(data) {
+  if (!data.has_professors) return "system";
+  if (!data.has_models) return "models";
+  const leading = document.querySelector(`[data-section="${data.order[0]}"]`);
   const first = leading ? leading.dataset.tab : TABS[0];
   const remembered = localStorage.getItem("settings-tab");
   return TABS.includes(remembered) ? remembered : first;
@@ -895,16 +914,23 @@ function modelRow(m) {
 
 async function loadModels() {
   const list = document.getElementById("models-list");
+  const note = document.getElementById("models-empty-note");
   try {
     const data = await api("/api/settings/models");
-    list.innerHTML = "";
-    if (!data.models.length) {
-      list.innerHTML = '<div class="empty">No models in the catalogue yet.</div>';
-      return;
-    }
+    list.replaceChildren();
+    // The note explains an empty catalogue; an empty catalogue is the only
+    // time it is worth reading. A list that failed to load is a different
+    // thing and gets its own line rather than this one.
+    note.hidden = data.models.length > 0;
+    if (!data.models.length) return;
     data.models.forEach(m => list.appendChild(modelRow(m)));
   } catch (e) {
-    list.innerHTML = '<div class="empty">Could not read the model catalogue.</div>';
+    note.hidden = true;
+    list.replaceChildren();
+    const failed = document.createElement("div");
+    failed.className = "empty";
+    failed.textContent = "Could not read the model catalogue.";
+    list.appendChild(failed);
   }
 }
 
@@ -984,7 +1010,7 @@ async function loadSettings() {
   const data = await api("/api/settings");
   applyOrder(data.order);
   document.getElementById("tabs").hidden = false;
-  showTab(openingTab(data.order));
+  showTab(openingTab(data));
   showBrowseButtons(data.can_browse);
   renderProfessors(data);
   renderWebui(data);

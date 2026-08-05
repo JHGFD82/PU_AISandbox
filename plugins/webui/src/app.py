@@ -277,6 +277,22 @@ def _directly_editable_paths() -> set[str]:
     }
 
 
+def _any_models() -> bool:
+    """Say whether any model has been set up yet.
+
+    A freshly set-up copy has none — which models exist depends on the
+    institution's AI sandbox rather than on this software, so none are shipped.
+    An empty catalogue is an ordinary state here, not a fault, which is why this
+    answers False rather than letting the error out.
+    """
+    from src.models import load_model_catalog
+
+    try:
+        return bool(load_model_catalog()["models"])
+    except Exception:
+        return False
+
+
 def _capability_summary(model: str) -> dict:
     """Describe what one model can do, in terms the settings page can show.
 
@@ -381,6 +397,9 @@ def _settings_snapshot() -> dict:
 
     return {
         "has_professors": has_professors,
+        # Which of the two blocking steps are still to do, so the page can
+        # open on the one that needs doing rather than always the first.
+        "has_models": _any_models(),
         "order": _SETTINGS_ORDER_FIRST_RUN if not has_professors else _SETTINGS_ORDER_REPEAT,
         # Whether to draw the "Browse…" buttons at all. A computer with no
         # file chooser the sandbox can open gets typeable boxes and no
@@ -585,9 +604,14 @@ def create_app() -> FastAPI:
     async def index(request: Request):
         if not request.session.get("unlocked"):
             return templates.TemplateResponse(request, "unlock.html", {"error": None})
-        if not load_professor_config():
+        if not load_professor_config() or not _any_models():
             # Nothing to chat with yet — send a first-time visitor straight
             # to setup instead of an empty, broken-looking chat screen.
+            #
+            # Models count as much as people do. A professor with no models
+            # gets a chat window that looks ready and fails on the first
+            # message, because there is nothing to send it to; the settings
+            # page can at least say what is missing before anything is typed.
             return RedirectResponse("/settings", status_code=303)
         return templates.TemplateResponse(
             request, "chat.html",
