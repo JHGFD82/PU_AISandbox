@@ -57,7 +57,7 @@ In the `data/` folder of the person's own files folder — active: `token_usage_
 ### Model catalog & alternate endpoints
 - `model_catalog.json` (in the person's own files folder; created by setup from `templates/model_catalog.template.json`) holds pricing/`supports_vision` per model, keyed by `[config.provider_map]` for provider slug quirks (e.g. `google` → `vertex-ai` for PortKey).
 - `openai/model-name` or `google/model-name` passed to `-m` auto-fetches and saves pricing from PortKey on first use, then tests the model to fill in `supports_vision` and any `rejects`/`prefers` — see `src/models/capabilities.py`. Pricing for other providers must still be added to the JSON by hand. `settings test-model [model]` re-runs that testing on demand.
-- Colon syntax in `-m` (e.g. `-m my_cluster:llama-3-70b`) looks up the matching `[endpoints.<name>]` table (merged from `settings.*.toml`) plus its credential (`endpoints.<name>.key` in `settings.toml`) and points the OpenAI-compatible client at that alternate `base_url`, bypassing the model catalog entirely.
+- Colon syntax in `-m` (e.g. `-m my_cluster:llama-3-70b`) looks up the matching `[endpoints.<name>]` table — defined in `preferences.toml` or a shared file, never in the package — plus its credential, which may sit in that same table or in `settings.toml` (which wins) and points the OpenAI-compatible client at that alternate `base_url`, bypassing the model catalog entirely.
 
 ### Where files live
 The package (the code, replaced on upgrade) and the person's own files are kept apart. `src/paths.py` resolves the split; a `.installation` marker inside the package records the folder, and its absence is the signal "not set up yet".

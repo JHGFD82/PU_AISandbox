@@ -142,9 +142,17 @@ class TestLoadAPIConfigErrors:
                 load_api_config("nonexistent")
 
     def test_missing_key_raises(self):
+        """It has to say which endpoint, and where the key goes.
+
+        Not the exact wording: the message shows the table to write rather than
+        the dotted path it used to name, and either says the same thing.
+        """
         with _patch_endpoints(_ENDPOINTS_WITH_ENDPOINTS), _patch_credentials({}):
-            with pytest.raises(ValueError, match="endpoints.hpc_cluster.key"):
+            with pytest.raises(ValueError) as caught:
                 load_api_config("hpc_cluster")
+        said = str(caught.value)
+        assert "hpc_cluster" in said
+        assert "settings.toml" in said
 
     def test_missing_base_url_raises(self):
         data = {"bad": {"name": "Bad"}}
@@ -233,3 +241,102 @@ class TestParseModelSource:
         api, model = parse_model_source("  hpc_cluster  :  llama-3-70b  ")
         assert api == "hpc_cluster"
         assert model == "llama-3-70b"
+
+
+class TestWhereAnEndpointsKeyMayLive:
+    """Nobody should have to edit the package to add an endpoint.
+
+    settings.default.toml sits inside the package: it is tracked by git,
+    replaced when the sandbox is updated, and committable by accident. Asking
+    somebody to put their cluster's address and credential there is asking them
+    to lose it on the next update, or to commit it.
+
+    Endpoint definitions already merged from preferences.toml and a shared
+    settings file. The credential did not: it was read from settings.toml
+    alone, so a key written beside the rest of the endpoint's settings — which
+    is what the interface's own example shows — was read and thrown away.
+    """
+
+    ENDPOINT = {
+        "name": "My HPC Cluster",
+        "base_url": "http://my-cluster.internal:8000/v1",
+        "openai_compatible": True,
+        "default_model": "llama-3-70b-instruct",
+    }
+
+    def _configured(self, monkeypatch, endpoint, settings_toml_key=None):
+        import src.settings as settings_mod
+        import src.settings_store as store
+        monkeypatch.setattr(settings_mod, "ENDPOINTS", {"my_cluster": endpoint})
+        monkeypatch.setattr(store, "get_value", lambda _p: settings_toml_key)
+
+    def test_a_key_beside_the_definition_is_used(self, monkeypatch):
+        """The whole point: one table, in a file outside the package."""
+        from src.services.api_config import load_api_config
+
+        self._configured(monkeypatch, dict(self.ENDPOINT, key="from-preferences"))
+        assert load_api_config("my_cluster").api_key == "from-preferences"
+
+    def test_it_is_not_left_lying_in_the_extra_fields(self, monkeypatch):
+        """It used to be. That is how it came to be read and ignored."""
+        from src.services.api_config import load_api_config
+
+        self._configured(monkeypatch, dict(self.ENDPOINT, key="from-preferences"))
+        assert "key" not in (load_api_config("my_cluster").extra or {})
+
+    def test_settings_toml_wins_over_a_shared_one(self, monkeypatch):
+        """settings.toml is this installation's own and is never shared, so a
+        personal key there overrides a group's without anybody arranging it."""
+        from src.services.api_config import load_api_config
+
+        self._configured(monkeypatch, dict(self.ENDPOINT, key="the-group's"),
+                         settings_toml_key="mine")
+        assert load_api_config("my_cluster").api_key == "mine"
+
+    def test_a_key_only_in_settings_toml_still_works(self, monkeypatch):
+        """The arrangement that already existed must go on working."""
+        from src.services.api_config import load_api_config
+
+        self._configured(monkeypatch, dict(self.ENDPOINT), settings_toml_key="mine")
+        assert load_api_config("my_cluster").api_key == "mine"
+
+    def test_with_no_key_anywhere_it_says_both_places(self, monkeypatch):
+        from src.services.api_config import load_api_config
+
+        self._configured(monkeypatch, dict(self.ENDPOINT))
+        with pytest.raises(ValueError) as caught:
+            load_api_config("my_cluster")
+        said = str(caught.value)
+        assert "preferences.toml" in said
+        assert "shared settings file" in said
+        assert "settings.toml" in said
+
+    def test_nothing_points_at_the_package_any_more(self, monkeypatch):
+        """An unknown endpoint used to be answered with "add it to
+        settings.default.toml", which is the one place nobody should."""
+        import src.settings as settings_mod
+        from src.services.api_config import load_api_config
+
+        monkeypatch.setattr(settings_mod, "ENDPOINTS", {})
+        with pytest.raises(ValueError) as caught:
+            load_api_config("nowhere")
+        assert "settings.default.toml" not in str(caught.value)
+        assert "preferences.toml" in str(caught.value)
+
+    def test_the_missing_key_message_recommends_one_place(self, monkeypatch):
+        """One recommendation, then the alternative as an informed choice.
+
+        Saying "either of these two" leaves somebody to work out which, at the
+        moment they are least equipped to. settings.toml is the answer; the
+        other way is offered with what it costs attached.
+        """
+        from src.services.api_config import load_api_config
+
+        self._configured(monkeypatch, dict(self.ENDPOINT))
+        with pytest.raises(ValueError) as caught:
+            load_api_config("my_cluster")
+        said = str(caught.value)
+        # The recommendation comes first.
+        assert said.index("settings.toml") < said.index("preferences.toml")
+        # And the alternative says what it costs.
+        assert "everyone who can read it" in said

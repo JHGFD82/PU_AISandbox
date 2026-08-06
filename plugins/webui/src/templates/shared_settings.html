@@ -83,20 +83,10 @@
     <div class="card">
       <p class="hint" id="intro">Loading&hellip;</p>
       <p class="hint">
-        You don't have to work through these. Type in a setting's box and it
-        ticks itself — that's the whole of it. Anything left unticked keeps
-        following whatever the sandbox or the plugin ships, which is usually
-        what you want, so a file with nothing ticked changes nothing for
-        anybody.
+        Adjust any setting below to enable it for your group. Untick a setting to leave it at its default value.
       </p>
       <p class="hint">
-        It is safe to untick one to see what it was originally: the box goes
-        back to showing the shipped value, and yours is remembered and comes
-        straight back if you tick it on again.
-      </p>
-      <p class="hint">
-        Wording is typed as wording — no quotation marks needed. A list keeps
-        its square brackets, with each item in quotation marks.
+        In text fields, enter your text exactly as you want it to appear, no need to escape quotation marks or other special characters. In fields with list values, follow standard Python list format (square brackets with each item enclosed in quotation marks).
       </p>
       <p class="hint" id="new-note" hidden></p>
       <p><label><input type="checkbox" id="only-new"> Show only settings marked NEW</label></p>
@@ -108,9 +98,7 @@
       <button id="download-btn">Download the file</button>
       <span class="count" id="count"></span>
       <p class="hint" style="margin: 0.75rem 0 0">
-        Nothing is saved here. The file downloads to you — rename it if you like,
-        put it where your group can read it, and tell each member to enter that
-        path in <strong>Settings &rarr; Shared settings</strong>.
+        <strong>Nothing is saved here.</strong> Place the downloaded file where everyone can access it (University-sanctioned services such as Dropbox or OneDrive are recommended), and tell each group member to change the file path located in <strong>Settings &rarr; Shared settings</strong> in order to use it.
       </p>
       <p class="hint" id="error" style="color:#c0392b; margin: 0.5rem 0 0"></p>
     </div>
@@ -476,8 +464,8 @@ async function load() {
   const total = sections.reduce((n, s) => n + s.settings.length, 0);
   const newCount = sections.reduce((n, s) => n + s.settings.filter(x => x.new).length, 0);
   document.getElementById("intro").textContent = data.existing_path
-    ? `Your group currently follows ${data.existing_path}. Its decisions are already ticked below.`
-    : "Your group has no shared settings file yet. Tick what everyone should share.";
+    ? `Your group currently uses this shared settings file: ${data.existing_path}. Existing settings are ticked below.`
+    : "Choose the settings you want to include in a shared configuration file for your group.";
   if (newCount > 0) {
     const note = document.getElementById("new-note");
     note.hidden = false;

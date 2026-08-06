@@ -112,8 +112,8 @@ def load_api_config(api_name: str) -> APIConfig:
         raise ValueError(
             f"API endpoint '{api_name}' is not configured.\n"
             f"{hint}\n"
-            "Add an [endpoints.<name>] table to settings.default.toml, a shared "
-            "settings file, or your preferences.toml to register an endpoint."
+            "Add an [endpoints.<name>] table to your preferences.toml, or to "
+            "the shared settings file your group follows."
         )
 
     raw: dict = endpoints[api_name]
@@ -124,15 +124,32 @@ def load_api_config(api_name: str) -> APIConfig:
             f"Endpoint '{api_name}' is missing required field 'base_url'."
         )
 
+    # The key may be written beside the rest of the endpoint's settings, or on
+    # its own in settings.toml. Beside the rest is what somebody following the
+    # example in the interface will do, and it used to be read and thrown away:
+    # "key" was not a field this knew about, so it went into `extra` and the
+    # endpoint was reported as having no credential while one sat in the file.
+    #
+    # settings.toml is looked at first because it is this installation's own
+    # and is never shared or layered — so a personal key there overrides a
+    # group's without anybody having to arrange it.
     credential_path = credential_path_for_endpoint(api_name)
-    api_key = settings_store.get_value(credential_path) or ""
+    api_key = settings_store.get_value(credential_path) or str(raw.get("key", "") or "")
     if not api_key:
         raise ValueError(
-            f"API key for '{api_name}' not found. "
-            f"Set it with: python main.py env set {credential_path}"
+            f"No API key for the endpoint '{api_name}'.\n"
+            "Add it to settings.toml, in your own files folder:\n"
+            f"    [endpoints.{api_name}]\n"
+            '    key = "..."\n'
+            "That file belongs to this installation alone — it is never shared "
+            "and never syncs anywhere.\n"
+            "The key can go beside the rest of the endpoint's settings instead, "
+            "in preferences.toml or the shared settings file, but a key in a "
+            "shared file is a key given to everyone who can read it."
         )
 
-    known_keys = {"name", "base_url", "openai_compatible", "default_model", "timeout", "verify_ssl"}
+    known_keys = {"name", "base_url", "openai_compatible", "default_model",
+                  "timeout", "verify_ssl", "key"}
     extra = {k: v for k, v in raw.items() if k not in known_keys}
 
     return APIConfig(

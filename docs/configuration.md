@@ -442,7 +442,7 @@ The next request includes it once more. If the provider still turns it down, tha
 
 An `[endpoints.<name>]` table describes an AI endpoint other than the built-in service — a model running on an HPC cluster or other self-hosted inference server, or a provider's direct API (many expose an OpenAI-compatible interface reachable with just a URL and a key).
 
-Definitions merge through the same three layers as every other setting. Only the credential is kept apart, in `settings.toml`, because credentials are never meant to be shared or layered.
+Definitions merge through the same three layers as every other setting, and so does the credential, in `settings.toml`, because credentials are never meant to be shared or layered.
 
 An endpoint must speak the OpenAI API's language, which nearly every self-hosted server and provider does; that is assumed unless you set `openai_compatible = false`, which makes the sandbox refuse it plainly instead of failing in a way that looks like the endpoint's fault. Setting `verify_ssl = false` turns off the check on the endpoint's certificate — sometimes the only way to reach a cluster with an internal one — and the sandbox writes a warning to the log each time it connects that way.
 
@@ -451,7 +451,7 @@ Calls to one of these are counted but carry no cost, and are reported on their o
 ### Defining one
 
 ```toml
-# settings.default.toml, or a shared file, or preferences.toml
+# preferences.toml, or the shared settings file your group follows
 [endpoints.my_cluster]
 name = "My HPC Cluster"
 base_url = "http://my-cluster.internal:8000/v1"
@@ -470,47 +470,46 @@ verify_ssl = false
 | `timeout` | No | `30` | Request timeout in seconds |
 | `verify_ssl` | No | `true` | Set `false` for an internal cluster with a self-signed certificate |
 
-`settings.default.toml` is tracked by git, so put definitions you're comfortable committing there or in a shared file, and anything specific to this installation in `preferences.toml`.
+**Not in `settings.default.toml`.** That file is inside the package: it is
+tracked by git, replaced whenever the sandbox is updated, and committable by
+accident. An endpoint put there is lost on the next update, or published. Use
+`preferences.toml` in your own files folder, or the shared settings file your
+group follows.
 
 ### Its API key
 
+**Put it in `settings.toml`.** That file belongs to this installation alone: it
+is never shared, never layered, and never syncs anywhere. It is where the
+professors' own API keys already live.
+
 ```toml
-# settings.toml
+# settings.toml, in your own files folder
 [endpoints.my_cluster]
 key = "sk-..."
 ```
 
-```bash
-Put the key in `settings.toml`:
+The key may instead go beside the rest of the endpoint's settings, in
+`preferences.toml` or in the shared settings file:
 
 ```toml
+# preferences.toml, or the shared settings file — see the warning below
 [endpoints.my_cluster]
-key = "…"
-```
-```
-
-### Using it
-
-```bash
-python main.py jh43 prompt -m my_cluster:llama-3-70b
+name = "My HPC Cluster"
+base_url = "http://my-cluster.internal:8000/v1"
+openai_compatible = true
+key = "sk-..."
 ```
 
-The part before the colon names the `[endpoints.<name>]` table; everything after is passed to that endpoint as the model name. The model catalogue is bypassed entirely. Token usage is still recorded.
+That works, and there are good reasons to want it — a departmental cluster with
+one credential everybody uses is the obvious one. But it is a risk you are
+taking on deliberately: a key in a shared file is a key given to everyone who
+can read that file, and a shared file usually lives somewhere that syncs.
 
-### Sending everything there
+`settings.toml` wins when both are set, so a personal key overrides a group's
+without anyone having to arrange it.
 
-Set `default_endpoint` to route every bare model name to an endpoint instead of the built-in service:
-
-```toml
-[config]
-default_endpoint = "my_cluster"
-```
-
-Unset — the default — bare model names go to the built-in service.
-
-See [CLI Reference → Specifying models](cli-reference.md#specifying-models) for the full syntax.
-
----
+Either way the key is stored as text anyone with the file can read. None of
+these files is tracked by git.
 
 ## External usage-data sources
 
@@ -639,8 +638,8 @@ pip install openpyxl
 | Web UI session secret | `settings.toml` (`webui.session_secret`) | No | N/A | ✅ by hand or in the browser / `--generate` | ✅ `/settings` |
 | Shared-settings pointer | `settings.toml` (`shared_settings.path`) | No — it's just a path | N/A | ✅ by hand or in the browser / `unset` | ✅ `/settings` |
 | A shared-settings draft to edit and place | Nowhere — handed to you, never saved | ✅ that's the point; you place it | N/A | ✅ `settings export-shared` | ✅ `/settings` → Choose settings for the group, or download the whole file |
-| Endpoint API keys | `settings.toml` (`endpoints.<name>.key`) | No | N/A | ✅ by hand or in the browser / `unset` | ✅ `/settings` — one field per endpoint already defined |
-| Endpoint definitions | `settings.default.toml`, a shared file, or `preferences.toml` | ✅ definitions may live in the tracked file or a shared one | ✅ `preferences.toml` wins | ❌ hand-edit TOML | ❌ read-only on `/settings`, with a copyable snippet |
+| Endpoint API keys | beside the definition, or `settings.toml` | ✅ if the group shares one credential | ✅ `settings.toml` wins | ❌ hand-edit TOML | ❌ |
+| Endpoint definitions | `preferences.toml`, or a shared file — never the package | ✅ a group can share one | ✅ `preferences.toml` wins | ❌ hand-edit TOML | ❌ |
 | Model pricing | `model_catalog.json`, your files folder | Not designed for it — kept separate precisely to avoid concurrent-write conflicts | N/A | Indirectly: `-m provider/model` registers pricing | ❌ |
 | Runtime defaults | `settings.default.toml`, in the package | N/A — this is the shared baseline | ✅ `preferences.toml` | ❌ hand-edit TOML | ❌ |
 | Shared runtime defaults | Wherever `shared_settings.path` points | ✅ that's the point | ✅ `preferences.toml` still wins | Pointer only, by hand | Pointer only, via `/settings` |

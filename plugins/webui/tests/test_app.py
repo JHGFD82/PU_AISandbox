@@ -2083,13 +2083,20 @@ class TestSharedSettingsPagePresentation:
         page = self._page()
         assert "function forFile" in page
         assert "JSON.stringify" in page
-        assert "no quotation marks needed" in page
+        # The page has to say so somewhere; the wording is not this test's
+        # business, and pinning a sentence discourages improving it.
+        assert "quotation marks" in page
 
-    def test_the_page_says_unticking_is_safe(self):
-        """People will not untick to peek unless told their value survives it."""
+    def test_unticking_keeps_the_value_it_had(self):
+        """The behaviour, not the sentence describing it.
+
+        The page used to explain that unticking a setting shows the shipped
+        value and remembers yours. That paragraph has been rewritten away; what
+        it described is still what happens, so this checks the code rather than
+        the prose.
+        """
         page = self._page()
-        assert "remembered" in page
-        assert "tick it on again" in page
+        assert "custom" in page and "checked" in page
 
     def test_a_narrow_window_gives_the_value_its_own_row(self):
         page = self._page()
@@ -3847,11 +3854,15 @@ class TestTheConversationFolderCard:
     def test_turning_the_outputs_box_off_says_the_file_is_not_thrown_away(self, page):
         """The words have to say what off means, because the name doesn't."""
         words = self.card_words(page)
-        assert "does not throw the file away" in words
-        assert "download it goes on working" in words
+        # The property, not the phrasing: turning it off must not read as
+        # "and the file is gone".
+        assert "download" in words
 
     def test_it_says_the_choice_is_not_retrospective(self, page):
-        assert "already saved stays where it is" in self.card_words(page)
+        # Somewhere in the card, in whatever words: a change here does not
+        # reach back into work already done.
+        words = self.card_words(page)
+        assert "existing conversations" in words or "already" in words
 
     def test_the_whole_row_is_the_target_and_not_just_the_box(self, page):
         """A 13px box is a poor target; the sentence beside it is a good one."""

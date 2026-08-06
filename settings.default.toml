@@ -5,10 +5,14 @@
 # put in it, without touching this file. Default models are in
 # model_catalog.json, alongside preferences.toml, under [config.defaults].
 #
-# [endpoints.<name>] and [config].default_endpoint are also supported here
-# (or, more commonly, in preferences.toml or a shared file) — see
-# "Alternate AI Endpoint Connections" in docs/configuration.md. The
-# credential for each endpoint is never stored here; it lives in settings.toml.
+# [endpoints.<name>] and [config].default_endpoint belong in preferences.toml,
+# or in a shared settings file — not here. This file is inside the package: it
+# is tracked by git, replaced whenever the sandbox is updated, and committable
+# by accident, so an endpoint put here is lost on the next update or published
+# by mistake. Its credential belongs in settings.toml, which is private to one
+# installation and is never shared; it can sit in the same table instead, at
+# your own risk, and settings.toml wins when both are set. See "Alternate AI
+# endpoints" in docs/configuration.md.
 
 [prompt]
 temperature = 0.7          # More creative than translation — suitable for open-ended prompts
