@@ -90,7 +90,7 @@
   <div id="page" role="tabpanel" aria-labelledby="tab-system">
     <div class="card" id="section-professors" data-section="professors" data-tab="system">
       <h2>Professors</h2>
-      <p class="hint">Each professor needs a Princeton AI Sandbox API key (from OIT) before they can use this tool. Keys are never shown once saved — only whether one is set.</p>
+      <p class="hint">Each professor, or faculty-supervised personnel, needs a Princeton AI Sandbox API key before they can use this tool. Keys are never displayed in this tool after they are saved.</p>
       <div id="professors-list"></div>
       <form id="add-professor-form">
         <div class="inline-fields">
@@ -116,15 +116,6 @@
             <input type="password" id="prof-backup-key">
           </div>
         </div>
-        <p class="hint field-note">
-          The <strong>netID</strong> is the university username this person signs in with —
-          <code>jh43</code>, not <code>Jeff Heller</code> and not an email address. It is how the
-          sandbox knows one person from another: it picks their API key, names their usage file,
-          and is what gets typed to run a command as them. Letters and digits only, and it can't
-          be changed later without removing them and adding them again.
-          The <strong>display name</strong> is only ever shown to people, so write it however reads best.
-          A <strong>backup key</strong>, if they have one, is used automatically whenever the primary key stops working.
-        </p>
         <div id="add-professor-error" class="form-error" style="display:none"></div>
         <button type="submit" id="add-professor-btn">Add professor</button>
       </form>
@@ -132,12 +123,12 @@
 
     <div class="card" id="section-webui" data-section="webui" data-tab="webui">
       <h2>Web UI</h2>
-      <p class="hint">Controls for this browser interface itself: the unlock passphrase and the session-signing secret.</p>
+      <p class="hint">Controls for this web-based interface.</p>
 
       <div class="row">
         <div class="main">
           <div class="name">Unlock passphrase</div>
-          <div class="sub">Leave unconfigured to run with no gate at all (fine for a 127.0.0.1-only setup).</div>
+          <div class="sub">Leave unset to enter the web UI without entering a passphrase. Suitable for installations on computers with only one user.</div>
         </div>
         <span class="badge" id="passphrase-badge"></span>
       </div>
@@ -159,7 +150,7 @@
       <div class="row" style="margin-top:0.75rem">
         <div class="main">
           <div class="name">Session secret</div>
-          <div class="sub">Keeps browser sessions signed in across server restarts.</div>
+          <div class="sub">Keeps browser sessions signed in across server restarts. </div>
         </div>
         <span class="badge" id="session-secret-badge"></span>
       </div>
@@ -176,46 +167,30 @@
     </div>
 
     <div class="card" id="section-folder" data-section="folder" data-tab="webui">
-      <h2>What each conversation keeps</h2>
-      <p class="hint">Every conversation has a folder of its own on this computer,
-        holding what was said and the settings behind it. These two decide whether the
-        documents also sit there. Open a conversation's folder from the ⋯ menu beside it
-        in the list.</p>
+      <h2>Conversation Attachment Storage</h2>
+      <p class="hint">Every conversation is stored within the data folder that is installed with this package (typically placed in your user folder unless you specify otherwise). Chat messages and settings are stored in folders for each conversation, and you can include other files based on the choices you select below.</p>
+      <p class="hint">Any changes to these settings will apply to new conversations, but existing conversations will retain their current content.</p>
 
       <label class="choice">
         <input type="checkbox" id="keep-supplied-documents">
         <span>
           <span class="name">Keep the documents I supply</span>
-          <span class="sub">A copy of each document handed to a translation or
-            transcription is kept in that conversation's folder. Off by default: the text
-            is read out of it and kept either way, so this is about having the original
-            to hand — worth it for work you may need to show or cite, and worth the disk
-            space it takes when it isn't.</span>
+          <span class="sub">Each document that is added through the use of a plugin is copied into the folder for the resulting conversation.</span>
         </span>
       </label>
 
       <label class="choice">
         <input type="checkbox" id="keep-job-outputs">
         <span>
-          <span class="name">Keep the files a job produces</span>
-          <span class="sub">A finished translation or transcription is kept in the
-            conversation's folder, so the whole piece of work — what was asked, what it
-            was given, and what came back — stays together. Turning this off does not
-            throw the file away: it goes to a shared folder of results instead, and the
-            link to download it goes on working. What changes is that deleting the
-            conversation no longer deletes it.</span>
+          <span class="name">Keep all files a job produces</span>
+          <span class="sub">The files supplied for a job, and the files that are generated by the job, are kept in the conversation's folder. The option to download the resulting file(s) from a job is always presented regardless of this setting.</span>
         </span>
       </label>
-
-      <p class="hint" id="folder-note">Applies to work started from now on. Anything
-        already saved stays where it is.</p>
     </div>
 
     <div class="card" id="section-shared" data-section="shared" data-tab="system">
       <h2>Shared settings</h2>
-      <p class="hint">A shared settings file lets a group of installations — everyone
-        you look after, say — follow the same tuned defaults, without anybody editing
-        their own copy by hand.</p>
+      <p class="hint">If you are part of a team with multiple users, you can share settings across all installations.</p>
 
       <label for="shared-path">Shared settings file path</label>
       <form class="inline" id="shared-path-form">
@@ -225,16 +200,12 @@
         <button type="submit">Save</button>
         <button type="button" class="secondary" id="clear-shared-path-btn">Clear</button>
       </form>
-      <p class="hint">Point this at a file your group already has. The name is
-        yours to choose — what's stored is the path, not the name.</p>
+      <p class="hint">Set the path above to the location of your shared settings file, if one has been created for your team.</p>
 
-      <p class="hint" style="margin-top:1rem"><strong>Looking after the shared file yourself?</strong>
-        Download a draft listing every setting this sandbox and its plugins have,
-        all commented out, with each author's explanation. Uncomment what the
-        group should share, rename it if you like, put it somewhere everyone can
-        read, and tell each member to enter that path above. If this installation
-        already points at a shared file, its decisions are carried across and
-        anything new since is marked <code>NEW:</code>.</p>
+      <p class="hint" style="margin-top:1rem"><strong>Create a shared settings file for your team</strong></p>
+
+      <p class="hint">Use the Shared Settings Picker to create a new shared settings file in a new tab, or download the draft to edit it manually in a text editor.</p>
+
       <p>
         <!-- Its own tab, not this modal: it is a long list to work through, and
              losing it by clicking away from the settings dialog would mean
@@ -242,19 +213,16 @@
              the new tab a reference back to this one. -->
         <a href="/shared-settings" target="_blank" rel="noopener">
           <button type="button">
-            Choose settings for the group…
+            Shared Settings Picker
             <svg class="external-icon" width="11" height="11" viewBox="0 0 32.5293 26.9238"><path d="M22.6172 5.21484L22.6172 10.4004L20.8887 10.4004L20.8887 5.20508C20.8887 2.98828 19.6387 1.73828 17.4219 1.73828L6.85547 1.73828C4.62891 1.73828 3.38867 2.98828 3.38867 5.20508L3.38867 21.7188C3.38867 23.9453 4.62891 25.1953 6.85547 25.1953L17.4219 25.1953C19.6387 25.1953 20.8887 23.9453 20.8887 21.7188L20.8887 16.5137L22.6172 16.5137L22.6172 21.7188C22.6172 25.0684 20.7617 26.9238 17.4219 26.9238L6.86523 26.9238C3.51562 26.9238 1.65039 25.0684 1.65039 21.7188L1.65039 5.21484C1.65039 1.86523 3.51562 0.00976562 6.86523 0.00976562L17.4219 0.00976562C20.7617 0.00976562 22.6172 1.86523 22.6172 5.21484Z" fill="currentColor" fill-opacity="0.5"/><path d="M12.334 13.457C12.334 13.916 12.7148 14.3066 13.1641 14.3066L26.2793 14.3066L29.3945 14.1797C29.7949 14.1602 30.127 13.8477 30.127 13.457C30.127 13.0566 29.7949 12.7441 29.3945 12.7246L26.2793 12.5977L13.1641 12.5977C12.7148 12.5977 12.334 12.9883 12.334 13.457ZM24.834 9.16992C24.834 9.375 24.9219 9.60938 25.0977 9.76562L27.3242 11.8848L28.9746 13.457L27.3242 15.0098L25.0977 17.1387C24.9219 17.2949 24.834 17.5195 24.834 17.7246C24.834 18.1641 25.1562 18.5059 25.5957 18.5059C25.8203 18.5059 25.9961 18.418 26.1621 18.252L30.2246 14.0723C30.4395 13.8574 30.5078 13.6719 30.5078 13.457C30.5078 13.2324 30.4395 13.0469 30.2246 12.832L26.1621 8.65234C25.9961 8.48633 25.8203 8.38867 25.5957 8.38867C25.1562 8.38867 24.834 8.7207 24.834 9.16992Z" fill="currentColor"/></svg>
             <span class="visually-hidden">(opens in a new tab)</span>
           </button>
         </a>
         <a id="download-shared-draft" href="/api/settings/shared-draft"
            download="shared-settings.toml">
-          <button type="button" class="secondary">Download the whole file instead</button>
+          <button type="button" class="secondary">Download Shared Settings TOML</button>
         </a>
       </p>
-      <p class="hint">The first opens a list of every setting, with what each one
-        does, so you can tick what the group should share. The second hands you
-        the same file with everything commented out, to edit in a text editor.</p>
 
     </div>
 
