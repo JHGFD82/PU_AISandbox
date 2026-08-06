@@ -4,7 +4,8 @@ Tests for src/settings_store.py:
   - get_shared_settings_path
   - get_professors / add_professor / remove_professor
   - get_source_id / set_source_id
-  - get_configured_sources / add_source / remove_source / get_shared_write_source
+  - get_configured_sources / set_professor_usage_source /
+    clear_professor_usage_source / get_shared_write_source
 
 Every test redirects settings_store.SETTINGS_PATH to a tmp_path location, so
 nothing here ever touches the real repo-root settings.toml file.
@@ -268,25 +269,95 @@ class TestSourceId:
 # Usage sources
 # ---------------------------------------------------------------------------
 
+def _person(netid="smith", name="Prof. Smith"):
+    """Add somebody, since a usage folder now belongs to a person."""
+    settings_store.add_professor(netid, name, "sk-test")
+
+
 class TestConfiguredSources:
 
     def test_empty_when_no_file(self):
         assert settings_store.get_configured_sources() == []
 
-    def test_returns_added_sources(self):
-        settings_store.add_source("Prof. Smith", "/tmp/smith-shared", mode="shared-write", professor="smith")
+    def test_a_person_with_no_folder_is_not_a_source(self):
+        _person()
+        assert settings_store.get_configured_sources() == []
+
+    def test_returns_the_folder_set_on_a_person(self):
+        _person()
+        settings_store.set_professor_usage_source(
+            "smith", "/tmp/smith-shared", mode="shared-write")
         sources = settings_store.get_configured_sources()
         assert len(sources) == 1
-        assert sources[0].label == "Prof. Smith"
+        assert sources[0].path == "/tmp/smith-shared"
         assert sources[0].mode == "shared-write"
         assert sources[0].professor == "smith"
 
-    def test_label_defaults_to_path_when_missing(self):
-        settings_store.set_value("usage_sources.source_id", "")  # ensure table exists
-        doc_path = settings_store.SETTINGS_PATH
-        doc_path.write_text('[usage_sources]\n[[usage_sources.external]]\npath = "/some/path"\n')
+    def test_the_label_is_the_persons_name(self):
+        """Nobody types a label any more, so it is what they are already called."""
+        _person("jh43", "Jeff Heller")
+        settings_store.set_professor_usage_source("jh43", "/tmp/jh43")
+        assert settings_store.get_configured_sources()[0].label == "Jeff Heller"
+
+    def test_one_folder_each(self):
+        _person("smith")
+        _person("johnson", "Prof. Johnson")
+        settings_store.set_professor_usage_source("smith", "/tmp/smith")
+        settings_store.set_professor_usage_source("johnson", "/tmp/johnson")
+        assert sorted(s.path for s in settings_store.get_configured_sources()) == [
+            "/tmp/johnson", "/tmp/smith"]
+
+    def test_setting_a_second_folder_replaces_the_first(self):
+        _person()
+        settings_store.set_professor_usage_source("smith", "/tmp/smith-v1")
+        settings_store.set_professor_usage_source("smith", "/tmp/smith-v2")
         sources = settings_store.get_configured_sources()
-        assert sources[0].label == "/some/path"
+        assert len(sources) == 1
+        assert sources[0].path == "/tmp/smith-v2"
+
+    def test_read_only_is_what_you_get_without_saying(self):
+        _person()
+        settings_store.set_professor_usage_source("smith", "/tmp/smith")
+        assert settings_store.get_configured_sources()[0].mode == "read-only"
+
+
+class TestSourcesWrittenTheOldWay:
+    """An installation set up before folders belonged to people keeps working."""
+
+    def _write_old_shape(self, **extra):
+        lines = ['[usage_sources]', '[[usage_sources.external]]',
+                 'label = "Prof. Smith"', 'path = "/tmp/old-smith"',
+                 'mode = "shared-write"', 'professor = "smith"']
+        for key, value in extra.items():
+            lines.append(f'{key} = "{value}"')
+        settings_store.SETTINGS_PATH.write_text("\n".join(lines) + "\n")
+
+    def test_an_old_entry_is_still_read(self):
+        self._write_old_shape()
+        sources = settings_store.get_configured_sources()
+        assert len(sources) == 1
+        assert sources[0].path == "/tmp/old-smith"
+        assert sources[0].label == "Prof. Smith"
+
+    def test_a_folder_on_the_person_wins_over_an_old_entry_for_them(self):
+        """Otherwise the same person would be counted twice, from two folders."""
+        self._write_old_shape()
+        _person()
+        settings_store.set_professor_usage_source("smith", "/tmp/new-smith")
+        sources = settings_store.get_configured_sources()
+        assert [s.path for s in sources] == ["/tmp/new-smith"]
+
+    def test_an_old_entry_for_somebody_else_is_kept(self):
+        self._write_old_shape()
+        _person("johnson", "Prof. Johnson")
+        settings_store.set_professor_usage_source("johnson", "/tmp/johnson")
+        assert sorted(s.path for s in settings_store.get_configured_sources()) == [
+            "/tmp/johnson", "/tmp/old-smith"]
+
+    def test_label_defaults_to_path_when_missing(self):
+        settings_store.SETTINGS_PATH.write_text(
+            '[usage_sources]\n[[usage_sources.external]]\npath = "/some/path"\n')
+        assert settings_store.get_configured_sources()[0].label == "/some/path"
 
     def test_entries_missing_path_are_skipped(self):
         settings_store.SETTINGS_PATH.write_text(
@@ -301,70 +372,98 @@ class TestSharedWriteSource:
         assert settings_store.get_shared_write_source("smith") is None
 
     def test_finds_matching_shared_write_source(self):
-        settings_store.add_source("Prof. Smith", "/tmp/smith-shared", mode="shared-write", professor="smith")
+        _person()
+        settings_store.set_professor_usage_source(
+            "smith", "/tmp/smith-shared", mode="shared-write")
         result = settings_store.get_shared_write_source("smith")
         assert result is not None
-        assert result.label == "Prof. Smith"
+        assert result.path == "/tmp/smith-shared"
 
     def test_matches_case_insensitively(self):
-        settings_store.add_source("Prof. Smith", "/tmp/smith-shared", mode="shared-write", professor="Smith")
+        _person("Smith")
+        settings_store.set_professor_usage_source(
+            "Smith", "/tmp/smith-shared", mode="shared-write")
         assert settings_store.get_shared_write_source("SMITH") is not None
 
     def test_read_only_source_never_matches(self):
-        settings_store.add_source("Prof. Johnson", "/tmp/johnson", mode="read-only", professor="smith")
+        _person("johnson", "Prof. Johnson")
+        settings_store.set_professor_usage_source(
+            "johnson", "/tmp/johnson", mode="read-only")
         assert settings_store.get_shared_write_source("johnson") is None
 
     def test_source_for_different_professor_does_not_match(self):
-        settings_store.add_source("Prof. Smith", "/tmp/smith-shared", mode="shared-write", professor="smith")
+        _person()
+        settings_store.set_professor_usage_source(
+            "smith", "/tmp/smith-shared", mode="shared-write")
         assert settings_store.get_shared_write_source("johnson") is None
 
 
-class TestAddSource:
-
-    def test_a_read_only_source_needs_a_professor_too(self):
-        """Whose spending is being followed is a decision per person: one may
-        be content for work to be done from a shared folder while another
-        wants only their spending seen from it."""
-        with pytest.raises(ValueError, match="professor"):
-            settings_store.add_source("Johnson", "/tmp/johnson", mode="read-only")
-
-    def test_shared_write_without_professor_raises(self):
-        with pytest.raises(ValueError, match="professor"):
-            settings_store.add_source("Smith", "/tmp/smith", mode="shared-write")
+class TestSetProfessorUsageSource:
 
     def test_invalid_mode_raises(self):
+        _person()
         with pytest.raises(ValueError, match="mode"):
-            settings_store.add_source("Smith", "/tmp/smith", mode="read-write", professor="smith")
+            settings_store.set_professor_usage_source(
+                "smith", "/tmp/smith", mode="read-write")
 
-    def test_adding_same_label_twice_replaces(self):
-        settings_store.add_source("Smith", "/tmp/smith-v1", mode="read-only", professor="smith")
-        settings_store.add_source("Smith", "/tmp/smith-v2", mode="read-only", professor="smith")
-        sources = settings_store.get_configured_sources()
-        assert len(sources) == 1
-        assert sources[0].path == "/tmp/smith-v2"
+    def test_a_folder_is_needed(self):
+        _person()
+        with pytest.raises(ValueError, match="location"):
+            settings_store.set_professor_usage_source("smith", "   ")
+
+    def test_somebody_who_was_never_added_raises(self):
+        """The netID would otherwise become a new, keyless person nobody meant."""
+        with pytest.raises(ValueError, match="added yet"):
+            settings_store.set_professor_usage_source("nobody", "/tmp/nobody")
+
+    def test_matches_however_it_was_capitalised(self):
+        _person("smith")
+        assert settings_store.set_professor_usage_source("SMITH", "/tmp/x") == "smith"
+
+    def test_surrounding_space_is_dropped(self):
+        _person()
+        settings_store.set_professor_usage_source("smith", "  /tmp/smith  ")
+        assert settings_store.get_configured_sources()[0].path == "/tmp/smith"
 
     def test_persists_to_disk(self):
-        settings_store.add_source("Smith", "/tmp/smith", mode="read-only", professor="smith")
-        content = settings_store.SETTINGS_PATH.read_text()
-        assert "Smith" in content
+        _person()
+        settings_store.set_professor_usage_source("smith", "/tmp/smith")
+        assert "usage_path" in settings_store.SETTINGS_PATH.read_text()
+
+    def test_their_key_is_left_alone(self):
+        _person()
+        settings_store.set_professor_usage_source("smith", "/tmp/smith")
+        assert settings_store.get_professors()["smith"]["key"] == "sk-test"
 
 
-class TestRemoveSource:
+class TestClearProfessorUsageSource:
 
-    def test_remove_existing_returns_true(self):
-        settings_store.add_source("Smith", "/tmp/smith", mode="read-only", professor="smith")
-        assert settings_store.remove_source("Smith") is True
+    def test_clearing_returns_true_and_forgets_the_folder(self):
+        _person()
+        settings_store.set_professor_usage_source("smith", "/tmp/smith")
+        assert settings_store.clear_professor_usage_source("smith") is True
         assert settings_store.get_configured_sources() == []
 
-    def test_remove_missing_returns_false(self):
-        assert settings_store.remove_source("Nobody") is False
+    def test_clearing_when_there_was_nothing_returns_false(self):
+        _person()
+        assert settings_store.clear_professor_usage_source("smith") is False
 
-    def test_remove_leaves_other_sources_intact(self):
-        settings_store.add_source("Smith", "/tmp/smith", mode="read-only", professor="smith")
-        settings_store.add_source("Johnson", "/tmp/johnson", mode="read-only", professor="johnson")
-        settings_store.remove_source("Smith")
-        labels = [s.label for s in settings_store.get_configured_sources()]
-        assert labels == ["Johnson"]
+    def test_clearing_for_somebody_unknown_returns_false(self):
+        assert settings_store.clear_professor_usage_source("nobody") is False
+
+    def test_the_person_is_not_removed_with_their_folder(self):
+        _person()
+        settings_store.set_professor_usage_source("smith", "/tmp/smith")
+        settings_store.clear_professor_usage_source("smith")
+        assert settings_store.get_professors()["smith"]["key"] == "sk-test"
+
+    def test_clearing_one_leaves_another_persons_folder_alone(self):
+        _person("smith")
+        _person("johnson", "Prof. Johnson")
+        settings_store.set_professor_usage_source("smith", "/tmp/smith")
+        settings_store.set_professor_usage_source("johnson", "/tmp/johnson")
+        settings_store.clear_professor_usage_source("smith")
+        assert [s.path for s in settings_store.get_configured_sources()] == ["/tmp/johnson"]
 
 
 class TestExternalSourceResolvedPath:

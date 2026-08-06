@@ -137,10 +137,10 @@ def _get_plugins() -> dict:
 # what this sandbox can send work to. It is late on a first run because adding
 # one needs a professor's key, which on a first run doesn't exist yet.
 _SETTINGS_ORDER_FIRST_RUN = [
-    "professors", "external_sources", "webui", "shared", "endpoints", "models", "folder",
+    "professors", "webui", "shared", "endpoints", "models", "folder",
 ]
 _SETTINGS_ORDER_REPEAT = [
-    "folder", "shared", "endpoints", "models", "professors", "webui", "external_sources",
+    "folder", "shared", "endpoints", "models", "professors", "webui",
 ]
 
 
@@ -242,10 +242,9 @@ class GenerateValueBody(BaseModel):
 
 
 class SourceBody(BaseModel):
-    label: str
+    netid: str
     path: str
     mode: str = "read-only"
-    professor: str | None = None
 
 
 class PickPathBody(BaseModel):
@@ -393,7 +392,12 @@ def _settings_snapshot() -> dict:
             "key_set": field_status.get(cred_path, False),
         })
 
-    sources = settings_store.get_configured_sources()
+    # Keyed by netID, so each person's row can show their own folder without
+    # searching a list for themselves.
+    usage_folders = {
+        (s.professor or "").lower(): {"path": s.path, "mode": s.mode}
+        for s in settings_store.get_configured_sources() if s.professor
+    }
 
     return {
         "has_professors": has_professors,
@@ -411,6 +415,7 @@ def _settings_snapshot() -> dict:
                 "name": prof["name"],
                 "has_key": bool(prof.get("key")),
                 "has_backup_key": bool(prof.get("backup_key")),
+                "usage": usage_folders.get(netid.lower()),
             }
             for netid, prof in professors.items()
         ],
@@ -422,13 +427,7 @@ def _settings_snapshot() -> dict:
             "shared_settings_path": settings_store.get_value("shared_settings.path"),
             "endpoints": endpoints,
         },
-        "sources": {
-            "source_id": settings_store.get_source_id(),
-            "external": [
-                {"label": s.label, "path": s.path, "mode": s.mode, "professor": s.professor}
-                for s in sources
-            ],
-        },
+        "source_id": settings_store.get_source_id(),
     }
 
 
@@ -939,19 +938,21 @@ def create_app() -> FastAPI:
         )
 
     @app.post("/api/settings/sources")
-    async def api_add_source(request: Request, body: SourceBody):
+    async def api_set_usage_source(request: Request, body: SourceBody):
         _require_unlocked(request)
         try:
-            settings_store.add_source(body.label, body.path, mode=body.mode, professor=body.professor)
+            settings_store.set_professor_usage_source(
+                body.netid, body.path, mode=body.mode
+            )
         except ValueError as e:
             raise HTTPException(400, str(e)) from e
         return {"ok": True}
 
     @app.delete("/api/settings/sources")
-    async def api_remove_source(request: Request, label: str):
+    async def api_clear_usage_source(request: Request, netid: str):
         _require_unlocked(request)
-        if not settings_store.remove_source(label):
-            raise HTTPException(404, f"No configured source named '{label}'.")
+        if not settings_store.clear_professor_usage_source(netid):
+            raise HTTPException(404, f"No usage folder is set for '{netid}'.")
         return {"ok": True}
 
     # ── Models ───────────────────────────────────────────────────────────────

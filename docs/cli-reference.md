@@ -176,27 +176,33 @@ python main.py jh43 usage daily
 python main.py jh43 usage daily 2026-03-01
 ```
 
-### `usage sources` — other installations' data
+### `usage sources` — folders kept somewhere else
 
-Registers another installation's `data/` folder so its usage appears in this one's reports. See [Configuration → External usage-data sources](configuration.md#external-usage-data-sources).
+Lists every folder this installation reads someone's work from, and who each
+belongs to. See [Configuration → Somebody's folder somewhere
+else](configuration.md#somebodys-folder-somewhere-else).
 
 ```bash
 python main.py jh43 usage sources list
 ```
 
-Sources are added and removed on the web interface's **Settings** page, or by
-editing `[usage_sources]` in `settings.toml` yourself:
+A folder belongs to the person whose work it holds, so it is set on them — on
+the web interface's **Settings** page, beside their name, or by adding two lines
+to their table in `settings.toml`:
 
 ```toml
-[usage_sources."Prof. Smith"]
-path = "/path/to/their/data"
-mode = "read-only"        # or "shared-write" if this installation writes there too
-professor = "jh43"        # whose usage this source holds — required in both modes
+[professors.jh43]
+name = "Jeff Heller"
+key = "..."
+usage_path = "/path/to/their/data"
+usage_mode = "read-only"   # or "shared-write"
 ```
 
-`read-only` means only the other side writes there. `shared-write` means this
-installation records usage there as well. `professor` is required either way:
-one person may share a folder for work and another only for tracking.
+`read-only` adds what is already in that folder to their spending and never
+changes it. `shared-write` makes it their folder: what each call cost and their
+conversations both go in it, so several computers sharing one folder keep one
+running total and one set of conversations. Use it only where work is genuinely
+done under that person's key.
 
 ---
 

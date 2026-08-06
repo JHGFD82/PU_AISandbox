@@ -66,6 +66,7 @@ key = "sk-...primary_key..."
 - `name` — their display name. Shown in reports and in the web interface's person picker and nowhere else, so write it however reads best.
 - `key` — primary PortKey API key, obtained through Princeton OIT.
 - `backup_key` — used if the primary key fails. A warning is printed when it is.
+- `usage_path`, `usage_mode` — optional; only where their work is kept somewhere other than this computer, such as a synced folder shared with them. See [Somebody's folder somewhere else](#somebodys-folder-somewhere-else).
 
 ### Why netIDs
 
@@ -393,6 +394,8 @@ data/conversations/<netid>/c_8f2a1c9de4b7a501/
     outputs/              files a translation or transcription job produced
 ```
 
+Somebody with a shared folder set to record work into keeps their conversations there instead, beside the record of what that work cost — see [Somebody's folder somewhere else](#somebodys-folder-somewhere-else).
+
 The point is that a whole piece of work sits in one place you can open, keep, back up, or cite. Each conversation's **⋮** menu has **Open this conversation's folder**, which opens it in Finder or Explorer. (That only appears when the browser is on the same computer as the sandbox — a folder can only be opened on the machine it is on.)
 
 Conversations saved before this existed are moved into folders automatically, once, the first time the web interface reads them. Nothing is copied and nothing is left behind.
@@ -511,40 +514,87 @@ without anyone having to arrange it.
 Either way the key is stored as text anyone with the file can read. None of
 these files is tracked by git.
 
-## External usage-data sources
+## Somebody's folder somewhere else
 
-`[usage_sources]` in `settings.toml` lists other installations whose usage data this one should include when building reports. It's managed entirely through `usage sources` commands rather than hand-edited.
+One person's work is normally kept in this installation's own files folder.
+It doesn't have to be. Two situations put it elsewhere:
 
-This lets one installation report on another's spending. For example: a professor runs their own copy pointed at a Dropbox-synced folder, and whoever manages several people's accounts registers that folder as a source on their own installation, so one report covers everyone without anyone copying files around.
+- **You want to see someone else's spending.** A professor runs their own copy,
+  pointed at a folder that syncs — Dropbox, OneDrive, a shared drive. Whoever
+  looks after several people's accounts names that folder on their own
+  installation, and one report then covers everybody without anyone copying
+  files around.
+- **One person works on several computers.** All of them use the same synced
+  folder, and each keeps the same running total and the same conversations.
+  There is no limit on how many: every API call writes its own small file,
+  named after the computer that wrote it and never edited again, and every
+  conversation is a folder of its own — so no two computers can ever make
+  conflicting edits to one file. Five machines and one folder is the ordinary
+  case.
 
-Two modes:
+The folder belongs to the person whose work it holds, so it is recorded on
+them. Set it on the web interface's **Settings** page — open **Shared folder**
+beside their name — or add two lines to their table in `settings.toml`:
 
-Every source names whose usage it holds, and only that person's is taken from it — a department folder may hold three professors' records while your arrangement covers one of them.
+```toml
+[professors.jh43]
+name = "Jeff Heller"
+key = "..."
+usage_path = "/Users/heller/Dropbox/Sandbox-Shared/data"
+usage_mode = "shared-write"
+```
 
-- **`read-only`** (the default) — only the other installation writes there; this one just reads.
-- **`shared-write`** — both installations record usage there, one file per call, so a file-sync service never sees two conflicting edits to the same file.
+`usage_mode` is one of two things:
+
+- **`read-only`** (what you get if you leave it out) — adds what is already in
+  that folder to their spending, and never changes it. This is what following
+  somebody else's spending wants. Their conversations stay here, because
+  writing them into that folder would be writing.
+- **`shared-write`** — this is their folder, and their work goes in it: what
+  each call cost, and their conversations. This is what several computers
+  keeping one running total want. Use it only where work is genuinely done
+  under that person's key.
+
+### What is in it
+
+A shared folder holds one person, so nothing inside it is filed under a netID —
+the folder already says whose it is:
+
+```
+their-folder/
+    calls/2026-08/            one file per API call this month: what it cost
+        20260806T174536_ce762d_toms-mac.json
+    archives/2026-07.json     a month that has ended, folded into one file
+    conversations/c_8f2a1c9de4b7a501/
+        conversation.json     exactly as described above
+        attachments/
+        outputs/
+```
+
+Each call's file is named after the moment it happened, a few random
+characters, and the computer that wrote it — so two computers writing at the
+same instant still write two files. Nothing rewrites a file that already
+exists, which is what makes a sync service safe here.
+
+One folder each, and it is per person on purpose — one professor may be happy
+for work to be done from a shared folder while another wants only their
+spending followed. To see what is configured:
 
 ```bash
 python main.py jh43 usage sources list
 ```
 
-Sources are added and removed on the web interface's **Settings** page, or by
-writing them into `settings.toml` yourself:
+That lists every folder, for everybody. A netID is asked for because every
+`usage` subcommand asks for one, but this subcommand doesn't use it.
+
+Every file written into a shared folder is named after the installation that
+wrote it. That name is worked out from the computer; to set it yourself, put it
+in `settings.toml`:
 
 ```toml
-[usage_sources."Prof. Smith"]
-path = "/path/to/shared/data"
-mode = "read-only"
-professor = "jh43"
-
-[usage_sources."This installation"]
-path = "/path/to/shared/data"
-mode = "shared-write"
-professor = "jh43"
+[usage_sources]
+source_id = "toms-mac"
 ```
-
-
-`add` prompts for anything you don't pass as a flag. A netID is required on the command line for consistency with every other `usage` subcommand, even though the source list itself isn't scoped to one person — see `src/settings_store.py`.
 
 ---
 
@@ -644,6 +694,6 @@ pip install openpyxl
 | Runtime defaults | `settings.default.toml`, in the package | N/A — this is the shared baseline | ✅ `preferences.toml` | ❌ hand-edit TOML | ❌ |
 | Shared runtime defaults | Wherever `shared_settings.path` points | ✅ that's the point | ✅ `preferences.toml` still wins | Pointer only, by hand | Pointer only, via `/settings` |
 | Plugin defaults | Each plugin's own directory, tracked by git | N/A | ❌ no per-plugin override file | ❌ hand-edit TOML | ❌ |
-| External usage sources | `settings.toml` (`[usage_sources]`) | ✅ that's the point — it points at another installation's `data/` folder | N/A | ✅ `usage sources list`; add and remove by hand | ✅ `/settings` |
+| Where a person's work is kept | `settings.toml` (`usage_path` on the person) | ✅ that's the point — it points at another installation's `data/` folder | N/A | ✅ `usage sources list`; add and remove by hand | ✅ `/settings` |
 
 Every "✅ `/settings`" row is served by the web interface's `/settings` route (`plugins/webui/src/templates/settings.html` and the `/api/settings/*` routes in `plugins/webui/src/app.py`), behind the same unlock passphrase as the rest of it. A first-time visitor with nobody configured is sent straight there rather than to an empty chat screen, and the section order flips depending on whether anyone is configured yet — people first on an empty installation, shared settings first once there's at least one person, since that's the more likely thing to come back and adjust.

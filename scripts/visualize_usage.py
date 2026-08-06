@@ -66,11 +66,11 @@ def load_all_data() -> dict:
     """
     result: dict = {}
     for _label, root, only_professor in get_configured_data_roots():
-        tree = load_usage_tree(root)
+        # A shared folder belongs to one person and has nothing inside it
+        # naming them, so it is read as theirs. This installation's own data/
+        # folder holds everybody and says so in each path, so it is not.
+        tree = load_usage_tree(root, only_professor)
         for prof, months in tree.items():
-            # A source stands for one person's usage unless it says otherwise,
-            # so a department folder holding three professors contributes the
-            # one it was configured for and not the other two.
             if only_professor and prof != only_professor:
                 continue
             result.setdefault(prof, {}).update(months)

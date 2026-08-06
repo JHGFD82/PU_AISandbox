@@ -918,3 +918,55 @@ class TestWhetherTheOutputStaysWithTheConversation:
                                          conversation_id=conv.id)
         assert found is not None and found.exists()
         assert found.read_text() == "translated"
+
+
+class TestAJobsOutputFollowsItsConversation:
+    """Whatever a job produces belongs inside the conversation that asked for
+    it. If these two worked out where conversations are kept differently, the
+    download link saved in a conversation would point at a file written
+    somewhere else entirely."""
+
+    @pytest.fixture
+    def real_resolution(self, _isolate_conversation_storage, monkeypatch):
+        """Let both modules work out where conversations go for themselves.
+
+        Every other test in this file pins them at a temp directory, which is
+        the one thing these tests must not do: what they are checking is that
+        the answer follows the person's settings.
+        """
+        monkeypatch.delattr(jobs, "_CONVERSATIONS_DIR", raising=False)
+        monkeypatch.delattr(conversation, "CONVERSATIONS_DIR", raising=False)
+
+    @pytest.fixture
+    def shared_folder(self, real_resolution, tmp_path, monkeypatch):
+        from src import settings_store
+
+        monkeypatch.setattr(settings_store, "SETTINGS_PATH", tmp_path / "settings.toml")
+        settings_store.add_professor("smith", "Prof. Smith", "sk-test")
+        settings_store.set_professor_usage_source(
+            "smith", str(tmp_path / "dropbox"), mode="shared-write")
+        return tmp_path / "dropbox"
+
+    def test_output_lands_in_the_shared_folder_with_the_conversation(self, shared_folder):
+        from plugins.webui.src.conversation import ConversationStore
+
+        store = ConversationStore("smith")
+        conv = store.create(title="Karonshu, folio 12", model="gpt-4o")
+        out = jobs.job_output_dir("smith", "job_1", conversation_id=conv.id)
+        assert out == shared_folder / "conversations" / conv.id / "outputs" / "job_1"
+        assert store._dir == out.parent.parent.parent
+
+    def test_a_job_with_no_conversation_still_goes_to_the_shared_folder(self, shared_folder):
+        out = jobs.job_output_dir("smith", "job_1")
+        assert out == shared_folder / "conversations" / "_job_outputs" / "job_1"
+
+    def test_without_a_shared_folder_it_stays_here(
+        self, real_resolution, tmp_path, monkeypatch
+    ):
+        from src import settings_store
+
+        monkeypatch.setattr(settings_store, "SETTINGS_PATH", tmp_path / "settings.toml")
+        settings_store.add_professor("smith", "Prof. Smith", "sk-test")
+        monkeypatch.setattr("src.paths.data_root", lambda: tmp_path / "data")
+        out = jobs.job_output_dir("smith", "job_1")
+        assert out == tmp_path / "data" / "conversations" / "smith" / "_job_outputs" / "job_1"

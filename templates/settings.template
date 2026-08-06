@@ -36,6 +36,20 @@
 # [professors.as12]
 # name = "Alice Smith"
 # key = "another_primary_key_here"
+#
+# Where somebody's work is kept somewhere other than this computer — because
+# they also work on another, or because several computers share one folder —
+# name that folder here.
+#
+# usage_path = "/Users/heller/Dropbox/Smith-Shared/data"
+# usage_mode = "read-only"     # only add what is there to their spending
+# usage_mode = "shared-write"  # their folder: what each call cost, and their
+#                              # conversations, both go in it
+#
+# A shared folder holds one person, so nothing in it is filed under a netID:
+#   their-folder/calls/2026-08/*.json    one file per call, never edited again
+#   their-folder/archives/2026-07.json   a month that has ended
+#   their-folder/conversations/c_.../
 
 # ── Alternate API endpoint keys ────────────────────────────────────────────────
 # For each [endpoints.<name>] entry you define in settings.default.toml,
@@ -70,21 +84,10 @@
 # The name is up to you — the sandbox reads whatever path you give here,
 # so call it after your group if that reads better.
 
-# ── External/remote usage-data sources (optional) ──────────────────────────────
-# Lets this installation include another installation's usage data when
-# building reports (e.g. a folder synced with Dropbox). See
-# `python main.py <netid> usage sources --help` for the full explanation.
-# This section is normally managed via that command rather than hand-edited.
+# ── What this installation is called (optional) ────────────────────────────────
+# Where a folder is shared between computers, every file written into it is
+# named after the computer that wrote it, so it is clear where each came from
+# and no two ever collide. Left unset, a name is worked out from this computer.
+# The folders themselves are set on each person, above.
 # [usage_sources]
-# source_id = ""
-#
-# [[usage_sources.external]]
-# label = "Prof. Johnson"          # read-only: only Johnson's own installation writes here
-# path = "/Volumes/shared-drive/johnson-sandbox/data"
-# mode = "read-only"
-#
-# [[usage_sources.external]]
-# label = "Prof. Smith"            # shared-write: both installations record usage here
-# path = "/Users/heller/Dropbox/Smith-Shared/data"
-# mode = "shared-write"
-# professor = "as12"
+# source_id = "toms-mac"

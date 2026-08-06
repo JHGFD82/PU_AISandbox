@@ -65,7 +65,8 @@
   #add-professor-form button[type=submit] { margin-top: 0.8rem; }
   /* Its own row, because a path is the longest value on this page. */
   .source-path-row { margin-top: var(--space-3); }
-  #add-source-form button[type=submit] { margin-top: var(--space-3); }
+  form[data-usage-for] button { margin-top: var(--space-3); }
+  form[data-usage-for] select { width: 100%; }
 </style>
 </head>
 <body>
@@ -92,6 +93,13 @@
       <h2>Professors</h2>
       <p class="hint">Each professor, or faculty-supervised personnel, needs a Princeton AI Sandbox API key before they can use this tool. Keys are never displayed in this tool after they are saved.</p>
       <div id="professors-list"></div>
+      <p class="hint field-note">
+        If someone&rsquo;s work belongs somewhere else &mdash; a folder shared
+        with them, or one synced between the computers they use &mdash; open
+        <strong>Shared folder</strong> beside their name and point this
+        installation at it. This installation is known as
+        <strong id="source-id"></strong> in the files it writes there.
+      </p>
       <form id="add-professor-form">
         <div class="inline-fields">
           <div>
@@ -309,49 +317,6 @@ key = "..."</div>
       </form>
     </div>
 
-    <div class="card" id="section-external_sources" data-section="external_sources" data-tab="system">
-      <h2>External usage-data sources</h2>
-      <p class="hint">Lets this installation combine another installation's usage data into reports — handy if you manage several professors' installations and want one combined view. This installation's own source id: <strong id="source-id"></strong></p>
-      <div id="sources-list"></div>
-      <form id="add-source-form">
-        <!-- Two rows rather than four boxes in one. The path is the longest
-             thing here by a distance and was sharing a line with three others,
-             so it showed about a dozen characters of a folder that may be
-             nested five deep. -->
-        <div class="inline-fields">
-          <div>
-            <label for="source-label">Label</label>
-            <input type="text" id="source-label" placeholder="Prof. Smith" required>
-          </div>
-          <div>
-            <label for="source-professor">Whose usage</label>
-            <input type="text" id="source-professor" placeholder="jh43"
-                   autocapitalize="none" autocorrect="off" spellcheck="false" required>
-          </div>
-          <div>
-            <label for="source-mode">Mode</label>
-            <select id="source-mode">
-              <option value="read-only">read-only — only look</option>
-              <option value="shared-write">shared-write — also record here</option>
-            </select>
-          </div>
-        </div>
-        <div class="source-path-row">
-          <label for="source-path">Folder</label>
-          <div class="field-set">
-            <input type="text" id="source-path" placeholder="/path/to/their/data" required>
-            <button type="button" class="secondary browse" data-browse="source-path" data-browse-kind="folder"
-                    data-browse-prompt="Choose the usage-data folder" style="display:none">Browse…</button>
-          </div>
-        </div>
-        <p class="hint field-note">
-          A source holds one person's usage. <strong>read-only</strong> follows their
-          spending and can never write; <strong>shared-write</strong> also records this
-          installation's work for them there — so use it only where you actually work
-          under their key.
-        </p>
-      </form>
-    </div>
   </div>
 
 <script>
@@ -410,7 +375,11 @@ function readableError(err) {
 // Finder or Explorer window and hand back a real path. A browser's own file
 // box can't: it gives back a file's contents and never its location.
 async function browseFor(button) {
-  const field = document.getElementById(button.dataset.browse);
+  // Named by id where there is only ever one of a box, and by position where
+  // the box is inside a row drawn once per person and so cannot have one.
+  const field = button.dataset.browse
+    ? document.getElementById(button.dataset.browse)
+    : button.closest(".field-set").querySelector("input");
   const original = button.textContent;
   button.disabled = true;
   button.textContent = "Choosing…";
@@ -473,6 +442,36 @@ function renderProfessors(data) {
             <button type="submit">Save</button>
           </form>
         </details>
+        <details class="manage"><summary>Shared folder</summary>
+          <form data-usage-for="${p.netid}">
+            <div class="source-path-row">
+              <label>Folder holding ${p.name}&rsquo;s work</label>
+              <div class="field-set">
+                <input type="text" name="path" placeholder="/path/to/their/data"
+                       value="${p.usage ? p.usage.path : ""}" required>
+                <button type="button" class="secondary browse" data-browse-kind="folder"
+                        data-browse-prompt="Choose the usage folder" style="display:none">Browse&hellip;</button>
+              </div>
+            </div>
+            <div><label>What to do with it</label>
+              <select name="mode">
+                <option value="read-only">Read only &mdash; follow their spending</option>
+                <option value="shared-write">Also write &mdash; keep their work in it</option>
+              </select>
+            </div>
+            <p class="hint field-note">
+              <strong>Read only</strong> adds what is already in that folder to their
+              spending and never changes it. <strong>Also write</strong> makes it
+              their folder: what each call costs and their conversations both go in
+              it, so several computers sharing one folder keep one running total and
+              one set of conversations. Use it only where work is genuinely done
+              under their key.
+            </p>
+            <button type="submit">Save</button>
+            <button type="button" class="danger" data-clear-usage="${p.netid}"
+                    ${p.usage ? "" : "style=\"display:none\""}>Stop reading it</button>
+          </form>
+        </details>
       </div>
       <span class="badge ${p.has_key ? 'set' : 'unset'}">${p.has_key ? 'key set' : 'NO KEY'}</span>
       <span class="badge ${p.has_backup_key ? 'set' : 'unset'}">${p.has_backup_key ? 'backup set' : 'no backup'}</span>
@@ -488,6 +487,39 @@ function renderProfessors(data) {
         await api(`/api/settings/professors/${encodeURIComponent(btn.dataset.remove)}`, { method: "DELETE" });
         await loadSettings();
       } catch (e) { alert("Error removing professor: " + e.message); }
+    });
+  });
+
+  // Set here rather than in the markup: a selected= written into a template
+  // string is one more place for the two to disagree about what is saved.
+  list.querySelectorAll("form[data-usage-for]").forEach(form => {
+    const saved = data.professors.find(p => p.netid === form.dataset.usageFor);
+    if (saved && saved.usage) form.querySelector("select").value = saved.usage.mode;
+    form.addEventListener("submit", async (ev) => {
+      ev.preventDefault();
+      try {
+        await api("/api/settings/sources", {
+          method: "POST",
+          body: JSON.stringify({
+            netid: form.dataset.usageFor,
+            path: form.querySelector("input[name=path]").value,
+            mode: form.querySelector("select").value,
+          }),
+        });
+        await loadSettings();
+      } catch (e) { alert("Error saving the usage folder: " + e.message); }
+    });
+  });
+
+  list.querySelectorAll("button[data-clear-usage]").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const who = btn.dataset.clearUsage;
+      if (!confirm(`Stop using that folder for ${who}? Everything already in `
+                 + `it is left exactly as it is; new work is kept here instead.`)) return;
+      try {
+        await api("/api/settings/sources?netid=" + encodeURIComponent(who), { method: "DELETE" });
+        await loadSettings();
+      } catch (e) { alert("Error: " + e.message); }
     });
   });
 
@@ -659,48 +691,9 @@ document.getElementById("clear-shared-path-btn").addEventListener("click", async
   } catch (e) { alert("Error clearing shared settings path: " + e.message); }
 });
 
-function renderSources(data) {
-  document.getElementById("source-id").textContent = data.sources.source_id;
-  const list = document.getElementById("sources-list");
-  list.innerHTML = "";
-  if (!data.sources.external.length) {
-    list.innerHTML = '<div class="empty">No external sources configured.</div>';
-  }
-  data.sources.external.forEach(s => {
-    const row = document.createElement("div");
-    row.className = "row";
-    const profNote = s.professor ? `, for ${s.professor}` : "";
-    row.innerHTML = `
-      <div class="main">
-        <div class="name">${s.label}</div>
-        <div class="sub">${s.mode}${profNote} · ${s.path}</div>
-      </div>
-      <button class="danger" data-remove-source="${s.label}">Remove</button>
-    `;
-    list.appendChild(row);
-  });
-  list.querySelectorAll("button[data-remove-source]").forEach(btn => {
-    btn.addEventListener("click", async () => {
-      try {
-        await api("/api/settings/sources?label=" + encodeURIComponent(btn.dataset.removeSource), { method: "DELETE" });
-        await loadSettings();
-      } catch (e) { alert("Error removing source: " + e.message); }
-    });
-  });
+function renderSourceId(data) {
+  document.getElementById("source-id").textContent = data.source_id;
 }
-
-document.getElementById("add-source-form").addEventListener("submit", async (ev) => {
-  ev.preventDefault();
-  const label = document.getElementById("source-label").value;
-  const path = document.getElementById("source-path").value;
-  const mode = document.getElementById("source-mode").value;
-  const professor = document.getElementById("source-professor").value || null;
-  try {
-    await api("/api/settings/sources", { method: "POST", body: JSON.stringify({ label, path, mode, professor }) });
-    ev.target.reset();
-    await loadSettings();
-  } catch (e) { alert("Error adding source: " + e.message); }
-});
 
 function applyOrder(order) {
   document.getElementById("page").style.display = "flex";
@@ -984,11 +977,11 @@ async function loadSettings() {
   applyOrder(data.order);
   document.getElementById("tabs").hidden = false;
   showTab(openingTab(data));
-  showBrowseButtons(data.can_browse);
   renderProfessors(data);
+  showBrowseButtons(data.can_browse);
   renderWebui(data);
   renderShared(data);
-  renderSources(data);
+  renderSourceId(data);
   renderModelProfessors(data);
   renderFolderChoices(await api("/api/settings/conversation-folder"));
   // Fetched separately, and not awaited with the rest: the catalogue is read

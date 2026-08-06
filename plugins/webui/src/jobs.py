@@ -70,15 +70,22 @@ def __getattr__(name: str):
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
-def _conversations_dir():
-    """The conversations directory, worked out the same way conversation.py does.
+def _conversations_dir_for(professor: str) -> Path:
+    """The folder holding one person's conversations.
 
-    Resolved on use rather than at import, for the same reason: a freshly
-    downloaded copy of the sandbox doesn't yet know where anything lives,
-    and importing must not be what forces the question.
+    Asks ``conversation.py`` rather than working it out again here. A job's
+    output belongs inside the conversation that asked for it, so if these two
+    ever disagreed about where that is, the download link in a saved
+    conversation would point at a file that was written somewhere else.
+
+    Resolved on use rather than at import: a freshly downloaded copy of the
+    sandbox doesn't yet know where anything lives, and importing must not be
+    what forces the question.
     """
     replaced = globals().get("_CONVERSATIONS_DIR")
-    return replaced if replaced is not None else data_root() / "conversations"
+    if replaced is not None:
+        return Path(replaced) / professor
+    return conversation.conversations_dir_for(professor)
 
 
 def new_job_id() -> str:
@@ -120,9 +127,8 @@ def job_output_dir(professor: str, job_id: str, base_dir: Optional[Path] = None,
                    conversation_id: Optional[str] = None) -> Path:
     """Return the directory a job's one output file should be written into, creating it if needed.
 
-    Inside the conversation's own folder
-    (``data/conversations/{professor}/{conversation_id}/outputs/{job_id}/``)
-    when the conversation is known, so that what a job produced sits with the
+    Inside the conversation's own folder — ``{conversation_id}/outputs/{job_id}/``,
+    wherever that person's conversations are kept — when the conversation is known, so that what a job produced sits with the
     conversation that asked for it, the documents it was given, and the note of
     the settings that produced them — a whole piece of work in one place, which
     is the point of the folder. A job whose conversation isn't known falls back
@@ -144,18 +150,20 @@ def job_output_dir(professor: str, job_id: str, base_dir: Optional[Path] = None,
         conversation_id: The conversation this job was started from. ``None``
                          for a job with no conversation, which keeps the older
                          shared location.
-        base_dir: Override for the conversations root directory. ``None``
-                  (the normal case) uses ``data/conversations``; redirected
-                  to a temporary directory in tests.
+        base_dir: Override for the folder every person's conversations sit
+                  under, with this person's own inside it. ``None`` (the normal
+                  case) works out where theirs belong, which may be a shared
+                  folder. Tests point it at a temporary directory.
 
     Returns:
         The absolute path to the (now-existing) output directory.
     """
-    base = base_dir if base_dir is not None else _conversations_dir()
+    root = (base_dir / professor if base_dir is not None
+            else _conversations_dir_for(professor))
     if conversation_id and conversation._CONVERSATION_ID_RE.fullmatch(conversation_id):
-        d = base / professor / conversation_id / "outputs" / job_id
+        d = root / conversation_id / "outputs" / job_id
     else:
-        d = base / professor / "_job_outputs" / job_id
+        d = root / "_job_outputs" / job_id
     d.mkdir(parents=True, exist_ok=True)
     return d
 

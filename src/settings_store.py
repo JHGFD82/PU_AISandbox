@@ -49,10 +49,9 @@ Schema::
     [usage_sources]
     source_id = "toms-mac"
 
-    [[usage_sources.external]]
-    label = "Prof. Smith"
-    path = "/path/to/shared/data"
-    mode = "read-only"
+Where somebody's usage is kept elsewhere, that folder is recorded on them, in
+their own table above: ``usage_path``, and ``usage_mode`` of "read-only" or
+"shared-write".
 """
 
 from __future__ import annotations
@@ -437,15 +436,48 @@ def set_source_id(source_id: str) -> None:
 
 
 def get_configured_sources() -> list[ExternalSource]:
-    """Return every external usage-data source configured for this installation."""
+    """Return every external usage-data folder configured for this installation.
+
+    A folder belongs to a person, so it is recorded on that person: a
+    ``usage_path`` beside their name and key. That is one folder each, which is
+    all this was ever able to use — ``get_shared_write_source()`` below returns
+    the first match and stops, so a second folder for the same person has never
+    been written to.
+
+    One folder is also all anybody needs. Several machines share usage by all
+    writing into the *same* synced folder, which is why shared-write gives every
+    call its own file rather than editing one: five installations and one
+    Dropbox folder, not five folders.
+
+    An installation set up before this read its folders from a separate
+    ``[[usage_sources.external]]`` list. Those are still read, so nothing is
+    lost by updating, and any professor who has a ``usage_path`` of their own
+    takes precedence over an old entry naming them.
+    """
     doc = _load()
-    table = _get_table(doc, "usage_sources")
-    if table is None or "external" not in table:
-        return []
-    sources = []
-    for entry in table["external"]:
-        path = entry.get("path")
+    sources: list[ExternalSource] = []
+    claimed: set[str] = set()
+
+    professors = _get_table(doc, "professors")
+    for netid, entry in (professors or {}).items():
+        path = entry.get("usage_path") if hasattr(entry, "get") else None
         if not path:
+            continue
+        claimed.add(netid.strip().lower())
+        sources.append(ExternalSource(
+            label=str(entry.get("name") or netid),
+            path=str(path),
+            mode=str(entry.get("usage_mode") or "read-only"),
+            professor=netid,
+        ))
+
+    # The older shape, for an installation that has not been updated. Skipped
+    # for anybody who now has a folder of their own, so the two cannot disagree.
+    table = _get_table(doc, "usage_sources")
+    for entry in (table or {}).get("external", []):
+        path = entry.get("path")
+        owner = (entry.get("professor") or "").strip().lower()
+        if not path or owner in claimed:
             continue
         sources.append(ExternalSource(
             label=entry.get("label") or path,
@@ -474,70 +506,76 @@ def get_shared_write_source(professor: str) -> ExternalSource | None:
     return None
 
 
-def add_source(label: str, path: str, mode: str = "read-only", professor: str | None = None) -> None:
-    """Add a new external usage-data source, or replace one already using this label.
+def set_professor_usage_source(netid: str, path: str, mode: str = "read-only") -> str:
+    """Record where a person's usage is kept, when it isn't kept here.
+
+    Somebody may already have usage on another computer, or may be running the
+    sandbox from several and want one running total. Either way it is one
+    folder, belonging to one person, so it is recorded on that person.
 
     Args:
-        label: A short, human-readable name for this source.
-        path: The folder to read (and, for shared-write, also write) usage
-              data in.
-        mode: ``'read-only'`` or ``'shared-write'``.
-        professor: Whose usage this source holds. Required in both modes.
+        netid: Whose folder this is — the university username, as used
+               everywhere else. Matched however it was capitalised.
+        path: The folder holding their usage. ``~`` is understood.
+        mode: ``'read-only'`` to only add what is there to their spending, or
+              ``'shared-write'`` to also record work done here into it — which
+              is what several computers keeping one running total need.
+
+    Returns:
+        The netID the folder was recorded against, as it is written in the
+        settings file.
 
     Raises:
-        ValueError: If *mode* isn't recognized, or no *professor* was named.
+        ValueError: If *mode* isn't one of those two, if no folder was given,
+                    or if nobody by that netID has been added yet.
     """
     if mode not in VALID_SOURCE_MODES:
         raise ValueError(f"mode must be one of {VALID_SOURCE_MODES}, got {mode!r}.")
-    if not professor:
-        raise ValueError(
-            "A source needs a professor — whose usage it holds. One person may "
-            "be happy for work to be done from here while another wants only "
-            "their spending followed, so it is settled per person."
-        )
+    if not path or not path.strip():
+        raise ValueError("A usage folder needs a location.")
 
     doc = _load()
-    usage_sources = _get_table(doc, "usage_sources", create=True)
-    existing = list(usage_sources.get("external", []))
-    existing = [e for e in existing if e.get("label") != label]
-
-    new_entry: dict[str, Any] = {"label": label, "path": path, "mode": mode}
-    if professor:
-        new_entry["professor"] = professor
-    existing.append(new_entry)
-
-    array = tomlkit.aot()
-    for entry in existing:
-        item = tomlkit.table()
-        for k, v in entry.items():
-            item[k] = v
-        array.append(item)
-    usage_sources["external"] = array
+    entry, stored = _find_professor(doc, netid)
+    entry["usage_path"] = path.strip()
+    entry["usage_mode"] = mode
     _save(doc)
+    return stored
 
 
-def remove_source(label: str) -> bool:
-    """Remove a configured source by its label.
+def clear_professor_usage_source(netid: str) -> bool:
+    """Stop reading a person's usage from somewhere else.
+
+    Their name, key and everything else are left alone — this only forgets the
+    folder.
 
     Returns:
-        ``True`` if a source with that label was found and removed,
-        ``False`` otherwise.
+        ``True`` if there was a folder to forget, ``False`` if there wasn't.
     """
     doc = _load()
-    table = _get_table(doc, "usage_sources")
-    if table is None or "external" not in table:
+    try:
+        entry, _ = _find_professor(doc, netid)
+    except ValueError:
         return False
-    before = list(table["external"])
-    after = [e for e in before if e.get("label") != label]
-    if len(after) == len(before):
+    if "usage_path" not in entry and "usage_mode" not in entry:
         return False
-
-    array = tomlkit.aot()
-    for entry in after:
-        item = tomlkit.table()
-        for k, v in dict(entry).items():
-            item[k] = v
-        array.append(item)
-    table["external"] = array
+    entry.pop("usage_path", None)
+    entry.pop("usage_mode", None)
     _save(doc)
     return True
+
+
+def _find_professor(doc: Any, netid: str) -> tuple[Any, str]:
+    """Return one person's settings table, and the netID it is filed under.
+
+    Raises:
+        ValueError: If nobody by that netID has been added.
+    """
+    professors = _get_table(doc, "professors")
+    wanted = netid.strip().lower()
+    for stored, entry in (professors or {}).items():
+        if stored.strip().lower() == wanted:
+            return entry, stored
+    raise ValueError(
+        f"No one with the netID {netid!r} has been added yet. Add them first, "
+        "then say where their usage is kept."
+    )
