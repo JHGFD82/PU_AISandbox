@@ -4240,14 +4240,30 @@ class TestTheModelsSectionOnThePage:
         """
         assert "Not tested yet" in page
 
-    def test_it_says_whose_key_the_testing_uses(self, page):
-        """Adding a model makes real requests against somebody's key.
+    def test_it_says_adding_a_model_spends_money(self, page):
+        """Adding one makes real requests, billed to somebody's key.
 
-        The wording changed and the sentence about what it costs went with it;
-        the field asking whose key it is stays, and that is the part somebody
-        has to answer.
+        Small money, but somebody's — and the panel asks whose without saying
+        why unless this is here. It sits after the list of name formats and
+        before the fields, which is the last thing read before filling them in.
         """
-        assert "Test with whose key" in page
+        card = page.split('data-section="models"')[1].split('id="section-shared"')[0]
+        words = " ".join(card.split())
+        assert "tested before they are added" in words
+        assert "less than a penny" in words
+        assert "must be assigned to pay" in words
+        assert "Test with whose key" in card
+
+    def test_that_notice_comes_before_the_fields(self, page):
+        """After it is filled in is too late to learn it costs anything."""
+        card = page.split('data-section="models"')[1].split('id="section-shared"')[0]
+        # Whitespace-normalised: the sentence wraps across lines in the source,
+        # so looking for it as written finds nothing.
+        card = " ".join(card.split())
+        assert card.index("less than a penny") < card.index('class="inline-fields"')
+        # And after the formats, so the reading order is: what to type, then
+        # what typing it does.
+        assert card.index("</ul>") < card.index("less than a penny")
 
     def test_it_shows_how_a_model_is_named(self, page):
         """'openai/gpt-5.2' is not guessable from an empty box."""
