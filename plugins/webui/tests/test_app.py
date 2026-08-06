@@ -4240,14 +4240,30 @@ class TestTheModelsSectionOnThePage:
         """
         assert "Not tested yet" in page
 
-    def test_it_says_whose_key_the_testing_uses(self, page):
-        """Adding a model makes real requests against somebody's key.
+    def test_it_says_adding_a_model_spends_money(self, page):
+        """Adding one makes real requests, billed to somebody's key.
 
-        The wording changed and the sentence about what it costs went with it;
-        the field asking whose key it is stays, and that is the part somebody
-        has to answer.
+        Small money, but somebody's — and the panel asks whose without saying
+        why unless this is here. It sits after the list of name formats and
+        before the fields, which is the last thing read before filling them in.
         """
-        assert "Test with whose key" in page
+        card = page.split('data-section="models"')[1].split('id="section-shared"')[0]
+        words = " ".join(card.split())
+        assert "tested before they are added" in words
+        assert "less than a penny" in words
+        assert "must be assigned to pay" in words
+        assert "Test with whose key" in card
+
+    def test_that_notice_comes_before_the_fields(self, page):
+        """After it is filled in is too late to learn it costs anything."""
+        card = page.split('data-section="models"')[1].split('id="section-shared"')[0]
+        # Whitespace-normalised: the sentence wraps across lines in the source,
+        # so looking for it as written finds nothing.
+        card = " ".join(card.split())
+        assert card.index("less than a penny") < card.index('class="inline-fields"')
+        # And after the formats, so the reading order is: what to type, then
+        # what typing it does.
+        assert card.index("</ul>") < card.index("less than a penny")
 
     def test_it_shows_how_a_model_is_named(self, page):
         """'openai/gpt-5.2' is not guessable from an empty box."""
@@ -4973,3 +4989,54 @@ class TestTheModelsPanelReadsAsOnePage:
                          token(half, "--badge-can-text")) >= 4.5, theme
             assert ratio(token(half, "--panel-bg"), token(half, "--link")) >= 4.5, theme
             assert ratio(token(half, "--bg"), token(half, "--link")) >= 4.5, theme
+
+
+class TestTheTwoStorageBoxesDoNotOverlap:
+    """One is what goes in, the other is what comes out.
+
+    The labels said otherwise: the outputs box claimed to cover "the files
+    supplied for a job" as well, which made the pair read as one box and one
+    box-plus-a-bit. The code never worked that way — keep_supplied_documents is
+    consulted for chat attachments and for files handed to a plugin, and
+    keep_job_outputs only for where a finished job writes its result.
+    """
+
+    @pytest.fixture
+    def boxes(self):
+        page = _rendered_template("settings.html")
+        card = page.split('data-section="folder"')[1].split('id="section-shared"')[0]
+        found = re.findall(
+            r'<span class="name">(.*?)</span>.*?<span class="sub">(.*?)</span>',
+            card, re.S)
+        return [(" ".join(n.split()), " ".join(s.split())) for n, s in found]
+
+    def test_there_are_two_of_them(self, boxes):
+        assert len(boxes) == 2
+
+    def test_the_first_is_about_what_goes_in(self, boxes):
+        name, sub = boxes[0]
+        assert "supply" in name
+        # Both ways a file arrives, since the setting covers both.
+        assert "chat" in sub and "plugin" in sub
+
+    def test_the_second_is_about_what_comes_out_and_only_that(self, boxes):
+        """The claim that made them look redundant."""
+        name, sub = boxes[1]
+        assert "produces" in name
+        assert "generates" in sub or "produced" in sub
+        assert "supplied" not in sub, "the outputs box does not decide about inputs"
+
+    def test_what_the_code_actually_does_matches_that_split(self):
+        """Read from the source, so the labels cannot drift from the behaviour.
+
+        If a future change makes the outputs setting cover inputs too, this
+        fails and the labels get revisited rather than quietly becoming wrong
+        again.
+        """
+        app = (Path(__file__).resolve().parents[1] / "src" / "app.py").read_text()
+        jobs = (Path(__file__).resolve().parents[1] / "src" / "jobs.py").read_text()
+        # What goes in: consulted on both routes a file can arrive by.
+        assert app.count("_keep_supplied_document(professor") == 2
+        # What comes out: one place, and it is where a job writes its result.
+        assert jobs.count('is_on("keep_job_outputs"') == 1
+        assert 'is_on("keep_supplied_documents"' not in jobs
