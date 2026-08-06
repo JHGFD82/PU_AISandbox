@@ -228,62 +228,54 @@
 
     <div class="card" id="section-endpoints" data-section="endpoints" data-tab="models">
       <h2>Alternate AI endpoints</h2>
-      <p class="hint">An AI service other than the Princeton AI Sandbox — a model on a cluster, or a provider's own API. Calls are counted but carry no cost   and are reported separately.</p>
+      <p class="hint">An AI service other than the Princeton AI Sandbox — a model on a cluster, or a provider's own API. Calls are counted but carry no cost and are reported separately.</p>
 
       <div id="endpoints-list"></div>
+      <p class="hint" style="margin-top:0.5rem"><strong>Adding a new API endpoint</strong></p>
       <div class="snippet" id="endpoints-guidance"># preferences.toml
 [endpoints.my_cluster]
 name = "My HPC Cluster"
 base_url = "http://my-cluster.internal:8000/v1"
 openai_compatible = true
 default_model = "llama-3-70b-instruct"</div>
-      <p class="hint" style="margin-top:0.5rem"><strong>Adding a new API endpoint</strong></p>
       <p class="hint">API endpoints are defined in one of two ways:</p>
       <ol>
         <li>By adding a new section to the <code>preferences.toml</code> file, following the pattern shown in the snippet above.</li>
         <li>By adding a new section to the shared settings file used by your team, following the pattern shown in the snippet above.</li>
       </ol>
-      <p class="hint"><strong>The API key for an endpoint belongs in
-        <code>settings.toml</code></strong>, in the same folder, as a
-        <code>key = "..."</code> line under its own
-        <code>[endpoints.&lt;name&gt;]</code> section. That file belongs to this
-        installation alone: it is never shared and never syncs anywhere, and it
-        is where each professor's API key is already kept.</p>
-      <p class="hint">You can put the key beside the rest of the endpoint's
-        settings instead, in <code>preferences.toml</code> or in the shared
-        settings file. That works, and for a departmental cluster with one
-        credential everybody uses it may be what you want — but you are taking
-        on the risk: a key in a shared file is a key given to everyone who can
-        read that file, and shared files usually live somewhere that syncs.
-        <code>settings.toml</code> is used in preference when both are set.</p>
-      <p class="hint">Keys are stored as plain text in whichever file holds
-        them, so keep these files somewhere secure and never commit them to
-        version control.</p>
+      <p class="hint"><strong>If needed, the API key for an endpoint belongs in
+        <code>settings.toml</code></strong>, in the same folder as either of the above-mentioned settings files, using the following pattern:
+        <div class="snippet" id="endpoints-guidance">
+[endpoints.my_cluster]
+key = "..."
+        </div></p>
+      <p class="hint">Keys can be stored within the <code>preferences.toml</code> file or shared settings file, however they are stored as plain text which can pose serious security risks if not handled properly. </p>
     </div>
 
     <div class="card" id="section-models" data-section="models" data-tab="models">
-      <h2>Models</h2>
+      <h2>Model Catalog</h2>
       <p class="hint">
-        The models this sandbox can use. Adding one looks up its price and then
-        finds out what it can do — whether it can read images and scanned pages,
-        and which settings it turns down — by trying it. That takes a few seconds
-        and a fraction of a cent, and it only happens once.
+        The models available for use in the Princeton AI sandbox.
       </p>
       <!-- Shown only while there are none. Which models exist depends on the
            institution rather than on this software, so nothing can be shipped
            and nothing can be guessed for somebody — but leaving them with an
            empty list and a box is not an answer either. -->
       <p class="hint" id="models-empty-note" hidden>
-        <strong>There are none yet, so nothing can be sent anywhere.</strong>
-        Which models you can use depends on your institution's AI sandbox rather
-        than on this software, so none are included here. Check
-        <strong>Princeton's own AI Sandbox documentation</strong> for the models
-        it currently offers, then add one below.
-        Using only an alternate endpoint of your own? Then you need none here —
-        see the <em>Alternate AI endpoints</em> panel.
+        <strong>There are no models available.</strong>
       </p>
       <div id="models-list"></div>
       <form id="add-model-form">
+        <p class="hint" style="margin-top:0.5rem"><strong>Adding a new model</strong></p>
+        <p class="hint field-note">Refer to the <a href="https://princeton.service-now.com/service?id=kb_article_view&sysparm_article=KB0014337">Princeton AI Sandbox Service</a> article on Service Now for the list of models available in the AI Sandbox. Model names are constructed with both provider and model name, separated by a slash — for example:
+          <ul>
+            <li><code>openai/gpt-5.2</code></li>
+            <li><code>anthropic/claude-opus-4-8</code></li>
+            <li><code>google/gemini-3-pro-preview</code></li>
+            <li><code>mistral/mistral-7b-instruct-v0.1</code></li>
+            <li><code>meta/llama-3-70b-instruct</code></li>
+          </ul>
+        </p>
         <div class="inline-fields">
           <div>
             <label for="add-model-name">Model</label>
@@ -311,12 +303,6 @@ default_model = "llama-3-70b-instruct"</div>
             </div>
           </div>
         </div>
-        <p class="hint field-note">
-          Named as the provider and then the model, separated by a slash — for
-          example <code>openai/gpt-5.2</code>, <code>anthropic/claude-opus-4-8</code>
-          or <code>google/gemini-3-pro-preview</code>. The few small test requests
-          are billed to the key you choose.
-        </p>
         <p class="form-error" id="add-model-error" style="display:none"></p>
         <button type="submit" id="add-model-btn">Add and test</button>
       </form>
