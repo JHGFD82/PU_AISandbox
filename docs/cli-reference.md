@@ -176,16 +176,17 @@ python main.py jh43 usage daily
 python main.py jh43 usage daily 2026-03-01
 ```
 
-### `usage sources` — usage kept somewhere else
+### `usage sources` — folders kept somewhere else
 
-Lists every folder this installation reads usage from, and who each belongs to.
-See [Configuration → Usage kept somewhere else](configuration.md#usage-kept-somewhere-else).
+Lists every folder this installation reads someone's work from, and who each
+belongs to. See [Configuration → Somebody's folder somewhere
+else](configuration.md#somebodys-folder-somewhere-else).
 
 ```bash
 python main.py jh43 usage sources list
 ```
 
-A folder belongs to the person whose usage it holds, so it is set on them — on
+A folder belongs to the person whose work it holds, so it is set on them — on
 the web interface's **Settings** page, beside their name, or by adding two lines
 to their table in `settings.toml`:
 
@@ -198,9 +199,10 @@ usage_mode = "read-only"   # or "shared-write"
 ```
 
 `read-only` adds what is already in that folder to their spending and never
-changes it. `shared-write` records work done on this computer there as well, so
-several computers sharing one folder keep a single running total — use it only
-where work is genuinely done under that person's key.
+changes it. `shared-write` makes it their folder: what each call cost and their
+conversations both go in it, so several computers sharing one folder keep one
+running total and one set of conversations. Use it only where work is genuinely
+done under that person's key.
 
 ---
 

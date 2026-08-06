@@ -1,11 +1,22 @@
 """Conversation data model and on-disk storage for the webui plugin.
 
-Each professor's conversations live as one JSON file per conversation under
-``data/conversations/{professor_netid}/{conversation_id}.json`` — one
-file per conversation rather than one shared file, for the same
-safe-to-sync-over-Dropbox reasons behind the external usage-data sources,
-even though nothing about this data is expected to be shared between
-installations.
+Each conversation is a folder of its own, holding one JSON file plus whatever
+was attached to it or produced by it — one folder per conversation rather than
+one file holding all of them, so that a sync service never has two computers
+editing the same file.
+
+Where those folders sit depends on the person:
+
+- Normally ``data/conversations/{netid}/`` in this installation's own files
+  folder, which holds everybody and so keeps each person under their netID.
+- Where somebody has a shared folder set to record work into (``usage_path``
+  with ``usage_mode = "shared-write"``, see ``src/settings_store.py``), their
+  conversations go in ``conversations/`` inside it, beside the record of what
+  their work cost. That folder is already theirs alone, so nothing in it is
+  filed under a netID.
+
+A folder set to read only is never written to, so conversations stay here for
+somebody whose folder is only being watched.
 """
 
 from __future__ import annotations
@@ -44,6 +55,33 @@ def _conversations_dir():
         return replaced
     from src.paths import data_root
     return data_root() / "conversations"
+
+
+def conversations_dir_for(professor: str) -> Path:
+    """Return the folder holding one person's conversations.
+
+    Their shared folder if they have one they work into, and this
+    installation's own otherwise. See this module's opening description.
+
+    Args:
+        professor: Their netID.
+
+    Returns:
+        The folder. It may not exist yet; whoever writes into it makes it.
+    """
+    replaced = globals().get("CONVERSATIONS_DIR")
+    if replaced is not None:
+        # A test said where these go, and meant it for everybody.
+        return Path(replaced) / professor
+
+    from src.settings_store import get_shared_write_source
+
+    shared = get_shared_write_source(professor)
+    if shared is not None:
+        return shared.resolved_path() / "conversations"
+
+    from src.paths import data_root
+    return data_root() / "conversations" / professor
 
 
 # The exact shape new_conversation_id() produces below: the letters "c_"
@@ -385,12 +423,15 @@ class ConversationStore:
 
         Args:
             professor: The professor's safe-filename identifier (e.g. ``'heller'``).
-            base_dir: Override for the conversations root directory. ``None``
-                      (the normal case) uses ``data/conversations``;
-                      redirected to a temporary directory in tests.
+            base_dir: Override for the folder every person's conversations sit
+                      under, with this person's own inside it. ``None`` (the
+                      normal case) works out where theirs belong — see
+                      ``conversations_dir_for()``. Tests point it at a
+                      temporary directory.
         """
         self.professor = professor
-        self._dir = (base_dir if base_dir is not None else _conversations_dir()) / professor
+        self._dir = (base_dir / professor if base_dir is not None
+                     else conversations_dir_for(professor))
         self._dir.mkdir(parents=True, exist_ok=True)
         self._move_loose_files_into_folders()
 

@@ -630,3 +630,83 @@ class TestMovingOlderConversationsIntoFolders:
         self._store(tmp_path)
         assert (folder / "notes.json").exists()
         assert (folder / "c_nonsense.json").exists()
+
+
+class TestWhereAPersonsConversationsGo:
+    """A person with a shared folder keeps their conversations in it, beside
+    the record of what their work cost."""
+
+    @pytest.fixture
+    def settings(self, tmp_path, monkeypatch):
+        from src import settings_store
+
+        monkeypatch.setattr(settings_store, "SETTINGS_PATH", tmp_path / "settings.toml")
+        settings_store.add_professor("smith", "Prof. Smith", "sk-test")
+        return settings_store
+
+    def _where(self, professor):
+        from plugins.webui.src.conversation import conversations_dir_for
+
+        return conversations_dir_for(professor)
+
+    def test_without_a_shared_folder_they_stay_here_under_their_netid(
+        self, settings, tmp_path, monkeypatch
+    ):
+        monkeypatch.setattr("src.paths.data_root", lambda: tmp_path / "data")
+        assert self._where("smith") == tmp_path / "data" / "conversations" / "smith"
+
+    def test_a_shared_folder_holds_them_instead(self, settings, tmp_path):
+        settings.set_professor_usage_source(
+            "smith", str(tmp_path / "dropbox"), mode="shared-write")
+        assert self._where("smith") == tmp_path / "dropbox" / "conversations"
+
+    def test_nothing_in_a_shared_folder_is_filed_under_a_netid(self, settings, tmp_path):
+        """The folder is already theirs; saying so again inside it is one more
+        thing able to disagree with the settings that named it."""
+        settings.set_professor_usage_source(
+            "smith", str(tmp_path / "dropbox"), mode="shared-write")
+        assert "smith" not in self._where("smith").relative_to(tmp_path / "dropbox").parts
+
+    def test_a_folder_only_being_watched_is_never_written_to(
+        self, settings, tmp_path, monkeypatch
+    ):
+        """Read-only means read-only. Conversations are work, and writing them
+        into somebody's folder is doing work in it."""
+        monkeypatch.setattr("src.paths.data_root", lambda: tmp_path / "data")
+        settings.set_professor_usage_source(
+            "smith", str(tmp_path / "dropbox"), mode="read-only")
+        assert self._where("smith") == tmp_path / "data" / "conversations" / "smith"
+
+    def test_it_follows_the_same_setting_the_spending_does(self, settings, tmp_path):
+        """One folder per person, holding both — that is the whole point of
+        setting it in one place."""
+        from src.tracking.token_tracker import _shared_call_dir
+
+        settings.set_professor_usage_source(
+            "smith", str(tmp_path / "dropbox"), mode="shared-write")
+        source = settings.get_shared_write_source("smith")
+        assert source is not None
+        assert _shared_call_dir(source, "2026-08").parent.parent == \
+               self._where("smith").parent
+
+    def test_two_people_with_shared_folders_do_not_share_one(self, settings, tmp_path):
+        settings.add_professor("jones", "Prof. Jones", "sk-test")
+        settings.set_professor_usage_source(
+            "smith", str(tmp_path / "smith-dropbox"), mode="shared-write")
+        settings.set_professor_usage_source(
+            "jones", str(tmp_path / "jones-dropbox"), mode="shared-write")
+        assert self._where("smith") != self._where("jones")
+
+    def test_the_store_puts_its_conversations_where_that_says(self, settings, tmp_path):
+        settings.set_professor_usage_source(
+            "smith", str(tmp_path / "dropbox"), mode="shared-write")
+        store = ConversationStore("smith")
+        conv = store.create(title="In the shared folder", model="gpt-4o")
+        assert (tmp_path / "dropbox" / "conversations" / conv.id).is_dir()
+
+    def test_a_test_that_named_a_folder_still_gets_one_each(self, tmp_path):
+        """The base_dir override holds everybody, so it keeps the netID layer."""
+        smith = ConversationStore("smith", base_dir=tmp_path)
+        jones = ConversationStore("jones", base_dir=tmp_path)
+        assert (tmp_path / "smith").is_dir() and (tmp_path / "jones").is_dir()
+        assert smith._dir != jones._dir

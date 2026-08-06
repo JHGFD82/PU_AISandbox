@@ -37,14 +37,19 @@
 # name = "Alice Smith"
 # key = "another_primary_key_here"
 #
-# Where somebody's usage is kept somewhere other than this computer — because
+# Where somebody's work is kept somewhere other than this computer — because
 # they also work on another, or because several computers share one folder —
-# name that folder here and their spending is counted from it.
+# name that folder here.
 #
 # usage_path = "/Users/heller/Dropbox/Smith-Shared/data"
 # usage_mode = "read-only"     # only add what is there to their spending
-# usage_mode = "shared-write"  # also record work done here, one file per call,
-#                              # so no two computers ever edit the same file
+# usage_mode = "shared-write"  # their folder: what each call cost, and their
+#                              # conversations, both go in it
+#
+# A shared folder holds one person, so nothing in it is filed under a netID:
+#   their-folder/calls/2026-08/*.json    one file per call, never edited again
+#   their-folder/archives/2026-07.json   a month that has ended
+#   their-folder/conversations/c_.../
 
 # ── Alternate API endpoint keys ────────────────────────────────────────────────
 # For each [endpoints.<name>] entry you define in settings.default.toml,

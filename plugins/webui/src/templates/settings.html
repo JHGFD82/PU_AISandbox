@@ -94,9 +94,9 @@
       <p class="hint">Each professor, or faculty-supervised personnel, needs a Princeton AI Sandbox API key before they can use this tool. Keys are never displayed in this tool after they are saved.</p>
       <div id="professors-list"></div>
       <p class="hint field-note">
-        If someone already has usage recorded somewhere else &mdash; on another
-        computer, or in a folder shared between several &mdash; open
-        <strong>Usage folder</strong> beside their name and point this
+        If someone&rsquo;s work belongs somewhere else &mdash; a folder shared
+        with them, or one synced between the computers they use &mdash; open
+        <strong>Shared folder</strong> beside their name and point this
         installation at it. This installation is known as
         <strong id="source-id"></strong> in the files it writes there.
       </p>
@@ -442,10 +442,10 @@ function renderProfessors(data) {
             <button type="submit">Save</button>
           </form>
         </details>
-        <details class="manage"><summary>Usage folder</summary>
+        <details class="manage"><summary>Shared folder</summary>
           <form data-usage-for="${p.netid}">
             <div class="source-path-row">
-              <label>Folder holding ${p.name}&rsquo;s usage</label>
+              <label>Folder holding ${p.name}&rsquo;s work</label>
               <div class="field-set">
                 <input type="text" name="path" placeholder="/path/to/their/data"
                        value="${p.usage ? p.usage.path : ""}" required>
@@ -456,15 +456,16 @@ function renderProfessors(data) {
             <div><label>What to do with it</label>
               <select name="mode">
                 <option value="read-only">Read only &mdash; follow their spending</option>
-                <option value="shared-write">Also write &mdash; record work done here into it</option>
+                <option value="shared-write">Also write &mdash; keep their work in it</option>
               </select>
             </div>
             <p class="hint field-note">
               <strong>Read only</strong> adds what is already in that folder to their
-              spending and never changes it. <strong>Also write</strong> records work
-              done on this computer there as well, so several computers sharing one
-              folder keep a single running total &mdash; use it only where work is
-              genuinely done under their key.
+              spending and never changes it. <strong>Also write</strong> makes it
+              their folder: what each call costs and their conversations both go in
+              it, so several computers sharing one folder keep one running total and
+              one set of conversations. Use it only where work is genuinely done
+              under their key.
             </p>
             <button type="submit">Save</button>
             <button type="button" class="danger" data-clear-usage="${p.netid}"
@@ -513,8 +514,8 @@ function renderProfessors(data) {
   list.querySelectorAll("button[data-clear-usage]").forEach(btn => {
     btn.addEventListener("click", async () => {
       const who = btn.dataset.clearUsage;
-      if (!confirm(`Stop reading ${who}'s usage from that folder? The folder `
-                 + `itself is left exactly as it is.`)) return;
+      if (!confirm(`Stop using that folder for ${who}? Everything already in `
+                 + `it is left exactly as it is; new work is kept here instead.`)) return;
       try {
         await api("/api/settings/sources?netid=" + encodeURIComponent(who), { method: "DELETE" });
         await loadSettings();

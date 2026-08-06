@@ -66,7 +66,7 @@ key = "sk-...primary_key..."
 - `name` — their display name. Shown in reports and in the web interface's person picker and nowhere else, so write it however reads best.
 - `key` — primary PortKey API key, obtained through Princeton OIT.
 - `backup_key` — used if the primary key fails. A warning is printed when it is.
-- `usage_path`, `usage_mode` — optional; only where their usage is kept somewhere other than this computer. See [Usage kept somewhere else](#usage-kept-somewhere-else).
+- `usage_path`, `usage_mode` — optional; only where their work is kept somewhere other than this computer, such as a synced folder shared with them. See [Somebody's folder somewhere else](#somebodys-folder-somewhere-else).
 
 ### Why netIDs
 
@@ -394,6 +394,8 @@ data/conversations/<netid>/c_8f2a1c9de4b7a501/
     outputs/              files a translation or transcription job produced
 ```
 
+Somebody with a shared folder set to record work into keeps their conversations there instead, beside the record of what that work cost — see [Somebody's folder somewhere else](#somebodys-folder-somewhere-else).
+
 The point is that a whole piece of work sits in one place you can open, keep, back up, or cite. Each conversation's **⋮** menu has **Open this conversation's folder**, which opens it in Finder or Explorer. (That only appears when the browser is on the same computer as the sandbox — a folder can only be opened on the machine it is on.)
 
 Conversations saved before this existed are moved into folders automatically, once, the first time the web interface reads them. Nothing is copied and nothing is left behind.
@@ -512,9 +514,9 @@ without anyone having to arrange it.
 Either way the key is stored as text anyone with the file can read. None of
 these files is tracked by git.
 
-## Usage kept somewhere else
+## Somebody's folder somewhere else
 
-Someone's usage is normally recorded in this installation's own `data/` folder.
+One person's work is normally kept in this installation's own files folder.
 It doesn't have to be. Two situations put it elsewhere:
 
 - **You want to see someone else's spending.** A professor runs their own copy,
@@ -522,14 +524,16 @@ It doesn't have to be. Two situations put it elsewhere:
   looks after several people's accounts names that folder on their own
   installation, and one report then covers everybody without anyone copying
   files around.
-- **One person works on several computers.** All of them write into the same
-  synced folder, and each keeps the same running total. There is no limit on how
-  many: every API call writes its own small file, named after the computer that
-  wrote it and never edited again, so no two computers can ever make conflicting
-  edits to one file. Five machines and one folder is the ordinary case.
+- **One person works on several computers.** All of them use the same synced
+  folder, and each keeps the same running total and the same conversations.
+  There is no limit on how many: every API call writes its own small file,
+  named after the computer that wrote it and never edited again, and every
+  conversation is a folder of its own — so no two computers can ever make
+  conflicting edits to one file. Five machines and one folder is the ordinary
+  case.
 
-The folder belongs to the person whose usage it holds, so it is recorded on
-them. Set it on the web interface's **Settings** page — open **Usage folder**
+The folder belongs to the person whose work it holds, so it is recorded on
+them. Set it on the web interface's **Settings** page — open **Shared folder**
 beside their name — or add two lines to their table in `settings.toml`:
 
 ```toml
@@ -544,10 +548,33 @@ usage_mode = "shared-write"
 
 - **`read-only`** (what you get if you leave it out) — adds what is already in
   that folder to their spending, and never changes it. This is what following
-  somebody else's spending wants.
-- **`shared-write`** — also records work done on *this* computer into that
-  folder. This is what several computers keeping one total want. Use it only
-  where work is genuinely done under that person's key: it writes.
+  somebody else's spending wants. Their conversations stay here, because
+  writing them into that folder would be writing.
+- **`shared-write`** — this is their folder, and their work goes in it: what
+  each call cost, and their conversations. This is what several computers
+  keeping one running total want. Use it only where work is genuinely done
+  under that person's key.
+
+### What is in it
+
+A shared folder holds one person, so nothing inside it is filed under a netID —
+the folder already says whose it is:
+
+```
+their-folder/
+    calls/2026-08/            one file per API call this month: what it cost
+        20260806T174536_ce762d_toms-mac.json
+    archives/2026-07.json     a month that has ended, folded into one file
+    conversations/c_8f2a1c9de4b7a501/
+        conversation.json     exactly as described above
+        attachments/
+        outputs/
+```
+
+Each call's file is named after the moment it happened, a few random
+characters, and the computer that wrote it — so two computers writing at the
+same instant still write two files. Nothing rewrites a file that already
+exists, which is what makes a sync service safe here.
 
 One folder each, and it is per person on purpose — one professor may be happy
 for work to be done from a shared folder while another wants only their
@@ -667,6 +694,6 @@ pip install openpyxl
 | Runtime defaults | `settings.default.toml`, in the package | N/A — this is the shared baseline | ✅ `preferences.toml` | ❌ hand-edit TOML | ❌ |
 | Shared runtime defaults | Wherever `shared_settings.path` points | ✅ that's the point | ✅ `preferences.toml` still wins | Pointer only, by hand | Pointer only, via `/settings` |
 | Plugin defaults | Each plugin's own directory, tracked by git | N/A | ❌ no per-plugin override file | ❌ hand-edit TOML | ❌ |
-| Where a person's usage is kept | `settings.toml` (`usage_path` on the person) | ✅ that's the point — it points at another installation's `data/` folder | N/A | ✅ `usage sources list`; add and remove by hand | ✅ `/settings` |
+| Where a person's work is kept | `settings.toml` (`usage_path` on the person) | ✅ that's the point — it points at another installation's `data/` folder | N/A | ✅ `usage sources list`; add and remove by hand | ✅ `/settings` |
 
 Every "✅ `/settings`" row is served by the web interface's `/settings` route (`plugins/webui/src/templates/settings.html` and the `/api/settings/*` routes in `plugins/webui/src/app.py`), behind the same unlock passphrase as the rest of it. A first-time visitor with nobody configured is sent straight there rather than to an empty chat screen, and the section order flips depending on whether anyone is configured yet — people first on an empty installation, shared settings first once there's at least one person, since that's the more likely thing to come back and adjust.

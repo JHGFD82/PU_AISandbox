@@ -3631,6 +3631,13 @@ class TestTheUsageFolderIsAskedForBesideThePerson:
         assert 'value="shared-write"' in page
         assert "never changes it" in page
 
+    def test_the_folder_is_said_to_hold_conversations_too(self):
+        """It stopped being only about spending when conversations began
+        following the same setting."""
+        page = self._settings()
+        note = page[page.index('data-usage-for="${p.netid}"'):]
+        assert "conversations" in note[:note.index("</details>")]
+
     def test_the_installations_own_name_is_still_shown(self):
         """It is what shared-write calls the files it writes."""
         assert 'id="source-id"' in self._settings()

@@ -1,7 +1,7 @@
 """
 Tests for the shared-write side of src/tracking/token_tracker.py:
   - fold_usage_records / _accumulate_stats_dict
-  - load_usage_tree (mutable files + archives + event files)
+  - load_usage_tree (mutable files + archives + call records)
   - get_configured_data_roots
   - TokenTracker in shared-write mode: record_usage, get_daily_usage,
     get_monthly_usage, get_all_time_usage, list_archived_months
@@ -128,18 +128,7 @@ class TestLoadUsageTree:
         tree = load_usage_tree(tmp_path)
         assert tree["heller"]["2026-05"]["total_usage"]["total_tokens"] == 50
 
-    def test_reads_and_folds_event_files(self, tmp_path):
-        event_dir = tmp_path / "events" / "smith" / "2026-07"
-        event_dir.mkdir(parents=True)
-        (event_dir / "a.json").write_text(json.dumps({
-            "model": "gpt-4o", "prompt_tokens": 10, "completion_tokens": 5,
-            "total_tokens": 15, "total_cost": 0.01, "timestamp": "2026-07-01T10:00:00",
-            "source": "toms-mac",
-        }))
-        tree = load_usage_tree(tmp_path)
-        assert tree["smith"]["2026-07"]["total_usage"]["total_tokens"] == 15
-
-    def test_merges_all_three_shapes_for_different_professors(self, tmp_path):
+    def test_merges_both_local_shapes_for_different_professors(self, tmp_path):
         (tmp_path / "token_usage_heller.json").write_text(json.dumps({
             "month": "2026-07", "total_usage": UsageStats(total_tokens=1).to_dict(),
             "model_usage": {}, "daily_usage": {}, "session_history": [],
@@ -150,14 +139,63 @@ class TestLoadUsageTree:
             "month": "2026-06", "total_usage": UsageStats(total_tokens=2).to_dict(),
             "model_usage": {}, "daily_usage": {}, "session_history": [],
         }))
-        event_dir = tmp_path / "events" / "smith" / "2026-07"
-        event_dir.mkdir(parents=True)
-        (event_dir / "a.json").write_text(json.dumps({
-            "model": "gpt-4o", "prompt_tokens": 3, "completion_tokens": 0,
-            "total_tokens": 3, "total_cost": 0.0, "timestamp": "2026-07-01T10:00:00",
-        }))
         tree = load_usage_tree(tmp_path)
-        assert set(tree.keys()) == {"heller", "johnson", "smith"}
+        assert set(tree.keys()) == {"heller", "johnson"}
+
+
+class TestLoadUsageTreeForOnePersonsFolder:
+    """A shared folder holds one person, so nothing inside it names them —
+    whose it is comes from the settings that pointed at it."""
+
+    def _a_call(self, folder, month, **fields):
+        call_dir = folder / "calls" / month
+        call_dir.mkdir(parents=True)
+        (call_dir / "a.json").write_text(json.dumps({
+            "model": "gpt-4o", "prompt_tokens": 10, "completion_tokens": 5,
+            "total_tokens": 15, "total_cost": 0.01,
+            "timestamp": f"{month}-01T10:00:00", "source": "toms-mac", **fields,
+        }))
+
+    def test_reads_and_folds_this_months_calls(self, tmp_path):
+        self._a_call(tmp_path, "2026-07")
+        tree = load_usage_tree(tmp_path, "smith")
+        assert tree["smith"]["2026-07"]["total_usage"]["total_tokens"] == 15
+
+    def test_reads_a_finished_month(self, tmp_path):
+        (tmp_path / "archives").mkdir()
+        (tmp_path / "archives" / "2026-05.json").write_text(json.dumps({
+            "month": "2026-05", "total_usage": UsageStats(total_tokens=50).to_dict(),
+            "model_usage": {}, "daily_usage": {}, "session_history": [],
+        }))
+        assert load_usage_tree(tmp_path, "smith")["smith"]["2026-05"][
+            "total_usage"]["total_tokens"] == 50
+
+    def test_both_at_once(self, tmp_path):
+        self._a_call(tmp_path, "2026-07")
+        (tmp_path / "archives").mkdir()
+        (tmp_path / "archives" / "2026-05.json").write_text(json.dumps({
+            "month": "2026-05", "total_usage": UsageStats(total_tokens=50).to_dict(),
+            "model_usage": {}, "daily_usage": {}, "session_history": [],
+        }))
+        assert sorted(load_usage_tree(tmp_path, "smith")["smith"]) == ["2026-05", "2026-07"]
+
+    def test_everything_read_belongs_to_the_person_whose_folder_it_is(self, tmp_path):
+        self._a_call(tmp_path, "2026-07")
+        assert list(load_usage_tree(tmp_path, "smith")) == ["smith"]
+
+    def test_an_empty_folder_contributes_nobody(self, tmp_path):
+        """Rather than the person with nothing, which reads as a zero total."""
+        assert load_usage_tree(tmp_path, "smith") == {}
+
+    def test_a_netid_layer_left_from_the_old_shape_is_not_read_as_a_month(self, tmp_path):
+        """It would otherwise land under a month called 'smith'."""
+        old = tmp_path / "calls" / "smith" / "2026-07"
+        old.mkdir(parents=True)
+        (old / "a.json").write_text(json.dumps({
+            "model": "gpt-4o", "prompt_tokens": 1, "completion_tokens": 1,
+            "total_tokens": 2, "total_cost": 0.0, "timestamp": "2026-07-01T10:00:00",
+        }))
+        assert load_usage_tree(tmp_path, "smith") == {}
 
     def test_corrupt_active_file_is_skipped(self, tmp_path):
         (tmp_path / "token_usage_bad.json").write_text("{not json")
@@ -216,13 +254,13 @@ class TestSharedWriteRecordUsage:
         t = _make_shared_tracker(shared_source)
         assert t.source_mode == "shared-write"
 
-    def test_record_usage_creates_event_file(self, shared_source, tmp_path):
+    def test_record_usage_creates_call_file(self, shared_source, tmp_path):
         t = _make_shared_tracker(shared_source)
         p1, p2 = _pricing_patches()
         with p1, p2, patch("src.tracking.token_tracker.get_shared_write_source", return_value=shared_source):
             t.record_usage("gpt-4o", 100, 50, 150)
-        event_dir = tmp_path / "shared" / "events" / "smith" / t._get_current_month()
-        assert list(event_dir.glob("*.json"))
+        call_dir = tmp_path / "shared" / "calls" / t._get_current_month()
+        assert list(call_dir.glob("*.json"))
 
     def test_two_calls_create_two_distinct_files(self, shared_source, tmp_path):
         t = _make_shared_tracker(shared_source)
@@ -230,19 +268,19 @@ class TestSharedWriteRecordUsage:
         with p1, p2:
             t.record_usage("gpt-4o", 100, 50, 150)
             t.record_usage("gpt-4o", 100, 50, 150)
-        event_dir = tmp_path / "shared" / "events" / "smith" / t._get_current_month()
-        assert len(list(event_dir.glob("*.json"))) == 2
+        call_dir = tmp_path / "shared" / "calls" / t._get_current_month()
+        assert len(list(call_dir.glob("*.json"))) == 2
 
-    def test_event_file_tagged_with_source_id(self, shared_source, tmp_path):
+    def test_call_file_tagged_with_source_id(self, shared_source, tmp_path):
         t = _make_shared_tracker(shared_source)
         p1, p2 = _pricing_patches()
         with p1, p2, patch("src.tracking.token_tracker.get_source_id", return_value="toms-mac"):
             t._source_id = "toms-mac"  # __init__ already ran; set directly for this test
             t.record_usage("gpt-4o", 100, 50, 150)
-        event_dir = tmp_path / "shared" / "events" / "smith" / t._get_current_month()
-        event_file = next(event_dir.glob("*.json"))
-        assert "toms-mac" in event_file.name
-        assert json.loads(event_file.read_text())["source"] == "toms-mac"
+        call_dir = tmp_path / "shared" / "calls" / t._get_current_month()
+        call_file = next(call_dir.glob("*.json"))
+        assert "toms-mac" in call_file.name
+        assert json.loads(call_file.read_text())["source"] == "toms-mac"
 
     def test_returns_token_usage_with_correct_totals(self, shared_source):
         t = _make_shared_tracker(shared_source)
@@ -287,7 +325,7 @@ class TestSharedWriteReads:
         assert result["total_tokens"] == 150
 
     def test_get_daily_usage_past_month_reads_archive(self, shared_source, tmp_path):
-        archive_dir = tmp_path / "shared" / "archives" / "smith"
+        archive_dir = tmp_path / "shared" / "archives"
         archive_dir.mkdir(parents=True)
         (archive_dir / "2025-01.json").write_text(json.dumps({
             "month": "2025-01",
@@ -306,7 +344,7 @@ class TestSharedWriteReads:
         assert result["total_tokens"] == 0
 
     def test_get_all_time_usage_combines_current_and_archives(self, shared_source, tmp_path):
-        archive_dir = tmp_path / "shared" / "archives" / "smith"
+        archive_dir = tmp_path / "shared" / "archives"
         archive_dir.mkdir(parents=True)
         (archive_dir / "2025-01.json").write_text(json.dumps({
             "month": "2025-01",
@@ -325,7 +363,7 @@ class TestSharedWriteReads:
         assert t.list_archived_months() == []
 
     def test_list_archived_months_returns_sorted(self, shared_source, tmp_path):
-        archive_dir = tmp_path / "shared" / "archives" / "smith"
+        archive_dir = tmp_path / "shared" / "archives"
         archive_dir.mkdir(parents=True)
         for month in ["2026-02", "2025-11"]:
             (archive_dir / f"{month}.json").write_text("{}")
@@ -336,46 +374,46 @@ class TestSharedWriteReads:
 class TestSharedWriteRollover:
 
     def test_closed_month_folded_into_archive(self, shared_source, tmp_path):
-        event_dir = tmp_path / "shared" / "events" / "smith" / "2020-01"
-        event_dir.mkdir(parents=True)
-        (event_dir / "a.json").write_text(json.dumps({
+        call_dir = tmp_path / "shared" / "calls" / "2020-01"
+        call_dir.mkdir(parents=True)
+        (call_dir / "a.json").write_text(json.dumps({
             "model": "gpt-4o", "prompt_tokens": 10, "completion_tokens": 0,
             "total_tokens": 10, "total_cost": 0.0, "timestamp": "2020-01-15T10:00:00",
             "source": "toms-mac",
         }))
         _make_shared_tracker(shared_source)  # __init__ triggers rollover
-        archive_path = tmp_path / "shared" / "archives" / "smith" / "2020-01.json"
+        archive_path = tmp_path / "shared" / "archives" / "2020-01.json"
         assert archive_path.exists()
         assert json.loads(archive_path.read_text())["total_usage"]["total_tokens"] == 10
 
-    def test_closed_month_event_files_removed_after_rollover(self, shared_source, tmp_path):
-        event_dir = tmp_path / "shared" / "events" / "smith" / "2020-01"
-        event_dir.mkdir(parents=True)
-        (event_dir / "a.json").write_text(json.dumps({
+    def test_closed_month_call_files_removed_after_rollover(self, shared_source, tmp_path):
+        call_dir = tmp_path / "shared" / "calls" / "2020-01"
+        call_dir.mkdir(parents=True)
+        (call_dir / "a.json").write_text(json.dumps({
             "model": "gpt-4o", "prompt_tokens": 10, "completion_tokens": 0,
             "total_tokens": 10, "total_cost": 0.0, "timestamp": "2020-01-15T10:00:00",
         }))
         _make_shared_tracker(shared_source)
-        assert not event_dir.exists()
+        assert not call_dir.exists()
 
     def test_current_month_events_not_rolled_over(self, shared_source, tmp_path):
         t = _make_shared_tracker(shared_source)
         p1, p2 = _pricing_patches()
         with p1, p2:
             t.record_usage("gpt-4o", 10, 0, 10)
-        event_dir = tmp_path / "shared" / "events" / "smith" / t._get_current_month()
-        assert event_dir.exists()
-        assert list(event_dir.glob("*.json"))
+        call_dir = tmp_path / "shared" / "calls" / t._get_current_month()
+        assert call_dir.exists()
+        assert list(call_dir.glob("*.json"))
 
     def test_rollover_skips_month_already_archived(self, shared_source, tmp_path):
-        archive_dir = tmp_path / "shared" / "archives" / "smith"
+        archive_dir = tmp_path / "shared" / "archives"
         archive_dir.mkdir(parents=True)
         archive_path = archive_dir / "2020-01.json"
         archive_path.write_text(json.dumps({"month": "2020-01", "total_usage": {"total_tokens": 777}}))
 
-        event_dir = tmp_path / "shared" / "events" / "smith" / "2020-01"
-        event_dir.mkdir(parents=True)
-        (event_dir / "a.json").write_text(json.dumps({
+        call_dir = tmp_path / "shared" / "calls" / "2020-01"
+        call_dir.mkdir(parents=True)
+        (call_dir / "a.json").write_text(json.dumps({
             "model": "gpt-4o", "prompt_tokens": 1, "completion_tokens": 0,
             "total_tokens": 1, "total_cost": 0.0, "timestamp": "2020-01-01T00:00:00",
         }))
@@ -386,7 +424,7 @@ class TestSharedWriteRollover:
 
 
 class TestRolloverPreservesUnreadableEvents:
-    """Month rollover must never delete an event file it couldn't fold in.
+    """Month rollover must never delete an call record it couldn't fold in.
 
     Shared-write mode is built for folders synced by Dropbox or OneDrive,
     where a placeholder or partially-downloaded file that fails to parse now
@@ -396,7 +434,7 @@ class TestRolloverPreservesUnreadableEvents:
     """
 
     def _closed_month_dir(self, tmp_path, month="2020-01"):
-        d = tmp_path / "shared" / "events" / "smith" / month
+        d = tmp_path / "shared" / "calls" / month
         d.mkdir(parents=True)
         return d
 
@@ -407,7 +445,7 @@ class TestRolloverPreservesUnreadableEvents:
             "input_cost": 0.1, "output_cost": 0.2, "total_cost": 0.3, "source": "x",
         }))
 
-    def test_unreadable_event_file_is_not_deleted(self, shared_source, tmp_path):
+    def test_unreadable_call_file_is_not_deleted(self, shared_source, tmp_path):
         d = self._closed_month_dir(tmp_path)
         self._good_event(d / "20200105T000000_aaa_x.json")
         corrupt = d / "20200105T000001_bbb_x.json"
@@ -416,7 +454,7 @@ class TestRolloverPreservesUnreadableEvents:
         t = _make_shared_tracker(shared_source)
         t._rollover_closed_shared_months()
 
-        assert corrupt.exists(), "an unreadable event file was deleted"
+        assert corrupt.exists(), "an unreadable call record was deleted"
         assert (d / "20200105T000000_aaa_x.json").exists(), (
             "readable files must also stay, so the month can be retried as a whole"
         )
@@ -434,7 +472,7 @@ class TestRolloverPreservesUnreadableEvents:
         self._good_event(d / "20200105T000001_bbb_x.json")
         t._rollover_closed_shared_months()
 
-        archive = tmp_path / "shared" / "archives" / "smith" / "2020-01.json"
+        archive = tmp_path / "shared" / "archives" / "2020-01.json"
         assert archive.exists()
         assert json.loads(archive.read_text())["total_usage"]["call_count"] == 2
         assert not d.exists(), "cleanly folded months should still be tidied away"
@@ -447,7 +485,7 @@ class TestRolloverPreservesUnreadableEvents:
         t = _make_shared_tracker(shared_source)
         t._rollover_closed_shared_months()
 
-        archive = tmp_path / "shared" / "archives" / "smith" / "2020-01.json"
+        archive = tmp_path / "shared" / "archives" / "2020-01.json"
         assert archive.exists()
         assert json.loads(archive.read_text())["total_usage"]["call_count"] == 1
         assert not d.exists()
@@ -462,7 +500,7 @@ class TestArchivedMonthReportInSharedMode:
     """
 
     def _archived_month(self, tmp_path, month="2020-01"):
-        archive_dir = tmp_path / "shared" / "archives" / "smith"
+        archive_dir = tmp_path / "shared" / "archives"
         archive_dir.mkdir(parents=True)
         (archive_dir / f"{month}.json").write_text(json.dumps({
             "month": month,
@@ -476,7 +514,7 @@ class TestArchivedMonthReportInSharedMode:
     def test_archive_path_branches_on_source_mode(self, shared_source, tmp_path):
         t = _make_shared_tracker(shared_source)
         path = t._archive_path_for("2020-01")
-        assert path == tmp_path / "shared" / "archives" / "smith" / "2020-01.json"
+        assert path == tmp_path / "shared" / "archives" / "2020-01.json"
 
     def test_report_finds_the_archive_it_lists_as_available(self, shared_source, tmp_path, capsys):
         self._archived_month(tmp_path)
