@@ -4889,3 +4889,87 @@ class TestAddingTheFirstModel:
         assert reached.get("name") == "openai/gpt-4o", (
             "the catalogue read raised before the model could be looked up"
         )
+
+
+class TestTheModelsPanelReadsAsOnePage:
+    """Five things that made the panel look assembled rather than designed."""
+
+    @pytest.fixture
+    def page(self):
+        return _rendered_template("settings.html")
+
+    def test_a_list_is_set_like_the_sentence_above_it(self, page):
+        rule = page.split(".card ul, .card ol {")[1].split("}")[0]
+        assert "font-size: var(--text-sm)" in rule
+        assert "color: var(--text-muted)" in rule
+
+    def test_no_list_is_trapped_inside_a_paragraph(self, page):
+        """A browser closes a <p> the moment a block starts inside it.
+
+        The list then sits outside .hint and inherits none of it — which is why
+        it looked nothing like the text introducing it, however the list itself
+        was styled.
+        """
+        assert not re.search(r'<p class="hint[^"]*">(?:(?!</p>).)*?<(ul|ol|div)\b',
+                             page, re.S)
+
+    def test_what_a_model_can_do_is_not_coloured_as_good_news(self, page):
+        """Green means "this is set". Being able to read images is neither
+        good news nor bad — it is a fact about the model."""
+        assert 'badge ${m.supports_vision ? "can"' in page
+        assert ".badge.can {" in page
+
+    def test_that_badge_is_the_sandbox_orange_and_not_a_new_colour(self, page):
+        """Same hue as #F58025, lightened — one family, not a second accent."""
+        import colorsys
+        for token in ("--badge-can-bg", "--badge-can-text"):
+            found = re.search(rf"{token}:\s*#([0-9a-fA-F]{{6}})", page)
+            r, g, b = (int(found.group(1)[i:i+2], 16) / 255 for i in (0, 2, 4))
+            hue = colorsys.rgb_to_hls(r, g, b)[0] * 360
+            assert 18 <= hue <= 36, f"{token} is hue {hue:.0f}°, not the orange's"
+
+    def test_there_is_a_line_before_adding_one(self, page):
+        """Without it the heading read as part of the last row above it."""
+        rule = page.split(".after-a-list {")[1].split("}")[0]
+        assert "border-top" in rule
+        assert 'id="add-model-form" class="after-a-list"' in page
+
+    def test_links_are_not_the_browsers_own_blue(self, page):
+        """There was no rule at all, so they came out louder than anything
+        else on a page made of one orange and greys."""
+        assert "a { color: var(--link); }" in page
+        assert re.search(r"--link:\s*#[0-9a-fA-F]{6}", page)
+
+    def test_the_link_colour_complements_the_orange(self, page):
+        """Its complement, not another warm colour fighting it."""
+        import colorsys
+        found = re.search(r"--link:\s*#([0-9a-fA-F]{6})", page)
+        r, g, b = (int(found.group(1)[i:i+2], 16) / 255 for i in (0, 2, 4))
+        hue = colorsys.rgb_to_hls(r, g, b)[0] * 360
+        assert 190 <= hue <= 220, f"hue {hue:.0f}° is not opposite the orange's 26°"
+
+    def test_the_button_is_not_hard_against_the_fields(self, page):
+        assert "button.after-fields { margin-top:" in page
+        assert 'id="add-model-btn" class="after-fields"' in page
+
+    def test_every_new_colour_can_be_read_in_both_themes(self, page):
+        """The floor for text is 4.5:1, and a colour chosen by eye misses it."""
+        def lum(h):
+            h = h.lstrip("#")
+            parts = [int(h[i:i+2], 16) / 255 for i in (0, 2, 4)]
+            f = [c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4 for c in parts]
+            return 0.2126 * f[0] + 0.7152 * f[1] + 0.0722 * f[2]
+
+        def ratio(a, b):
+            hi, lo = sorted((lum(a), lum(b)), reverse=True)
+            return (hi + 0.05) / (lo + 0.05)
+
+        def token(where, name):
+            return re.findall(rf"{name}:\s*(#[0-9a-fA-F]{{6}})", where)[-1]
+
+        light, dark = page.split('[data-theme="dark"]')
+        for half, theme in ((light, "light"), (dark, "dark")):
+            assert ratio(token(half, "--badge-can-bg"),
+                         token(half, "--badge-can-text")) >= 4.5, theme
+            assert ratio(token(half, "--panel-bg"), token(half, "--link")) >= 4.5, theme
+            assert ratio(token(half, "--bg"), token(half, "--link")) >= 4.5, theme

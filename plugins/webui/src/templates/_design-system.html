@@ -63,6 +63,17 @@
     --danger-hover-bg: #fdf0f0;
     --badge-set-bg: #e5f5e6;
     --badge-set-text: #1c7c2b;
+    /* A model that can read images is not a success or a permission, so it is
+       not green. Same hue as the sandbox's orange (26°), lifted to a tint with
+       ink dark enough to read on it: 6.5:1, where the ordinary floor is 4.5. */
+    --badge-can-bg: #fce8d9;
+    --badge-can-text: #84400b;
+    /* Links. There was no rule for these at all, so they came out in the
+       browser's own blue, which is louder than anything else on the page. This
+       is the orange's complement — hue 206° against its 26° — lightened until
+       it stops competing and stopped before it stops being readable: 4.52:1 on
+       the page background, against a 4.5 floor. */
+    --link: #2275b4;
 
     /* ── Type roles ────────────────────────────────────────────────────────
        Three, and they mean different things. The interface is set in the
@@ -166,6 +177,11 @@
     --danger-hover-bg: #3a1f1f;
     --badge-set-bg: #16321a;
     --badge-set-text: #6fd67f;
+    --badge-can-bg: #4f2f17;
+    --badge-can-text: #f4b07b;
+    /* Lighter again on a dark panel, for the same reason the hover orange is:
+       darkening here moves towards the background rather than away. 5.56:1. */
+    --link: #5aa3de;
   }
 
   * { box-sizing: border-box; }

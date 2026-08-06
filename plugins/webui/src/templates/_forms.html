@@ -61,6 +61,10 @@
     display: block; font-size: var(--text-xs); color: var(--text-muted);
     margin: 0.6rem 0 0.2rem;
   }
+  /* Without a rule these came out in the browser's own blue, which is the
+     loudest thing on a page otherwise made of one orange and greys. */
+  a { color: var(--link); }
+  a:hover { text-decoration: underline; }
   /* ── Cards and the rows inside them ───────────────────────────────────── */
   .card {
     background: var(--panel-bg); border: 1px solid var(--border);
