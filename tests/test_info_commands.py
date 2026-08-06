@@ -325,12 +325,14 @@ class TestHandleInfoCommandsUsageSources:
                         usage_subcommand="sources", sources_subcommand="list")
         assert handle_info_commands(args) is True
 
-    def test_sources_list_prints_no_sources_message_when_empty(self, capsys):
+    def test_sources_list_says_so_when_there_are_none(self, capsys):
+        """And says where one is set, rather than leaving a bare 'none'."""
         args = _make_ns(command="usage", professor="testprof",
                         usage_subcommand="sources", sources_subcommand="list")
         handle_info_commands(args)
-        out = capsys.readouterr().out
-        assert "No external usage-data sources configured" in out
+        out = capsys.readouterr().out.lower()
+        assert "nobody" in out or "no " in out
+        assert "settings page" in out
 
     def test_sources_does_not_construct_token_tracker(self, capsys):
         """'usage sources' shouldn't need a working professor config at all."""

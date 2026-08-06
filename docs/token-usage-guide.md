@@ -96,7 +96,7 @@ Each file, active or archived, covers exactly one month:
 
 The file is named with the person's netID, which is why netIDs are the identifier — they need no cleaning up to be used as a filename.
 
-Don't edit these by hand. If two installations share a folder like this (see [Configuration → External usage-data sources](configuration.md#external-usage-data-sources)), the sandbox writes one small file per call there instead of rewriting a shared one, so a sync service never has two conflicting edits to merge.
+Don't edit these by hand. Where several computers share one folder (see [Configuration → Usage kept somewhere else](configuration.md#usage-kept-somewhere-else)), the sandbox writes one small file per call there instead of rewriting a shared one, so a sync service never has two conflicting edits to merge — which is why any number of computers can share a folder.
 
 ---
 

@@ -546,14 +546,11 @@ def _settings_add_professor_interactive(args: argparse.Namespace) -> None:
 
 
 def _handle_usage_sources(args: argparse.Namespace) -> None:
-    """Handle 'usage sources list/add/remove'.
+    """Handle 'usage sources list'.
 
-    Note that the external-source configuration itself (in ``settings.toml``)
-    isn't scoped to the professor named on the command line — every usage
-    subcommand requires a professor argument for consistency, but 'sources'
-    manages this installation's config as a whole. The professor named on
-    the command line only matters here as "which professor's data source
-    to add/remove," via --for-professor.
+    Lists every folder this installation reads usage from, for everybody, not
+    only for the person named on the command line — a professor is asked for by
+    every usage subcommand, and this one has nothing to do with them.
     """
     sub = getattr(args, 'sources_subcommand', None)
 
@@ -563,8 +560,9 @@ def _handle_usage_sources(args: argparse.Namespace) -> None:
 
     raise CLIError(
         "Usage: python main.py <professor> usage sources list\n"
-        "\nExternal sources are added and removed on the web interface's settings\n"
-        "page, or by editing [usage_sources] in settings.toml yourself."
+        "\nA person's usage folder is set on the web interface's settings page,\n"
+        "beside their name — or by adding usage_path to their table in\n"
+        "settings.toml yourself."
     )
 
 
@@ -573,13 +571,14 @@ def _print_configured_sources() -> None:
     print(f"\nThis installation's source id: {get_source_id()}")
     sources = get_configured_sources()
     if not sources:
-        print("No external usage-data sources configured.")
-        print("Add one with: python main.py <professor> usage sources add")
+        print("Nobody's usage is being read from anywhere else.")
+        print("Set a folder on the settings page of the web interface, beside "
+              "the person's name.")
         return
-    print("\nConfigured external sources:")
+    print("\nUsage also read from:")
     for s in sources:
-        prof_note = f", for={s.professor}" if s.professor else ""
-        print(f"  {s.label}  [{s.mode}{prof_note}]  {s.path}")
+        who = s.professor or "everyone found there"
+        print(f"  {who}  [{s.mode}]  {s.path}")
 
 
 def _settings_export_shared(args: argparse.Namespace) -> None:

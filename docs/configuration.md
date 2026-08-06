@@ -66,6 +66,7 @@ key = "sk-...primary_key..."
 - `name` — their display name. Shown in reports and in the web interface's person picker and nowhere else, so write it however reads best.
 - `key` — primary PortKey API key, obtained through Princeton OIT.
 - `backup_key` — used if the primary key fails. A warning is printed when it is.
+- `usage_path`, `usage_mode` — optional; only where their usage is kept somewhere other than this computer. See [Usage kept somewhere else](#usage-kept-somewhere-else).
 
 ### Why netIDs
 
@@ -511,40 +512,62 @@ without anyone having to arrange it.
 Either way the key is stored as text anyone with the file can read. None of
 these files is tracked by git.
 
-## External usage-data sources
+## Usage kept somewhere else
 
-`[usage_sources]` in `settings.toml` lists other installations whose usage data this one should include when building reports. It's managed entirely through `usage sources` commands rather than hand-edited.
+Someone's usage is normally recorded in this installation's own `data/` folder.
+It doesn't have to be. Two situations put it elsewhere:
 
-This lets one installation report on another's spending. For example: a professor runs their own copy pointed at a Dropbox-synced folder, and whoever manages several people's accounts registers that folder as a source on their own installation, so one report covers everyone without anyone copying files around.
+- **You want to see someone else's spending.** A professor runs their own copy,
+  pointed at a folder that syncs — Dropbox, OneDrive, a shared drive. Whoever
+  looks after several people's accounts names that folder on their own
+  installation, and one report then covers everybody without anyone copying
+  files around.
+- **One person works on several computers.** All of them write into the same
+  synced folder, and each keeps the same running total. There is no limit on how
+  many: every API call writes its own small file, named after the computer that
+  wrote it and never edited again, so no two computers can ever make conflicting
+  edits to one file. Five machines and one folder is the ordinary case.
 
-Two modes:
+The folder belongs to the person whose usage it holds, so it is recorded on
+them. Set it on the web interface's **Settings** page — open **Usage folder**
+beside their name — or add two lines to their table in `settings.toml`:
 
-Every source names whose usage it holds, and only that person's is taken from it — a department folder may hold three professors' records while your arrangement covers one of them.
+```toml
+[professors.jh43]
+name = "Jeff Heller"
+key = "..."
+usage_path = "/Users/heller/Dropbox/Sandbox-Shared/data"
+usage_mode = "shared-write"
+```
 
-- **`read-only`** (the default) — only the other installation writes there; this one just reads.
-- **`shared-write`** — both installations record usage there, one file per call, so a file-sync service never sees two conflicting edits to the same file.
+`usage_mode` is one of two things:
+
+- **`read-only`** (what you get if you leave it out) — adds what is already in
+  that folder to their spending, and never changes it. This is what following
+  somebody else's spending wants.
+- **`shared-write`** — also records work done on *this* computer into that
+  folder. This is what several computers keeping one total want. Use it only
+  where work is genuinely done under that person's key: it writes.
+
+One folder each, and it is per person on purpose — one professor may be happy
+for work to be done from a shared folder while another wants only their
+spending followed. To see what is configured:
 
 ```bash
 python main.py jh43 usage sources list
 ```
 
-Sources are added and removed on the web interface's **Settings** page, or by
-writing them into `settings.toml` yourself:
+That lists every folder, for everybody. A netID is asked for because every
+`usage` subcommand asks for one, but this subcommand doesn't use it.
+
+Every file written into a shared folder is named after the installation that
+wrote it. That name is worked out from the computer; to set it yourself, put it
+in `settings.toml`:
 
 ```toml
-[usage_sources."Prof. Smith"]
-path = "/path/to/shared/data"
-mode = "read-only"
-professor = "jh43"
-
-[usage_sources."This installation"]
-path = "/path/to/shared/data"
-mode = "shared-write"
-professor = "jh43"
+[usage_sources]
+source_id = "toms-mac"
 ```
-
-
-`add` prompts for anything you don't pass as a flag. A netID is required on the command line for consistency with every other `usage` subcommand, even though the source list itself isn't scoped to one person — see `src/settings_store.py`.
 
 ---
 
@@ -644,6 +667,6 @@ pip install openpyxl
 | Runtime defaults | `settings.default.toml`, in the package | N/A — this is the shared baseline | ✅ `preferences.toml` | ❌ hand-edit TOML | ❌ |
 | Shared runtime defaults | Wherever `shared_settings.path` points | ✅ that's the point | ✅ `preferences.toml` still wins | Pointer only, by hand | Pointer only, via `/settings` |
 | Plugin defaults | Each plugin's own directory, tracked by git | N/A | ❌ no per-plugin override file | ❌ hand-edit TOML | ❌ |
-| External usage sources | `settings.toml` (`[usage_sources]`) | ✅ that's the point — it points at another installation's `data/` folder | N/A | ✅ `usage sources list`; add and remove by hand | ✅ `/settings` |
+| Where a person's usage is kept | `settings.toml` (`usage_path` on the person) | ✅ that's the point — it points at another installation's `data/` folder | N/A | ✅ `usage sources list`; add and remove by hand | ✅ `/settings` |
 
 Every "✅ `/settings`" row is served by the web interface's `/settings` route (`plugins/webui/src/templates/settings.html` and the `/api/settings/*` routes in `plugins/webui/src/app.py`), behind the same unlock passphrase as the rest of it. A first-time visitor with nobody configured is sent straight there rather than to an empty chat screen, and the section order flips depending on whether anyone is configured yet — people first on an empty installation, shared settings first once there's at least one person, since that's the more likely thing to come back and adjust.

@@ -1463,7 +1463,7 @@ class TestSettingsPage:
         data = unlocked_client.get("/api/settings").json()
         assert data["has_professors"] is False
         assert data["order"] == [
-            "professors", "external_sources", "webui", "shared", "endpoints", "models",
+            "professors", "webui", "shared", "endpoints", "models",
             "folder",
         ]
         assert data["professors"] == []
@@ -1487,12 +1487,11 @@ class TestSettingsProfessors:
         assert data["has_professors"] is True
         assert data["order"] == [
             "folder", "shared", "endpoints", "models", "professors", "webui",
-            "external_sources",
         ]
         prof = data["professors"][0]
         assert prof == {
             "netid": "jh43", "name": "Jeff Heller",
-            "has_key": True, "has_backup_key": False,
+            "has_key": True, "has_backup_key": False, "usage": None,
         }
 
     def test_add_professor_with_backup_key(self, unlocked_client, settings_env):
@@ -1675,42 +1674,78 @@ class TestSettingsValues:
         assert ep2["key_set"] is True
 
 
-class TestSettingsSources:
+class TestAPersonsUsageFolder:
+    """A folder holding somebody's usage belongs to them, so it is set on them."""
 
-    def test_add_and_list_read_only_source(self, unlocked_client, settings_env):
+    def _add_smith(self, client):
+        return client.post("/api/settings/professors", json={
+            "netid": "smith", "name": "Prof. Smith", "key": "sk-test",
+        })
+
+    def test_setting_a_folder_and_reading_it_back(self, unlocked_client, settings_env):
+        self._add_smith(unlocked_client)
         resp = unlocked_client.post("/api/settings/sources", json={
-            "label": "Prof. Smith", "path": "/tmp/smith-data", "mode": "read-only",
-            "professor": "smith",
+            "netid": "smith", "path": "/tmp/smith-data", "mode": "read-only",
         })
         assert resp.status_code == 200
-        sources = unlocked_client.get("/api/settings").json()["sources"]["external"]
-        assert sources == [{"label": "Prof. Smith", "path": "/tmp/smith-data",
-                            "mode": "read-only", "professor": "smith"}]
+        people = unlocked_client.get("/api/settings").json()["professors"]
+        assert people[0]["usage"] == {"path": "/tmp/smith-data", "mode": "read-only"}
 
-    def test_shared_write_without_professor_rejected(self, unlocked_client, settings_env):
+    def test_somebody_with_no_folder_says_so(self, unlocked_client, settings_env):
+        self._add_smith(unlocked_client)
+        people = unlocked_client.get("/api/settings").json()["professors"]
+        assert people[0]["usage"] is None
+
+    def test_a_folder_for_somebody_unknown_is_refused(self, unlocked_client, settings_env):
+        """It would otherwise be filed against a person who does not exist."""
         resp = unlocked_client.post("/api/settings/sources", json={
-            "label": "Prof. Smith", "path": "/tmp/smith-data", "mode": "shared-write",
+            "netid": "nobody", "path": "/tmp/nobody",
+        })
+        assert resp.status_code == 400
+        assert "added yet" in resp.text
+
+    def test_both_modes_are_accepted(self, unlocked_client, settings_env):
+        self._add_smith(unlocked_client)
+        for mode in ("read-only", "shared-write"):
+            resp = unlocked_client.post("/api/settings/sources", json={
+                "netid": "smith", "path": f"/tmp/{mode}", "mode": mode,
+            })
+            assert resp.status_code == 200, (mode, resp.text)
+
+    def test_an_unrecognised_mode_is_refused(self, unlocked_client, settings_env):
+        self._add_smith(unlocked_client)
+        resp = unlocked_client.post("/api/settings/sources", json={
+            "netid": "smith", "path": "/tmp/smith", "mode": "read-write",
         })
         assert resp.status_code == 400
 
-    def test_shared_write_with_professor_accepted(self, unlocked_client, settings_env):
-        resp = unlocked_client.post("/api/settings/sources", json={
-            "label": "This installation", "path": "/tmp/shared", "mode": "shared-write", "professor": "smith",
-        })
-        assert resp.status_code == 200
+    def test_the_installation_says_what_it_is_called(self, unlocked_client, settings_env):
+        """Shared-write names every file it writes after this installation."""
+        assert unlocked_client.get("/api/settings").json()["source_id"]
 
-    def test_remove_source(self, unlocked_client, settings_env):
+    def test_clearing_a_folder(self, unlocked_client, settings_env):
+        self._add_smith(unlocked_client)
         unlocked_client.post("/api/settings/sources", json={
-            "label": "Prof. Smith", "path": "/tmp/smith-data", "mode": "read-only",
-            "professor": "smith",
+            "netid": "smith", "path": "/tmp/smith-data",
         })
-        resp = unlocked_client.delete("/api/settings/sources", params={"label": "Prof. Smith"})
+        resp = unlocked_client.delete("/api/settings/sources", params={"netid": "smith"})
         assert resp.status_code == 200
-        assert unlocked_client.get("/api/settings").json()["sources"]["external"] == []
+        assert unlocked_client.get("/api/settings").json()["professors"][0]["usage"] is None
 
-    def test_remove_unknown_source_404s(self, unlocked_client, settings_env):
-        resp = unlocked_client.delete("/api/settings/sources", params={"label": "Nobody"})
+    def test_clearing_a_folder_nobody_set_404s(self, unlocked_client, settings_env):
+        self._add_smith(unlocked_client)
+        resp = unlocked_client.delete("/api/settings/sources", params={"netid": "smith"})
         assert resp.status_code == 404
+
+    def test_clearing_leaves_the_person_alone(self, unlocked_client, settings_env):
+        self._add_smith(unlocked_client)
+        unlocked_client.post("/api/settings/sources", json={
+            "netid": "smith", "path": "/tmp/smith-data",
+        })
+        unlocked_client.delete("/api/settings/sources", params={"netid": "smith"})
+        people = unlocked_client.get("/api/settings").json()["professors"]
+        assert [p["netid"] for p in people] == ["smith"]
+        assert people[0]["has_key"] is True
 
 
 class TestConversationIdTraversalOverHttp:
@@ -3563,48 +3598,58 @@ class TestChoosingHowRepliesAreSet:
         assert "--font-ui:" not in sans, "the choice redefines the interface's own face"
 
 
-class TestASourceSaysWhoseUsageItHolds:
-    """One professor may share a folder for work, another only for tracking."""
+class TestTheUsageFolderIsAskedForBesideThePerson:
+    """It used to be a section of its own, where a label and a netID were both
+    typed for one person who was already listed a few inches above."""
 
     def _settings(self):
         from pathlib import Path
 
         return (Path(__file__).resolve().parents[1] / "src" / "templates" / "settings.html").read_text()
 
-    def test_a_read_only_source_is_refused_without_a_professor(self, unlocked_client, settings_env):
-        r = unlocked_client.post("/api/settings/sources", json={
-            "label": "Prof. Smith", "path": "/tmp/smith", "mode": "read-only",
-        })
-        assert r.status_code >= 400
-        assert "professor" in r.text.lower()
-
-    def test_both_modes_take_one(self, unlocked_client, settings_env):
-        for mode in ("read-only", "shared-write"):
-            r = unlocked_client.post("/api/settings/sources", json={
-                "label": f"Prof {mode}", "path": f"/tmp/{mode}", "mode": mode,
-                "professor": "smith",
-            })
-            assert r.status_code == 200, (mode, r.text)
-
-    def test_the_professor_box_is_always_offered(self):
-        """It used to appear only for shared-write."""
+    def test_there_is_no_separate_sources_section(self):
         page = self._settings()
-        assert 'id="source-professor"' in page
-        assert "source-professor-wrap" not in page, "the box is still being hidden by mode"
+        assert 'id="section-external_sources"' not in page
+        assert 'id="add-source-form"' not in page
 
-    def test_the_folder_gets_a_line_to_itself(self):
-        """It is the longest value on the page and was sharing a row with
-        three other boxes."""
+    def test_the_folder_is_asked_for_in_the_persons_own_row(self):
         page = self._settings()
-        assert 'class="source-path-row"' in page
-        path_at = page.index('id="source-path"')
-        fields_at = page.index('class="inline-fields"', page.index('id="add-source-form"'))
-        assert path_at > page.index("</div>", fields_at), "the path is still in the crowded row"
+        assert 'data-usage-for="${p.netid}"' in page
+        row_at = page.index('data-usage-for="${p.netid}"')
+        list_at = page.index('const list = document.getElementById("professors-list")')
+        assert row_at > list_at, "the folder is not being drawn with the people"
 
-    def test_the_two_modes_are_explained_where_they_are_chosen(self):
+    def test_nobody_types_a_label_or_a_netid_for_it(self):
+        """Both were already known: it is that person's row."""
         page = self._settings()
-        assert "only look" in page
-        assert "can never write" in page
+        assert 'id="source-label"' not in page
+        assert 'id="source-professor"' not in page
+
+    def test_both_modes_are_offered_and_explained_where_they_are_chosen(self):
+        page = self._settings()
+        assert 'value="read-only"' in page
+        assert 'value="shared-write"' in page
+        assert "never changes it" in page
+
+    def test_the_installations_own_name_is_still_shown(self):
+        """It is what shared-write calls the files it writes."""
+        assert 'id="source-id"' in self._settings()
+
+    def test_the_browse_buttons_are_drawn_after_the_rows_holding_them(self):
+        """One of them is now inside a row drawn once per person, so showing
+        them before the rows exist leaves that one hidden for good."""
+        page = self._settings()
+        # Measured from inside loadSettings, since the name of each of these
+        # also appears earlier as the function that defines it.
+        loading = page[page.index("async function loadSettings()"):]
+        assert loading.index("showBrowseButtons(data.can_browse)") > loading.index(
+            "renderProfessors(data)")
+
+    def test_a_browse_button_with_no_id_to_point_at_finds_its_own_box(self):
+        """Rows repeat, so the box beside a button in one cannot have an id."""
+        page = self._settings()
+        assert 'button.closest(".field-set").querySelector("input")' in page
+        assert 'class="field-set"' in page
 
 
 class TestTheModelMenuIsGrouped:
@@ -4325,7 +4370,7 @@ class TestTheSettingsPageIsInThreeTabs:
     """Seven cards in one column meant scrolling to find anything."""
 
     ASSIGNED = {
-        "professors": "system", "shared": "system", "external_sources": "system",
+        "professors": "system", "shared": "system",
         "webui": "webui", "folder": "webui",
         "models": "models", "endpoints": "models",
     }
