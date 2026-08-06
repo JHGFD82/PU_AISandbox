@@ -60,107 +60,39 @@ class NewModelBody(BaseModel):
     provider_model: str
     professor: str
 
-_PAGE = """<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Set up the PU AI Sandbox</title>
-<style>
-  :root {{ color-scheme: light dark; }}
-  /* Width means the whole thing, padding and border included. Without this a
-     browser measures a text input's width *inside* its padding and a select's
-     around it, so the same "width: 100%" made the model box overhang its panel
-     while the picker under it fitted exactly. */
-  *, *::before, *::after {{ box-sizing: border-box; }}
-  body {{
-    font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    max-width: 40rem; margin: 3rem auto; padding: 0 1.25rem;
-  }}
-  h1 {{ font-size: 1.5rem; margin-bottom: .25rem; }}
-  .lede {{ color: #666; margin-top: 0; }}
-  fieldset {{ border: 1px solid #ccc; border-radius: 8px; padding: 1rem 1.25rem; margin: 1.5rem 0; }}
-  legend {{ padding: 0 .4rem; font-weight: 600; }}
-  label {{ display: block; margin: .75rem 0 .25rem; }}
-  input[type=text] {{ width: 100%; padding: .55rem; font: inherit; border: 1px solid #999; border-radius: 6px; }}
-  .found {{ background: #f3f7ff; border-color: #9db8e8; }}
-  .note {{ background: #fff8e6; border: 1px solid #e0c169; border-radius: 8px; padding: .9rem 1.1rem; margin: 1.25rem 0; }}
-  .error {{ background: #ffeaea; border: 1px solid #d98080; border-radius: 8px; padding: .9rem 1.1rem; margin: 1.25rem 0; }}
-  button {{ font: inherit; padding: .6rem 1.4rem; border-radius: 6px; border: 0; background: #2b6cb0; color: #fff; cursor: pointer; }}
-  button:disabled {{ opacity: .55; cursor: default; }}
-  button.browse, button.secondary {{ background: transparent; color: inherit; border: 1px solid #999; padding: .5rem 1rem; }}
-  /* How far through setup this is. Quiet by design — a reassurance rather
-     than the thing on the page worth looking at. */
-  .progress {{ margin: 0 0 1.75rem; }}
-  .progress-bar {{ height: 3px; background: rgba(128,128,128,.22); border-radius: 2px; }}
-  .progress-bar span {{ display: block; height: 100%; background: #2b6cb0;
-                        border-radius: 2px; transition: width .3s ease; }}
-  .progress-label {{ margin: .35rem 0 0; font-size: .8rem; color: #666; }}
-  @media (prefers-color-scheme: dark) {{
-    .progress-bar span {{ background: #7aa7dd; }}
-    .progress-label {{ color: #9aa4ad; }}
-  }}
-  /* A panel holding something that has to be filled in before setup can end.
-     The colour is a reminder, not the message: "Required" is written inside it
-     as well, because a border somebody cannot distinguish is no signal at all.
-     It fades rather than snaps, so the change is noticed by someone who has
-     just pressed Add and is looking at the list, not at the edge. */
-  fieldset.needed {{ border: 2px solid #c0392b; }}
-  fieldset.satisfied {{ border: 2px solid #ccc; transition: border-color .5s ease; }}
-  /* The legend spans the box so the state can sit at its right-hand edge,
-     against the border it describes, rather than trailing the words. */
-  /* The legend spans the box so the state can sit at its right-hand edge,
-     against the border it describes. The rule between the two carries the
-     box's own line across the gap, so the shape reads as unbroken rather than
-     as two labels floating in a hole in the border. */
-  fieldset.needed > legend, fieldset.satisfied > legend {{
-    display: flex; align-items: center; width: calc(100% - .8rem); gap: .6rem;
-  }}
-  legend .rule {{ flex: 1; height: 0; border-top: 2px solid #c0392b; }}
-  fieldset.satisfied legend .rule {{ border-top-color: #ccc; transition: border-color .5s ease; }}
-  .required-flag {{ color: #c0392b; font-weight: 600; font-size: .85rem; white-space: nowrap; }}
-  fieldset.satisfied .required-flag {{ color: #3f7a45; }}
-  .added {{ margin: .5rem 0 0; padding-left: 1.2rem; }}
-  .added li {{ margin: .15rem 0; }}
-  .waiting {{ color: #666; font-style: italic; }}
-  .row-error {{ color: #c0392b; margin: .6rem 0 0; }}
-  .field-row {{ display: flex; gap: .5rem; align-items: center; }}
-  .field-row input[type=text] {{ flex: 1; }}
-  input[type=password] {{ width: 100%; padding: .55rem; font: inherit; border: 1px solid #999; border-radius: 6px; }}
-  select {{ width: 100%; padding: .55rem; font: inherit; border: 1px solid #999; border-radius: 6px; }}
-  details {{ margin: 1.5rem 0; }}
-  details summary {{ cursor: pointer; color: #2b6cb0; }}
-  @media (prefers-color-scheme: dark) {{ details summary {{ color: #7aa7dd; }} }}
-  ul {{ margin: .4rem 0; padding-left: 1.2rem; }}
-  code {{ background: rgba(128,128,128,.15); padding: .1rem .3rem; border-radius: 4px; }}
-  @media (prefers-color-scheme: dark) {{
-    body {{ background: #14171a; color: #e6e6e6; }}
-    .lede {{ color: #9aa4ad; }}
-    fieldset {{ border-color: #333; }}
-    input[type=text] {{ background: #1d2126; color: #e6e6e6; border-color: #444; }}
-    .found {{ background: #16202e; border-color: #2f4a72; }}
-    .note {{ background: #2a2412; border-color: #6b5a25; }}
-    .error {{ background: #2c1717; border-color: #7a3b3b; }}
-    fieldset.needed {{ border-color: #e07a6a; }}
-    fieldset.satisfied {{ border-color: #333; }}
-    .required-flag, .row-error {{ color: #e07a6a; }}
-    legend .rule {{ border-top-color: #e07a6a; }}
-    fieldset.satisfied legend .rule {{ border-top-color: #333; }}
-    fieldset.satisfied .required-flag {{ color: #8fc493; }}
-    .waiting {{ color: #9aa4ad; }}
-    input[type=password], select {{ background: #1d2126; color: #e6e6e6; border-color: #444; }}
-  }}
-</style>
-</head>
-<body>
-<h1>Set up the PU AI Sandbox</h1>
-<p class="lede">{lede}</p>
-{error}
-{body}
-{script}
-</body>
-</html>
-"""
+_TEMPLATES_DIR = Path(__file__).parent / "templates"
+
+
+def _page(body: str, lede: str, script: str = "", error: str = "") -> str:
+    """Draw one setup page in the shell every other page of the sandbox uses.
+
+    The shell was a string in this file with a stylesheet of its own — 28
+    colours, none of them the sandbox's. Somebody installing this saw one piece
+    of software and then, a moment later, what looked like another.
+
+    It is a template beside the rest now, so it includes the same design
+    system. Its layout stays its own: one narrow column, no top bar, nothing to
+    navigate. An installer is not a page of the application.
+
+    Args:
+        body: The question being asked, as HTML.
+        lede: The line under the heading.
+        script: Any behaviour this page needs, as a <script> element.
+        error: An explanation of what went wrong last time, as HTML.
+
+    Returns:
+        The whole page.
+    """
+    from jinja2 import Environment, FileSystemLoader, select_autoescape
+
+    environment = Environment(
+        loader=FileSystemLoader(str(_TEMPLATES_DIR)),
+        autoescape=select_autoescape(["html"]),
+    )
+    return environment.get_template("setup.html").render(
+        body=body, lede=lede, script=script, error=error,
+    )
+
 
 # Added to the page only when this computer has a file chooser to open, and
 # only on the question that asks for a folder. The button asks the server —
@@ -299,7 +231,7 @@ def _render(error: str = "") -> str:
         )
         lede = "Where should your files be kept?"
 
-    return _PAGE.format(
+    return _page(
         body=_progress(1) + body,
         lede=lede,
         script=_BROWSE_SCRIPT if file_picker.available() else "",
@@ -334,7 +266,7 @@ def _render_sync_confirm(chosen: Path, warning: str) -> str:
         "</form>"
         '<p><a href="/">Choose somewhere else</a></p>'
     )
-    return _PAGE.format(body=body, lede="One thing to check first.", script="", error="")
+    return _page(body=body, lede="One thing to check first.")
 
 
 def _progress(step: int) -> str:
@@ -437,8 +369,8 @@ def _render_people(where) -> str:
 <p><button type="button" id="continue" {carry_on}>Continue to step 3</button>
    <span class="waiting" id="continue-hint">{hint}</span></p>
 """
-    return _PAGE.format(body=body, lede="Who will be using this sandbox?",
-                        error="", script=_PEOPLE_SCRIPT)
+    return _page(body=body, lede="Who will be using this sandbox?",
+                 script=_PEOPLE_SCRIPT)
 
 
 def _render_models(where, billed_to: str = "") -> str:
@@ -498,8 +430,8 @@ def _render_models(where, billed_to: str = "") -> str:
    <span class="waiting" id="finish-hint">{hint}</span></p>
 <p><a href="/people">Back to step 2</a></p>
 """
-    return _PAGE.format(body=body, lede="What may they send work to?",
-                        error="", script=_MODELS_SCRIPT)
+    return _page(body=body, lede="What may they send work to?",
+                 script=_MODELS_SCRIPT)
 
 
 # Shared by both pages: sending one thing, and saying so when it did not work.

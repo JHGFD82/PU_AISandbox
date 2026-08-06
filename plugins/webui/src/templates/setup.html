@@ -1,0 +1,131 @@
+{#
+  The shell the first-run pages are drawn in.
+
+  It used to be a Python string in setup_web.py with its own stylesheet — 28
+  colours, none of them the sandbox's. A different blue, different greys, a
+  different dark background. The first thing anyone saw of this software looked
+  like a different piece of software from the one it was installing.
+
+  It is a template now for one reason: so it can include the same design system
+  every other page uses. The layout stays its own — one narrow column, centred,
+  no top bar and no sidebar — because an installer is not a page of the
+  application and should not pretend to be. What is shared is what makes two
+  pages look like they were made by the same people: the colours, the type, the
+  spacing, the corners, and how a button and a field are drawn.
+#}
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Set up the PU AI Sandbox</title>
+{% include "_design-system.html" %}
+<style>
+  body {
+    font-family: var(--font-ui);
+    max-width: 40rem; margin: 3rem auto; padding: 0 var(--space-4);
+    background: var(--bg); color: var(--text); line-height: 1.6;
+  }
+  h1 { font-size: var(--text-xxl); margin-bottom: var(--space-1); }
+  .lede { color: var(--text-muted); margin-top: 0; }
+
+  /* ── Where things are asked for ──────────────────────────────────────── */
+  fieldset {
+    border: 1px solid var(--border); border-radius: var(--radius-lg);
+    padding: var(--space-4) var(--space-6); margin: var(--space-6) 0;
+    background: var(--panel-bg);
+  }
+  legend { padding: 0 var(--space-1); font-weight: 600; }
+  label { display: block; margin: var(--space-3) 0 var(--space-1); }
+  input[type=text], input[type=password], select {
+    width: 100%; padding: 0.5rem; font: inherit;
+    border: 1px solid var(--border); border-radius: var(--radius-md);
+    background: var(--input-bg); color: var(--text);
+  }
+  .field-row { display: flex; gap: var(--space-2); align-items: center; }
+  .field-row input[type=text] { flex: 1; }
+
+  /* ── What is said back ───────────────────────────────────────────────── */
+  .found { background: var(--orange-tint); border-color: var(--orange); }
+  .note {
+    background: var(--orange-tint); border: 1px solid var(--orange);
+    border-radius: var(--radius-lg); padding: var(--space-3) var(--space-4);
+    margin: var(--space-4) 0;
+  }
+  .error {
+    background: var(--danger-hover-bg); border: 1px solid var(--danger-border);
+    border-radius: var(--radius-lg); padding: var(--space-3) var(--space-4);
+    margin: var(--space-4) 0;
+  }
+  .row-error { color: var(--danger-text); margin: var(--space-2) 0 0; }
+  .waiting { color: var(--text-muted); font-style: italic; }
+
+  /* ── Pressing on ─────────────────────────────────────────────────────── */
+  button {
+    font: inherit; padding: var(--space-2) var(--space-4);
+    border-radius: var(--radius-md); border: 0;
+    background: var(--orange); color: var(--on-orange); cursor: pointer;
+  }
+  button:hover { background: var(--orange-hover); }
+  button:disabled { opacity: 0.55; cursor: default; }
+  button.browse, button.secondary {
+    background: transparent; color: var(--text);
+    border: 1px solid var(--border); padding: 0.45rem var(--space-3);
+  }
+  button.browse:hover, button.secondary:hover { background: var(--hover-bg); }
+  a { color: var(--link); }
+  details { margin: var(--space-6) 0; }
+  details summary { cursor: pointer; color: var(--link); }
+
+  ul { margin: var(--space-1) 0; padding-left: var(--space-6); }
+  code {
+    background: var(--hover-bg); padding: 0.1rem var(--space-1);
+    border-radius: var(--radius-sm); font-family: var(--font-mono);
+  }
+
+  /* ── How far through this is ─────────────────────────────────────────── */
+  .progress { margin: 0 0 var(--space-6); }
+  .progress-bar {
+    height: 3px; background: var(--hover-bg); border-radius: 2px;
+  }
+  .progress-bar span {
+    display: block; height: 100%; background: var(--orange);
+    border-radius: 2px; transition: width 0.3s ease;
+  }
+  .progress-label {
+    margin: var(--space-1) 0 0; font-size: var(--text-xs); color: var(--text-muted);
+  }
+
+  /* ── A panel holding something that must be filled in ────────────────── */
+  /* The colour is a reminder, not the message: "Required" is written inside it
+     as well, because a border somebody cannot distinguish is no signal at all.
+     It fades rather than snaps, so the change is noticed by someone who has
+     just pressed Add and is looking at the list, not at the edge. */
+  fieldset.needed { border: 2px solid var(--danger-text); }
+  fieldset.satisfied { border: 2px solid var(--border); transition: border-color 0.5s ease; }
+  /* The legend spans the box so the state can sit at its right-hand edge, and
+     the rule between them carries the box's own line across the gap. */
+  fieldset.needed > legend, fieldset.satisfied > legend {
+    display: flex; align-items: center; width: calc(100% - 0.8rem); gap: var(--space-2);
+  }
+  legend .rule { flex: 1; height: 0; border-top: 2px solid var(--danger-text); }
+  fieldset.satisfied legend .rule {
+    border-top-color: var(--border); transition: border-color 0.5s ease;
+  }
+  .required-flag {
+    color: var(--danger-text); font-weight: 600; font-size: var(--text-sm);
+    white-space: nowrap;
+  }
+  fieldset.satisfied .required-flag { color: var(--badge-set-text); }
+  .added { margin: var(--space-2) 0 0; padding-left: var(--space-6); }
+  .added li { margin: 0.15rem 0; }
+</style>
+</head>
+<body>
+<h1>Set up the PU AI Sandbox</h1>
+<p class="lede">{{ lede }}</p>
+{{ error | safe }}
+{{ body | safe }}
+{{ script | safe }}
+</body>
+</html>
