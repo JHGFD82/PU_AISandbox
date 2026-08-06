@@ -543,13 +543,80 @@ class TestAskingWhoIsUsingThisAndWhatTheyMaySendTo:
         two different widths — and the wider one ran past the edge of the box.
         """
         _client, _chosen, page = self._at_step_two(client_and_result)
-        # Set on everything, not patched onto the one field that showed it.
-        assert "*, *::before, *::after { box-sizing: border-box; }" in page
+        # Set on everything, not patched onto the one field that showed it —
+        # and it comes from the shared design system now, along with everything
+        # else about how this page looks.
+        assert "box-sizing: border-box" in page
 
     def test_the_two_fields_are_declared_the_same_width(self, client_and_result):
+        """One rule for all three, so they cannot come to differ."""
+        import re
+
         client, _chosen, _page = self._at_step_two(client_and_result)
         client.post("/people", json={"netid": "jh43", "name": "J", "key": "sk-t"})
         page = client.get("/models").text
-        for selector in ("input[type=text]", "select"):
-            rule = page.split(selector + " {")[1].split("}")[0]
-            assert "width: 100%" in rule, selector
+        rule = re.search(r"input\[type=text\][^{]*\{([^}]*)\}", page)
+        assert rule, "the text field has no rule at all"
+        assert "input[type=password]" in rule.group(0)
+        assert "select" in rule.group(0)
+        assert "width: 100%" in rule.group(1)
+
+
+class TestEveryPageLooksLikeTheSamePiece:
+    """First-time setup used to have a palette of its own.
+
+    Twenty-eight colours, not one of them the sandbox's: a different blue, a
+    different set of greys, a different dark background. The first thing anyone
+    saw of this software looked like a different piece of software from the one
+    it was installing.
+    """
+
+    def _rendered(self, name, **values):
+        from jinja2 import Environment, FileSystemLoader, select_autoescape
+        directory = Path(__file__).resolve().parents[1] / "src" / "templates"
+        environment = Environment(loader=FileSystemLoader(str(directory)),
+                                  autoescape=select_autoescape(["html"]))
+        return environment.get_template(name).render(**values)
+
+    def _tokens(self):
+        import re
+        directory = Path(__file__).resolve().parents[1] / "src" / "templates"
+        text = (directory / "_design-system.html").read_text()
+        return {m.group(1).lower()
+                for m in re.finditer(r"--[\w-]+:\s*(#[0-9a-fA-F]{3,8})", text)}
+
+    def test_setup_uses_the_shared_design_system(self):
+        source = (Path(__file__).resolve().parents[1] / "src" / "templates"
+                  / "setup.html").read_text()
+        assert '{% include "_design-system.html" %}' in source
+
+    def test_it_invents_no_colours_of_its_own(self):
+        """The test that would have failed loudest before this."""
+        import re
+
+        page = self._rendered("setup.html", body="", lede="", script="", error="")
+        css = "\n".join(re.findall(r"<style>(.*?)</style>", page, re.S))
+        css = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+        declared = set(re.findall(r"--[\w-]+:\s*(#[0-9a-fA-F]{3,8})", css))
+        used = set(re.findall(r"#[0-9a-fA-F]{3,8}\b", css)) - declared
+        stray = sorted(c for c in used if c.lower() not in self._tokens())
+        assert not stray, f"setup draws its own colours: {stray}"
+
+    def test_it_keeps_its_own_shape(self):
+        """Sharing the colours is not the same as pretending to be the app.
+
+        An installer is one narrow column with nothing to navigate. It should
+        not grow a sidebar and a spend panel because the chat page has them.
+        """
+        source = (Path(__file__).resolve().parents[1] / "src" / "templates"
+                  / "setup.html").read_text()
+        assert "max-width: 40rem" in source
+        assert "topbar" not in source
+        assert '{% include "_forms.html" %}' not in source
+
+    def test_the_page_is_no_longer_built_by_string_formatting(self):
+        """58 doubled braces were there only to survive .format()."""
+        source = (Path(__file__).resolve().parents[1] / "src"
+                  / "setup_web.py").read_text()
+        assert "_PAGE.format(" not in source
+        assert "def _page(" in source
