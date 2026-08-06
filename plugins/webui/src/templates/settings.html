@@ -243,7 +243,22 @@ default_model = "llama-3-70b-instruct"</div>
         <li>By adding a new section to the <code>preferences.toml</code> file, following the pattern shown in the snippet above.</li>
         <li>By adding a new section to the shared settings file used by your team, following the pattern shown in the snippet above.</li>
       </ol>
-      <p class="hint">Please note that API keys will be stored in plain text within these files, and therefore should be stored securely and not committed to version control.</p>
+      <p class="hint"><strong>The API key for an endpoint belongs in
+        <code>settings.toml</code></strong>, in the same folder, as a
+        <code>key = "..."</code> line under its own
+        <code>[endpoints.&lt;name&gt;]</code> section. That file belongs to this
+        installation alone: it is never shared and never syncs anywhere, and it
+        is where each professor's API key is already kept.</p>
+      <p class="hint">You can put the key beside the rest of the endpoint's
+        settings instead, in <code>preferences.toml</code> or in the shared
+        settings file. That works, and for a departmental cluster with one
+        credential everybody uses it may be what you want — but you are taking
+        on the risk: a key in a shared file is a key given to everyone who can
+        read that file, and shared files usually live somewhere that syncs.
+        <code>settings.toml</code> is used in preference when both are set.</p>
+      <p class="hint">Keys are stored as plain text in whichever file holds
+        them, so keep these files somewhere secure and never commit them to
+        version control.</p>
     </div>
 
     <div class="card" id="section-models" data-section="models" data-tab="models">

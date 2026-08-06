@@ -138,12 +138,14 @@ def load_api_config(api_name: str) -> APIConfig:
     if not api_key:
         raise ValueError(
             f"No API key for the endpoint '{api_name}'.\n"
-            "Add a key = \"...\" line to its [endpoints." + api_name + "] table in "
-            "your preferences.toml, or in the shared settings file your group "
-            "follows.\n"
-            "You can also keep it out of those files by putting it in "
-            f"settings.toml at {credential_path}, which is private to this "
-            "installation and never shared."
+            "Add it to settings.toml, in your own files folder:\n"
+            f"    [endpoints.{api_name}]\n"
+            '    key = "..."\n'
+            "That file belongs to this installation alone — it is never shared "
+            "and never syncs anywhere.\n"
+            "The key can go beside the rest of the endpoint's settings instead, "
+            "in preferences.toml or the shared settings file, but a key in a "
+            "shared file is a key given to everyone who can read it."
         )
 
     known_keys = {"name", "base_url", "openai_compatible", "default_model",

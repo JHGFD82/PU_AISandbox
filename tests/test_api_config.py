@@ -142,9 +142,17 @@ class TestLoadAPIConfigErrors:
                 load_api_config("nonexistent")
 
     def test_missing_key_raises(self):
+        """It has to say which endpoint, and where the key goes.
+
+        Not the exact wording: the message shows the table to write rather than
+        the dotted path it used to name, and either says the same thing.
+        """
         with _patch_endpoints(_ENDPOINTS_WITH_ENDPOINTS), _patch_credentials({}):
-            with pytest.raises(ValueError, match="endpoints.hpc_cluster.key"):
+            with pytest.raises(ValueError) as caught:
                 load_api_config("hpc_cluster")
+        said = str(caught.value)
+        assert "hpc_cluster" in said
+        assert "settings.toml" in said
 
     def test_missing_base_url_raises(self):
         data = {"bad": {"name": "Bad"}}
@@ -314,3 +322,21 @@ class TestWhereAnEndpointsKeyMayLive:
             load_api_config("nowhere")
         assert "settings.default.toml" not in str(caught.value)
         assert "preferences.toml" in str(caught.value)
+
+    def test_the_missing_key_message_recommends_one_place(self, monkeypatch):
+        """One recommendation, then the alternative as an informed choice.
+
+        Saying "either of these two" leaves somebody to work out which, at the
+        moment they are least equipped to. settings.toml is the answer; the
+        other way is offered with what it costs attached.
+        """
+        from src.services.api_config import load_api_config
+
+        self._configured(monkeypatch, dict(self.ENDPOINT))
+        with pytest.raises(ValueError) as caught:
+            load_api_config("my_cluster")
+        said = str(caught.value)
+        # The recommendation comes first.
+        assert said.index("settings.toml") < said.index("preferences.toml")
+        # And the alternative says what it costs.
+        assert "everyone who can read it" in said

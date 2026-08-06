@@ -478,21 +478,9 @@ group follows.
 
 ### Its API key
 
-The key can sit in the same table as everything else:
-
-```toml
-# preferences.toml, or the shared settings file
-[endpoints.my_cluster]
-name = "My HPC Cluster"
-base_url = "http://my-cluster.internal:8000/v1"
-openai_compatible = true
-key = "sk-..."
-```
-
-**A key in a shared file is a key shared with the group.** For a departmental
-cluster with one credential everybody uses, that is exactly right. For your own
-account with a provider, it is not — put that one in `settings.toml` instead,
-which belongs to this installation alone and is never shared or layered:
+**Put it in `settings.toml`.** That file belongs to this installation alone: it
+is never shared, never layered, and never syncs anywhere. It is where the
+professors' own API keys already live.
 
 ```toml
 # settings.toml, in your own files folder
@@ -500,13 +488,28 @@ which belongs to this installation alone and is never shared or layered:
 key = "sk-..."
 ```
 
+The key may instead go beside the rest of the endpoint's settings, in
+`preferences.toml` or in the shared settings file:
+
+```toml
+# preferences.toml, or the shared settings file — see the warning below
+[endpoints.my_cluster]
+name = "My HPC Cluster"
+base_url = "http://my-cluster.internal:8000/v1"
+openai_compatible = true
+key = "sk-..."
+```
+
+That works, and there are good reasons to want it — a departmental cluster with
+one credential everybody uses is the obvious one. But it is a risk you are
+taking on deliberately: a key in a shared file is a key given to everyone who
+can read that file, and a shared file usually lives somewhere that syncs.
+
 `settings.toml` wins when both are set, so a personal key overrides a group's
 without anyone having to arrange it.
 
-Either way the key is stored as text you could read. Both files live in your
-own files folder, alongside the professors' API keys, and neither is tracked by
-git — but a shared file usually lives somewhere that syncs, so put it somewhere
-your group can reach and others cannot.
+Either way the key is stored as text anyone with the file can read. None of
+these files is tracked by git.
 
 ## External usage-data sources
 
