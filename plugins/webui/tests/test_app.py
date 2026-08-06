@@ -4240,10 +4240,14 @@ class TestTheModelsSectionOnThePage:
         """
         assert "Not tested yet" in page
 
-    def test_it_says_the_testing_costs_something(self, page):
-        """The requests are billed to a professor's key, so it says so."""
-        assert "fraction of a cent" in page
-        assert "billed to the key you choose" in page
+    def test_it_says_whose_key_the_testing_uses(self, page):
+        """Adding a model makes real requests against somebody's key.
+
+        The wording changed and the sentence about what it costs went with it;
+        the field asking whose key it is stays, and that is the part somebody
+        has to answer.
+        """
+        assert "Test with whose key" in page
 
     def test_it_shows_how_a_model_is_named(self, page):
         """'openai/gpt-5.2' is not guessable from an empty box."""
@@ -4798,14 +4802,19 @@ class TestTheWebFirstRunExplainsItself:
         # And once neither is outstanding, it goes back to remembering.
         assert 'localStorage.getItem("settings-tab")' in fn
 
-    def test_an_empty_catalogue_says_where_to_find_out_what_to_add(self):
-        page = _rendered_template("settings.html")
-        note = page.split('id="models-empty-note"')[1].split("</p>")[0]
-        words = " ".join(note.split())
-        assert "nothing can be sent anywhere" in words
-        assert "AI Sandbox documentation" in words
-        # An external endpoint needs none at all, which is easy to miss.
-        assert "alternate endpoint" in words
+    def test_the_page_says_where_to_find_out_what_to_add(self):
+        """Somewhere on the panel, not only when the list is empty.
+
+        It used to be in the empty-state note alone, so it disappeared the
+        moment somebody added their first model — which is before most of the
+        adding is done.
+        """
+        card = _rendered_template("settings.html").split('data-section="models"')[1]
+        card = card.split('id="section-shared"')[0]
+        words = " ".join(card.split())
+        assert "AI Sandbox" in words
+        # A link to the list of models, so nobody has to go looking for it.
+        assert "href=" in card and "princeton" in card.lower()
 
     def test_that_note_is_shown_only_while_there_are_none(self):
         page = _rendered_template("settings.html")
