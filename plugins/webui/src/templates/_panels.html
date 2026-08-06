@@ -18,6 +18,29 @@
   .badge { font-size: var(--text-xs); padding: 0.15rem 0.5rem; border-radius: var(--radius-pill); white-space: nowrap; }
   .badge.set { background: var(--badge-set-bg); color: var(--badge-set-text); }
   .badge.unset { background: var(--hover-bg); color: var(--text-muted); }
+  /* What a model can do, which is neither good news nor bad — so not the green
+     that means "this is set". */
+  .badge.can { background: var(--badge-can-bg); color: var(--badge-can-text); }
+
+  /* A list is the same voice as the paragraph introducing it, so it is set the
+     same way. Without this it took the body's own size and colour and stood
+     apart from the sentence above it. */
+  .card ul, .card ol {
+    font-size: var(--text-sm); color: var(--text-muted); line-height: 1.4;
+    margin: 0.4rem 0 1rem; padding-left: 1.4rem;
+  }
+  .card li { margin: 0.15rem 0; }
+
+  /* A rule between what is already there and the business of adding to it.
+     Without one the two ran together and the heading below read as part of
+     the last row above it. */
+  .after-a-list {
+    border-top: 1px solid var(--border); margin-top: var(--space-4);
+    padding-top: var(--space-4);
+  }
+  /* The button sat hard against the boxes above it, so it read as one more
+     field rather than the thing you press when they are filled in. */
+  button.after-fields { margin-top: var(--space-3); }
   /* A folded-away control, opened only by someone who came to change it. */
   details.manage { margin-top: 0.4rem; }
   details.manage summary { font-size: var(--text-xs); color: var(--orange); cursor: pointer; }
