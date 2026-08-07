@@ -75,10 +75,36 @@
   .row { display: flex; align-items: center; gap: 0.6rem; padding: 0.5rem 0; border-bottom: 1px solid var(--bg); }
   .row:last-child { border-bottom: none; }
   .row .main { flex: 1; min-width: 0; }
-  .row .name { font-size: var(--text-md); font-weight: 500; }
+  .row .name { font-size: var(--text-md); font-weight: 500; line-height: 1.5; }
   .row .sub { font-size: var(--text-xs); color: var(--text-muted); }
+  /* Badges and the button that acts on a row, held against its first line.
+     Centred on the row instead, they drifted downwards as the folded sections
+     below the name made the row taller — furthest from the name in exactly
+     the rows someone had opened in order to work on. */
+  .row:has(> .trailing) { align-items: flex-start; }
+  .row > .trailing {
+    display: flex; align-items: center; gap: 0.6rem;
+    min-height: calc(var(--text-md) * 1.5);
+  }
 
   .empty { font-size: var(--text-md); color: var(--text-muted); }
+
+  /* A paragraph after something you read off or type into starts a new
+     thought; it is not a caption for what sits below it. With only a label's
+     worth of room above, every one of these read as the label belonging to
+     whatever came next — which is the opposite of what it says. One distance,
+     so a paragraph after a block of TOML sits exactly where a paragraph after
+     a box does. An error is the exception: it belongs against its own field. */
+  .card :is(input, select, .field-set, .inline-fields, .snippet, form) + p:not(.form-error),
+  .card div:has(> input, > select, > .field-set) + p:not(.form-error) {
+    margin-top: var(--space-6);
+  }
+
+  /* What is folded away under a row spans the row, rather than stopping short
+     where the badges begin — those sit against the name on the line above and
+     leave nothing beside them to avoid. */
+  .row:has(> .expandables) { flex-wrap: wrap; }
+  .row > .expandables { flex-basis: 100%; min-width: 0; }
 
   /* ── The bar across the top ───────────────────────────────────────────── */
   /* Said explicitly, because the rule below sets display and would otherwise

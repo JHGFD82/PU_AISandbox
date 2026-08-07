@@ -9,8 +9,11 @@
   /* A row of boxes ending in a button, all sharing a baseline. */
   form.inline { display: flex; gap: 0.5rem; align-items: flex-end; flex-wrap: wrap; margin-top: 0.75rem; }
   form.inline > div { flex: 1; min-width: 140px; }
-  /* A box with a button beside it, rather than under it. */
-  .field-set { display: flex; gap: 0.5rem; align-items: center; }
+  /* A box with a button beside it, rather than under it. Stretched rather
+     than centred: a button and a box are given different padding, so centring
+     leaves two things of visibly different heights sharing a middle. Matching
+     their heights is what actually reads as lined up. */
+  .field-set { display: flex; gap: 0.5rem; align-items: stretch; }
   .field-set input { flex: 1; }
 
   /* ── Small parts ──────────────────────────────────────────────────────── */
@@ -44,6 +47,14 @@
   /* A folded-away control, opened only by someone who came to change it. */
   details.manage { margin-top: 0.4rem; }
   details.manage summary { font-size: var(--text-xs); color: var(--orange); cursor: pointer; }
+  /* One gap below the summary, whatever the section holds. A label carries a
+     top margin of its own, which in a form laid out as a row of boxes was
+     added to the form's and in one laid out as blocks was absorbed into it —
+     so the two sections opened to visibly different gaps. The form sets the
+     distance; the first label inside it adds nothing. */
+  details.manage > form { margin-top: var(--space-3); }
+  details.manage > form > :first-child label:first-child,
+  details.manage > form > label:first-child { margin-top: 0; }
   /* A block of literal text — a path, a line of TOML — shown as itself. */
   .snippet {
     background: var(--bg); border-radius: var(--radius-md); padding: 0.75rem;
