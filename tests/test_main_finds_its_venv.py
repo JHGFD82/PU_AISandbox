@@ -21,13 +21,66 @@ _MAIN = _ROOT / "main.py"
 _HANDED_OVER = "PU_AISANDBOX_PYTHON_CHOSEN"
 
 
+def _a_checkout_with_an_environment(root: Path, python_is: Path | None = None) -> Path:
+    """Build a copy of the sandbox with a ``.venv`` beside it, and return it.
+
+    These tests used to read the ``.venv`` of whoever ran them. That passed on
+    a machine where somebody had run ``start.py`` and failed everywhere else —
+    continuous integration installs into the Python it is already running, so
+    there was no ``.venv`` there at all and every one of these was quietly
+    testing nothing. The environment is built here instead, so the tests hold
+    the thing they are about rather than borrowing it.
+
+    Args:
+        root: Where to build it.
+        python_is: What ``.venv``'s Python should be. ``None`` leaves a stub
+                   that is never run, which is all a test needs when it has
+                   replaced ``os.execv``. Give a real Python for the one test
+                   that runs the command through for real — it is put there as
+                   a two-line script that runs it, not as a link to it, because
+                   a Python reached through a link in a folder with no
+                   ``pyvenv.cfg`` beside it decides it is not in an environment
+                   at all and looks for its packages in the wrong place.
+
+    Returns:
+        The folder built, with ``main.py`` in it.
+    """
+    root.mkdir(parents=True, exist_ok=True)
+    # Linked rather than copied: the point is to test this checkout's main.py,
+    # and everything it reaches on the way to answering --help.
+    for name in ("main.py", "src", "plugins", "templates", "settings.default.toml"):
+        source = _ROOT / name
+        if source.exists():
+            (root / name).symlink_to(source)
+
+    bin_dir = root / ".venv" / ("Scripts" if os.name == "nt" else "bin")
+    bin_dir.mkdir(parents=True)
+    python = bin_dir / ("python.exe" if os.name == "nt" else "python")
+    if python_is is None:
+        python.write_text("")
+    else:
+        python.write_text(f'#!/bin/sh\nexec "{python_is}" "$@"\n')
+    python.chmod(0o755)
+    return root
+
+
 @pytest.fixture
-def handover():
-    """The handover functions, loaded without running the rest of main.py."""
-    source = _MAIN.read_text()
-    prefix = source.split("_use_the_sandboxes_own_python()\n")[0]
-    namespace: dict = {"__file__": str(_MAIN)}
-    exec(compile(prefix, str(_MAIN), "exec"), namespace)
+def sandbox(tmp_path):
+    """A checkout with an environment of its own, and no Python worth running."""
+    return _a_checkout_with_an_environment(tmp_path / "sandbox")
+
+
+@pytest.fixture
+def handover(sandbox):
+    """The handover functions, loaded without running the rest of main.py.
+
+    Loaded as though they were sitting in *sandbox*, since where main.py is
+    is exactly what decides which environment it hands over to.
+    """
+    main = sandbox / "main.py"
+    prefix = main.read_text().split("_use_the_sandboxes_own_python()\n")[0]
+    namespace: dict = {"__file__": str(main)}
+    exec(compile(prefix, str(main), "exec"), namespace)
     return namespace
 
 
@@ -38,14 +91,23 @@ class TestItStillRunsOnTheOldPython:
     def test_the_file_compiles_for_python_3_9(self):
         compile(_MAIN.read_text(), str(_MAIN), "exec", dont_inherit=True)
 
-    def test_a_command_works_from_the_system_python(self):
-        """The whole point, end to end, with no environment activated."""
+    def test_a_command_works_from_the_system_python(self, tmp_path):
+        """The whole point, end to end, with no environment activated.
+
+        The environment this hands over to is the Python running these tests,
+        which has everything installed — so what is being tested is that the
+        handover happens and carries the command, not that pip works.
+        """
         system = Path("/usr/bin/python3")
         if not system.exists():
             pytest.skip("no system python to try this with")
+        if Path(sys.executable).resolve() == system.resolve():
+            pytest.skip("these tests are running on the system python already")
+        root = _a_checkout_with_an_environment(
+            tmp_path / "sandbox", python_is=Path(sys.executable))
         done = subprocess.run(
-            [str(system), str(_MAIN), "--help"],
-            capture_output=True, text=True, cwd=_ROOT,
+            [str(system), str(root / "main.py"), "--help"],
+            capture_output=True, text=True, cwd=root,
             env={k: v for k, v in os.environ.items() if k != _HANDED_OVER},
         )
         assert done.returncode == 0, done.stderr
@@ -56,7 +118,7 @@ class TestWhenItHandsOver:
     def test_it_does_nothing_when_already_in_that_environment(self, handover, monkeypatch):
         """Somebody who activated it is running that same Python."""
         own = handover["_sandboxes_own_python"]()
-        assert own, "this checkout has no .venv to test against"
+        assert own, "the checkout built for this test has no .venv in it"
         monkeypatch.setattr(sys, "executable", own)
         called = []
         monkeypatch.setattr(os, "execv", lambda *a: called.append(a))
@@ -72,7 +134,7 @@ class TestWhenItHandsOver:
         assert called, "it should have handed the command over"
         program, argv = called[0]
         assert program.endswith("python") or program.endswith("python.exe")
-        assert argv[1] == str(_MAIN)
+        assert argv[1] == handover["__file__"]
 
     def test_it_carries_the_command_across(self, handover, monkeypatch):
         """Otherwise the handover would run a different command."""
