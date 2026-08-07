@@ -2153,9 +2153,16 @@ class TestSharedSettingsLink:
 
     def test_it_opens_in_its_own_tab(self):
         """It is a long list to work through; losing it by leaving the modal
-        would mean starting again."""
+        would mean starting again.
+
+        Read as "the link to that page carries target=_blank" rather than as
+        one exact string, so that restyling the link does not read as breaking
+        it — this failed once because a text-decoration was added between the
+        two halves it was matching.
+        """
         page = self._settings_page()
-        assert '<a href="/shared-settings" target="_blank"' in page
+        link = page[page.index('<a href="/shared-settings"'):]
+        assert 'target="_blank"' in link[:link.index(">")]
 
     def test_the_new_tab_cannot_reach_back_into_this_one(self):
         page = self._settings_page()
@@ -3638,6 +3645,42 @@ class TestTheUsageFolderIsAskedForBesideThePerson:
         note = page[page.index('data-usage-for="${p.netid}"'):]
         assert "conversations" in note[:note.index("</details>")]
 
+    def test_a_folder_can_be_given_when_somebody_is_first_added(self):
+        """Otherwise it is: add them, find them in the list, open a section,
+        fill in one box — for something known at the moment they were added."""
+        page = self._settings()
+        form = page[page.index('id="add-professor-form"'):]
+        form = form[:form.index("</form>")]
+        assert 'id="prof-usage-path"' in form
+        assert 'id="prof-usage-mode"' in form
+
+    def test_that_folder_is_optional(self):
+        """Most people have none, and a required box would stop them adding
+        anybody at all."""
+        page = self._settings()
+        form = page[page.index('id="add-professor-form"'):]
+        form = form[:form.index("</form>")]
+        path_field = form[form.index('id="prof-usage-path"'):]
+        assert "required" not in path_field[:path_field.index(">")]
+
+    def test_it_is_only_sent_when_one_was_typed(self):
+        """An empty box must not record an empty folder against them."""
+        page = self._settings()
+        assert "if (usagePath) {" in page
+
+    def test_there_is_somewhere_to_explain_the_folder_above_those_fields(self):
+        """Asked for, so the wording can be written without moving markup."""
+        page = self._settings()
+        form = page[page.index('id="add-professor-form"'):]
+        note_at = form.index('id="add-professor-folder-note"')
+        assert note_at < form.index('id="prof-usage-path"')
+
+    def test_the_clear_button_says_where_the_work_goes_instead(self):
+        """"Stop reading it" said what stops, not what then happens."""
+        page = self._settings()
+        assert "Revert to data folder" in page
+        assert "Stop reading it" not in page
+
     def test_the_installations_own_name_is_still_shown(self):
         """It is what shared-write calls the files it writes."""
         assert 'id="source-id"' in self._settings()
@@ -3657,6 +3700,125 @@ class TestTheUsageFolderIsAskedForBesideThePerson:
         page = self._settings()
         assert 'button.closest(".field-set").querySelector("input")' in page
         assert 'class="field-set"' in page
+
+
+class TestTheProfessorRowsLineUp:
+    """What acts on a row is held against the name it acts on."""
+
+    def _page(self):
+        from pathlib import Path
+
+        return (Path(__file__).resolve().parents[1] / "src" / "templates" / "settings.html").read_text()
+
+    def _partial(self, name):
+        from pathlib import Path
+
+        return (Path(__file__).resolve().parents[1] / "src" / "templates" / name).read_text()
+
+    def test_the_badges_and_the_button_are_one_group(self):
+        page = self._page()
+        row = page[page.index('<div class="main">'):page.index("list.appendChild(row)")]
+        group_at = row.index('<div class="trailing">')
+        assert group_at < row.index("data-remove=")
+        assert row.index("badge can") > group_at
+
+    def test_that_group_is_held_against_the_first_line_not_the_row(self):
+        """A row grows when its folded sections are opened; the name does not
+        move, so neither should these."""
+        css = self._partial("_forms.html")
+        assert ".row:has(> .trailing) { align-items: flex-start; }" in css
+        trailing = css[css.index(".row > .trailing {"):]
+        assert "align-items: center" in trailing[:trailing.index("}")]
+        assert "min-height" in trailing[:trailing.index("}")]
+
+    def test_what_is_folded_away_spans_the_row(self):
+        """The badges sit against the name on the line above, so there is
+        nothing beside these to stop short of."""
+        page = self._page()
+        row = page[page.index('<div class="main">'):page.index("list.appendChild(row)")]
+        assert '<div class="expandables">' in row
+        # Out of .main, or it would still be as wide as .main is.
+        assert row.index('class="expandables"') > row.index("</div>")
+        css = self._partial("_forms.html")
+        assert ".row:has(> .expandables) { flex-wrap: wrap; }" in css
+        assert "flex-basis: 100%" in css[css.index(".row > .expandables {"):]
+
+    def test_a_paragraph_after_a_field_is_given_room(self):
+        """Set close, it reads as the label for the box below it, which is the
+        opposite of what it says."""
+        css = self._partial("_forms.html")
+        rule = css[css.index(".card :is(input, select"):]
+        rule = rule[:rule.index("}")]
+        assert "margin-top: var(--space-6)" in rule
+
+    def test_a_block_of_toml_is_given_the_same_room_as_a_field(self):
+        """Two of them sit under Alternate AI endpoints, each followed by a
+        paragraph that was reading as its caption."""
+        css = self._partial("_forms.html")
+        selectors = css[css.index(".card :is(input, select"):css.index("margin-top: var(--space-6)")]
+        assert ".snippet" in selectors
+
+    def test_the_two_blocks_under_endpoints_are_each_followed_by_one(self):
+        """The rule only helps if these are still shaped the way it matches."""
+        import re
+
+        page = self._page()
+        card = page[page.index('id="section-endpoints"'):]
+        card = card[:card.index('id="section-models"')]
+        assert len(re.findall(r'</div>\s*<p class="hint"', card)) >= 2
+
+    def test_both_keys_are_asked_for_on_one_line(self):
+        page = self._page()
+        form = page[page.index('data-kind="keys"'):]
+        form = form[:form.index("</form>")]
+        assert 'name="key"' in form and 'name="backup_key"' in form
+        assert form.count("<button type=\"submit\"") == 1, "two Saves for one line"
+
+    def test_a_blank_key_box_leaves_that_key_alone(self):
+        """On a form holding both, "blank clears it" would wipe a backup key
+        every time somebody changed only the primary."""
+        page = self._page()
+        handler = page[page.index('form[data-kind=keys]'):
+                       page.index("button[data-clear-backup]")]
+        assert "if (key) {" in handler
+        assert "if (backup) {" in handler
+        assert "(!key && !backup) return" in handler
+
+    def test_taking_a_backup_key_away_is_its_own_button(self):
+        """Blank no longer clears, so there has to be a way to clear."""
+        page = self._page()
+        assert "data-clear-backup=" in page
+        assert 'JSON.stringify({ backup_key: null })' in page
+
+    def test_that_button_is_only_offered_to_somebody_who_has_one(self):
+        page = self._page()
+        at = page.index("data-clear-backup=")
+        assert "p.has_backup_key ?" in page[at:at + 200]
+
+    def test_the_folder_and_its_mode_share_a_line_in_both_places(self):
+        page = self._page()
+        for where, marker in (("a professor's row", 'data-usage-for="${p.netid}"'),
+                              ("the add form", 'id="add-professor-form"')):
+            block = page[page.index(marker):]
+            block = block[:block.index("</form>")]
+            fields_at = block.index('class="inline-fields"')
+            assert fields_at < block.index("What to do with it"), where
+            assert "wide" in block[fields_at:block.index("What to do with it")], where
+
+    def test_a_box_and_the_button_beside_it_are_the_same_height(self):
+        """They are given different padding, so centring them leaves two
+        visibly different heights sharing a middle."""
+        css = self._partial("_panels.html")
+        rule = css[css.index(".field-set {"):]
+        assert "align-items: stretch" in rule[:rule.index("}")]
+
+    def test_both_folded_sections_open_to_the_same_gap(self):
+        """One was laid out as a row of boxes and the other as blocks, which
+        added the first label's own margin in one case and absorbed it in the
+        other."""
+        css = self._partial("_panels.html")
+        assert "details.manage > form { margin-top: var(--space-3); }" in css
+        assert "details.manage > form > :first-child label:first-child" in css
 
 
 class TestTheModelMenuIsGrouped:
