@@ -646,3 +646,52 @@ class ConversationStore:
             shutil.rmtree(folder, ignore_errors=True)
             return True
         return False
+
+
+# ── Moving them when the folder they belong in changes ──────────────────────
+#
+# Registered with core rather than known to it. Where somebody's work is kept
+# is core's setting, but conversations are this plugin's idea, and core moving
+# them would mean core knowing that the web interface exists — see
+# `plugins/CLAUDE.md`. So this says how to move them and core says when.
+
+
+def _move_conversations(professor, was, now):
+    """Move one person's conversations to wherever their work now goes.
+
+    Args:
+        professor: Their netID.
+        was: The shared folder their work was written to, or ``None`` for this
+             installation's own folder.
+        now: The same, as it is now.
+
+    Returns:
+        A ``Moved`` counting the conversations that went across, and naming
+        any that stayed — one already at the destination under the same name
+        is left alone rather than written over.
+    """
+    from src.paths import data_root
+    from src.tracking.relocate import Moved, move_a_folder_of_things
+
+    def where(source):
+        if source is not None:
+            return source.resolved_path() / "conversations"
+        return data_root() / "conversations" / professor
+
+    moved, left = move_a_folder_of_things(where(was), where(now))
+    return Moved(counts={"conversations": moved} if moved else {}, left_behind=left)
+
+
+_move_conversations.moves = "conversations"
+
+
+def register_with_core() -> None:
+    """Tell core to move conversations when somebody's folder changes.
+
+    Called once, by the plugin, at startup. Doing it here rather than at import
+    would register it again every time this module is reloaded, and the same
+    conversations would be moved twice.
+    """
+    from src.tracking.relocate import register_mover
+
+    register_mover(_move_conversations)

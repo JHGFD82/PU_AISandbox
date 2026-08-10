@@ -241,6 +241,28 @@ class GenerateValueBody(BaseModel):
     path: str
 
 
+def _move_their_work(netid: str, was) -> dict:
+    """Move somebody's work after the folder it belongs in has been changed.
+
+    Args:
+        netid: Whose work.
+        was: The folder their work was written to before the change, or
+             ``None`` if it was kept here.
+
+    Returns:
+        What to add to the answer: a sentence for the person, and the detail
+        of anything that could not be moved. Nothing at all when nothing
+        moved, so the ordinary case says nothing.
+    """
+    from src.tracking.relocate import move_a_persons_work
+
+    moved = move_a_persons_work(netid, was,
+                                settings_store.get_shared_write_source(netid))
+    if not moved and not moved.left_behind:
+        return {}
+    return {"moved": moved.summary(), "left_behind": moved.left_behind}
+
+
 class SourceBody(BaseModel):
     netid: str
     path: str
@@ -940,20 +962,24 @@ def create_app() -> FastAPI:
     @app.post("/api/settings/sources")
     async def api_set_usage_source(request: Request, body: SourceBody):
         _require_unlocked(request)
+        # Read before the change and again after, so the move is told where
+        # the work was and where it now goes rather than guessing either.
+        was = settings_store.get_shared_write_source(body.netid)
         try:
             settings_store.set_professor_usage_source(
                 body.netid, body.path, mode=body.mode
             )
         except ValueError as e:
             raise HTTPException(400, str(e)) from e
-        return {"ok": True}
+        return {"ok": True, **_move_their_work(body.netid, was)}
 
     @app.delete("/api/settings/sources")
     async def api_clear_usage_source(request: Request, netid: str):
         _require_unlocked(request)
+        was = settings_store.get_shared_write_source(netid)
         if not settings_store.clear_professor_usage_source(netid):
             raise HTTPException(404, f"No usage folder is set for '{netid}'.")
-        return {"ok": True}
+        return {"ok": True, **_move_their_work(netid, was)}
 
     # ── Models ───────────────────────────────────────────────────────────────
     # Adding a model means two things the browser has to wait for: looking its

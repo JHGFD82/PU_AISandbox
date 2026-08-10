@@ -481,6 +481,48 @@ Which side of the job `token` refers to depends on the action: the *destination*
 
 ---
 
+## Moving a plugin's files when somebody's folder changes
+
+A professor can have a shared folder set on them, and their work is kept there
+instead of in this installation's own files folder — see
+[Configuration → Somebody's folder somewhere else](configuration.md#somebodys-folder-somewhere-else).
+When that setting changes, everything of theirs moves.
+
+If your plugin keeps files per professor, say how to move them:
+
+```python
+from src.tracking.relocate import Moved, move_a_folder_of_things, register_mover
+
+
+def _move_my_files(professor, was, now):
+    """Move this plugin's files for one person when their folder changes.
+
+    `was` and `now` are each an ExternalSource for a shared folder, or None
+    for this installation's own files folder. Return a Moved saying what you
+    did; it names its own counts, so the person is told in your words.
+    """
+    def where(source):
+        if source is not None:
+            return source.resolved_path() / "my-plugin"
+        return data_root() / "my-plugin" / professor
+
+    moved, left = move_a_folder_of_things(where(was), where(now))
+    return Moved(counts={"drafts": moved} if moved else {}, left_behind=left)
+
+
+_move_my_files.moves = "drafts"        # what to call it if it fails
+register_mover(_move_my_files)          # once, at startup
+```
+
+Note the shape difference: this installation's own folder holds everybody, so
+files there are filed under a netID; a shared folder holds one person and so
+nothing in it is. `move_a_folder_of_things()` moves whole folders and never
+writes over one already at the destination — it reports it instead.
+
+Core never learns your plugin exists: it decides *when* movers run, and each
+one says *what* to move. The web interface registers its conversations exactly
+this way (`plugins/webui/src/conversation.py`).
+
 ## Testing
 
 Put tests in `plugins/myplugin/tests/` and **add that path to `testpaths` in the root `pytest.ini`** — discovery is by explicit list, not automatic:

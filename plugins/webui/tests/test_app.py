@@ -1737,6 +1737,57 @@ class TestAPersonsUsageFolder:
         resp = unlocked_client.delete("/api/settings/sources", params={"netid": "smith"})
         assert resp.status_code == 404
 
+    def test_setting_a_folder_says_what_it_moved(self, unlocked_client, settings_env,
+                                                 monkeypatch, tmp_path):
+        """Work recorded before the folder was set goes with it, and the person
+        is told so rather than finding out from a report that got smaller."""
+        from src.tracking import relocate, token_tracker
+
+        monkeypatch.setattr(token_tracker, "data_root", lambda: tmp_path / "data")
+        monkeypatch.setattr(relocate, "_MOVERS", [])
+        (tmp_path / "data").mkdir(exist_ok=True)
+        self._add_smith(unlocked_client)
+        tracker = token_tracker.TokenTracker("smith")
+        tracker.record_usage("gpt-4o", 100, 50, 150)
+
+        resp = unlocked_client.post("/api/settings/sources", json={
+            "netid": "smith", "path": str(tmp_path / "dropbox"), "mode": "shared-write",
+        })
+        assert resp.status_code == 200
+        assert "1 call" in resp.json()["moved"]
+
+    def test_an_ordinary_change_with_nothing_to_move_says_nothing(
+        self, unlocked_client, settings_env, monkeypatch, tmp_path
+    ):
+        from src.tracking import relocate, token_tracker
+
+        monkeypatch.setattr(token_tracker, "data_root", lambda: tmp_path / "data")
+        monkeypatch.setattr(relocate, "_MOVERS", [])
+        (tmp_path / "data").mkdir(exist_ok=True)
+        self._add_smith(unlocked_client)
+        resp = unlocked_client.post("/api/settings/sources", json={
+            "netid": "smith", "path": str(tmp_path / "dropbox"), "mode": "shared-write",
+        })
+        assert "moved" not in resp.json()
+
+    def test_clearing_brings_the_work_back(self, unlocked_client, settings_env,
+                                           monkeypatch, tmp_path):
+        from src.tracking import relocate, token_tracker
+
+        monkeypatch.setattr(token_tracker, "data_root", lambda: tmp_path / "data")
+        monkeypatch.setattr(relocate, "_MOVERS", [])
+        (tmp_path / "data").mkdir(exist_ok=True)
+        self._add_smith(unlocked_client)
+        unlocked_client.post("/api/settings/sources", json={
+            "netid": "smith", "path": str(tmp_path / "dropbox"), "mode": "shared-write",
+        })
+        token_tracker.TokenTracker("smith").record_usage("gpt-4o", 100, 50, 150)
+
+        resp = unlocked_client.delete("/api/settings/sources", params={"netid": "smith"})
+        assert resp.status_code == 200
+        assert "1 call" in resp.json()["moved"]
+        assert (tmp_path / "data" / "token_usage_smith.json").exists()
+
     def test_clearing_leaves_the_person_alone(self, unlocked_client, settings_env):
         self._add_smith(unlocked_client)
         unlocked_client.post("/api/settings/sources", json={

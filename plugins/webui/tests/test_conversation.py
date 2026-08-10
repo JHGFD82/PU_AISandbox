@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -710,3 +711,95 @@ class TestWhereAPersonsConversationsGo:
         jones = ConversationStore("jones", base_dir=tmp_path)
         assert (tmp_path / "smith").is_dir() and (tmp_path / "jones").is_dir()
         assert smith._dir != jones._dir
+
+
+class TestConversationsMoveWithTheFolder:
+    """Setting or clearing somebody's shared folder used to leave their
+    conversations where they were, which meant they simply stopped appearing."""
+
+    @pytest.fixture
+    def settings(self, tmp_path, monkeypatch):
+        from src import settings_store
+        from src.tracking import relocate
+
+        monkeypatch.setattr(settings_store, "SETTINGS_PATH", tmp_path / "settings.toml")
+        monkeypatch.setattr("src.paths.data_root", lambda: tmp_path / "data")
+        monkeypatch.setattr(relocate, "_MOVERS", [])
+        settings_store.add_professor("smith", "Prof. Smith", "sk-test")
+        return settings_store
+
+    @pytest.fixture
+    def shared(self, tmp_path):
+        from src.settings_store import ExternalSource
+
+        return ExternalSource(label="Theirs", path=str(tmp_path / "dropbox"),
+                              mode="shared-write", professor="smith")
+
+    def _move(self, was, now):
+        from plugins.webui.src.conversation import _move_conversations
+
+        return _move_conversations("smith", was, now)
+
+    def test_they_go_to_the_shared_folder(self, settings, shared, tmp_path):
+        made = [ConversationStore("smith").create(title=f"n{i}", model="gpt-4o").id
+                for i in range(3)]
+        moved = self._move(None, shared)
+        assert moved.counts["conversations"] == 3
+        for cid in made:
+            assert (tmp_path / "dropbox" / "conversations" / cid).is_dir()
+
+    def test_and_are_found_there_afterwards(self, settings, shared):
+        ConversationStore("smith").create(title="Kept", model="gpt-4o")
+        settings.set_professor_usage_source("smith", shared.path, mode="shared-write")
+        self._move(None, shared)
+        assert len(ConversationStore("smith").list_conversations()) == 1
+
+    def test_they_come_home_again(self, settings, shared, tmp_path):
+        settings.set_professor_usage_source("smith", shared.path, mode="shared-write")
+        cid = ConversationStore("smith").create(title="Away", model="gpt-4o").id
+        settings.clear_professor_usage_source("smith")
+        moved = self._move(shared, None)
+        assert moved.counts["conversations"] == 1
+        assert (tmp_path / "data" / "conversations" / "smith" / cid).is_dir()
+        assert len(ConversationStore("smith").list_conversations()) == 1
+
+    def test_everything_a_conversation_gathered_goes_with_it(self, settings, shared, tmp_path):
+        """The folder is the conversation — what was attached to it and what
+        its jobs produced are inside it."""
+        conv = ConversationStore("smith").create(title="With files", model="gpt-4o")
+        here = tmp_path / "data" / "conversations" / "smith" / conv.id
+        (here / "attachments").mkdir(parents=True, exist_ok=True)
+        (here / "attachments" / "folio12.pdf").write_bytes(b"%PDF-")
+        self._move(None, shared)
+        there = tmp_path / "dropbox" / "conversations" / conv.id
+        assert (there / "attachments" / "folio12.pdf").read_bytes() == b"%PDF-"
+
+    def test_one_already_there_is_left_alone_rather_than_written_over(
+        self, settings, shared, tmp_path
+    ):
+        conv = ConversationStore("smith").create(title="Mine", model="gpt-4o")
+        already = tmp_path / "dropbox" / "conversations" / conv.id
+        already.mkdir(parents=True)
+        (already / "conversation.json").write_text('{"theirs": true}')
+        moved = self._move(None, shared)
+        assert moved.counts == {}
+        assert any(conv.id in line for line in moved.left_behind)
+        assert json.loads((already / "conversation.json").read_text()) == {"theirs": True}
+
+    def test_nothing_to_move_is_not_an_error(self, settings, shared):
+        assert self._move(None, shared).counts == {}
+
+    def test_core_is_told_to_ask_this_when_a_folder_changes(self):
+        """Registered rather than known to core: conversations are this
+        plugin's idea, and core moving them would mean core knowing it exists."""
+        from src.tracking import relocate
+
+        from plugins.webui.src.conversation import _move_conversations, register_with_core
+
+        before = list(relocate._MOVERS)
+        try:
+            relocate._MOVERS.clear()
+            register_with_core()
+            assert _move_conversations in relocate._MOVERS
+        finally:
+            relocate._MOVERS[:] = before
