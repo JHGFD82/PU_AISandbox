@@ -2529,12 +2529,12 @@ class TestOpeningAConversationFolder:
         here = Path(__file__).resolve().parents[1] / "src" / "templates"
         page = (Jinja2Templates(directory=str(here)).env
                 .get_template("chat.html").render(request=None, can_reveal=False))
-        assert "canReveal: false" in page
+        assert 'data-can-reveal="false"' in page
 
     def test_the_chat_page_is_told_whether_it_can(self, unlocked_client):
         """The template defaults to false, so a route that forgot would be silent."""
         page = unlocked_client.get("/").text
-        assert "canReveal: true" in page or "canReveal: false" in page
+        assert 'data-can-reveal="true"' in page or 'data-can-reveal="false"' in page
 
     def test_it_opens_the_conversations_own_folder(self, unlocked_client, monkeypatch):
         import sys
@@ -4019,6 +4019,98 @@ class TestSectionsInSettingsAreHeadings:
                               ("models", "Adding a new model")):
             at = body.index(f"<h3>{heading}</h3>")
             assert "after-a-list" in body[:at][-200:], name
+
+
+class TestEveryScriptBlockIsValidJavaScript:
+    """An editor reads a script block as JavaScript, whatever the file's
+    extension. A Jinja expression sitting in one is a syntax error to it —
+    marks against a file that is perfectly correct, which is how people learn
+    to ignore the marks."""
+
+    def _templates(self):
+        from pathlib import Path
+
+        return sorted((Path(__file__).resolve().parents[1] / "src" / "templates").glob("*.html"))
+
+    def test_no_template_writes_jinja_into_a_script_block(self):
+        import re
+
+        offenders = []
+        for template in self._templates():
+            for block in re.finditer(r"<script(?![^>]*type=)[^>]*>(.*?)</script>",
+                                     template.read_text(), re.S):
+                for found in re.findall(r"\{\{.*?\}\}|\{%.*?%\}", block.group(1)):
+                    offenders.append(f"{template.name}: {found[:60]}")
+        assert not offenders, (
+            "server values belong in an attribute the script reads, not written "
+            "into the script itself — see the note on chat.html's body tag:\n  "
+            + "\n  ".join(offenders))
+
+    def _body_attributes(self, page):
+        """The attributes a browser would actually find on the body element.
+
+        Asked of a parser rather than searched for in the text: the word
+        "<body>" appears in a CSS comment in this file as well, and an
+        attribute written there is raw text inside a style block — present in
+        the page, invisible to the script, and indistinguishable from the real
+        thing to anything that only looks for the string.
+        """
+        from html.parser import HTMLParser
+
+        class Read(HTMLParser):
+            def __init__(self):
+                super().__init__()
+                self.found = None
+
+            def handle_starttag(self, tag, attrs):
+                if tag == "body" and self.found is None:
+                    self.found = dict(attrs)
+
+        reader = Read()
+        reader.feed(page)
+        return reader.found or {}
+
+    def test_what_the_server_settles_arrives_on_the_body_tag(self):
+        attributes = self._body_attributes(_rendered_chat())
+        assert "data-can-reveal" in attributes
+        assert "data-default-sampling" in attributes
+
+    def test_and_the_script_reads_it_from_there(self):
+        page = _rendered_chat()
+        assert 'document.body.dataset.canReveal === "true"' in page
+        assert "JSON.parse(document.body.dataset.defaultSampling" in page
+
+    def test_the_page_has_exactly_one_body_tag(self):
+        """A stray one would end the head early and take the stylesheet with
+        it. The word appears in a CSS comment too, which is why this asks a
+        parser rather than counting the text."""
+        from html.parser import HTMLParser
+
+        class Count(HTMLParser):
+            def __init__(self):
+                super().__init__()
+                self.bodies = 0
+
+            def handle_starttag(self, tag, attrs):
+                if tag == "body":
+                    self.bodies += 1
+
+        counter = Count()
+        counter.feed(_rendered_chat())
+        assert counter.bodies == 1
+
+    def test_a_missing_value_still_leaves_something_the_script_can_read(self):
+        """A route that forgot to pass one must not produce an attribute the
+        script then fails to parse."""
+        from pathlib import Path
+
+        from fastapi.templating import Jinja2Templates
+
+        here = Path(__file__).resolve().parents[1] / "src" / "templates"
+        page = (Jinja2Templates(directory=str(here)).env
+                .get_template("chat.html").render(request=None))
+        assert 'data-can-reveal="false"' in page
+        assert "data-default-sampling='{}'" in page
 
 
 class TestTheModelMenuIsGrouped:
