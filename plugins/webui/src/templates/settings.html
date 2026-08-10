@@ -263,24 +263,31 @@
       <p class="hint">An AI service other than the Princeton AI Sandbox — a model on a cluster, or a provider's own API. Calls are counted but carry no cost and are reported separately.</p>
 
       <div id="endpoints-list"></div>
-      <h3>Adding a new API endpoint</h3>
-      <div class="snippet" id="endpoints-guidance"># preferences.toml
-[endpoints.my_cluster]
-name = "My HPC Cluster"
-base_url = "http://my-cluster.internal:8000/v1"
-openai_compatible = true
-default_model = "llama-3-70b-instruct"</div>
-      <p class="hint">API endpoints are defined in one of two ways:</p>
-      <ol>
-        <li>By adding a new section to the <code>preferences.toml</code> file, following the pattern shown in the snippet above.</li>
-        <li>By adding a new section to the shared settings file used by your team, following the pattern shown in the snippet above.</li>
-      </ol>
-      <p class="hint"><strong>If needed, the API key for an endpoint belongs in
-        <code>settings.toml</code></strong>, in the same folder as either of the
-        above-mentioned settings files, using the following pattern:</p>
-      <div class="snippet">[endpoints.my_cluster]
-key = "..."</div>
-      <p class="hint">Keys can be stored within the <code>preferences.toml</code> file or shared settings file, however they are stored as plain text which can pose serious security risks if not handled properly. </p>
+      <!-- No form here: an endpoint is set up by editing a file, so this
+           section is the explanation of how. It is ruled off from the list
+           above it the same way the other two are — a container carrying
+           .after-a-list, with the heading as its first child so the heading
+           takes its distance from the rule rather than adding to it. -->
+      <div class="after-a-list">
+        <h3>Adding a new API endpoint</h3>
+        <div class="snippet" id="endpoints-guidance"># preferences.toml
+  [endpoints.my_cluster]
+  name = "My HPC Cluster"
+  base_url = "http://my-cluster.internal:8000/v1"
+  openai_compatible = true
+  default_model = "llama-3-70b-instruct"</div>
+        <p class="hint">API endpoints are defined in one of two ways:</p>
+        <ol>
+          <li>By adding a new section to the <code>preferences.toml</code> file, following the pattern shown in the snippet above.</li>
+          <li>By adding a new section to the shared settings file used by your team, following the pattern shown in the snippet above.</li>
+        </ol>
+        <p class="hint"><strong>If needed, the API key for an endpoint belongs in
+          <code>settings.toml</code></strong>, in the same folder as either of the
+          above-mentioned settings files, using the following pattern:</p>
+        <div class="snippet">[endpoints.my_cluster]
+  key = "..."</div>
+        <p class="hint">Keys can be stored within the <code>preferences.toml</code> file or shared settings file, however they are stored as plain text which can pose serious security risks if not handled properly. </p>
+      </div>
     </div>
 
     <div class="card" id="section-models" data-section="models" data-tab="models">

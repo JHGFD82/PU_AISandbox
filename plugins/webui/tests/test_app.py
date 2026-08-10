@@ -3939,17 +3939,35 @@ class TestSectionsInSettingsAreHeadings:
             at = body.index(f"<h3>{heading}</h3>")
             assert form in body[:at][-120:], heading
 
-    def test_a_list_is_ruled_off_from_the_business_of_adding_to_it(self):
+    def test_every_list_is_ruled_off_from_what_follows_it(self):
         """Without a line the two ran together and the heading read as part of
-        the last row above it. The model list had one; the professor list, the
-        other place with a list and a form under it, did not."""
+        the last row above it. Only the model list had one.
+
+        Whatever follows the list carries the rule, not only a form: an
+        endpoint is set up by editing a file, so what follows that list is the
+        explanation of how rather than a form to fill in.
+        """
         import re
 
         body = re.sub(r"<script>.*?</script>", "", self._rendered(), flags=re.S)
-        for name in ("professors", "models"):
+        body = re.sub(r"<!--.*?-->", "", body, flags=re.S)
+        for name in ("professors", "endpoints", "models"):
             at = body.index(f'id="{name}-list"')
-            form = re.search(r"<form[^>]*>", body[at:at + 300])
-            assert form and "after-a-list" in form.group(0), name
+            following = re.search(r"<(?:form|div)[^>]*>", body[at + 30:])
+            assert following and "after-a-list" in following.group(0), name
+
+    def test_each_of_those_holds_its_own_heading(self):
+        """The heading takes its distance from the rule rather than adding to
+        it, which is what keeps the three cards spaced alike."""
+        import re
+
+        body = re.sub(r"<script>.*?</script>", "", self._rendered(), flags=re.S)
+        body = re.sub(r"<!--.*?-->", "", body, flags=re.S)
+        for name, heading in (("professors", "Add a new professor"),
+                              ("endpoints", "Adding a new API endpoint"),
+                              ("models", "Adding a new model")):
+            at = body.index(f"<h3>{heading}</h3>")
+            assert "after-a-list" in body[:at][-200:], name
 
 
 class TestTheModelMenuIsGrouped:
