@@ -353,17 +353,20 @@ def _render_people(where) -> str:
      from OIT. Keys are kept in <code>{safe}</code> and are never shown again
      once saved. Add as many as you like; at least one is needed.</p>
   {_as_list(people, "Nobody added yet.")}
-  <label for="netid">NetID <span class="waiting">&mdash; the university username, e.g. jh43</span></label>
-  <input type="text" id="netid" autocapitalize="none" autocorrect="off" spellcheck="false">
-  <label for="fullname">Display name <span class="waiting">&mdash; e.g. Jeff Heller</span></label>
-  <input type="text" id="fullname">
-  <label for="apikey">API key</label>
-  <input type="password" id="apikey" autocomplete="off">
-  <label for="backupkey">Backup key <span class="waiting">&mdash; optional; used if the first stops working</span></label>
-  <input type="password" id="backupkey" autocomplete="off">
-  <p class="row-error" id="people-error" hidden></p>
-  <p><button type="button" id="add-person" class="secondary">Add this person</button>
-     <span class="waiting" id="people-busy" hidden>Saving&hellip;</span></p>
+  <div class="after-a-list">
+    <h3>Add a person</h3>
+    <label for="netid">NetID <span class="waiting">&mdash; the university username, e.g. jh43</span></label>
+    <input type="text" id="netid" autocapitalize="none" autocorrect="off" spellcheck="false">
+    <label for="fullname">Display name <span class="waiting">&mdash; e.g. Jeff Heller</span></label>
+    <input type="text" id="fullname">
+    <label for="apikey">API key</label>
+    <input type="password" id="apikey" autocomplete="off">
+    <label for="backupkey">Backup key <span class="waiting">&mdash; optional; used if the first stops working</span></label>
+    <input type="password" id="backupkey" autocomplete="off">
+    <p class="row-error" id="people-error" hidden></p>
+    <p><button type="button" id="add-person" class="secondary">Add this person</button>
+       <span class="waiting" id="people-busy" hidden>Saving&hellip;</span></p>
+  </div>
 </fieldset>
 
 <p><button type="button" id="continue" {carry_on}>Continue to step 3</button>
@@ -412,18 +415,21 @@ def _render_models(where, billed_to: str = "") -> str:
      Sandbox documentation</strong> for the models it currently offers, then add
      one below &mdash; named as its provider and then the model, like
      <code>openai/gpt-4o</code>.</p>
-  <p>Adding one looks up its price and then asks it a few one-token questions to
-     find out what it can do. That takes a few seconds and a fraction of a cent,
-     billed to the key you pick, and happens once.</p>
   {_as_list(models, "Nothing added yet.")}
-  <label for="modelname">Model</label>
-  <input type="text" id="modelname" placeholder="openai/gpt-4o"
-         autocapitalize="none" autocorrect="off" spellcheck="false">
-  <label for="modelprof">Test with whose key</label>
-  <select id="modelprof">{options}</select>
-  <p class="row-error" id="models-error" hidden></p>
-  <p><button type="button" id="add-model" class="secondary">Add and test</button>
-     <span class="waiting" id="models-busy" hidden>Asking the model what it can do&hellip;</span></p>
+  <div class="after-a-list">
+    <h3>Add a model</h3>
+    <p>Adding one looks up its price and then asks it a few one-token questions to
+       find out what it can do. That takes a few seconds and a fraction of a cent,
+       billed to the key you pick, and happens once.</p>
+    <label for="modelname">Model</label>
+    <input type="text" id="modelname" placeholder="openai/gpt-4o"
+           autocapitalize="none" autocorrect="off" spellcheck="false">
+    <label for="modelprof">Test with whose key</label>
+    <select id="modelprof">{options}</select>
+    <p class="row-error" id="models-error" hidden></p>
+    <p><button type="button" id="add-model" class="secondary">Add and test</button>
+       <span class="waiting" id="models-busy" hidden>Asking the model what it can do&hellip;</span></p>
+  </div>
 </fieldset>
 
 <p><button type="button" id="finish" {finish}>Finish setup</button>
