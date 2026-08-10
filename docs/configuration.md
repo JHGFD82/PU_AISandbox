@@ -555,6 +555,31 @@ usage_mode = "shared-write"
   keeping one running total want. Use it only where work is genuinely done
   under that person's key.
 
+### Changing it moves what is already there
+
+Setting a folder, clearing one, or turning it from read-only to also-write
+moves that person's work to wherever it now belongs — the calls of the month
+under way, every finished month, and their conversations with everything
+attached to them. Nothing is left in the old place and nothing has to be moved
+by hand.
+
+You are told what moved. Where the same month exists at both ends — which is
+what happens when somebody is switched partway through one — the two are added
+together rather than one replacing the other.
+
+Nothing is deleted until the copy has been made, so a move that fails leaves
+everything where it was. Two things are deliberately not moved, and are named
+in what you are told rather than being dealt with quietly:
+
+- A conversation already in the new folder under the same name. It is left
+  alone; nothing is written over.
+- A month recording totals without the individual calls behind them. Those
+  totals cannot be added to another month's without inventing records, so the
+  file stays and is yours to move.
+
+Turning a folder to **read-only** brings their work back here, because a folder
+only being watched is never written to.
+
 ### What is in it
 
 A shared folder holds one person, so nothing inside it is filed under a netID —

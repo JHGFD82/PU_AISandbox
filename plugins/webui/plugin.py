@@ -82,6 +82,10 @@ _register("src.services.chat_service", "src/services/chat_service.py")
 _register("_pu_webui_setup_web", "src/setup_web.py")
 _register("_pu_webui_app", "src/app.py")
 
+# Conversations belong to this plugin, so this plugin says how to move them
+# when the folder somebody's work is kept in changes. Core says when.
+sys.modules["_pu_webui_conversation"].register_with_core()
+
 from src.config import register_setting
 from src.errors import CLIError
 from src.settings import CHAT_ROLE, TITLE_ROLE  # noqa: E402
