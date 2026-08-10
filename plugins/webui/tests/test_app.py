@@ -3755,7 +3755,11 @@ class TestTheProfessorRowsLineUp:
         """Two of them sit under Alternate AI endpoints, each followed by a
         paragraph that was reading as its caption."""
         css = self._partial("_forms.html")
-        selectors = css[css.index(".card :is(input, select"):css.index("margin-top: var(--space-6)")]
+        # Measured forward from the rule, not from the top of the file: the
+        # same declaration appears in more than one rule, and searching from
+        # the top found whichever came first.
+        at = css.index(".card :is(input, select")
+        selectors = css[at:css.index("margin-top: var(--space-6)", at)]
         assert ".snippet" in selectors
 
     def test_the_two_blocks_under_endpoints_are_each_followed_by_one(self):
@@ -3819,6 +3823,80 @@ class TestTheProfessorRowsLineUp:
         css = self._partial("_panels.html")
         assert "details.manage > form { margin-top: var(--space-3); }" in css
         assert "details.manage > form > :first-child label:first-child" in css
+
+
+class TestSectionsInSettingsAreHeadings:
+    """A bold paragraph looks like a heading and is not one: nothing reading
+    the page aloud, or listing its structure, can tell it apart from the
+    sentence beside it."""
+
+    def _rendered(self):
+        from pathlib import Path
+
+        from fastapi.templating import Jinja2Templates
+
+        directory = Path(__file__).resolve().parents[1] / "src" / "templates"
+        return Jinja2Templates(directory=str(directory)).get_template(
+            "settings.html").render(request=None)
+
+    def _partial(self, name):
+        from pathlib import Path
+
+        return (Path(__file__).resolve().parents[1] / "src" / "templates" / name).read_text()
+
+    SECTIONS = [
+        "Add a new professor",
+        "Create a shared settings file for your team",
+        "Adding a new API endpoint",
+        "Adding a new model",
+    ]
+
+    def test_each_one_is_a_heading(self):
+        page = self._rendered()
+        for name in self.SECTIONS:
+            assert f"<h3>{name}</h3>" in page, name
+
+    def test_none_of_them_is_still_a_bold_paragraph(self):
+        page = self._rendered()
+        for name in self.SECTIONS:
+            assert f"<strong>{name}</strong>" not in page, name
+
+    def test_they_sit_under_the_card_they_belong_to(self):
+        """h3 under h2, so the page's outline is the page's structure."""
+        import re
+
+        page = self._rendered()
+        levels = [int(m.group(1)) for m in re.finditer(r"<h([123])\b", page)]
+        assert 3 in levels and 2 in levels
+        # No h3 before the first h2, which would be a section belonging to
+        # nothing.
+        assert levels.index(2) < levels.index(3)
+
+    def test_emphasis_inside_a_sentence_is_left_alone(self):
+        """Not every bold phrase is a heading; these are read as part of the
+        sentence around them."""
+        page = self._rendered()
+        assert "<strong>There are no models available.</strong>" in page
+        assert "<strong>Read only</strong>" in page
+
+    def test_a_heading_is_given_the_same_air_wherever_it_appears(self):
+        """The four carried inline margins of 1rem, 1rem, 0.5rem and 0.5rem —
+        no two chosen together."""
+        page = self._rendered()
+        assert "margin-top:1rem" not in page
+        assert "margin-top:0.5rem" not in page
+        assert ".card * + h3 { margin-top: var(--space-6); }" in self._partial("_forms.html")
+
+    def test_a_heading_that_opens_a_form_is_not_pushed_off_it(self):
+        """There the form's own padding is the gap, and adding to it would
+        leave the heading floating above the box it introduces."""
+        import re
+
+        page = self._rendered()
+        body = re.sub(r"<script>.*?</script>", "", page, flags=re.S)
+        at = body.index("<h3>Adding a new model</h3>")
+        assert body[:at].rstrip().endswith(">")
+        assert "add-model-form" in body[:at][-120:]
 
 
 class TestTheModelMenuIsGrouped:
