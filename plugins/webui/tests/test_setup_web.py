@@ -620,3 +620,113 @@ class TestEveryPageLooksLikeTheSamePiece:
                   / "setup_web.py").read_text()
         assert "_PAGE.format(" not in source
         assert "def _page(" in source
+
+
+class TestSetupIsBuiltLikeTheSettingsPage:
+    """Somebody who has just been through setup meets the settings page the
+    first time they change anything. Both ask the same shape of question — here
+    is what you have, and here is how to add another — so both are arranged the
+    same way: a heading over a ruled-off block holding the boxes."""
+
+    def _fields_by_where_they_sit(self, page):
+        """Return the ids of the boxes inside the ruled-off block, and outside."""
+        from html.parser import HTMLParser
+
+        class Read(HTMLParser):
+            def __init__(self):
+                super().__init__()
+                self.stack, self.inside, self.outside = [], [], []
+                self.heading_is_ruled_off = None
+                self.headings = []
+
+            def handle_starttag(self, tag, attrs):
+                a = dict(attrs)
+                if tag in ("div", "fieldset", "ul"):
+                    self.stack.append("ruled" if "after-a-list" in (a.get("class") or "")
+                                      else tag)
+                if tag in ("input", "select"):
+                    (self.inside if "ruled" in self.stack else self.outside).append(a.get("id"))
+                if tag == "h3":
+                    self.heading_is_ruled_off = "ruled" in self.stack
+                    self.reading_heading = True
+
+            def handle_endtag(self, tag):
+                if tag in ("div", "fieldset", "ul") and self.stack:
+                    self.stack.pop()
+                if tag == "h3":
+                    self.reading_heading = False
+
+            def handle_data(self, data):
+                if getattr(self, "reading_heading", False) and data.strip():
+                    self.headings.append(data.strip())
+
+        reader = Read()
+        reader.feed(page)
+        return reader
+
+    def _page(self, which, tmp_path):
+        import sys
+
+        setup_web = sys.modules["_pu_webui_setup_web"]
+        return (setup_web._render_people(tmp_path) if which == "people"
+                else setup_web._render_models(tmp_path))
+
+    @pytest.mark.parametrize("which,heading,expected", [
+        ("people", "Add a person", ["netid", "fullname", "apikey", "backupkey"]),
+        ("models", "Add a model", ["modelname", "modelprof"]),
+    ])
+    def test_the_boxes_sit_under_a_heading_in_a_ruled_off_block(
+        self, which, heading, expected, tmp_path
+    ):
+        read = self._fields_by_where_they_sit(self._page(which, tmp_path))
+        assert read.headings == [heading]
+        assert read.heading_is_ruled_off is True
+        assert read.inside == expected
+        assert read.outside == [], "a box was left above the rule"
+
+    @pytest.mark.parametrize("which", ["people", "models"])
+    def test_what_is_already_there_is_shown_above_the_rule(self, which, tmp_path):
+        """The list answers "what do I have"; the block below answers "how do I
+        add another". Running them together was what the rule fixed."""
+        page = self._page(which, tmp_path)
+        assert page.index('class="added"') < page.index('class="after-a-list"')
+
+    def test_it_uses_the_same_three_rules_the_settings_page_uses(self):
+        """Written out rather than shared, because this page keeps its own
+        layout — so the values have to be the same tokens, not lookalikes."""
+        directory = Path(__file__).resolve().parents[1] / "src" / "templates"
+        setup = (directory / "setup.html").read_text()
+        forms = (directory / "_forms.html").read_text()
+        panels = (directory / "_panels.html").read_text()
+
+        assert "h3 { font-size: var(--text-md); margin: 0 0 var(--space-1); }" in setup
+        assert "font-size: var(--text-md)" in forms, "settings changed its heading size"
+        assert "* + h3 { margin-top: var(--space-6); }" in setup
+        assert ".card * + h3 { margin-top: var(--space-6); }" in forms
+        for rule in ("margin-top: var(--space-4); padding-top: var(--space-4)",):
+            assert rule in setup.replace("\n    ", " ")
+            assert rule in panels.replace("\n    ", " ")
+
+    def test_a_paragraph_after_a_field_is_given_room_here_too(self):
+        setup = (Path(__file__).resolve().parents[1] / "src" / "templates"
+                 / "setup.html").read_text()
+        assert ":is(input, select, .field-row) + p { margin-top: var(--space-6); }" in setup
+
+    def test_step_one_has_such_a_paragraph_for_that_rule_to_reach(self, monkeypatch):
+        """The line about the suggested folder sits directly under the box.
+
+        Only on a machine with nothing set up yet — the other branch of that
+        page offers a folder it already found and has no such line, which is
+        what a first check of this was misled by.
+        """
+        import re
+
+        monkeypatch.setattr(setup_web.first_run, "find_existing", lambda: [])
+        body = re.sub(r"<style>.*?</style>|<!--.*?-->", "", setup_web._render(), flags=re.S)
+        assert re.search(r'<div class="field-row">.*?</div>\s*<p', body, re.S), (
+            "nothing follows the folder box, so the rule above has no work to do")
+
+    def test_the_heading_opening_a_block_is_not_pushed_off_it(self):
+        setup = (Path(__file__).resolve().parents[1] / "src" / "templates"
+                 / "setup.html").read_text()
+        assert ".after-a-list > h3:first-child { margin-top: 0; }" in setup

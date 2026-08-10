@@ -119,6 +119,27 @@
   fieldset.satisfied .required-flag { color: var(--badge-set-text); }
   .added { margin: var(--space-2) 0 0; padding-left: var(--space-6); }
   .added li { margin: 0.15rem 0; }
+
+  /* ── Naming a part of a question, the way the settings page does ─────── */
+  /* Each of these panels asks one thing and then offers the boxes to answer
+     it with. Settings arranges that as a heading over a ruled-off block, and
+     somebody who has just been through setup meets the same page again the
+     first time they change anything — so it is arranged the same way here.
+     Written out rather than shared from a partial: this page keeps its own
+     layout on purpose, and the rules below are three, all built from the same
+     tokens the settings page builds its own from. */
+  h3 { font-size: var(--text-md); margin: 0 0 var(--space-1); }
+  * + h3 { margin-top: var(--space-6); }
+  /* A line between what is already there and the business of adding to it.
+     Not the first thing in the block, where the padding is already the gap. */
+  .after-a-list {
+    border-top: 1px solid var(--border);
+    margin-top: var(--space-4); padding-top: var(--space-4);
+  }
+  .after-a-list > h3:first-child { margin-top: 0; }
+  /* A paragraph after a field starts something new; it is not a caption for
+     the box below it. */
+  :is(input, select, .field-row) + p { margin-top: var(--space-6); }
 </style>
 </head>
 <body>
