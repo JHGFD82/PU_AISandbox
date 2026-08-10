@@ -3193,10 +3193,18 @@ class TestTheInterfaceCanBeReachedWithoutAMouse:
                 ratio = (pair[0] + 0.05) / (pair[1] + 0.05)
                 assert ratio >= 3.0, f"the ring is {ratio:.2f}:1 against {surface}"
 
-    def test_a_button_label_is_readable_on_its_own_button(self):
-        """Words on a button are words, so 4.5:1 rather than the 3:1 that a
-        border or an icon is held to. White on the orange reached 3.08:1 —
-        which is why the label is dark and the orange kept as it is."""
+    def test_a_button_label_holds_the_line_that_was_chosen_for_it(self):
+        """Words on a button are words, so WCAG asks 4.5:1 of them rather than
+        the 3:1 it asks of a border or an icon. White on the light theme's
+        orange reaches 3.08:1, and that is a deliberate exception — satisfying
+        4.5:1 needs either a darker orange or dark writing, and the maintainer
+        looked at both and kept the colour.
+
+        So this holds the line actually chosen, 3:1, rather than the one being
+        set aside. It still catches the thing worth catching: an orange or a
+        label picked later that fails even the bar for a plain border. The
+        reason for the exception is written beside the token itself.
+        """
         import re
         from pathlib import Path
 
@@ -3221,9 +3229,10 @@ class TestTheInterfaceCanBeReachedWithoutAMouse:
                 pair = sorted((luminance(theme["--on-orange"]), luminance(theme[surface])),
                               reverse=True)
                 ratio = (pair[0] + 0.05) / (pair[1] + 0.05)
-                assert ratio >= 4.5, (
+                assert ratio >= 3.0, (
                     f"{name}: the label is {ratio:.2f}:1 on {surface} "
-                    f"({theme['--on-orange']} on {theme[surface]})")
+                    f"({theme['--on-orange']} on {theme[surface]}) — below the "
+                    "3:1 that even a border is held to")
 
     def test_controls_that_appear_on_hover_appear_on_focus_too(self):
         """They stayed in the tab order while invisible."""

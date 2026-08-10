@@ -29,14 +29,19 @@
     /* What is written on top of a filled orange button. White reaches only
        3.02:1 there, under the 4.5:1 a label needs; the interface's own dark ink
        reaches 5.56:1 on the very same orange. So the brand colour stays at full
-       strength and the writing changes instead of the other way round.
+       strength and the writing changes instead of the other way round. Each
+       theme sets its own, because each theme sets its own orange.
 
-       Dark rather than white, because white on this orange reaches 3.08:1 —
-       enough for a border or an icon, which WCAG asks 3:1 of, and not enough
-       for words, which it asks 4.5:1 of at this size. Dark reaches 5.44:1 and
-       leaves the orange exactly where it is. Each theme sets its own, because
-       each theme now sets its own orange. */
-    --on-orange: #1d1d1f;
+       White here is a deliberate exception, taken with the numbers in hand.
+       It reaches 3.08:1 on the light theme's orange: enough for the 3:1 WCAG
+       asks of a border or an icon, short of the 4.5:1 it asks of words at
+       this size. The two ways to satisfy that rule are a darker orange, which
+       stops being this orange, or dark writing on it — and the maintainer,
+       having seen both, chose the colour. Recorded rather than quietly done,
+       so that nobody later reads 3.08:1 as an oversight and fixes it. The
+       dark theme's black on its own orange reaches 6.94:1 and needs no
+       exception. */
+    --on-orange: #ffffff;
 
     /* ── Surfaces ─────────────────────────────────────────────────────── */
     --bg: #f5f5f7;
