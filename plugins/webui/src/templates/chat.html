@@ -644,7 +644,20 @@
   }
 </style>
 </head>
-<body>
+{#
+  What the server settles, handed to the page as attributes rather than
+  written into the script below. An editor reads a script block as
+  JavaScript, so a Jinja expression sitting in one is a syntax error to it —
+  two red marks on a file that is perfectly correct, which is the kind of
+  thing that teaches people to ignore the marks. An attribute is a string to
+  everybody, so both are quiet here and the script stays valid JavaScript on
+  its own, checkable without being rendered first.
+
+  Single quotes deliberately: tojson escapes < > & and ' for exactly this
+  purpose, and leaves " alone.
+#}
+<body data-can-reveal="{{ can_reveal | default(false) | tojson }}"
+      data-default-sampling='{{ default_sampling | default({}, true) | tojson }}'>
   <header id="page-title-bar">
     <button type="button" class="icon-btn" id="sidebar-toggle-btn"
             title="Show conversations" aria-label="Show conversations" aria-expanded="false">
@@ -904,12 +917,13 @@ const state = {
   // see conv.temperature/top_p/max_tokens in conversation.py.
   sampling: { temperature: null, top_p: null, max_tokens: null, system_prompt: null },
   // Settled by the server when the page is built: whether this computer has a
-  // file browser to open at all. See file_picker.can_reveal().
-  canReveal: {{ can_reveal | default(false) | tojson }},
+  // file browser to open at all. See file_picker.can_reveal(), and the note
+  // on the opening body tag for why these two arrive as attributes.
+  canReveal: document.body.dataset.canReveal === "true",
   // What a message is sent with when this conversation sets nothing of its own.
   // Real numbers, from the server: a blank box is not "whatever the model
   // likes", it is these.
-  defaultSampling: {{ default_sampling | default({}, true) | tojson }},
+  defaultSampling: JSON.parse(document.body.dataset.defaultSampling || "{}"),
 };
 
 // ── Dark mode ────────────────────────────────────────────────────────────
