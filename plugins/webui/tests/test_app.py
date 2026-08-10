@@ -3193,6 +3193,38 @@ class TestTheInterfaceCanBeReachedWithoutAMouse:
                 ratio = (pair[0] + 0.05) / (pair[1] + 0.05)
                 assert ratio >= 3.0, f"the ring is {ratio:.2f}:1 against {surface}"
 
+    def test_a_button_label_is_readable_on_its_own_button(self):
+        """Words on a button are words, so 4.5:1 rather than the 3:1 that a
+        border or an icon is held to. White on the orange reached 3.08:1 —
+        which is why the label is dark and the orange kept as it is."""
+        import re
+        from pathlib import Path
+
+        css = (Path(__file__).resolve().parents[1] / "src" / "templates"
+               / "_design-system.html").read_text()
+
+        def values(block_start):
+            segment = css.split(block_start)[1].split("}")[0]
+            return dict(re.findall(r"(--[a-z-]+):\s*(#[0-9a-fA-F]{6})", segment))
+
+        light = values(":root {")
+        dark = {**light, **values('[data-theme="dark"] {')}
+
+        def luminance(colour):
+            channels = [int(colour[i:i + 2], 16) / 255 for i in (1, 3, 5)]
+            adjusted = [c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+                        for c in channels]
+            return 0.2126 * adjusted[0] + 0.7152 * adjusted[1] + 0.0722 * adjusted[2]
+
+        for name, theme in (("light", light), ("dark", dark)):
+            for surface in ("--orange", "--orange-hover"):
+                pair = sorted((luminance(theme["--on-orange"]), luminance(theme[surface])),
+                              reverse=True)
+                ratio = (pair[0] + 0.05) / (pair[1] + 0.05)
+                assert ratio >= 4.5, (
+                    f"{name}: the label is {ratio:.2f}:1 on {surface} "
+                    f"({theme['--on-orange']} on {theme[surface]})")
+
     def test_controls_that_appear_on_hover_appear_on_focus_too(self):
         """They stayed in the tab order while invisible."""
         chat = self._chat()
@@ -3892,11 +3924,23 @@ class TestSectionsInSettingsAreHeadings:
         leave the heading floating above the box it introduces."""
         import re
 
-        page = self._rendered()
-        body = re.sub(r"<script>.*?</script>", "", page, flags=re.S)
-        at = body.index("<h3>Adding a new model</h3>")
-        assert body[:at].rstrip().endswith(">")
-        assert "add-model-form" in body[:at][-120:]
+        body = re.sub(r"<script>.*?</script>", "", self._rendered(), flags=re.S)
+        for form, heading in (("add-model-form", "Adding a new model"),
+                              ("add-professor-form", "Add a new professor")):
+            at = body.index(f"<h3>{heading}</h3>")
+            assert form in body[:at][-120:], heading
+
+    def test_a_list_is_ruled_off_from_the_business_of_adding_to_it(self):
+        """Without a line the two ran together and the heading read as part of
+        the last row above it. The model list had one; the professor list, the
+        other place with a list and a form under it, did not."""
+        import re
+
+        body = re.sub(r"<script>.*?</script>", "", self._rendered(), flags=re.S)
+        for name in ("professors", "models"):
+            at = body.index(f'id="{name}-list"')
+            form = re.search(r"<form[^>]*>", body[at:at + 300])
+            assert form and "after-a-list" in form.group(0), name
 
 
 class TestTheModelMenuIsGrouped:
