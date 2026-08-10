@@ -800,6 +800,215 @@ class TestConversationsMoveWithTheFolder:
         try:
             relocate._MOVERS.clear()
             register_with_core()
-            assert _move_conversations in relocate._MOVERS
+            assert ("conversations", _move_conversations) in relocate._MOVERS
         finally:
             relocate._MOVERS[:] = before
+
+
+def _msg(text, when):
+    """One message, said at a stated moment."""
+    from plugins.webui.src.conversation import Message
+
+    return Message(role="user", content=text, timestamp=when)
+
+
+class TestCombiningMessages:
+    """Two computers sharing a folder each hold a version of the same
+    conversation. Both are things somebody said, so both are kept."""
+
+    def test_nothing_to_combine_is_left_exactly_as_it_was(self):
+        """The ordinary case, one computer: the transcript must not move."""
+        from plugins.webui.src.conversation import merge_messages
+
+        said = [_msg("one", "2026-08-10T10:00:00"), _msg("two", "2026-08-10T10:00:01")]
+        assert [m.content for m in merge_messages(said)] == ["one", "two"]
+
+    def test_the_same_message_from_both_is_kept_once(self):
+        from plugins.webui.src.conversation import merge_messages
+
+        shared = _msg("both saw this", "2026-08-10T10:00:00")
+        a = [shared, _msg("only A", "2026-08-10T10:01:00")]
+        b = [_msg("both saw this", "2026-08-10T10:00:00"), _msg("only B", "2026-08-10T10:02:00")]
+        assert [m.content for m in merge_messages(a, b)] == [
+            "both saw this", "only A", "only B"]
+
+    def test_they_come_back_in_the_order_they_were_said(self):
+        from plugins.webui.src.conversation import merge_messages
+
+        a = [_msg("later", "2026-08-10T11:00:00")]
+        b = [_msg("earlier", "2026-08-10T10:00:00")]
+        assert [m.content for m in merge_messages(a, b)] == ["earlier", "later"]
+
+    def test_two_in_the_same_instant_keep_the_order_they_were_found_in(self):
+        """A single computer's transcript is left exactly as it was, even where
+        two messages carry the same timestamp."""
+        from plugins.webui.src.conversation import merge_messages
+
+        same = "2026-08-10T10:00:00"
+        said = [_msg("first", same), _msg("second", same), _msg("third", same)]
+        assert [m.content for m in merge_messages(said)] == ["first", "second", "third"]
+
+    def test_the_same_words_at_different_moments_are_two_messages(self):
+        """Somebody saying "yes" twice said it twice."""
+        from plugins.webui.src.conversation import merge_messages
+
+        said = [_msg("yes", "2026-08-10T10:00:00"), _msg("yes", "2026-08-10T10:05:00")]
+        assert len(merge_messages(said)) == 2
+
+
+class TestTwoComputersWritingAtOnce:
+    """Both online. A conversation is written whole every time a message is
+    added, so a copy read before the other computer's message arrived used to
+    write straight over it."""
+
+    @pytest.fixture
+    def folder(self, tmp_path):
+        return tmp_path / "Dropbox"
+
+    def test_neither_computers_message_is_lost(self, folder):
+        a = ConversationStore("smith", base_dir=folder)
+        b = ConversationStore("smith", base_dir=folder)
+        cid = a.create(title="Both here", model="gpt-4o").id
+
+        on_a, on_b = a.load(cid), b.load(cid)   # both read it
+        on_a.messages.append(_msg("from A", "2026-08-10T10:00:00"))
+        a.save(on_a)
+        on_b.messages.append(_msg("from B", "2026-08-10T10:00:05"))
+        b.save(on_b)                            # b's copy predates a's message
+
+        assert [m.content for m in a.load(cid).messages] == ["from A", "from B"]
+
+    def test_the_copy_in_hand_ends_up_matching_the_file(self, folder):
+        """Whoever saved second is looking at a screen that must not now
+        disagree with what is on disk."""
+        a = ConversationStore("smith", base_dir=folder)
+        b = ConversationStore("smith", base_dir=folder)
+        cid = a.create(title="Both here", model="gpt-4o").id
+        on_a, on_b = a.load(cid), b.load(cid)
+        on_a.messages.append(_msg("from A", "2026-08-10T10:00:00"))
+        a.save(on_a)
+        on_b.messages.append(_msg("from B", "2026-08-10T10:00:05"))
+        b.save(on_b)
+        assert [m.content for m in on_b.messages] == ["from A", "from B"]
+
+    def test_one_computer_alone_writes_what_it_was_given(self, folder):
+        store = ConversationStore("smith", base_dir=folder)
+        cid = store.create(title="Alone", model="gpt-4o").id
+        conv = store.load(cid)
+        conv.messages = [_msg("one", "2026-08-10T10:00:00"),
+                         _msg("two", "2026-08-10T10:00:01")]
+        store.save(conv)
+        assert [m.content for m in store.load(cid).messages] == ["one", "two"]
+
+    def test_a_background_job_writing_alongside_the_browser(self, folder):
+        """The same fault without a second computer: a job appends progress
+        while the browser holds a copy read before it started."""
+        store = ConversationStore("smith", base_dir=folder)
+        cid = store.create(title="A job", model="gpt-4o").id
+        in_browser = store.load(cid)
+
+        from_job = store.load(cid)
+        from_job.messages.append(_msg("Translating... 3 of 10 done.", "2026-08-10T10:00:00"))
+        store.save(from_job)
+
+        in_browser.messages.append(_msg("what the person typed", "2026-08-10T10:00:02"))
+        store.save(in_browser)
+        assert [m.content for m in store.load(cid).messages] == [
+            "Translating... 3 of 10 done.", "what the person typed"]
+
+
+class TestACopyASyncServiceSetAside:
+    """One computer offline. The sync service notices when it reconnects,
+    keeps one version and renames the other — which this software never read,
+    so it was on disk, never shown and never mentioned."""
+
+    @pytest.fixture
+    def opened(self, tmp_path):
+        """A conversation with one message, and the store that holds it."""
+        store = ConversationStore("smith", base_dir=tmp_path / "Dropbox")
+        cid = store.create(title="Karonshu", model="gpt-4o").id
+        conv = store.load(cid)
+        conv.messages.append(_msg("added while the other was away",
+                                  "2026-08-10T11:00:00"))
+        store.save(conv)
+        return store, cid, store._dir / cid
+
+    def _set_aside(self, folder, name, messages):
+        """Write the version a sync service renamed out of the way."""
+        from plugins.webui.src.conversation import Conversation
+
+        theirs = Conversation.from_dict(json.loads((folder / "conversation.json").read_text()))
+        theirs.messages = messages
+        (folder / name).write_text(json.dumps(theirs.to_dict(), indent=2))
+
+    def test_its_messages_come_back_when_the_conversation_is_opened(self, opened):
+        store, cid, folder = opened
+        self._set_aside(folder, "conversation (Machine B's conflicted copy 2026-08-10).json",
+                        [_msg("typed on the train", "2026-08-10T10:55:00")])
+        assert [m.content for m in store.load(cid).messages] == [
+            "typed on the train", "added while the other was away"]
+
+    def test_the_copy_is_removed_once_they_are_safely_back(self, opened):
+        store, cid, folder = opened
+        self._set_aside(folder, "conversation (conflicted copy).json",
+                        [_msg("mine", "2026-08-10T10:00:00")])
+        store.load(cid)
+        assert sorted(f.name for f in folder.glob("*.json")) == ["conversation.json"]
+
+    @pytest.mark.parametrize("name", [
+        "conversation (Jeff's conflicted copy 2026-08-10).json",   # Dropbox
+        "conversation-DESKTOP-A1B2C3.json",                        # OneDrive
+        "conversation (1).json",                                   # Google Drive
+        "conversation.sync-conflict-20260810-105500-ABCDEFG.json",  # Syncthing
+    ])
+    def test_whatever_the_sync_service_called_it(self, opened, name):
+        """Each names them differently, and none of the names is ours."""
+        store, cid, folder = opened
+        self._set_aside(folder, name, [_msg("mine", "2026-08-10T10:00:00")])
+        assert "mine" in [m.content for m in store.load(cid).messages]
+
+    def test_more_than_one_copy_is_taken_back(self, opened):
+        """Three computers, or two rounds of it."""
+        store, cid, folder = opened
+        self._set_aside(folder, "conversation (B conflicted copy).json",
+                        [_msg("from B", "2026-08-10T10:00:00")])
+        self._set_aside(folder, "conversation (C conflicted copy).json",
+                        [_msg("from C", "2026-08-10T10:30:00")])
+        said = [m.content for m in store.load(cid).messages]
+        assert said == ["from B", "from C", "added while the other was away"]
+
+    def test_a_copy_that_cannot_be_read_is_left_where_it_is(self, opened):
+        """Half-synced, or damaged. Removing it would be throwing away the
+        only thing that might still be recoverable by hand."""
+        store, cid, folder = opened
+        bad = folder / "conversation (conflicted copy).json"
+        bad.write_text("{not json")
+        assert store.load(cid) is not None
+        assert bad.exists()
+
+    def test_our_own_half_written_file_is_not_mistaken_for_one(self, opened):
+        """A save in progress writes a temp file in the same folder."""
+        store, cid, folder = opened
+        (folder / "conversation.9999.1.tmp").write_text("{}")
+        store.load(cid)
+        assert (folder / "conversation.9999.1.tmp").exists()
+
+    def test_a_conversation_with_no_copies_beside_it_is_not_rewritten(self, opened):
+        """Opening a conversation must not look like changing it."""
+        store, cid, folder = opened
+        before = (folder / "conversation.json").read_text()
+        store.load(cid)
+        assert (folder / "conversation.json").read_text() == before
+
+    def test_nothing_is_removed_before_the_messages_are_safely_back(self, opened, monkeypatch):
+        store, cid, folder = opened
+        copy = folder / "conversation (conflicted copy).json"
+        self._set_aside(folder, copy.name, [_msg("mine", "2026-08-10T10:00:00")])
+
+        def cannot_save(*args, **kwargs):
+            raise OSError("no space left on device")
+
+        monkeypatch.setattr(ConversationStore, "save", cannot_save)
+        with pytest.raises(OSError):
+            store.load(cid)
+        assert copy.exists(), "the only copy of those messages was removed"

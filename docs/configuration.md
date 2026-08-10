@@ -580,6 +580,29 @@ in what you are told rather than being dealt with quietly:
 Turning a folder to **read-only** brings their work back here, because a folder
 only being watched is never written to.
 
+### Several computers in the same conversation
+
+Each conversation is a folder of its own with a name no other conversation will
+take, so two computers working on different conversations never meet. The same
+conversation on two computers at once used to be a different matter: a
+conversation is written out whole every time a message is added, so whoever
+saved second replaced what the other had just written.
+
+Both cases are now put back together rather than one replacing the other:
+
+- **Both online.** What is on disk is read again immediately before writing, so
+  a message that arrived in between is kept.
+- **One offline.** The sync service notices when it reconnects, keeps one
+  version and renames the other — Dropbox calls it a *conflicted copy*, and
+  OneDrive, Google Drive and Syncthing each have their own wording. Opening the
+  conversation reads whatever was set aside, puts those messages back in the
+  order they were said, and removes the copy once they are safely in.
+
+Nothing in the sandbox ever deletes a message, only adds, which is what makes
+combining two versions always the right answer. A copy that cannot be read is
+left exactly where it is rather than removed, so there is still something to
+recover by hand.
+
 ### What is in it
 
 A shared folder holds one person, so nothing inside it is filed under a netID —

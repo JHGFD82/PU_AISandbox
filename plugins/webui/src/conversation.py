@@ -22,6 +22,7 @@ somebody whose folder is only being watched.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import secrets
@@ -31,6 +32,44 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
+
+logger = logging.getLogger(__name__)
+
+
+def merge_messages(*lists: list["Message"]) -> list["Message"]:
+    """Combine several versions of one conversation's messages into one.
+
+    Two computers sharing a folder can each hold a version of the same
+    conversation with something the other has not seen. Both are real, so both
+    are kept: the same message appearing in more than one version is kept once,
+    and the result is put back in the order things were said.
+
+    A message is taken to be the same message when who said it, when, and what
+    it said all match. There is no id to compare — two computers generate
+    messages independently, and any id invented here would differ between them
+    for the same message.
+
+    Args:
+        *lists: The message lists to combine, oldest-known version first.
+
+    Returns:
+        One list, in the order the messages were written.
+    """
+    seen: set[tuple[str, str, str]] = set()
+    merged: list["Message"] = []
+    for messages in lists:
+        for message in messages:
+            fingerprint = (message.role, message.timestamp, message.content)
+            if fingerprint in seen:
+                continue
+            seen.add(fingerprint)
+            merged.append(message)
+    # Steady rather than clever: two messages written in the same instant keep
+    # the order they were found in, so a single computer's transcript is left
+    # exactly as it was.
+    merged.sort(key=lambda m: m.timestamp)
+    return merged
+
 
 def __getattr__(name: str):
     """Resolve the conversations directory on first use, not at import.
@@ -558,7 +597,78 @@ class ConversationStore:
             return None
         if not path.exists():
             return None
+        self._take_back_anything_a_sync_service_set_aside(path)
         return Conversation.from_dict(json.loads(path.read_text()))
+
+    def _read_quietly(self, path: Path) -> Optional[Conversation]:
+        """Read a conversation file, or return ``None`` if it cannot be read.
+
+        Used where the answer is wanted but its absence is not a failure —
+        reading what is already on disk before writing over it, where a file
+        that is missing, half-synced or damaged should not stop the write that
+        was actually asked for.
+        """
+        try:
+            return Conversation.from_dict(json.loads(path.read_text()))
+        except FileNotFoundError:
+            return None
+        except (json.JSONDecodeError, OSError, KeyError, TypeError) as e:
+            logger.warning("Could not read %s before writing it: %s", path, e)
+            return None
+
+    def _take_back_anything_a_sync_service_set_aside(self, path: Path) -> None:
+        """Fold in any copy of this conversation a sync service left beside it.
+
+        Two computers sharing one folder can both write to a conversation
+        before either has seen the other's version. Where one of them was
+        offline at the time, the sync service notices when it reconnects,
+        keeps one version under the real name, and renames the other —
+        ``conversation (Machine B's conflicted copy 2026-08-10).json`` is
+        Dropbox's wording, and OneDrive, Google Drive and Syncthing each have
+        their own. Whatever the wording, this software only ever reads
+        ``conversation.json``, so what was set aside became invisible: on disk,
+        never shown, and never mentioned.
+
+        So it is read and put back. The two are combined rather than one
+        chosen, since both are things somebody actually said, and the copy is
+        removed only once the combined version is safely written.
+
+        A read that writes is not a thing to do lightly, and it is done here
+        because there is nowhere better: the moment somebody opens a
+        conversation is the moment their missing messages need to be in it.
+        """
+        set_aside = [f for f in sorted(path.parent.glob("conversation*.json"))
+                     if f != path]
+        if not set_aside:
+            return
+
+        try:
+            merged = Conversation.from_dict(json.loads(path.read_text()))
+        except (json.JSONDecodeError, OSError, KeyError) as e:
+            logger.warning("Cannot take back copies beside %s: %s", path, e)
+            return
+
+        taken: list[tuple[Path, int]] = []
+        for other in set_aside:
+            try:
+                theirs = Conversation.from_dict(json.loads(other.read_text()))
+            except (json.JSONDecodeError, OSError, KeyError) as e:
+                logger.warning("Could not read %s, so it was left alone: %s", other.name, e)
+                continue
+            before = len(merged.messages)
+            merged.messages = merge_messages(merged.messages, theirs.messages)
+            # What this copy actually brought back, not the size of the result.
+            taken.append((other, len(merged.messages) - before))
+
+        if not taken:
+            return
+        self.save(merged)
+        for other, gained in taken:
+            logger.warning(
+                "Took %d message(s) back from %s, which a sync service had set "
+                "aside because two computers wrote to this conversation at "
+                "once. That copy has been removed.", gained, other.name)
+            other.unlink(missing_ok=True)
 
     def save(self, conversation: Conversation) -> None:
         """Write *conversation* to disk, updating its updated_at timestamp first.
@@ -575,8 +685,18 @@ class ConversationStore:
         on the same filesystem — a reader always sees either the complete
         old file or the complete new one, never a half-written one.
         """
-        conversation.updated_at = datetime.now().isoformat()
         path = self._path(conversation.id)
+        # What is on disk may have gained messages since this copy was read —
+        # another computer sharing this folder, or this one's own background
+        # job. Writing the whole file from a copy read before those arrived
+        # would drop them without a word, so they are read back in first.
+        # Nothing in this software ever removes a message, only adds, which is
+        # what makes combining the two always the right answer.
+        on_disk = self._read_quietly(path)
+        if on_disk is not None:
+            conversation.messages = merge_messages(on_disk.messages, conversation.messages)
+
+        conversation.updated_at = datetime.now().isoformat()
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp_path = path.with_suffix(f".{os.getpid()}.{threading.get_ident()}.tmp")
         tmp_path.write_text(json.dumps(conversation.to_dict(), indent=2))
@@ -682,9 +802,6 @@ def _move_conversations(professor, was, now):
     return Moved(counts={"conversations": moved} if moved else {}, left_behind=left)
 
 
-_move_conversations.moves = "conversations"
-
-
 def register_with_core() -> None:
     """Tell core to move conversations when somebody's folder changes.
 
@@ -694,4 +811,4 @@ def register_with_core() -> None:
     """
     from src.tracking.relocate import register_mover
 
-    register_mover(_move_conversations)
+    register_mover(_move_conversations, "conversations")

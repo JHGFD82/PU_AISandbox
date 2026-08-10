@@ -46,10 +46,10 @@ logger = logging.getLogger(__name__)
 # A mover is called only when the two differ.
 Mover = Callable[[str, Optional[ExternalSource], Optional[ExternalSource]], "Moved"]
 
-_MOVERS: list[Mover] = []
+_MOVERS: list[tuple[str, Mover]] = []
 
 
-def register_mover(mover: Mover) -> None:
+def register_mover(mover: Mover, name: str) -> None:
     """Say that something of a person's needs moving when their folder changes.
 
     Core registers what it owns — what each call cost, and finished months.
@@ -63,8 +63,10 @@ def register_mover(mover: Mover) -> None:
                Returns a ``Moved`` saying what it did — it names its own
                counts, so what a person is told uses its words and not this
                module's.
+        name: What this mover looks after, in a word — ``'conversations'``.
+              Used only to say which part failed when one does.
     """
-    _MOVERS.append(mover)
+    _MOVERS.append((name, mover))
 
 
 @dataclass
@@ -147,12 +149,11 @@ def move_a_persons_work(
         return Moved()
 
     result = Moved()
-    for mover in [_move_usage] + _MOVERS:
+    for what, mover in [("usage", _move_usage)] + _MOVERS:
         try:
             part = mover(netid, old, new)
         except Exception as e:  # noqa: BLE001 — one part failing must not
             # strand the others, and the person has to be told which failed.
-            what = getattr(mover, "moves", mover.__name__)
             logger.warning("Could not move %s for %s: %s", what, netid, e)
             result.left_behind.append(f"{what} could not be moved: {e}")
             continue
@@ -203,8 +204,6 @@ def _move_usage(netid: str, old: Optional[ExternalSource],
         counts["finished months"] = len(finished)
     return Moved(counts=counts)
 
-
-_move_usage.moves = "usage"  # type: ignore[attr-defined]
 
 
 def _read_usage(
