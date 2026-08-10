@@ -510,8 +510,7 @@ def _move_my_files(professor, was, now):
     return Moved(counts={"drafts": moved} if moved else {}, left_behind=left)
 
 
-_move_my_files.moves = "drafts"        # what to call it if it fails
-register_mover(_move_my_files)          # once, at startup
+register_mover(_move_my_files, "drafts")   # once, at startup
 ```
 
 Note the shape difference: this installation's own folder holds everybody, so

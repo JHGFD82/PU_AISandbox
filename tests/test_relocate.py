@@ -289,14 +289,14 @@ class TestWhatEachPartOfTheSandboxMoves:
             asked.append((netid, was, now))
             return Moved(counts={"widgets": 3})
 
-        relocate.register_mover(mover)
+        relocate.register_mover(mover, "widgets")
         moved = move_a_persons_work("smith", None, shared)
         assert asked == [("smith", None, shared)]
         assert moved.counts["widgets"] == 3
 
     def test_it_is_not_asked_when_nothing_changed(self, here):
         asked = []
-        relocate.register_mover(lambda *a: asked.append(a) or Moved())
+        relocate.register_mover(lambda *a: asked.append(a) or Moved(), "widgets")
         move_a_persons_work("smith", None, None)
         assert asked == []
 
@@ -306,8 +306,7 @@ class TestWhatEachPartOfTheSandboxMoves:
         def broken(netid, was, now):
             raise OSError("the disk is full")
 
-        broken.moves = "widgets"
-        relocate.register_mover(broken)
+        relocate.register_mover(broken, "widgets")
         put_locally(here, records=[a_call(100)])
         moved = move_a_persons_work("smith", None, shared)
         assert moved.counts["calls"] == 1
