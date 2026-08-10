@@ -3193,6 +3193,47 @@ class TestTheInterfaceCanBeReachedWithoutAMouse:
                 ratio = (pair[0] + 0.05) / (pair[1] + 0.05)
                 assert ratio >= 3.0, f"the ring is {ratio:.2f}:1 against {surface}"
 
+    def test_a_button_label_holds_the_line_that_was_chosen_for_it(self):
+        """Words on a button are words, so WCAG asks 4.5:1 of them rather than
+        the 3:1 it asks of a border or an icon. White on the light theme's
+        orange reaches 3.08:1, and that is a deliberate exception — satisfying
+        4.5:1 needs either a darker orange or dark writing, and the maintainer
+        looked at both and kept the colour.
+
+        So this holds the line actually chosen, 3:1, rather than the one being
+        set aside. It still catches the thing worth catching: an orange or a
+        label picked later that fails even the bar for a plain border. The
+        reason for the exception is written beside the token itself.
+        """
+        import re
+        from pathlib import Path
+
+        css = (Path(__file__).resolve().parents[1] / "src" / "templates"
+               / "_design-system.html").read_text()
+
+        def values(block_start):
+            segment = css.split(block_start)[1].split("}")[0]
+            return dict(re.findall(r"(--[a-z-]+):\s*(#[0-9a-fA-F]{6})", segment))
+
+        light = values(":root {")
+        dark = {**light, **values('[data-theme="dark"] {')}
+
+        def luminance(colour):
+            channels = [int(colour[i:i + 2], 16) / 255 for i in (1, 3, 5)]
+            adjusted = [c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+                        for c in channels]
+            return 0.2126 * adjusted[0] + 0.7152 * adjusted[1] + 0.0722 * adjusted[2]
+
+        for name, theme in (("light", light), ("dark", dark)):
+            for surface in ("--orange", "--orange-hover"):
+                pair = sorted((luminance(theme["--on-orange"]), luminance(theme[surface])),
+                              reverse=True)
+                ratio = (pair[0] + 0.05) / (pair[1] + 0.05)
+                assert ratio >= 3.0, (
+                    f"{name}: the label is {ratio:.2f}:1 on {surface} "
+                    f"({theme['--on-orange']} on {theme[surface]}) — below the "
+                    "3:1 that even a border is held to")
+
     def test_controls_that_appear_on_hover_appear_on_focus_too(self):
         """They stayed in the tab order while invisible."""
         chat = self._chat()
@@ -3755,7 +3796,11 @@ class TestTheProfessorRowsLineUp:
         """Two of them sit under Alternate AI endpoints, each followed by a
         paragraph that was reading as its caption."""
         css = self._partial("_forms.html")
-        selectors = css[css.index(".card :is(input, select"):css.index("margin-top: var(--space-6)")]
+        # Measured forward from the rule, not from the top of the file: the
+        # same declaration appears in more than one rule, and searching from
+        # the top found whichever came first.
+        at = css.index(".card :is(input, select")
+        selectors = css[at:css.index("margin-top: var(--space-6)", at)]
         assert ".snippet" in selectors
 
     def test_the_two_blocks_under_endpoints_are_each_followed_by_one(self):
@@ -3819,6 +3864,92 @@ class TestTheProfessorRowsLineUp:
         css = self._partial("_panels.html")
         assert "details.manage > form { margin-top: var(--space-3); }" in css
         assert "details.manage > form > :first-child label:first-child" in css
+
+
+class TestSectionsInSettingsAreHeadings:
+    """A bold paragraph looks like a heading and is not one: nothing reading
+    the page aloud, or listing its structure, can tell it apart from the
+    sentence beside it."""
+
+    def _rendered(self):
+        from pathlib import Path
+
+        from fastapi.templating import Jinja2Templates
+
+        directory = Path(__file__).resolve().parents[1] / "src" / "templates"
+        return Jinja2Templates(directory=str(directory)).get_template(
+            "settings.html").render(request=None)
+
+    def _partial(self, name):
+        from pathlib import Path
+
+        return (Path(__file__).resolve().parents[1] / "src" / "templates" / name).read_text()
+
+    SECTIONS = [
+        "Add a new professor",
+        "Create a shared settings file for your team",
+        "Adding a new API endpoint",
+        "Adding a new model",
+    ]
+
+    def test_each_one_is_a_heading(self):
+        page = self._rendered()
+        for name in self.SECTIONS:
+            assert f"<h3>{name}</h3>" in page, name
+
+    def test_none_of_them_is_still_a_bold_paragraph(self):
+        page = self._rendered()
+        for name in self.SECTIONS:
+            assert f"<strong>{name}</strong>" not in page, name
+
+    def test_they_sit_under_the_card_they_belong_to(self):
+        """h3 under h2, so the page's outline is the page's structure."""
+        import re
+
+        page = self._rendered()
+        levels = [int(m.group(1)) for m in re.finditer(r"<h([123])\b", page)]
+        assert 3 in levels and 2 in levels
+        # No h3 before the first h2, which would be a section belonging to
+        # nothing.
+        assert levels.index(2) < levels.index(3)
+
+    def test_emphasis_inside_a_sentence_is_left_alone(self):
+        """Not every bold phrase is a heading; these are read as part of the
+        sentence around them."""
+        page = self._rendered()
+        assert "<strong>There are no models available.</strong>" in page
+        assert "<strong>Read only</strong>" in page
+
+    def test_a_heading_is_given_the_same_air_wherever_it_appears(self):
+        """The four carried inline margins of 1rem, 1rem, 0.5rem and 0.5rem —
+        no two chosen together."""
+        page = self._rendered()
+        assert "margin-top:1rem" not in page
+        assert "margin-top:0.5rem" not in page
+        assert ".card * + h3 { margin-top: var(--space-6); }" in self._partial("_forms.html")
+
+    def test_a_heading_that_opens_a_form_is_not_pushed_off_it(self):
+        """There the form's own padding is the gap, and adding to it would
+        leave the heading floating above the box it introduces."""
+        import re
+
+        body = re.sub(r"<script>.*?</script>", "", self._rendered(), flags=re.S)
+        for form, heading in (("add-model-form", "Adding a new model"),
+                              ("add-professor-form", "Add a new professor")):
+            at = body.index(f"<h3>{heading}</h3>")
+            assert form in body[:at][-120:], heading
+
+    def test_a_list_is_ruled_off_from_the_business_of_adding_to_it(self):
+        """Without a line the two ran together and the heading read as part of
+        the last row above it. The model list had one; the professor list, the
+        other place with a list and a form under it, did not."""
+        import re
+
+        body = re.sub(r"<script>.*?</script>", "", self._rendered(), flags=re.S)
+        for name in ("professors", "models"):
+            at = body.index(f'id="{name}-list"')
+            form = re.search(r"<form[^>]*>", body[at:at + 300])
+            assert form and "after-a-list" in form.group(0), name
 
 
 class TestTheModelMenuIsGrouped:
