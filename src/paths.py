@@ -68,6 +68,14 @@ MODEL_CATALOG_FILENAME = "model_catalog.json"
 PREFERENCES_FILENAME = "preferences.toml"
 DATA_DIRNAME = "data"
 
+# Where one person's conversations sit, inside whichever data location is
+# theirs. Named here rather than in the web interface that writes them,
+# because it is not the only thing that needs to find them: first-run
+# detection reports what a folder holds before anything is loaded, and a
+# folder name spelled in two places is a folder name that can differ in two
+# places.
+CONVERSATIONS_DIRNAME = "conversations"
+
 
 def read_install_marker() -> Path | None:
     """Return the extras folder this package was set up against, if it has been.

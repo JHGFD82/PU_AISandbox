@@ -82,8 +82,8 @@ def __getattr__(name: str):
     assigning it creates a real module attribute, which wins over this.
     """
     if name == "CONVERSATIONS_DIR":
-        from src.paths import data_root
-        return data_root() / "conversations"
+        from src.paths import CONVERSATIONS_DIRNAME, data_root
+        return data_root() / CONVERSATIONS_DIRNAME
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
@@ -92,8 +92,8 @@ def _conversations_dir():
     replaced = globals().get("CONVERSATIONS_DIR")
     if replaced is not None:
         return replaced
-    from src.paths import data_root
-    return data_root() / "conversations"
+    from src.paths import CONVERSATIONS_DIRNAME, data_root
+    return data_root() / CONVERSATIONS_DIRNAME
 
 
 def conversations_dir_for(professor: str) -> Path:
@@ -113,14 +113,15 @@ def conversations_dir_for(professor: str) -> Path:
         # A test said where these go, and meant it for everybody.
         return Path(replaced) / professor
 
+    from src.paths import CONVERSATIONS_DIRNAME, data_root
     from src.settings_store import get_shared_write_source
 
     shared = get_shared_write_source(professor)
     if shared is not None:
-        return shared.resolved_path() / "conversations"
+        # Their own folder, so nothing in it is filed under a netID.
+        return shared.resolved_path() / CONVERSATIONS_DIRNAME
 
-    from src.paths import data_root
-    return data_root() / "conversations" / professor
+    return data_root() / CONVERSATIONS_DIRNAME / professor
 
 
 # The exact shape new_conversation_id() produces below: the letters "c_"
@@ -790,13 +791,13 @@ def _move_conversations(professor, was, now):
         any that stayed — one already at the destination under the same name
         is left alone rather than written over.
     """
-    from src.paths import data_root
+    from src.paths import CONVERSATIONS_DIRNAME, data_root
     from src.tracking.relocate import Moved, move_a_folder_of_things
 
     def where(source):
         if source is not None:
-            return source.resolved_path() / "conversations"
-        return data_root() / "conversations" / professor
+            return source.resolved_path() / CONVERSATIONS_DIRNAME
+        return data_root() / CONVERSATIONS_DIRNAME / professor
 
     moved, left = move_a_folder_of_things(where(was), where(now))
     return Moved(counts={"conversations": moved} if moved else {}, left_behind=left)

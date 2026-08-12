@@ -62,7 +62,9 @@ class TestAskingWhereFilesGo:
     def test_offers_the_default_when_nothing_exists(self, client_and_result):
         client, _ = client_and_result
         page = client.get("/").text
-        assert "Where should your files be kept" in page
+        # Read as "it asks where, and suggests somewhere", not as one exact
+        # sentence — the wording of these pages is still being worked on.
+        assert "Where should" in page and "be kept" in page
         assert str(paths.DEFAULT_EXTRAS_ROOT) in page
 
     def test_creating_the_folder_sets_the_sandbox_up(self, client_and_result):
@@ -105,9 +107,10 @@ class TestCarryingForwardAnExistingSetup:
         _make_setup(paths.DEFAULT_EXTRAS_ROOT, people=3)
         client, _ = client_and_result
         page = client.get("/").text
-        assert "already here" in page
+        assert str(paths.DEFAULT_EXTRAS_ROOT) in page, "it did not offer what it found"
         assert "3 people configured" in page
-        assert "Use these files" in page
+        # One button that takes what was found, whatever it is called.
+        assert 'name="acknowledged"' in page
 
     def test_using_them_changes_nothing_on_disk(self, client_and_result):
         root = _make_setup(paths.DEFAULT_EXTRAS_ROOT, people=2)
@@ -137,7 +140,7 @@ class TestCarryingForwardAnExistingSetup:
         _make_setup(paths.DEFAULT_EXTRAS_ROOT, people=1)
         client, _ = client_and_result
         page = client.get("/").text
-        assert "somewhere else" in page
+        assert "<summary>" in page, "the second answer is not offered at all"
         assert 'name="folder"' in page
         # Two answers, so two forms — one submitting the found folder, one
         # submitting whatever gets typed.
@@ -730,3 +733,94 @@ class TestSetupIsBuiltLikeTheSettingsPage:
         setup = (Path(__file__).resolve().parents[1] / "src" / "templates"
                  / "setup.html").read_text()
         assert ".after-a-list > h3:first-child { margin-top: 0; }" in setup
+
+
+class TestTheTwoLocationsAreNamedSeparately:
+    """"Your files are here" was one sentence covering two places. The settings
+    are in the folder that was found; each person's work is wherever their
+    settings say, which is often somewhere else entirely — and reading that one
+    sentence, somebody would take it to cover both."""
+
+    def _found_with(self, tmp_path, monkeypatch, *, shared=True, conversations=0):
+        """A settings location whose people keep their work here or elsewhere."""
+        import sys
+
+        from src import first_run, paths as core_paths
+
+        root = paths.DEFAULT_EXTRAS_ROOT
+        (root / core_paths.DATA_DIRNAME).mkdir(parents=True, exist_ok=True)
+        (root / core_paths.MODEL_CATALOG_FILENAME).write_text('{"models": {}}')
+        where = tmp_path / "Dropbox" / "heller"
+        if shared:
+            (root / core_paths.SETTINGS_FILENAME).write_text(
+                '[professors.jh43]\nname = "Heller"\nkey = "sk"\n'
+                f'usage_path = "{where}"\nusage_mode = "shared-write"\n')
+            (where / "archives").mkdir(parents=True)
+            (where / "archives" / "2026-05.json").write_text("{}")
+            for i in range(conversations):
+                (where / core_paths.CONVERSATIONS_DIRNAME / f"c_{i:016x}").mkdir(parents=True)
+        else:
+            (root / core_paths.SETTINGS_FILENAME).write_text(
+                '[professors.jh43]\nname = "Heller"\nkey = "sk"\n')
+        module = sys.modules["_pu_webui_setup_web"]
+        monkeypatch.setattr(module.first_run, "find_existing",
+                            lambda: [first_run.inspect_extras(root)])
+        return where
+
+    def _text(self, page):
+        import re
+
+        stripped = re.sub(r"<script>.*?</script>|<style>.*?</style>|<!--.*?-->", "",
+                          page, flags=re.S)
+        return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", stripped))
+
+    def test_the_settings_location_is_named_as_that(self, client_and_result,
+                                                    tmp_path, monkeypatch):
+        self._found_with(tmp_path, monkeypatch)
+        client, _ = client_and_result
+        assert "Settings location" in self._text(client.get("/").text)
+
+    def test_a_shared_folder_is_named_as_a_data_location(self, client_and_result,
+                                                         tmp_path, monkeypatch):
+        where = self._found_with(tmp_path, monkeypatch, conversations=28)
+        client, _ = client_and_result
+        text = self._text(client.get("/").text)
+        assert "Data location" in text
+        assert str(where) in text, "the folder holding their work is not shown"
+        assert "28 conversations" in text
+
+    def test_it_says_plainly_that_some_of_it_is_elsewhere(self, client_and_result,
+                                                          tmp_path, monkeypatch):
+        self._found_with(tmp_path, monkeypatch)
+        client, _ = client_and_result
+        assert "outside the folder above" in self._text(client.get("/").text)
+
+    def test_and_says_the_opposite_when_it_is_all_here(self, client_and_result,
+                                                       tmp_path, monkeypatch):
+        self._found_with(tmp_path, monkeypatch, shared=False)
+        client, _ = client_and_result
+        text = self._text(client.get("/").text)
+        assert "All of it is kept inside the folder above" in text
+        assert "outside the folder above" not in text
+
+    def test_usage_history_is_not_listed_as_if_it_were_in_the_settings_folder(
+        self, client_and_result, tmp_path, monkeypatch
+    ):
+        """The first list covers the settings location only. History belongs in
+        the second, next to the folder actually holding it."""
+        self._found_with(tmp_path, monkeypatch)
+        client, _ = client_and_result
+        text = self._text(client.get("/").text)
+        settings_part = text[text.index("Settings location"):text.index("Data location")]
+        assert "month" not in settings_part
+        assert "conversation" not in settings_part
+
+    def test_the_page_names_itself_the_same_way_twice(self):
+        """The title said one name and the heading said another."""
+        source = (Path(__file__).resolve().parents[1] / "src" / "templates"
+                  / "setup.html").read_text()
+        import re
+
+        title = re.search(r"<title>(.*?)</title>", source).group(1)
+        heading = re.search(r"<h1>(.*?)</h1>", source).group(1)
+        assert title == heading

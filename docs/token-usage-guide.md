@@ -240,7 +240,7 @@ Daily Breakdown:
 
 ### It won't start
 
-1. Check `model_catalog.json` exists in your files folder. If it doesn't, run `python main.py settings setup`.
+1. Check `model_catalog.json` exists in your settings location. If it doesn't, run `python main.py settings setup`.
 2. Check the file is valid JSON — a missing comma or bracket is the usual cause.
 3. Check it has both a `config` section and a `models` section with at least one model in it.
 

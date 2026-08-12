@@ -19,12 +19,12 @@ Two behaviours worth knowing before changing anything near them:
 
 ### Where files live
 
-The package (the code) and the person's own files are kept apart, so replacing the package on upgrade can't take API keys and months of history with it. `src/paths.py` is the only module that answers "where":
+The package (the code) and the settings location are kept apart, so replacing the package on upgrade can't take API keys and months of history with it. `src/paths.py` is the only module that answers "where":
 
 | Location | Contents |
 |----------|----------|
-| The person's files folder (`~/PU_AISandbox_data` by default) | `settings.toml`, `model_catalog.json`, `preferences.toml`, `data/` |
-| The package | `settings.default.toml`, `plugins/*/settings.toml`, `templates/`, `.installation` (the marker naming the files folder) |
+| The person's settings location (`~/PU_AISandbox_data` by default) | `settings.toml`, `model_catalog.json`, `preferences.toml`, `data/` |
+| The package | `settings.default.toml`, `plugins/*/settings.toml`, `templates/`, `.installation` (the marker naming the settings location) |
 
 The `.installation` marker has to live in the package because the sandbox needs to know where the settings file is before it can read it. Its absence is the signal "this copy hasn't been set up".
 

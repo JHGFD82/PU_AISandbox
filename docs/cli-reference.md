@@ -64,7 +64,7 @@ interface's **Settings** page, which can reach all of them:
 
 | File | Holds |
 |---|---|
-| `settings.toml` in your files folder | who uses this installation, their API keys, alternate endpoints, web-interface secrets, external usage sources |
+| `settings.toml` in your settings location | who uses this installation, their API keys, alternate endpoints, web-interface secrets, external usage sources |
 | `preferences.toml` beside it | every adjustable setting each plugin ships, listed for you and commented out — uncomment a line to take it over |
 
 The commands below are the ones that survive that rule, because each does
@@ -453,7 +453,7 @@ python main.py jh43 prompt -m openai/gpt-4o-new
 python main.py jh43 prompt -m google/gemini-2.5-pro
 ```
 
-Only `openai` and `google` can be looked up this way. For any other provider, add the model to `model_catalog.json` in your files folder by hand — see [Configuration → Adding models](configuration.md#adding-models).
+Only `openai` and `google` can be looked up this way. For any other provider, add the model to `model_catalog.json` in your settings location by hand — see [Configuration → Adding models](configuration.md#adding-models).
 
 **An alternate endpoint** — put `name:` in front to route to a configured `[endpoints.<name>]`:
 

@@ -28,20 +28,52 @@ from .errors import CLIError
 _RULE = "─" * 64
 
 
+def _amount(months: int, conversations: int) -> str:
+    """Say how much of somebody's work is somewhere, in plain words."""
+    if not months and not conversations:
+        return "nothing saved yet"
+    parts = []
+    if months:
+        parts.append("1 month of spending" if months == 1
+                     else f"{months} months of spending")
+    if conversations:
+        parts.append("1 conversation" if conversations == 1
+                     else f"{conversations} conversations")
+    return " and ".join(parts)
+
+
 def _describe(candidate: first_run.ExtrasCandidate) -> list[str]:
-    """Return the lines describing what was found at one location."""
-    lines = []
+    """Return the lines describing an installation that was found.
+
+    Two parts, named separately on purpose. The settings location holds the
+    settings, the keys and the model catalog. Where each person's work is kept
+    is written *in* those settings, and is often somewhere else — a folder
+    shared with them, or one synced between the computers they use. One list
+    covering both would let "your files are here" stand for work that is not
+    here at all.
+    """
+    lines = ["  Settings location", f"    {candidate.path}"]
     if candidate.settings_file:
         people = candidate.people
         who = "no one configured yet" if people == 0 else (
             "1 person configured" if people == 1 else f"{people} people configured"
         )
-        lines.append(f"    your settings and API keys   ({who})")
+        lines.append(f"      your settings and API keys   ({who})")
     if candidate.has_catalog:
-        lines.append("    your model catalog")
-    if candidate.months:
-        months = "1 month" if candidate.months == 1 else f"{candidate.months} months"
-        lines.append(f"    your usage history           ({months})")
+        lines.append("      your model catalog")
+
+    if candidate.work:
+        lines.append("")
+        lines.append("  Data locations" if candidate.data_is_elsewhere
+                     else "  Data location")
+        for w in candidate.work:
+            lines.append(f"      {w.name}   ({_amount(w.months, w.conversations)})")
+            lines.append(f"        {w.path}")
+        if candidate.data_is_elsewhere:
+            lines.append("")
+            lines.append("  Some of this is kept outside the settings location, in")
+            lines.append("  folders named in those settings. All of it is part of")
+            lines.append("  this installation, and using it means using all of it.")
     return lines
 
 
@@ -69,14 +101,15 @@ def _warn_if_synced(path: Path, print_fn: Callable[..., None]) -> None:
 
 def _ask_for_location(input_fn: Callable[[str], str],
                       print_fn: Callable[..., None]) -> Path:
-    """Ask where the person's own files should be kept."""
+    """Ask where this installation's settings should be kept."""
     default = paths.DEFAULT_EXTRAS_ROOT
     print_fn(
-        "\nWhere should the sandbox keep your files?\n"
-        "\nThis is where your API keys, your usage history and your saved\n"
-        "conversations will live. Keeping them outside the sandbox folder is\n"
-        "what lets you replace it with a newer version later without losing\n"
-        "any of it.\n"
+        "\nWhere should the sandbox keep your settings?\n"
+        "\nThis is where your API keys and your settings will live, and unless\n"
+        "you say otherwise later, so will your usage history and your saved\n"
+        "conversations. Keeping them outside the sandbox's own folder is what\n"
+        "lets you replace it with a newer version later without losing any of\n"
+        "it.\n"
     )
     while True:
         typed = input_fn(f"Folder [{default}]: ").strip()
@@ -148,10 +181,10 @@ def run_interactive_setup(
 
     for candidate in first_run.find_existing():
         print_fn(
-            f"\nFound your files already at {candidate.path}:\n"
+            "\nFound an existing installation:\n\n"
             + "\n".join(_describe(candidate))
         )
-        if _ask_yes_no("\nUse these?", default=True,
+        if _ask_yes_no("\nUse this installation?", default=True,
                        input_fn=input_fn, print_fn=print_fn):
             _warn_if_synced(candidate.path, print_fn)
             first_run.complete_setup(candidate.path)

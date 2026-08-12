@@ -1,18 +1,31 @@
 # Configuration
 
-The sandbox keeps two things apart:
+An **installation** is three things, and they need not be in the same place.
+Knowing which is which is what makes the rest of this page readable:
 
-- **The package** — the code, which is what you replace when you upgrade.
-- **Your files** — settings, API keys, the model catalog, usage history and conversations. These live in a folder of your own, outside the package, so replacing the package can never take them with it.
+- **The package location** — the code itself. This is what you replace when
+  you upgrade, and nothing of yours is kept in it.
+- **The settings location** — your API keys, your settings and the model
+  catalog. Setup asks where this should go and offers `PU_AISandbox_data` in
+  your home folder. A marker file (`.installation`) inside the package records
+  your answer, so the two find each other afterwards.
+- **The data location** — the record of what each call cost, the months
+  already closed, and the conversations. This is normally a `data/` folder
+  inside the settings location, and it does not have to be: a person can have
+  a folder of their own instead — one shared with them, or synced between the
+  computers they work on. It is settled per person, in `settings.toml`. See
+  [Somebody's folder somewhere else](#somebodys-folder-somewhere-else).
 
-Setup asks where your folder should go, offering `PU_AISandbox_data` in your home folder. A small marker file (`.installation`) inside the package records the answer; its absence is what tells the sandbox this copy hasn't been set up yet.
+So "my files are in `~/PU_AISandbox_data`" is usually true of the settings and
+often not true of the data. When first-run setup finds an existing
+installation, it names the two separately for that reason.
 
 | File | Where it lives | Purpose |
 |------|----------------|---------|
-| `settings.toml` | your files folder | API keys, endpoint credentials, web UI secrets, external usage-data sources — this installation's own private configuration |
-| `model_catalog.json` | your files folder | Model pricing and capabilities |
-| `preferences.toml` | your files folder | Your own adjustments to how the sandbox behaves |
-| `data/` | your files folder | Usage history, archives, conversations |
+| `settings.toml` | your settings location | API keys, endpoint credentials, web UI secrets, external usage-data sources — this installation's own private configuration |
+| `model_catalog.json` | your settings location | Model pricing and capabilities |
+| `preferences.toml` | your settings location | Your own adjustments to how the sandbox behaves |
+| `data/` | your settings location, unless a person has a folder of their own | Usage history, archives, conversations |
 | `settings.default.toml` | the package, tracked by git | The defaults everyone starts from, plus alternate-endpoint definitions |
 | A shared file | anywhere (optional) | Defaults a group wants to share, e.g. via Dropbox |
 | `plugins/*/settings.toml` | the package, tracked by git | Each plugin's own defaults |
@@ -128,7 +141,7 @@ Prints everyone configured, their data-file paths and whether those files exist,
 
 ## `model_catalog.json` — model pricing and capabilities
 
-This lives in your files folder rather than in `settings.toml` for a practical reason: the sandbox writes to it on its own, registering pricing the first time you use `-m provider/model-name`. That kind of frequent automatic write is exactly what causes conflicts in a shared or synced file. Runtime settings change rarely enough to be safe to share; model pricing can change every time someone tries a new model.
+This lives in your settings location rather than in `settings.toml` for a practical reason: the sandbox writes to it on its own, registering pricing the first time you use `-m provider/model-name`. That kind of frequent automatic write is exactly what causes conflicts in a shared or synced file. Runtime settings change rarely enough to be safe to share; model pricing can change every time someone tries a new model.
 
 ### Schema
 
@@ -231,7 +244,7 @@ python main.py --list-models
 
 ## `settings.default.toml` — runtime defaults
 
-Tracked by git and shipped with the package. It holds the defaults for everyone; to change any of them for yourself, copy the lines you want into `preferences.toml` in your own files folder.
+Tracked by git and shipped with the package. It holds the defaults for everyone; to change any of them for yourself, copy the lines you want into `preferences.toml` in your settings location.
 
 ```toml
 [prompt]
@@ -308,7 +321,7 @@ Settings merge from up to three layers. Each is optional, and each overrides onl
 
 1. **`settings.default.toml`** in the package — the defaults, the same for everyone.
 2. **A shared file**, if `shared_settings.path` is set in `settings.toml`. Any path, in the same format as `settings.default.toml` — for example one synced across a research group with Dropbox. This lets a group share a cluster's worker count, a group-wide font size, even a shared endpoint definition, without anyone hand-editing their own copy. Nothing changes unless the pointer is set.
-3. **`preferences.toml`** in your files folder — your own adjustments, and the last word. Even with a shared file in play, a setting placed here wins, so one person can override just their own quirk without touching the file everyone else reads. Setup creates it already commented with examples, and because it sits outside the package it survives upgrading.
+3. **`preferences.toml`** in your settings location — your own adjustments, and the last word. Even with a shared file in play, a setting placed here wins, so one person can override just their own quirk without touching the file everyone else reads. Setup creates it already commented with examples, and because it sits outside the package it survives upgrading.
 
 ```toml
 # preferences.toml
@@ -337,7 +350,7 @@ Whoever looks after it does this:
 python main.py settings export-shared
 ```
 
-This writes **`shared-settings.toml`** into their own files folder (`~/PU_AISandbox_data/shared-settings.toml` unless they chose somewhere else). The command prints the full path, and `--output` puts it somewhere else instead.
+This writes **`shared-settings.toml`** into their settings location (`~/PU_AISandbox_data/shared-settings.toml` unless they chose somewhere else). The command prints the full path, and `--output` puts it somewhere else instead.
 
 Either way it lists **every** setting the sandbox and the installed plugins have, with each author's explanation, all commented out — so a draft placed unedited changes nothing for anyone.
 
@@ -384,7 +397,7 @@ A plugin's own settings layer the same way (see [Plugin settings](#plugin-settin
 
 ## Where a conversation's files are kept
 
-Each conversation in the web interface has a folder of its own, under your files folder:
+Each conversation in the web interface has a folder of its own, under your settings location:
 
 ```
 data/conversations/<netid>/c_8f2a1c9de4b7a501/
@@ -476,7 +489,7 @@ verify_ssl = false
 **Not in `settings.default.toml`.** That file is inside the package: it is
 tracked by git, replaced whenever the sandbox is updated, and committable by
 accident. An endpoint put there is lost on the next update, or published. Use
-`preferences.toml` in your own files folder, or the shared settings file your
+`preferences.toml` in your settings location, or the shared settings file your
 group follows.
 
 ### Its API key
@@ -486,7 +499,7 @@ is never shared, never layered, and never syncs anywhere. It is where the
 professors' own API keys already live.
 
 ```toml
-# settings.toml, in your own files folder
+# settings.toml, in your settings location
 [endpoints.my_cluster]
 key = "sk-..."
 ```
@@ -516,7 +529,7 @@ these files is tracked by git.
 
 ## Somebody's folder somewhere else
 
-One person's work is normally kept in this installation's own files folder.
+One person's work is normally kept in this installation's settings location.
 It doesn't have to be. Two situations put it elsewhere:
 
 - **You want to see someone else's spending.** A professor runs their own copy,
@@ -731,14 +744,14 @@ pip install openpyxl
 
 | Setting | Where it's stored | Can it live somewhere shared? | Personal override? | Command line | Web interface |
 |---|---|---|---|---|---|
-| Names and API keys | `settings.toml`, your files folder | No — never sync `settings.toml` | N/A | ✅ `settings add-professor` / `remove-professor` | ✅ `/settings` — add, remove, replace primary or backup key |
+| Names and API keys | `settings.toml`, your settings location | No — never sync `settings.toml` | N/A | ✅ `settings add-professor` / `remove-professor` | ✅ `/settings` — add, remove, replace primary or backup key |
 | Web UI passphrase | `settings.toml` (`webui.passphrase_hash`) | No | N/A | ✅ `webui set-passphrase` | ✅ `/settings` — hashed server-side, never shown |
 | Web UI session secret | `settings.toml` (`webui.session_secret`) | No | N/A | ✅ by hand or in the browser / `--generate` | ✅ `/settings` |
 | Shared-settings pointer | `settings.toml` (`shared_settings.path`) | No — it's just a path | N/A | ✅ by hand or in the browser / `unset` | ✅ `/settings` |
 | A shared-settings draft to edit and place | Nowhere — handed to you, never saved | ✅ that's the point; you place it | N/A | ✅ `settings export-shared` | ✅ `/settings` → Choose settings for the group, or download the whole file |
 | Endpoint API keys | beside the definition, or `settings.toml` | ✅ if the group shares one credential | ✅ `settings.toml` wins | ❌ hand-edit TOML | ❌ |
 | Endpoint definitions | `preferences.toml`, or a shared file — never the package | ✅ a group can share one | ✅ `preferences.toml` wins | ❌ hand-edit TOML | ❌ |
-| Model pricing | `model_catalog.json`, your files folder | Not designed for it — kept separate precisely to avoid concurrent-write conflicts | N/A | Indirectly: `-m provider/model` registers pricing | ❌ |
+| Model pricing | `model_catalog.json`, your settings location | Not designed for it — kept separate precisely to avoid concurrent-write conflicts | N/A | Indirectly: `-m provider/model` registers pricing | ❌ |
 | Runtime defaults | `settings.default.toml`, in the package | N/A — this is the shared baseline | ✅ `preferences.toml` | ❌ hand-edit TOML | ❌ |
 | Shared runtime defaults | Wherever `shared_settings.path` points | ✅ that's the point | ✅ `preferences.toml` still wins | Pointer only, by hand | Pointer only, via `/settings` |
 | Plugin defaults | Each plugin's own directory, tracked by git | N/A | ❌ no per-plugin override file | ❌ hand-edit TOML | ❌ |

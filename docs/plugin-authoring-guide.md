@@ -484,7 +484,7 @@ Which side of the job `token` refers to depends on the action: the *destination*
 ## Moving a plugin's files when somebody's folder changes
 
 A professor can have a shared folder set on them, and their work is kept there
-instead of in this installation's own files folder — see
+instead of in this installation's settings location — see
 [Configuration → Somebody's folder somewhere else](configuration.md#somebodys-folder-somewhere-else).
 When that setting changes, everything of theirs moves.
 
@@ -498,7 +498,7 @@ def _move_my_files(professor, was, now):
     """Move this plugin's files for one person when their folder changes.
 
     `was` and `now` are each an ExternalSource for a shared folder, or None
-    for this installation's own files folder. Return a Moved saying what you
+    for this installation's settings location. Return a Moved saying what you
     did; it names its own counts, so the person is told in your words.
     """
     def where(source):

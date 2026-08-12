@@ -554,7 +554,7 @@ function renderProfessors(data) {
   list.querySelectorAll("button[data-clear-usage]").forEach(btn => {
     btn.addEventListener("click", async () => {
       const who = btn.dataset.clearUsage;
-      if (!confirm(`Keep ${who}'s work in this installation's own data folder `
+      if (!confirm(`Keep ${who}'s work in this computer's own data folder `
                  + `from now on? Everything already in the shared folder is left `
                  + `exactly as it is.`)) return;
       try {
@@ -635,7 +635,7 @@ document.getElementById("add-professor-form").addEventListener("submit", async (
     });
     // Second, and only if one was given: a folder is recorded on a person, so
     // there has to be a person first. Left blank, nobody is asked anything and
-    // their work stays in this installation's own data folder.
+    // their work stays in this computer's own data folder.
     const usagePath = document.getElementById("prof-usage-path").value.trim();
     if (usagePath) {
       await api("/api/settings/sources", {

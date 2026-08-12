@@ -222,3 +222,104 @@ class TestAFreshInstallLeavesYouReady:
         assert "A fresh copy has no models in it" in readme
         assert "Your first five minutes" in readme
         assert "--dry-run" in readme
+
+
+def _with_shared_folder(root: Path, netid: str, folder: Path, *,
+                        mode: str = "shared-write", months=(), conversations: int = 0):
+    """Configure one person whose work is kept somewhere other than *root*."""
+    settings = root / paths.SETTINGS_FILENAME
+    settings.write_text(
+        (settings.read_text(encoding="utf-8") if settings.exists() else "")
+        + f'[professors.{netid}]\nname = "{netid.title()}"\nkey = "sk"\n'
+          f'usage_path = "{folder}"\nusage_mode = "{mode}"\n',
+        encoding="utf-8")
+    (folder / "archives").mkdir(parents=True, exist_ok=True)
+    for month in months:
+        (folder / "archives" / f"{month}.json").write_text("{}", encoding="utf-8")
+    for i in range(conversations):
+        (folder / paths.CONVERSATIONS_DIRNAME / f"c_{i:016x}").mkdir(parents=True)
+    return folder
+
+
+class TestItFollowsTheSettingsToWhereTheWorkIs:
+    """A settings location is not necessarily where anybody's work is. It says
+    where, per person, and until this read those settings it reported a folder
+    full of somebody's history as holding nothing at all."""
+
+    def test_a_shared_folder_is_found_and_named(self, tmp_path):
+        root = _make_setup(tmp_path / "extras", people=0)
+        shared = _with_shared_folder(root, "smith", tmp_path / "Dropbox" / "smith",
+                                     months=("2026-05", "2026-06"), conversations=28)
+        got = first_run.inspect_extras(root)
+        assert [w.netid for w in got.work] == ["smith"]
+        assert got.work[0].path == shared
+        assert got.work[0].elsewhere is True
+        assert got.work[0].months == 2
+        assert got.work[0].conversations == 28
+
+    def test_that_history_is_counted_in_the_total(self, tmp_path):
+        """It used to report zero months for a folder holding years of them."""
+        root = _make_setup(tmp_path / "extras", people=0)
+        _with_shared_folder(root, "smith", tmp_path / "Dropbox" / "smith",
+                            months=("2026-05", "2026-06", "2026-07"))
+        assert first_run.inspect_extras(root).months == 3
+
+    def test_an_open_month_counts_even_with_no_archive_yet(self, tmp_path):
+        root = _make_setup(tmp_path / "extras", people=0)
+        shared = _with_shared_folder(root, "smith", tmp_path / "Dropbox" / "smith")
+        (shared / "calls" / "2026-08").mkdir(parents=True)
+        assert first_run.inspect_extras(root).work[0].months == 1
+
+    def test_a_folder_only_being_watched_is_not_theirs(self, tmp_path):
+        """Read-only is somebody else's record; their own work stays here."""
+        root = _make_setup(tmp_path / "extras", people=0)
+        _with_shared_folder(root, "smith", tmp_path / "Dropbox" / "smith",
+                            mode="read-only", months=("2026-05",))
+        got = first_run.inspect_extras(root)
+        assert got.work[0].elsewhere is False
+        assert got.work[0].path == root / paths.DATA_DIRNAME
+
+    def test_work_kept_here_is_reported_too(self, tmp_path):
+        root = _make_setup(tmp_path / "extras", people=1, months=2)
+        data = root / paths.DATA_DIRNAME
+        (data / paths.CONVERSATIONS_DIRNAME / "p0" / "c_abc").mkdir(parents=True)
+        got = first_run.inspect_extras(root)
+        assert got.work[0].netid == "p0"
+        assert got.work[0].elsewhere is False
+        assert got.work[0].months == 2
+        assert got.work[0].conversations == 1
+
+    def test_two_people_in_the_same_month_are_one_month(self, tmp_path):
+        """The total is how many months this setup covers, not a sum."""
+        root = _make_setup(tmp_path / "extras", people=0)
+        _with_shared_folder(root, "a", tmp_path / "d" / "a", months=("2026-05",))
+        _with_shared_folder(root, "b", tmp_path / "d" / "b", months=("2026-05",))
+        assert first_run.inspect_extras(root).months == 1
+
+    def test_it_says_when_work_is_kept_outside_the_settings_location(self, tmp_path):
+        root = _make_setup(tmp_path / "extras", people=1)
+        assert first_run.inspect_extras(root).data_is_elsewhere is False
+        _with_shared_folder(root, "smith", tmp_path / "Dropbox" / "smith")
+        assert first_run.inspect_extras(root).data_is_elsewhere is True
+
+    def test_a_shared_folder_that_is_not_there_is_reported_as_empty(self, tmp_path):
+        """A drive not mounted, or a folder Dropbox has not brought down yet.
+        Named, with nothing in it, rather than silently dropped."""
+        root = _make_setup(tmp_path / "extras", people=0)
+        settings = root / paths.SETTINGS_FILENAME
+        settings.write_text(
+            '[professors.smith]\nname = "Smith"\nkey = "sk"\n'
+            f'usage_path = "{tmp_path / "not-mounted"}"\nusage_mode = "shared-write"\n',
+            encoding="utf-8")
+        got = first_run.inspect_extras(root)
+        assert [w.netid for w in got.work] == ["smith"]
+        assert got.work[0].is_empty is True
+
+    def test_a_folder_with_history_and_no_settings_still_counts(self, tmp_path):
+        """There is nothing to read, so the folder itself is all there is."""
+        root = _make_setup(tmp_path / "extras", months=3)
+        (root / paths.SETTINGS_FILENAME).unlink()
+        got = first_run.inspect_extras(root)
+        assert got.work == []
+        assert got.months == 3
+        assert got.is_usable is True

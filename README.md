@@ -322,7 +322,7 @@ Everyone is tracked separately, one calendar month at a time. The files live in 
 
 ## Model Catalog
 
-`model_catalog.json`, in your files folder, holds the price and capabilities of every model this installation knows about.
+`model_catalog.json`, in your settings location, holds the price and capabilities of every model this installation knows about.
 
 **Adding models:**
 - **OpenAI or Google**: use `openai/model-name` or `google/model-name` with `-m` the first time — the price is fetched from [PortKey](https://api.portkey.ai) and saved automatically.
@@ -346,7 +346,7 @@ Prices are per 1,000,000 tokens (default `pricing_unit`). Set `"supports_vision"
 
 ## Runtime Settings
 
-`settings.default.toml` in the sandbox folder holds the defaults for everything below. To change any of them, put just the lines you want to change into `preferences.toml` in your own files folder — setup creates it for you, already commented with examples. Because it lives outside the sandbox folder, your adjustments survive upgrading.
+`settings.default.toml` in the sandbox folder holds the defaults for everything below. To change any of them, put just the lines you want to change into `preferences.toml` in your settings location — setup creates it for you, already commented with examples. Because it lives outside the sandbox folder, your adjustments survive upgrading.
 
 A group can also share a settings file between installations, sitting between the two (pointed at by `shared_settings.path` in `settings.toml`). See [`docs/configuration.md`](docs/configuration.md#how-settings-layer) for how the layers merge.
 

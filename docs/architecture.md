@@ -200,8 +200,8 @@ The package holds the code and is what gets replaced on upgrade. Everything belo
 
 | Location | Contents |
 |----------|----------|
-| Your files folder | `settings.toml` (API keys, endpoint credentials, web UI secrets, external usage sources), `model_catalog.json`, `preferences.toml`, `data/` |
-| The package | `settings.default.toml`, `plugins/*/settings.toml`, `templates/`, `.installation` (the marker naming your files folder) |
+| Your settings location | `settings.toml` (API keys, endpoint credentials, web UI secrets, external usage sources), `model_catalog.json`, `preferences.toml`, `data/` |
+| The package | `settings.default.toml`, `plugins/*/settings.toml`, `templates/`, `.installation` (the marker naming your settings location) |
 
 ### Configuration layers
 
@@ -209,7 +209,7 @@ The package holds the code and is what gets replaced on upgrade. Everything belo
 |--------|----------|
 | `settings.default.toml` (package, tracked) | Core defaults: temperature, retry, workers, font size, budget threshold, alternate-endpoint *definitions* |
 | A shared file (optional, path set by `shared_settings.path` in `settings.toml`) | Same shape as `settings.default.toml`; overrides it, is overridden by `preferences.toml` |
-| `preferences.toml` (your files folder) | This person's own adjustments; applied last |
+| `preferences.toml` (your settings location) | This person's own adjustments; applied last |
 | `plugins/*/settings.toml` | Plugin-specific defaults; each plugin's `src/settings.py` walks up to find its own |
 | CLI flags | Runtime overrides; always win |
 

@@ -50,25 +50,25 @@ How to write one, the `sys.modules` registration names, and how `DispatchPlugin`
 `settings.toml` pattern: `[professors.<netid>]` tables with `name` (display name), `key`, `backup_key` (optional). The table name is the person's university netID — letters and digits only, validated by `normalize_netid()` in `src/config.py`, and used verbatim as a filename. Missing/blank required fields → `ValueError` re-raised as `CLIError`, process exits 1. `settings.toml` also holds `[webui]` secrets, `[endpoints.<name>].key` credentials, `[shared_settings].path`, and `[usage_sources]` — see `src/settings_store.py` and `docs/configuration.md`.
 
 ### Token tracking
-In the `data/` folder of the person's own files folder — active: `token_usage_{netid}.json` (current month only); archives: `archives/{netid}/{YYYY-MM}.json`, written automatically on month rollover.
+In the `data/` folder of the settings location — active: `token_usage_{netid}.json` (current month only); archives: `archives/{netid}/{YYYY-MM}.json`, written automatically on month rollover.
 - `usage report --all-time` aggregates the active file + all archives on demand (not loaded eagerly).
 - Exceeding the monthly budget only logs warnings at thresholds (e.g. 80%, 100%) — it never halts processing; the only way to stop usage is revoking the professor's API key externally.
 
 ### Model catalog & alternate endpoints
-- `model_catalog.json` (in the person's own files folder; created by setup from `templates/model_catalog.template.json`) holds pricing/`supports_vision` per model, keyed by `[config.provider_map]` for provider slug quirks (e.g. `google` → `vertex-ai` for PortKey).
+- `model_catalog.json` (in the settings location; created by setup from `templates/model_catalog.template.json`) holds pricing/`supports_vision` per model, keyed by `[config.provider_map]` for provider slug quirks (e.g. `google` → `vertex-ai` for PortKey).
 - `openai/model-name` or `google/model-name` passed to `-m` auto-fetches and saves pricing from PortKey on first use, then tests the model to fill in `supports_vision` and any `rejects`/`prefers` — see `src/models/capabilities.py`. Pricing for other providers must still be added to the JSON by hand. `settings test-model [model]` re-runs that testing on demand.
 - Colon syntax in `-m` (e.g. `-m my_cluster:llama-3-70b`) looks up the matching `[endpoints.<name>]` table — defined in `preferences.toml` or a shared file, never in the package — plus its credential, which may sit in that same table or in `settings.toml` (which wins) and points the OpenAI-compatible client at that alternate `base_url`, bypassing the model catalog entirely.
 
 ### Where files live
-The package (the code, replaced on upgrade) and the person's own files are kept apart. `src/paths.py` resolves the split; a `.installation` marker inside the package records the folder, and its absence is the signal "not set up yet".
+The package (the code, replaced on upgrade) and the settings location are kept apart. `src/paths.py` resolves the split; a `.installation` marker inside the package records the folder, and its absence is the signal "not set up yet".
 
 | Location | Contents |
 |---|---|
-| The person's files folder (`~/PU_AISandbox_data` by default) | `settings.toml`, `model_catalog.json`, `preferences.toml`, `data/` |
+| The person's settings location (`~/PU_AISandbox_data` by default) | `settings.toml`, `model_catalog.json`, `preferences.toml`, `data/` |
 | The package | `settings.default.toml`, `plugins/*/settings.toml`, `templates/`, `.installation` |
 
 ### Configuration layering (highest precedence last)
-`settings.default.toml` (in the package, tracked) → an optional shared file (path set via `settings.toml`'s `shared_settings.path`) → `preferences.toml` in the person's files folder → `plugins/*/settings.toml` (each plugin's `src/settings.py` walks up to find its own) → CLI flags. `settings.toml` itself (keys, endpoint credentials, webui secrets, usage sources) is never layered — it's this installation's own private configuration, edited via the built-in `settings` command, the web interface's `/settings` page, or by hand.
+`settings.default.toml` (in the package, tracked) → an optional shared file (path set via `settings.toml`'s `shared_settings.path`) → `preferences.toml` in the person's settings location → `plugins/*/settings.toml` (each plugin's `src/settings.py` walks up to find its own) → CLI flags. `settings.toml` itself (keys, endpoint credentials, webui secrets, usage sources) is never layered — it's this installation's own private configuration, edited via the built-in `settings` command, the web interface's `/settings` page, or by hand.
 
 ## Documentation & docstring standard
 

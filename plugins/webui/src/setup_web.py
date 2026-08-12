@@ -127,7 +127,13 @@ document.getElementById("browse-btn").addEventListener("click", async function (
 
 
 def _describe(candidate: first_run.ExtrasCandidate) -> str:
-    """Return an HTML list of what was found at a location."""
+    """Return an HTML list of what is in the settings location itself.
+
+    Settings, keys and the model catalog only. Where each person's work is
+    kept is a separate question, answered by ``_describe_data()`` below,
+    because the answer is often a different folder — and somebody reading
+    "your files are here" would otherwise take this list to cover both.
+    """
     items = []
     if candidate.settings_file:
         n = candidate.people
@@ -136,10 +142,52 @@ def _describe(candidate: first_run.ExtrasCandidate) -> str:
         items.append(f"your settings and API keys <em>({who})</em>")
     if candidate.has_catalog:
         items.append("your model catalog")
-    if candidate.months:
-        months = "1 month" if candidate.months == 1 else f"{candidate.months} months"
-        items.append(f"your usage history <em>({months})</em>")
     return "<ul>" + "".join(f"<li>{i}</li>" for i in items) + "</ul>"
+
+
+def _amount(months: int, conversations: int) -> str:
+    """Say how much of somebody's work is somewhere, in plain words."""
+    if not months and not conversations:
+        return "nothing saved yet"
+    parts = []
+    if months:
+        parts.append("1 month of spending" if months == 1 else f"{months} months of spending")
+    if conversations:
+        parts.append("1 conversation" if conversations == 1
+                     else f"{conversations} conversations")
+    return " and ".join(parts)
+
+
+def _describe_data(candidate: first_run.ExtrasCandidate) -> str:
+    """Return a block naming where each person's work is kept, and how much.
+
+    Read out of the settings that were just found, because that is the only
+    place it is written down. A settings location does not have to hold
+    anybody's work: a person can have a folder of their own — one shared with
+    them, or synced between the computers they use — and then their
+    conversations and their spending are there and not here.
+
+    Nothing is returned when there are no people to report on, rather than an
+    empty box saying so.
+    """
+    if not candidate.work:
+        return ""
+
+    rows = []
+    for w in candidate.work:
+        where = "" if not w.elsewhere else f"<br><code>{html.escape(str(w.path))}</code>"
+        rows.append(
+            f"<li>{html.escape(w.name)} <em>({_amount(w.months, w.conversations)})</em>"
+            f"{where}</li>")
+
+    if candidate.data_is_elsewhere:
+        note = ("Some of this is kept outside the folder above, in folders "
+                "named in those settings. Both are part of this installation, "
+                "and using it means using all of it.")
+    else:
+        note = "All of it is kept inside the folder above."
+    return ("<fieldset><legend>Data locations</legend>"
+            f"<p>{note}</p><ul>" + "".join(rows) + "</ul></fieldset>")
 
 
 def _sync_note(path: Path) -> str:
@@ -186,40 +234,42 @@ def _render(error: str = "") -> str:
         # behind a summary, since wanting it is the rare case.
         body = (
             '<form method="post" action="/">'
-            '<fieldset class="found"><legend>Your files are already here</legend>'
+            '<fieldset class="found"><legend>Settings location</legend>'
             f"<p><code>{safe_path}</code></p>"
             f"{_describe(candidate)}"
             f'<input type="hidden" name="folder" value="{safe_path}">'
             f'<input type="hidden" name="acknowledged" value="{safe_path}">'
             "</fieldset>"
+            f"{_describe_data(candidate)}"
             f"{_sync_note(candidate.path)}"
-            "<button type=\"submit\">Use these files, then continue to step 2</button>"
+            '<button type="submit">Use this installation, then continue to step 2</button>'
             "</form>"
-            "<details><summary>My files are somewhere else</summary>"
+            "<details><summary>Specify a different location</summary>"
             '<form method="post" action="/">'
             "<fieldset>"
-            "<p>If you keep your files somewhere other than the folder above — "
-            "on an external drive, say, or in a folder you chose yourself last "
-            "time — point the sandbox at it here. Whatever is already in it is "
-            "used as it is: nothing is overwritten, and no settings or usage "
-            "history are lost.</p>"
+            "<p>If you wish to set up a new location for settings and data to be stored, or if another location has already been used for a previous installation, you can specify it here. Existing data is preserved, nothing will be overwritten.</p>"
             f"{_folder_field('')}"
             "</fieldset>"
-            '<button type="submit" class="secondary">Use this folder instead</button>'
+            '<button type="submit">Use this folder instead</button>'
             "</form></details>"
         )
         # Files already here means the two questions after this one are very
         # likely answered too — the people and the models are in them.
-        lede = "Your files are already here."
+        # Named as one thing with parts, because that is what it is: the
+        # settings are here, and each person's work is wherever their settings
+        # say — which may be a folder shared with them, somewhere else
+        # entirely. Saying "your files are here" would be claiming both.
+        lede = "An existing installation was found."
     else:
         default = paths.DEFAULT_EXTRAS_ROOT
         body = (
             '<form method="post" action="/">'
-            "<fieldset><legend>Where should your files be kept?</legend>"
-            "<p>Your API keys, your usage history and your saved conversations "
-            "will live here. Keeping them outside the sandbox folder is what "
-            "lets you replace the sandbox with a newer version later without "
-            "losing any of it.</p>"
+            "<fieldset><legend>Where should your settings be kept?</legend>"
+            "<p>Your API keys and your settings will live here, and unless you "
+            "say otherwise later, so will your usage history and your saved "
+            "conversations. Keeping them outside the sandbox's own folder is "
+            "what lets you replace the sandbox with a newer version later "
+            "without losing any of it.</p>"
             f"{_folder_field(str(default))}"
             "<p>The suggestion above is a good one — press the button below to "
             "take it. Choose somewhere else only if you have a reason to.</p>"
@@ -229,7 +279,7 @@ def _render(error: str = "") -> str:
             '<button type="submit">Create these files, then continue to step 2</button>'
             "</form>"
         )
-        lede = "Where should your files be kept?"
+        lede = "Where should your settings be kept?"
 
     return _page(
         body=_progress(1) + body,
@@ -589,7 +639,7 @@ def create_setup_app(on_complete) -> FastAPI:
             chosen = file_picker.choose(
                 kind="folder",
                 start=body.start,
-                prompt="Choose where the sandbox should keep your files",
+                prompt="Choose where the sandbox should keep your settings",
             )
         except file_picker.PickerUnavailable as e:
             return JSONResponse({"path": None, "error": str(e)}, status_code=503)
@@ -604,7 +654,7 @@ def create_setup_app(on_complete) -> FastAPI:
         typed = folder.strip()
         if not typed:
             return _render(
-                "No folder was given. Type where your files should be kept, or "
+                "No folder was given. Type where your settings should be kept, or "
                 "use the Browse button to find it."
             )
         chosen = Path(typed).expanduser()

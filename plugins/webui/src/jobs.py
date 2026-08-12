@@ -41,7 +41,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional
 
-from src.paths import data_root
+from src.paths import CONVERSATIONS_DIRNAME, data_root
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +66,7 @@ def __getattr__(name: str):
     the ordinary way.
     """
     if name == "_CONVERSATIONS_DIR":
-        return data_root() / "conversations"
+        return data_root() / CONVERSATIONS_DIRNAME
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
