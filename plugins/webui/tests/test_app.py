@@ -3760,12 +3760,17 @@ class TestTheUsageFolderIsAskedForBesideThePerson:
         page = self._settings()
         assert "if (usagePath) {" in page
 
-    def test_there_is_somewhere_to_explain_the_folder_above_those_fields(self):
-        """Asked for, so the wording can be written without moving markup."""
+    def test_the_folder_is_explained_above_the_boxes_for_it(self):
+        """Read as "something explains it first", not as one id or one
+        sentence — the wording here is the maintainer's and moves."""
+        import re
+
         page = self._settings()
         form = page[page.index('id="add-professor-form"'):]
-        note_at = form.index('id="add-professor-folder-note"')
-        assert note_at < form.index('id="prof-usage-path"')
+        fields_at = form.index('id="prof-usage-path"')
+        paragraphs = [m for m in re.finditer(r"<p[^>]*>(.*?)</p>", form[:fields_at], re.S)]
+        assert any("shared folder" in m.group(1).lower() for m in paragraphs), (
+            "nothing above the boxes says what a shared folder is for")
 
     def test_the_clear_button_says_where_the_work_goes_instead(self):
         """"Stop reading it" said what stops, not what then happens."""

@@ -675,7 +675,8 @@ class TestSetupIsBuiltLikeTheSettingsPage:
                 else setup_web._render_models(tmp_path))
 
     @pytest.mark.parametrize("which,heading,expected", [
-        ("people", "Add a person", ["netid", "fullname", "apikey", "backupkey"]),
+        ("people", "Add a person",
+         ["netid", "fullname", "apikey", "backupkey", "usagepath", "usagemode"]),
         ("models", "Add a model", ["modelname", "modelprof"]),
     ])
     def test_the_boxes_sit_under_a_heading_in_a_ruled_off_block(
@@ -824,3 +825,72 @@ class TestTheTwoLocationsAreNamedSeparately:
         title = re.search(r"<title>(.*?)</title>", source).group(1)
         heading = re.search(r"<h1>(.*?)</h1>", source).group(1)
         assert title == heading
+
+
+class TestASharedFolderCanBeGivenDuringSetup:
+    """Somebody setting up a second computer already knows where their work
+    lives. Asking only afterwards, on the settings page, meant setting it up
+    twice — and the wording on both pages now says it can be given here."""
+
+    def _client(self, client_and_result):
+        """Past step one, which is what tells the sandbox where it lives."""
+        from src import settings_store
+
+        client, _ = client_and_result
+        assert client.post("/", data={"folder": str(paths.DEFAULT_EXTRAS_ROOT)}
+                           ).status_code == 200
+        return client, settings_store
+
+    def test_a_folder_given_here_is_recorded_on_the_person(self, client_and_result, tmp_path):
+        client, store = self._client(client_and_result)
+        resp = client.post("/people", json={
+            "netid": "smith", "name": "Prof. Smith", "key": "sk-test",
+            "usage_path": str(tmp_path / "Dropbox"), "usage_mode": "shared-write"})
+        assert resp.status_code == 200
+        source = store.get_shared_write_source("smith")
+        assert source is not None and source.path == str(tmp_path / "Dropbox")
+
+    def test_leaving_it_blank_records_nothing(self, client_and_result):
+        """Most people have none, and an empty box must not become a folder."""
+        client, store = self._client(client_and_result)
+        assert client.post("/people", json={
+            "netid": "jones", "name": "Prof. Jones", "key": "sk"}).status_code == 200
+        assert store.get_shared_write_source("jones") is None
+        assert store.get_configured_sources() == []
+
+    def test_a_mode_that_is_not_one_is_refused(self, client_and_result):
+        client, _ = self._client(client_and_result)
+        assert client.post("/people", json={
+            "netid": "brown", "name": "Prof. Brown", "key": "sk",
+            "usage_path": "/x", "usage_mode": "nonsense"}).status_code == 400
+
+    def test_the_person_is_added_before_the_folder_is_set_on_them(self, client_and_result,
+                                                                  tmp_path):
+        """A folder is recorded on somebody, so there has to be a somebody."""
+        client, store = self._client(client_and_result)
+        client.post("/people", json={
+            "netid": "smith", "name": "Prof. Smith", "key": "sk-test",
+            "usage_path": str(tmp_path / "Dropbox"), "usage_mode": "shared-write"})
+        assert "smith" in store.get_professors()
+
+    def test_both_pages_explain_it_the_same_way(self):
+        """The settings page and setup ask this in the same words, because it
+        is the same question."""
+        directory = Path(__file__).resolve().parents[1] / "src"
+        settings = (directory / "templates" / "settings.html").read_text()
+        setup = (directory / "setup_web.py").read_text()
+        for phrase in ("use the sandbox on multiple computers",
+                       "research team or lab", "shared folder"):
+            assert phrase in settings, phrase
+            assert phrase in setup, phrase
+
+    def test_the_browse_button_is_hidden_where_there_is_no_chooser(
+        self, tmp_path, monkeypatch
+    ):
+        import sys
+
+        module = sys.modules["_pu_webui_setup_web"]
+        monkeypatch.setattr(module.file_picker, "available", lambda: False)
+        page = module._render_people(tmp_path)
+        at = page.index('id="browse-usage-btn"')
+        assert "display:none" in page[at:at + 120]

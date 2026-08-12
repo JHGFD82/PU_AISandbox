@@ -52,6 +52,10 @@ class NewPersonBody(BaseModel):
     name: str
     key: str
     backup_key: str = ""
+    # Optional: a folder of their own, for somebody working from more than one
+    # computer or sharing with a group. Blank means their work is kept here.
+    usage_path: str = ""
+    usage_mode: str = "read-only"
 
 
 class NewModelBody(BaseModel):
@@ -386,9 +390,15 @@ def _render_people(where) -> str:
     that asks one thing is drawn from what is on disk each time it is asked
     for, and so has nothing to keep in step.
     """
+    from src.settings_store import get_source_id
+
     people = _people_so_far()
     state, wording = _panel_state(len(people))
     safe = html.escape(str(where))
+    source_id = html.escape(get_source_id())
+    # Drawn only where there is a chooser to open, the same as every other
+    # Browse button — see file_picker.available().
+    browse = "" if file_picker.available() else 'style="display:none"' 
     carry_on = "" if people else "disabled"
     # Nothing to say once the button works: pressing it is the answer, and a
     # line explaining that you may press it is one more thing to read past.
@@ -418,6 +428,29 @@ def _render_people(where) -> str:
     <input type="password" id="apikey" autocomplete="off">
     <label for="backupkey">Backup key <span class="waiting">&mdash; optional; used if the first stops working</span></label>
     <input type="password" id="backupkey" autocomplete="off">
+    <p>Optionally, if this person needs to use the sandbox on multiple computers
+       or between a group of users (e.g., a research team or lab), a
+       <strong>shared folder</strong> can be specified below. Conversations and
+       other data written by this installation will be labeled with
+       <strong>{source_id}</strong> in the files it writes there.</p>
+    <div class="inline-fields">
+      <div class="wide">
+        <label for="usagepath">Shared folder</label>
+        <div class="field-set">
+          <input type="text" id="usagepath" placeholder="/path/to/the/folder"
+                 spellcheck="false">
+          <button type="button" class="browse" id="browse-usage-btn"
+                  {browse}>Browse&hellip;</button>
+        </div>
+      </div>
+      <div>
+        <label for="usagemode">What to do with it</label>
+        <select id="usagemode">
+          <option value="read-only">Read only &mdash; follow their spending</option>
+          <option value="shared-write">Also write &mdash; keep their work in it</option>
+        </select>
+      </div>
+    </div>
     <p class="row-error" id="people-error" hidden></p>
     <p><button type="button" id="add-person" class="secondary">Add this person</button>
        <span class="waiting" id="people-busy" hidden>Saving&hellip;</span></p>
@@ -530,7 +563,11 @@ document.getElementById("add-person").addEventListener("click", async () => {
   }
   show("people-busy", true);
   try {
-    await send("/people", { netid, name, key, backup_key: backup });
+    await send("/people", {
+      netid, name, key, backup_key: backup,
+      usage_path: document.getElementById("usagepath").value.trim(),
+      usage_mode: document.getElementById("usagemode").value,
+    });
     // Asking for the page again rather than patching it here. The page is
     // built from what is on disk, so a reload shows exactly what was saved —
     // nothing to keep in step, and nothing to get wrong keeping it.
@@ -741,6 +778,15 @@ def create_setup_app(on_complete) -> FastAPI:
             # come back as different types, and either is something the person
             # can put right — not a fault to hand them a 500 for.
             raise HTTPException(400, str(e)) from e
+
+        # Second, and only if one was given: a folder is recorded on a person,
+        # so there has to be a person first.
+        if body.usage_path.strip():
+            try:
+                settings_store.set_professor_usage_source(
+                    netid, body.usage_path.strip(), mode=body.usage_mode)
+            except ValueError as e:
+                raise HTTPException(400, str(e)) from e
         return JSONResponse({
             "netid": netid,
             "label": f"{body.name.strip()} ({netid})",
