@@ -5546,3 +5546,100 @@ class TestTheTwoStorageBoxesDoNotOverlap:
         # What comes out: one place, and it is where a job writes its result.
         assert jobs.count('is_on("keep_job_outputs"') == 1
         assert 'is_on("keep_supplied_documents"' not in jobs
+
+
+class TestControlsOnOneRowAreOneHeight:
+    """A field, a menu and a button are each given their own padding, and a
+    browser adds its own idea of how tall a menu should be on top — so three
+    of them side by side came out three heights."""
+
+    def _partial(self, name):
+        from pathlib import Path
+
+        return (Path(__file__).resolve().parents[1] / "src" / "templates" / name).read_text()
+
+    def test_one_height_is_defined_once(self):
+        assert "--control-height:" in self._partial("_design-system.html")
+
+    def test_and_applied_to_everything_sharing_a_row(self):
+        css = self._partial("_forms.html")
+        rule = css[css.index(":is(.inline-fields, .field-set, form.inline)"):]
+        rule = rule[:rule.index("}")]
+        for control in ("input", "select", "button"):
+            assert control in rule, control
+        assert "min-height: var(--control-height)" in rule
+
+    def test_only_in_a_row(self):
+        """The chat page's icon buttons come through the same stylesheet and
+        are not fields; stretching them would make them look like fields."""
+        css = self._partial("_forms.html")
+        at = css.index("min-height: var(--control-height)")
+        selector = css[css.rindex("\n", 0, css.rindex("{", 0, at)):at]
+        assert ".inline-fields" in selector or ".field-set" in selector
+
+    def test_the_file_fields_button_is_the_sandboxs_own(self):
+        """It was the one control still drawn by the browser."""
+        css = self._partial("_forms.html")
+        assert "input[type=file]::file-selector-button" in css
+        rule = css[css.index("input[type=file]::file-selector-button"):]
+        rule = rule[:rule.index("}")]
+        # The same clothes as button.secondary beside it.
+        assert "border: 1px solid var(--border)" in rule
+        assert "border-radius: var(--radius-md)" in rule
+        assert "padding: 0.45rem 0.8rem" in rule
+
+    def test_the_file_field_is_still_a_real_file_field(self):
+        """Styled, not replaced by a label dressed as a button — the real
+        control keeps its keyboard behaviour and its focus ring."""
+        chat = _rendered_chat()
+        assert 'replacement.type = "file"' in chat
+        # Styled, not hidden behind something else that clicks it for you.
+        css = self._partial("_forms.html")
+        rule = css[css.index("input[type=file]::file-selector-button"):]
+        assert "display: none" not in rule[:rule.index("}")]
+        assert "input[type=file] { display: none" not in css
+
+
+class TestHowSomebodyGetsAKey:
+    """Asked in two places — first-run setup and the settings page — and the
+    answer is the same in both."""
+
+    def _settings(self):
+        from pathlib import Path
+
+        return (Path(__file__).resolve().parents[1] / "src" / "templates"
+                / "settings.html").read_text()
+
+    def _setup(self):
+        from pathlib import Path
+
+        return (Path(__file__).resolve().parents[1] / "src" / "setup_web.py").read_text()
+
+    def test_both_send_people_to_the_request_form(self):
+        for source in (self._settings(), self._setup()):
+            assert "ServiceNow request" in source
+            assert "sc_cat_item" in source
+
+    def test_both_say_who_can_submit_one(self):
+        """A professor, for themselves or somebody they supervise — the form
+        turns anybody else away, which is worth knowing beforehand."""
+        for source in (self._settings(), self._setup()):
+            assert "supervise" in source
+            assert "Non-faculty personnel" in source
+
+    def test_the_link_opens_in_its_own_tab(self):
+        source = self._settings()
+        at = source.index("sc_cat_item")
+        assert 'target="_blank"' in source[at:at + 400]
+        assert 'rel="noopener"' in source[at:at + 400]
+
+    def test_the_product_is_called_one_thing(self):
+        """Five pages, one name."""
+        import re
+        from pathlib import Path
+
+        templates = Path(__file__).resolve().parents[1] / "src" / "templates"
+        for page in sorted(templates.glob("*.html")):
+            text = page.read_text()
+            assert "PU AI Sandbox" not in text, page.name
+            assert not re.search(r"Princeton (?!University)\w* ?AI Sandbox", text), page.name

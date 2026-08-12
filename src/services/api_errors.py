@@ -165,7 +165,7 @@ def raise_for_model_access_error(error: Exception, model: str) -> None:
     removed_note = " It has been removed from the catalog." if removed else ""
     logging.error(f"Model access denied for {model!r}: {error}")
     raise CLIError(
-        f"Model '{model}' is not accessible in the Princeton AI Sandbox — "
+        f"Model '{model}' is not accessible in the Princeton University AI Sandbox — "
         f"you do not have access to this model.{removed_note} "
         "Please use a different model or contact your sandbox administrator."
     ) from error

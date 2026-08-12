@@ -1,4 +1,4 @@
-"""Translates document text using the Princeton AI Sandbox's AI models, page by page.
+"""Translates document text using the Princeton University AI Sandbox's AI models, page by page.
 
 This is the core AI-calling class behind the ``translate`` command. A plugin
 author building a similar service can use this as a reference: it extends

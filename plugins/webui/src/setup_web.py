@@ -399,9 +399,14 @@ def _render_people(where) -> str:
 
 <fieldset id="people" class="{state}">
   <legend>People <span class="rule"></span><span class="required-flag">{wording}</span></legend>
-  <p>Each person needs their own Princeton AI Sandbox API key, which they get
-     from OIT. Keys are kept in <code>{safe}</code> and are never shown again
-     once saved. Add as many as you like; at least one is needed.</p>
+  <p>To grant access to this tool, a professor must submit a
+     <a href="https://princeton.service-now.com/service?id=sc_cat_item&amp;table=sc_cat_item&amp;sys_id=dca54d1c1b495690423c777b1d4bcb94&amp;searchTerm=ai%20sandbox" target="_blank" rel="noopener">ServiceNow request</a>
+     for themselves or for someone they supervise. (Non-faculty personnel cannot
+     access the request form.) Once the request is approved, an API key for the
+     sandbox environment will be emailed to the designated recipient. The
+     recipient can then enter the API key here to gain access to the tool.</p>
+  <p>Keys are kept in <code>{safe}</code> and are never shown again once saved.
+     Add as many as you like; at least one is needed.</p>
   {_as_list(people, "Nobody added yet.")}
   <div class="after-a-list">
     <h3>Add a person</h3>

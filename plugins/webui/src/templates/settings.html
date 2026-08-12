@@ -96,7 +96,15 @@
       <form id="add-professor-form" class="after-a-list">
         <h3>Add a new professor</h3>
         <p class="hint field-note">
-          Each professor, or faculty-supervised personnel, needs a Princeton AI Sandbox API key before they can use this tool. Keys are never displayed in this tool after they are saved.
+          To grant access to this tool, a professor must submit a
+          <a href="https://princeton.service-now.com/service?id=sc_cat_item&amp;table=sc_cat_item&amp;sys_id=dca54d1c1b495690423c777b1d4bcb94&amp;searchTerm=ai%20sandbox" target="_blank" rel="noopener">ServiceNow request</a>
+          for themselves or for someone they supervise. (Non-faculty personnel
+          cannot access the request form.) Once the request is approved, an API
+          key for the sandbox environment will be emailed to the designated
+          recipient. The recipient can then enter the API key here to gain
+          access to the tool. Keys are never displayed again once saved.
+        </p>
+        <p class="hint field-note">
           If someone&rsquo;s work belongs somewhere else &mdash; a folder shared
           with them, or one synced between the computers they use &mdash; open
           <strong>Shared folder</strong> beside their name and point this
@@ -260,7 +268,7 @@
 
     <div class="card" id="section-endpoints" data-section="endpoints" data-tab="models">
       <h2>Alternate AI endpoints</h2>
-      <p class="hint">An AI service other than the Princeton AI Sandbox — a model on a cluster, or a provider's own API. Calls are counted but carry no cost and are reported separately.</p>
+      <p class="hint">An AI service other than the Princeton University AI Sandbox — a model on a cluster, or a provider's own API. Calls are counted but carry no cost and are reported separately.</p>
 
       <div id="endpoints-list"></div>
       <!-- No form here: an endpoint is set up by editing a file, so this
@@ -305,7 +313,7 @@
       <div id="models-list"></div>
       <form id="add-model-form" class="after-a-list">
         <h3>Adding a new model</h3>
-        <p class="hint field-note">Refer to the <a href="https://princeton.service-now.com/service?id=kb_article_view&amp;sysparm_article=KB0014337" target="_blank" rel="noopener">Princeton AI Sandbox Service</a> article on Service Now for the list of models available in the AI Sandbox. Model names are constructed with both provider and model name, separated by a slash — for example:</p>
+        <p class="hint field-note">Refer to the <a href="https://princeton.service-now.com/service?id=kb_article_view&amp;sysparm_article=KB0014337" target="_blank" rel="noopener">Princeton University AI Sandbox Service</a> article on Service Now for the list of models available in the AI Sandbox. Model names are constructed with both provider and model name, separated by a slash — for example:</p>
         <ul>
           <li><code>openai/gpt-5.2</code></li>
           <li><code>anthropic/claude-opus-4-8</code></li>

@@ -780,7 +780,7 @@ def remove_model_from_catalog(model_name: str) -> bool:
 
 def is_model_access_error(error_message: str) -> bool:
     """Return True if the error message indicates the model is not accessible
-    in the Princeton AI Sandbox (PortKey router cannot find it).
+    in the Princeton University AI Sandbox (PortKey router cannot find it).
     """
     return "invalid target name found in the query router" in error_message.lower()
 

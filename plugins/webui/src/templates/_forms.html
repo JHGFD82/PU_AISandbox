@@ -61,6 +61,36 @@
     display: block; font-size: var(--text-xs); color: var(--text-muted);
     margin: 0.6rem 0 0.2rem;
   }
+  /* Anything sharing a row is the same height as everything else on it. Only
+     in a row: a button on its own is sized by its own padding, and the icon
+     buttons in the chat page are not fields and must not be stretched to look
+     like them. */
+  :is(.inline-fields, .field-set, form.inline) :is(input, select, button) {
+    min-height: var(--control-height);
+    line-height: 1.25;
+  }
+  /* The button inside a file field is drawn by the browser, and was the one
+     control left wearing the browser's clothes — grey, square-cornered and a
+     different size from every button beside it. Styled here rather than
+     replaced with a label dressed as a button: the real control keeps its
+     keyboard behaviour, its focus ring and its "no file chosen" text, and
+     only its appearance changes.
+
+     Chosen over the settings page's Browse button, which asks the server to
+     open a folder chooser and hands back a path. That would suit this field
+     — no copying, and a folder of scans can be large — but a job deletes the
+     folder it was given when it finishes (jobs.discard_scratch_dir), and
+     handing it somebody's own folder instead of a scratch copy would delete
+     their originals. */
+  input[type=file]::file-selector-button {
+    font: inherit; font-size: var(--text-md); line-height: 1.25;
+    padding: 0.45rem 0.8rem; margin-right: var(--space-3);
+    background: transparent; color: var(--text);
+    border: 1px solid var(--border); border-radius: var(--radius-md);
+    cursor: pointer;
+  }
+  input[type=file]::file-selector-button:hover { background: var(--hover-bg); }
+
   /* Without a rule these came out in the browser's own blue, which is the
      loudest thing on a page otherwise made of one orange and greys. */
   a { color: var(--link); }

@@ -177,7 +177,7 @@ def run_interactive_setup(
         CLIError: If the person declines every option, or if a folder can't
                   be prepared.
     """
-    print_fn(f"\n{_RULE}\nSetting up the PU AI Sandbox\n{_RULE}")
+    print_fn(f"\n{_RULE}\nSetting up the Princeton University AI Sandbox\n{_RULE}")
 
     for candidate in first_run.find_existing():
         print_fn(

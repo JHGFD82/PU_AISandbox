@@ -322,7 +322,7 @@ def _serve(args: argparse.Namespace) -> None:
     gate = "passphrase required" if auth.get_configured_backend().configured else "no passphrase set"
     reach = "this computer only" if _is_loopback_host(host) else "reachable from other computers"
     app_module = sys.modules["_pu_webui_app"]
-    print(f"Starting Princeton AI Sandbox web interface at http://{host}:{port}")
+    print(f"Starting Princeton University AI Sandbox web interface at http://{host}:{port}")
     print(f"  Access: {reach} — {gate}")
     app_module.run_server(host=host, port=port)
 

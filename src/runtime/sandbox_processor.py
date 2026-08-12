@@ -118,7 +118,7 @@ class SandboxProcessor(*_discover_plugin_mixins(), _FileTypeMixin, _CommandMixin
                         instead of the sandbox's normal endpoint. ``None``
                         with a colon-syntax ``model`` resolves this
                         automatically; ``None`` with a plain model name uses
-                        the standard Princeton AI Sandbox endpoint.
+                        the standard Princeton University AI Sandbox endpoint.
 
         Raises:
             CLIError: If the professor's configuration is missing or invalid
@@ -187,7 +187,7 @@ class SandboxProcessor(*_discover_plugin_mixins(), _FileTypeMixin, _CommandMixin
         file are needed to support a new plugin's services.
 
         When ``self._api_config`` names an alternate API endpoint (rather
-        than the standard Princeton AI Sandbox endpoint), the newly created
+        than the standard Princeton University AI Sandbox endpoint), the newly created
         service's network client is replaced with one pointed at that
         endpoint's address, and the model name is used exactly as given
         instead of being checked against the model price catalog — this
