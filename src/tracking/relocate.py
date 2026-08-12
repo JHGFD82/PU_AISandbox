@@ -190,6 +190,16 @@ def _move_usage(netid: str, old: Optional[ExternalSource],
     """Move what each call cost, and every finished month."""
     calls, finished, sources = _read_usage(netid, old)
     if not calls and not finished:
+        # Nothing to carry across — but there may still be an emptied file
+        # sitting where their work used to be. Left alone it is read as a
+        # month with nothing in it, which is the answer a report falls back to
+        # when the folder their work actually moved to cannot be reached: a
+        # confident zero instead of a missing figure. Only ever files this
+        # already found to hold nothing.
+        for path in sources:
+            logger.info("Removing %s, which holds nothing, now that %s's work "
+                        "is kept elsewhere.", path.name, netid)
+            _discard(path)
         return Moved()
 
     _write_usage(netid, new, calls, finished)

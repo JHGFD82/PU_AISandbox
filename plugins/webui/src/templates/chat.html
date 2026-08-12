@@ -421,6 +421,15 @@
   .spend-figure, .spend-row, #spend-endpoints {
     font-variant-numeric: tabular-nums;
   }
+  /* A caution, not an error: the figures beside it are still real, they are
+     just not all of them. */
+  .spend-warning {
+    font-size: var(--text-xs); line-height: 1.4; margin: 0 0 var(--space-4);
+    padding: var(--space-2) var(--space-3);
+    background: var(--orange-tint); border: 1px solid var(--orange);
+    border-radius: var(--radius-md); word-break: break-word;
+  }
+  .spend-warning[hidden] { display: none; }
   .spend-figure { font-size: var(--text-xxl); font-weight: 600; }
   .spend-label { font-size: var(--text-xs); color: var(--text-muted); }
   .spend-row { display: flex; justify-content: space-between; font-size: var(--text-md); padding: 0.2rem 0; }
@@ -811,6 +820,11 @@
   </main>
 
   <aside id="spend" aria-label="Spending">
+    <!-- Shown only when a folder somebody's work is kept in is not there.
+         Above the figures, because it is about whether to believe them: a
+         folder that cannot be read contributes nothing, and nothing looks
+         exactly like a month with no spending in it. -->
+    <p class="spend-warning" id="spend-unreadable" hidden></p>
     <h2>This month</h2>
     <div class="spend-figure" id="spend-month">$0.00</div>
     <div class="spend-label" id="spend-budget"></div>
@@ -2292,6 +2306,18 @@ async function loadUsage() {
   document.getElementById("spend-alltime").textContent = fmtMoney(data.all_time.total_cost);
   document.getElementById("spend-budget").textContent =
     data.budget.monthly_limit ? `of ${fmtMoney(data.budget.monthly_limit)} budget (${data.budget.usage_percentage.toFixed(0)}%)` : "";
+  const unreadable = document.getElementById("spend-unreadable");
+  const missing = data.unreadable_folders || [];
+  unreadable.hidden = missing.length === 0;
+  if (missing.length) {
+    // textContent, so a folder name is a folder name and not markup.
+    unreadable.textContent =
+      (missing.length === 1
+        ? "This folder is not there, so what is in it is missing from these figures: "
+        : "These folders are not there, so what is in them is missing from these figures: ")
+      + missing.join(", ");
+  }
+
   const byModel = document.getElementById("spend-by-model");
   byModel.innerHTML = "";
   Object.entries(data.model_usage || {}).forEach(([model, stats]) => {

@@ -593,6 +593,20 @@ in what you are told rather than being dealt with quietly:
 Turning a folder to **read-only** brings their work back here, because a folder
 only being watched is never written to.
 
+### When a folder isn't there
+
+An external drive that isn't plugged in, a synced folder that hasn't come down
+yet, a path typed wrong. A folder named in the settings and missing from the
+disk contributes no figures — and no figures is also what somebody who hasn't
+spent anything contributes, so reports say which folder is missing rather than
+showing a total that quietly leaves it out. The spending panel says so above
+the figures, `usage report` says so before printing any, and the HTML report
+warns at the top.
+
+Only absence is caught this way. A folder that is present but that a sync
+service hasn't filled in yet can't be told apart from a folder with no work in
+it, and nothing pretends otherwise.
+
 ### Several computers in the same conversation
 
 Each conversation is a folder of its own with a name no other conversation will

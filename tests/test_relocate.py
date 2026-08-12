@@ -329,3 +329,98 @@ class TestWhatThePersonIsTold:
     def test_what_was_left_is_counted_in(self):
         said = Moved(counts={"calls": 1}, left_behind=["a thing"]).summary()
         assert "left where they were" in said
+
+
+class TestAnEmptiedFileIsNotLeftBehind:
+    """A file holding nothing, left where somebody's work used to be, is read
+    as a month with nothing in it. That is the same answer a report falls back
+    to when the folder their work moved to cannot be reached — so the leftover
+    turns "I cannot read that" into a confident zero."""
+
+    def test_it_is_removed_when_the_work_moves_out(self, here, shared):
+        (here / "token_usage_smith.json").write_text(json.dumps(a_month([])))
+        move_a_persons_work("smith", None, shared)
+        assert not (here / "token_usage_smith.json").exists()
+
+    def test_even_though_there_was_nothing_to_move(self, here, shared):
+        """It reports honestly: nothing moved, because nothing was in it."""
+        (here / "token_usage_smith.json").write_text(json.dumps(a_month([])))
+        assert not move_a_persons_work("smith", None, shared)
+
+    def test_a_file_with_something_in_it_is_moved_not_dropped(self, here, shared):
+        put_locally(here, records=[a_call(100)])
+        move_a_persons_work("smith", None, shared)
+        assert not (here / "token_usage_smith.json").exists()
+        assert tokens_in(shared) == 100
+
+    def test_and_a_report_then_has_nothing_to_mistake_for_a_zero(self, here, shared):
+        (here / "token_usage_smith.json").write_text(json.dumps(a_month([])))
+        move_a_persons_work("smith", None, shared)
+        assert token_tracker.load_usage_tree(here) == {}
+
+
+class TestSayingAFolderCannotBeRead:
+    """A folder named in the settings and missing from the disk contributes
+    nothing — and nothing is also what somebody who has not spent anything
+    contributes. A spending report must not leave those looking the same."""
+
+    def test_a_missing_folder_is_reported(self, here, tmp_path):
+        settings_store.add_professor("smith", "Prof. Smith", "sk")
+        settings_store.set_professor_usage_source(
+            "smith", str(tmp_path / "not-mounted"), mode="shared-write")
+        missing = token_tracker.unreadable_folders()
+        assert [s.professor for s in missing] == ["smith"]
+
+    def test_a_folder_that_is_there_is_not(self, here, tmp_path):
+        (tmp_path / "mounted").mkdir()
+        settings_store.add_professor("smith", "Prof. Smith", "sk")
+        settings_store.set_professor_usage_source(
+            "smith", str(tmp_path / "mounted"), mode="shared-write")
+        assert token_tracker.unreadable_folders() == []
+
+    def test_an_empty_folder_is_not_called_unreadable(self, here, tmp_path):
+        """Present but empty cannot be told apart from "no work yet", and
+        claiming otherwise would cry wolf on every new setup."""
+        (tmp_path / "mounted").mkdir()
+        settings_store.add_professor("smith", "Prof. Smith", "sk")
+        settings_store.set_professor_usage_source(
+            "smith", str(tmp_path / "mounted"), mode="shared-write")
+        assert token_tracker.unreadable_folders() == []
+
+    def test_a_folder_only_being_watched_counts_too(self, here, tmp_path):
+        """Read-only still contributes figures to a report, so its absence
+        still leaves figures out."""
+        settings_store.add_professor("smith", "Prof. Smith", "sk")
+        settings_store.set_professor_usage_source(
+            "smith", str(tmp_path / "gone"), mode="read-only")
+        assert len(token_tracker.unreadable_folders()) == 1
+
+    def test_the_terminal_says_so_before_printing_any_figure(self, here, tmp_path, capsys):
+        from src.runtime.info_commands import _warn_about_folders_that_are_not_there
+
+        settings_store.add_professor("smith", "Prof. Smith", "sk")
+        settings_store.set_professor_usage_source(
+            "smith", str(tmp_path / "not-mounted"), mode="shared-write")
+        _warn_about_folders_that_are_not_there("smith")
+        said = capsys.readouterr().out
+        assert "not there" in said
+        assert str(tmp_path / "not-mounted") in said, "it does not say which folder"
+
+    def test_and_says_nothing_when_there_is_nothing_to_say(self, here, tmp_path, capsys):
+        from src.runtime.info_commands import _warn_about_folders_that_are_not_there
+
+        settings_store.add_professor("smith", "Prof. Smith", "sk")
+        _warn_about_folders_that_are_not_there("smith")
+        assert capsys.readouterr().out == ""
+
+    def test_it_only_mentions_the_person_being_reported_on(self, here, tmp_path, capsys):
+        from src.runtime.info_commands import _warn_about_folders_that_are_not_there
+
+        for who in ("smith", "jones"):
+            settings_store.add_professor(who, who.title(), "sk")
+            settings_store.set_professor_usage_source(
+                who, str(tmp_path / f"gone-{who}"), mode="shared-write")
+        _warn_about_folders_that_are_not_there("smith")
+        said = capsys.readouterr().out
+        assert "gone-smith" in said
+        assert "gone-jones" not in said

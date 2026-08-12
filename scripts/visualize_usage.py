@@ -545,8 +545,23 @@ def main():
     print("Loading usage data...")
     all_data = load_all_data()
 
+    # Before any figure is shown. A folder named in the settings and missing
+    # from the disk contributes nothing, and nothing is what a person who has
+    # not spent anything also contributes — so a report that stays quiet here
+    # is a report that cannot be trusted to be complete.
+    from src.tracking.token_tracker import unreadable_folders
+
+    missing = unreadable_folders()
+    for source in missing:
+        whose = f"{source.professor}'s " if source.professor else ""
+        print(f"  WARNING: {whose}work is kept in {source.resolved_path()},")
+        print("           and that folder is not there. Its figures are missing")
+        print("           from this report.")
+
     if not all_data:
         print("No usage data found in", data_dir)
+        if missing:
+            print("Every folder that was supposed to hold some is unreadable.")
         sys.exit(1)
 
     professors = sorted(all_data.keys())

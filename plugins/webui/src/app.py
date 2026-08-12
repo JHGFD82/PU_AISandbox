@@ -1137,7 +1137,16 @@ def create_app() -> FastAPI:
         # this professor's tracker, and left out the two warning flags — so
         # the sidebar had no way to say someone was over budget.
         budget = tracker.get_monthly_budget_status()
+        # A folder named in the settings and missing from the disk contributes
+        # nothing, which on its own looks exactly like a person who has spent
+        # nothing. The panel says which folder, rather than showing a total
+        # that quietly excludes it.
+        from src.tracking.token_tracker import unreadable_folders
+
+        missing = [str(s.resolved_path()) for s in unreadable_folders()
+                   if (s.professor or "").strip().lower() == professor.strip().lower()]
         return {
+            "unreadable_folders": missing,
             "month": budget["monthly_usage"],
             "all_time": tracker.get_all_time_usage(),
             "model_usage": tracker.usage_data.get("model_usage", {}),

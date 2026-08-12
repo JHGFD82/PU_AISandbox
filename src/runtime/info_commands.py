@@ -239,6 +239,7 @@ def handle_info_commands(args: argparse.Namespace) -> bool:
         _require_configured_netid(args.professor)
 
         token_tracker = TokenTracker(professor=args.professor)
+        _warn_about_folders_that_are_not_there(args.professor)
 
         if usage_subcommand == 'report':
             month = getattr(args, 'month', None)
@@ -543,6 +544,31 @@ def _settings_add_professor_interactive(args: argparse.Namespace) -> None:
 
     print(f"\nAdded {name} ({netid}).")
     print(f"Try it out: python main.py {netid} usage report")
+
+
+def _warn_about_folders_that_are_not_there(professor: str) -> None:
+    """Say so, before any figure is printed, if this person's folder is missing.
+
+    Their work is kept wherever their settings say, and a folder that is not
+    there reads as no spending: the report simply has nothing to add. That is
+    the same output as a person who genuinely has not spent anything, which is
+    the one thing a spending report must never be unclear about.
+
+    Args:
+        professor: Whose report is about to be printed.
+    """
+    from ..tracking.token_tracker import unreadable_folders
+
+    missing = [s for s in unreadable_folders()
+               if (s.professor or "").strip().lower() == professor.strip().lower()]
+    for source in missing:
+        print(
+            f"\n  Note: {professor}'s work is kept in\n"
+            f"      {source.resolved_path()}\n"
+            "  and that folder is not there at the moment. An external drive that\n"
+            "  is not plugged in, or a synced folder that has not come down yet,\n"
+            "  looks like this. The figures below leave out whatever is in it."
+        )
 
 
 def _handle_usage_sources(args: argparse.Namespace) -> None:

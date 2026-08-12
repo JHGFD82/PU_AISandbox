@@ -5648,3 +5648,74 @@ class TestHowSomebodyGetsAKey:
             text = page.read_text()
             assert "PU AI Sandbox" not in text, page.name
             assert not re.search(r"Princeton (?!University)\w* ?AI Sandbox", text), page.name
+
+
+class TestTheSidebarSaysWhenAFolderCannotBeRead:
+    """A total that quietly leaves somebody's shared folder out looks exactly
+    like a total for somebody who has not spent anything."""
+
+    def _configured(self, tmp_path, monkeypatch, *, reachable):
+        from src import settings_store
+        from src.tracking import token_tracker
+
+        monkeypatch.setattr(settings_store, "SETTINGS_PATH", tmp_path / "settings.toml")
+        monkeypatch.setattr(token_tracker, "data_root", lambda: tmp_path / "data")
+        (tmp_path / "data").mkdir(exist_ok=True)
+        settings_store.add_professor("heller", "Heller", "sk-test")
+        folder = tmp_path / ("mounted" if reachable else "not-mounted")
+        if reachable:
+            folder.mkdir()
+        settings_store.set_professor_usage_source(
+            "heller", str(folder), mode="shared-write")
+        return folder
+
+    def test_it_names_the_folder(self, unlocked_client, tmp_path, monkeypatch):
+        folder = self._configured(tmp_path, monkeypatch, reachable=False)
+        body = unlocked_client.get("/api/usage?professor=heller").json()
+        assert body["unreadable_folders"] == [str(folder)]
+
+    def test_and_says_nothing_when_it_is_there(self, unlocked_client, tmp_path, monkeypatch):
+        self._configured(tmp_path, monkeypatch, reachable=True)
+        body = unlocked_client.get("/api/usage?professor=heller").json()
+        assert body["unreadable_folders"] == []
+
+    def test_somebody_elses_missing_folder_is_not_reported_here(
+        self, unlocked_client, tmp_path, monkeypatch
+    ):
+        from src import settings_store
+
+        self._configured(tmp_path, monkeypatch, reachable=True)
+        settings_store.add_professor("conlan", "Conlan", "sk-test")
+        settings_store.set_professor_usage_source(
+            "conlan", str(tmp_path / "gone"), mode="shared-write")
+        body = unlocked_client.get("/api/usage?professor=heller").json()
+        assert body["unreadable_folders"] == []
+
+    def test_the_figures_are_still_returned(self, unlocked_client, tmp_path, monkeypatch):
+        """A warning beside the numbers, not instead of them."""
+        self._configured(tmp_path, monkeypatch, reachable=False)
+        body = unlocked_client.get("/api/usage?professor=heller").json()
+        assert "unreadable_folders" in body
+        assert len(body) > 1
+
+    def test_the_panel_has_somewhere_to_say_it(self):
+        """Returning the fact and never showing it would leave the silent
+        zero exactly as it was."""
+        chat = _rendered_chat()
+        assert 'id="spend-unreadable"' in chat
+        # Above the figures: it is about whether to believe them.
+        assert chat.index('id="spend-unreadable"') < chat.index('id="spend-month"')
+
+    def test_and_shows_it_only_when_there_is_something_to_say(self):
+        chat = _rendered_chat()
+        assert "unreadable.hidden = missing.length === 0" in chat
+
+    def test_the_folder_name_is_written_as_text_not_markup(self):
+        """A path is not markup, and this one comes from a settings file."""
+        chat = _rendered_chat()
+        # The warning block alone. Reading further reaches the by-model list,
+        # which clears itself with innerHTML = "" and is entitled to.
+        block = chat[chat.index("const unreadable = document.getElementById"):
+                     chat.index("const byModel = document.getElementById")]
+        assert "textContent" in block
+        assert "innerHTML" not in block

@@ -128,6 +128,28 @@ def _shared_archive_path(source: "ExternalSource", month: str) -> Path:
     return _shared_archive_dir(source) / f"{month}.json"
 
 
+def unreadable_folders() -> list[ExternalSource]:
+    """Return every configured folder that is not there to be read right now.
+
+    A folder named in the settings and missing from the disk is the ordinary
+    shape of a real problem: an external drive that was not plugged in, a
+    sync service that has not brought it down yet, a path typed wrong. What
+    makes it worth catching is that the alternative is silence — a report
+    that simply leaves that person's spending out, or shows it as nothing,
+    and looks exactly like a person who has not spent anything.
+
+    Only absence can be caught this way. A folder that is present but not yet
+    filled in by a sync service is indistinguishable from a folder with no
+    work in it, and nothing here can tell those apart.
+
+    Returns:
+        The sources whose folder is missing, in the order they are configured.
+        Empty when everything named can be read.
+    """
+    return [source for source in get_configured_sources()
+            if not source.resolved_path().is_dir()]
+
+
 def get_configured_data_roots() -> list[tuple[str, Path, str | None]]:
     """Return every data-shaped directory that should be scanned when building an aggregate usage report.
 
