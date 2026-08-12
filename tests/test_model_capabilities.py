@@ -83,7 +83,7 @@ class TestAnOrdinaryModel:
         assert report.findings["supports_vision"] is True
 
     def test_nothing_odd_is_recorded_against_it(self):
-        """A model with no quirks should add no quirks to the catalogue."""
+        """A model with no quirks should add no quirks to the catalog."""
         report = probe_model_capabilities("plain-model", FakeModel())
         assert "rejects" not in report.findings
         assert "prefers" not in report.findings
@@ -176,7 +176,7 @@ class TestWhenTheTestCannotBeRun:
         assert report.unsettled
 
 
-class TestFoldingTheAnswersIntoTheCatalogue:
+class TestFoldingTheAnswersIntoThecatalog:
     def test_a_quirk_learned_from_a_real_refusal_is_not_dropped(self):
         """Testing doesn't hit every field, so it must not replace the list.
 

@@ -13,7 +13,7 @@ import pytest
 import src.models.catalog as _catalog_module
 from src import paths
 
-# The tests' own catalogue, not the one the product ships. Those are two
+# The tests' own catalog, not the one the product ships. Those are two
 # different decisions: a new installation starts with no models, so that nobody
 # is handed names their institution may not offer, while the tests need a
 # couple of known models at known prices. Sharing one file meant emptying the
@@ -23,13 +23,13 @@ _FIXTURE_CATALOG = Path(__file__).parent / "tests" / "fixtures" / "model_catalog
 
 @pytest.fixture(autouse=True)
 def _use_fixture_catalog(monkeypatch):
-    """Point every test at the fixture catalogue, wherever the test lives.
+    """Point every test at the fixture catalog, wherever the test lives.
 
     This one is at the repository root rather than in ``tests/`` for the reason
     given above: the plugin suites are not below ``tests/``, and they need a
-    catalogue as much as anything else does.
+    catalog as much as anything else does.
 
-    A test needing its own catalogue replaces this again in its own fixture;
+    A test needing its own catalog replaces this again in its own fixture;
     the later monkeypatch wins.
     """
     monkeypatch.setattr(_catalog_module, "get_model_catalog_path", lambda: _FIXTURE_CATALOG)
@@ -39,7 +39,7 @@ def _use_fixture_catalog(monkeypatch):
 def _isolated_extras_folder(tmp_path_factory, monkeypatch):
     """Give every test its own empty folder to treat as "this person's files".
 
-    The sandbox keeps settings, the model catalogue and usage history in a
+    The sandbox keeps settings, the model catalog and usage history in a
     folder chosen during setup, and finds it through a small marker file
     inside the package (``src/paths.py``). That marker is deliberately not
     committed — it describes one installation and must never travel to

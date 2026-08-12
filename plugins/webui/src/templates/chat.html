@@ -1035,9 +1035,9 @@ async function loadModels() {
 }
 
 // Models this person has reached on an AI service of their own. They are not
-// in the catalogue — an endpoint's models are whatever it runs, and nothing
+// in the catalog — an endpoint's models are whatever it runs, and nothing
 // here can ask it — so the ones actually used are remembered, and appear under
-// the endpoint's name the way a catalogue model appears under its company's.
+// the endpoint's name the way a catalog model appears under its company's.
 function rememberedEndpointModels() {
   try {
     return JSON.parse(localStorage.getItem("endpoint-models") || "[]");
@@ -1057,7 +1057,7 @@ function renderModelList() {
   const list = document.getElementById("model-list");
   list.innerHTML = "";
 
-  // Grouped by whose model it is, and within a group by name. The catalogue's
+  // Grouped by whose model it is, and within a group by name. The catalog's
   // own order was one flat run of twenty-eight, which is a lot to read when
   // you already know whose model you want.
   const groups = new Map();

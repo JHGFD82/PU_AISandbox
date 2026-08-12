@@ -122,8 +122,8 @@ class BaseService:
     endpoint_name: str = ""
 
     # The endpoint this service was pointed at, or None for the sandbox. Read by
-    # ``_get_model()``, which must not look a model up in the catalogue when the
-    # catalogue does not describe the service answering.
+    # ``_get_model()``, which must not look a model up in the catalog when the
+    # catalog does not describe the service answering.
     _endpoint: Optional["APIConfig"] = None
 
     def __init__(
@@ -173,7 +173,7 @@ class BaseService:
             max_tokens: Cap on how long the model's response can be, measured
                         in tokens (roughly one token per word). ``None`` means
                         use the cap recorded for that model in the
-                        catalogue, or the service's own if it has none.
+                        catalog, or the service's own if it has none.
         """
         self.professor = professor
         self.custom_model = model
@@ -286,7 +286,7 @@ class BaseService:
         straight into per-professor budget tracking.
 
         A service pointed at an alternate endpoint skips all of that and uses
-        the name it was given, since the catalogue describes the sandbox's
+        the name it was given, since the catalog describes the sandbox's
         models and not that endpoint's.
 
         Subclasses rarely need to override this — setting ``model_role`` is
@@ -296,7 +296,7 @@ class BaseService:
         """
         if self._endpoint is not None:
             # An endpoint of somebody's own runs whatever models it runs, and the
-            # catalogue describes the sandbox's. Resolving against it would pick
+            # catalog describes the sandbox's. Resolving against it would pick
             # a model this service cannot reach, and pricing it would invent a
             # figure — see the endpoint's own usage reporting.
             model = self.custom_model or self._endpoint.default_model

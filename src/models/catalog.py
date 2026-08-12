@@ -27,7 +27,7 @@ _SAMPLING_FIELDS: tuple = ("temperature", "top_p", "frequency_penalty", "presenc
 # Two ways of writing the same thing. A model's quirks belong under ``rejects``
 # (request fields it won't accept) and ``prefers`` (fields needing a value
 # other than the usual one), which is what the sandbox learns into and what the
-# catalogue template ships. A catalogue may instead spell some of them as
+# catalog template ships. A catalog may instead spell some of them as
 # individual flags, which are read and understood as the equivalent entry —
 # the two below map a flag onto every field it stands for.
 _FLAGS_MEANING_REJECTED: dict = {
@@ -62,7 +62,7 @@ _catalog_cache_stamp: Optional[tuple[int, int]] = None
 
 
 def get_model_catalog_path() -> Path:
-    """Return the model catalogue file, wherever this installation keeps it."""
+    """Return the model catalog file, wherever this installation keeps it."""
     from ..paths import model_catalog_path
     return model_catalog_path()
 
@@ -132,7 +132,7 @@ def load_model_catalog() -> Dict[str, Any]:
         from ..paths import template_path
         template_file = template_path("model_catalog.template.json")
         error_msg = (
-            f"No model catalogue found at {catalog_file}.\n"
+            f"No model catalog found at {catalog_file}.\n"
             "Setup creates this for you — run it once:\n"
             "  python main.py settings setup\n"
             f"(The starting point it copies from is {template_file}, if you "
@@ -159,7 +159,7 @@ def load_model_catalog() -> Dict[str, Any]:
         logging.error(error_msg)
         raise ValueError(error_msg)
 
-    # No check that there are any models. An empty catalogue is an ordinary
+    # No check that there are any models. An empty catalog is an ordinary
     # state — a freshly set-up copy has none until somebody adds the ones their
     # institution offers — and objecting here would make adding the first one
     # impossible, since adding reads the file before writing it. The complaint

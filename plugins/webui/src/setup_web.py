@@ -135,7 +135,7 @@ def _describe(candidate: first_run.ExtrasCandidate) -> str:
                else "1 person configured" if n == 1 else f"{n} people configured")
         items.append(f"your settings and API keys <em>({who})</em>")
     if candidate.has_catalog:
-        items.append("your model catalogue")
+        items.append("your model catalog")
     if candidate.months:
         months = "1 month" if candidate.months == 1 else f"{candidate.months} months"
         items.append(f"your usage history <em>({months})</em>")
@@ -303,7 +303,7 @@ def _people_so_far() -> list:
 
 
 def _models_so_far() -> list:
-    """Return the models already in the catalogue, or none if it cannot be read."""
+    """Return the models already in the catalog, or none if it cannot be read."""
     from src.models import get_available_models
 
     try:
@@ -736,7 +736,7 @@ def create_setup_app(on_complete) -> FastAPI:
         try:
             models = get_available_models()
         except Exception:
-            # A catalogue that cannot be read counts as no models. During setup
+            # A catalog that cannot be read counts as no models. During setup
             # that is a thing to say plainly and let somebody act on, not a
             # fault to hand them a 500 for.
             models = []

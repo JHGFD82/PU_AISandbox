@@ -94,7 +94,7 @@ None of the optional members are part of the `ModePlugin` protocol. Each is read
 
 **This is required.** A plugin that doesn't declare it is refused at load, with a message saying what to add.
 
-The reason is not bureaucracy. Without a declaration the sandbox has nothing to go on and falls through to the cheapest model in the catalogue — which keeps working, so nobody notices, and the answers quietly come from whichever model happens to be least expensive. That is how the `translate` command came to default to a four-billion-parameter model with nothing but a line in the terminal to say so.
+The reason is not bureaucracy. Without a declaration the sandbox has nothing to go on and falls through to the cheapest model in the catalog — which keeps working, so nobody notices, and the answers quietly come from whichever model happens to be least expensive. That is how the `translate` command came to default to a four-billion-parameter model with nothing but a line in the terminal to say so.
 
 Declare one **role** per distinct job your plugin does. Translating a document and translating a scan are two jobs: one needs to read text, the other needs to read a picture.
 

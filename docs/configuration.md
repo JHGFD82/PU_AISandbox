@@ -3,7 +3,7 @@
 The sandbox keeps two things apart:
 
 - **The package** — the code, which is what you replace when you upgrade.
-- **Your files** — settings, API keys, the model catalogue, usage history and conversations. These live in a folder of your own, outside the package, so replacing the package can never take them with it.
+- **Your files** — settings, API keys, the model catalog, usage history and conversations. These live in a folder of your own, outside the package, so replacing the package can never take them with it.
 
 Setup asks where your folder should go, offering `PU_AISandbox_data` in your home folder. A small marker file (`.installation`) inside the package records the answer; its absence is what tells the sandbox this copy hasn't been set up yet.
 
@@ -34,7 +34,7 @@ python main.py settings add-professor
 
 # 3. Check it
 python main.py --show-config    # who is configured — makes no API calls
-python main.py --list-models    # the model catalogue
+python main.py --list-models    # the model catalog
 ```
 
 Setup runs on its own the first time you use a copy that hasn't been set up, so you can also just run the command you actually wanted and answer its questions. `python3 start.py` covers the same two steps in a browser instead: a page asking where your files go, then the web interface's Settings page for adding people. Neither route is the lesser one — they write the same `settings.toml`.
@@ -168,7 +168,7 @@ Not set here. Each plugin declares the models its own work should use, and ships
 
 To change one, edit your own `preferences.toml` — every plugin's model list is already listed there for you, commented out, with the plugin author's note about it. Uncomment the line and edit it. You never need to open anything inside `plugins/`. See [Plugin settings](#plugin-settings), and [`plugin-authoring-guide.md`](plugin-authoring-guide.md#which-models-your-plugin-uses) for what a plugin declares.
 
-Each list is tried in order, and if none of the models in it are left the sandbox falls back to the cheapest one in the catalogue that can do the job, saying so. That is a safety net, not a preference — it keeps things working but chooses on price alone.
+Each list is tried in order, and if none of the models in it are left the sandbox falls back to the cheapest one in the catalog that can do the job, saying so. That is a safety net, not a preference — it keeps things working but chooses on price alone.
 
 ### Adding models
 
@@ -202,13 +202,13 @@ established is offered in the picker and then refused when you use it.
 Anything that can't be settled is left alone rather than guessed at, and said
 so. A model that couldn't be reached at all changes nothing.
 
-**Testing a model again** — providers change, and a catalogue built before any
+**Testing a model again** — providers change, and a catalog built before any
 of this existed holds models that were only ever assumed to be text-only. In
 the web interface, press **Test** beside the model. From the command line:
 
 ```bash
 python main.py settings test-model gpt-5.1        # one model
-python main.py settings test-model                # the whole catalogue
+python main.py settings test-model                # the whole catalog
 ```
 
 **A provider PortKey doesn't price** — add the entry by hand, then test it to

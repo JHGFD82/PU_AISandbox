@@ -23,7 +23,7 @@ _prompt = plugin_settings(__file__, "prompt_command")["prompt_command"]
 
 # Which models the `prompt` command should use, in order of preference. Named at
 # all — rather than left to the sandbox — because without a preference,
-# resolution falls straight through to the cheapest model in the catalogue,
+# resolution falls straight through to the cheapest model in the catalog,
 # which for a freeform question is not what anyone means.
 PROMPT_ROLE = ModelRole(
     models=required_models(

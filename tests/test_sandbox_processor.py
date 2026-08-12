@@ -387,7 +387,7 @@ class TestAnEndpointsOwnSettingsAreUsed:
         assert "Certificate checking is turned off" in caplog.text
 
     def test_the_model_is_taken_as_given_not_looked_up(self, monkeypatch):
-        """The catalogue describes the sandbox's models, not this endpoint's."""
+        """The catalog describes the sandbox's models, not this endpoint's."""
         service = self._service(monkeypatch, default_model="llama-3-70b")
         assert service._get_model() == "llama-3-70b"
 

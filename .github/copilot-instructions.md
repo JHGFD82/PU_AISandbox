@@ -97,8 +97,8 @@ python main.py jh43 prompt -s --dry-run       # preview, no API call
 - **Defaults per mode**: `model_catalog.json` → `config.defaults` (`translation`, `ocr`, `image_translation`)
 - **Override**: `-m` / `--model`
 - **OpenAI and Google auto-registration**: `-m openai/model-name` or `-m google/model-name` fetches pricing from [PortKey](https://api.portkey.ai) and saves it on first use
-- **Other providers**: add the entry to `model_catalog.json` by hand. There are no CLI commands for managing the catalogue.
-- **Alternate endpoints**: `-m my_cluster:model-name` routes to an `[endpoints.<name>]` table, bypassing the catalogue entirely
+- **Other providers**: add the entry to `model_catalog.json` by hand. There are no CLI commands for managing the catalog.
+- **Alternate endpoints**: `-m my_cluster:model-name` routes to an `[endpoints.<name>]` table, bypassing the catalog entirely
 
 ## Error handling
 

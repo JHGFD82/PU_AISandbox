@@ -71,7 +71,7 @@ def resolve_model(
 
     available_models = _catalog.get_available_models()
     # Nothing at all is its own answer, and not the same as "nothing that
-    # fits": there is no catalogue to search rather than a search that failed.
+    # fits": there is no catalog to search rather than a search that failed.
     # Said here rather than when the file is read, because reading it is what
     # adding the very first model has to do.
     if not available_models:

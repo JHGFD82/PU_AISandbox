@@ -58,7 +58,7 @@ The single entry point:
 
 ### `src/paths.py` — where files live
 
-Answers one question: which folder holds this person's settings, catalogue and data. A marker file (`.installation`) inside the package records the answer, and has to live there because the sandbox needs to know where the settings file is before it can read it. Its absence is exactly the signal "this copy hasn't been set up" — no version numbers to compare.
+Answers one question: which folder holds this person's settings, catalog and data. A marker file (`.installation`) inside the package records the answer, and has to live there because the sandbox needs to know where the settings file is before it can read it. Its absence is exactly the signal "this copy hasn't been set up" — no version numbers to compare.
 
 ### `src/first_run.py` and `src/setup_prompts.py` — setup
 
@@ -95,7 +95,7 @@ Several optional members (`requires_professor`, `handles`, `ui_action`, `run_ui_
 - Holds the document processors and the file output handler
 - **Lazily** loads plugin-owned services through `__getattr__`
 - **Composes plugin-owned command mixins** as base classes at class-definition time
-- **Routes to alternate endpoints**: if `model` contains colon syntax (e.g. `"my_cluster:llama-3-70b"`), loads the matching `[endpoints.<name>]` definition from the merged settings layers plus its credential from `settings.toml`, points the OpenAI-compatible client at that `base_url`, and bypasses the model catalogue
+- **Routes to alternate endpoints**: if `model` contains colon syntax (e.g. `"my_cluster:llama-3-70b"`), loads the matching `[endpoints.<name>]` definition from the merged settings layers plus its credential from `settings.toml`, points the OpenAI-compatible client at that `base_url`, and bypasses the model catalog
 
 The lazy loader follows a naming convention: attribute `translation_service` maps to `sys.modules["src.services.translation_service"].TranslationService`. Plugins inject their service files into `sys.modules` at import time; the processor instantiates them on first access.
 

@@ -550,7 +550,7 @@ class TestEachConversationHasAFolder:
         assert lines["Temperature"].split(":")[1].strip() == "0.2"
         assert lines["Top-p"].split(":")[1].strip() == str(PROMPT_TOP_P)
 
-    def test_a_model_missing_from_the_catalogue_still_gets_a_note(self, tmp_path):
+    def test_a_model_missing_from_the_catalog_still_gets_a_note(self, tmp_path):
         """A conversation outlives the model it used."""
         store = self._store(tmp_path)
         conv = store.create(model="a-model-that-was-retired")

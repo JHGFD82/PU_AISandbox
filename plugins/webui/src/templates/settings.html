@@ -960,7 +960,7 @@ async function loadModels() {
   try {
     const data = await api("/api/settings/models");
     list.replaceChildren();
-    // The note explains an empty catalogue; an empty catalogue is the only
+    // The note explains an empty catalog; an empty catalog is the only
     // time it is worth reading. A list that failed to load is a different
     // thing and gets its own line rather than this one.
     note.hidden = data.models.length > 0;
@@ -971,7 +971,7 @@ async function loadModels() {
     list.replaceChildren();
     const failed = document.createElement("div");
     failed.className = "empty";
-    failed.textContent = "Could not read the model catalogue.";
+    failed.textContent = "Could not read the model catalog.";
     list.appendChild(failed);
   }
 }
@@ -1012,7 +1012,7 @@ document.getElementById("models-list").addEventListener("click", async (ev) => {
   const button = ev.target.closest("[data-remove-model]");
   if (!button) return;
   const name = button.dataset.removeModel;
-  if (!confirm(`Remove ${name} from the catalogue?\n\nIt no longer exists, so every request naming it fails. Adding it back later is one line in the box below.`)) return;
+  if (!confirm(`Remove ${name} from the catalog?\n\nIt no longer exists, so every request naming it fails. Adding it back later is one line in the box below.`)) return;
   try {
     await api(`/api/settings/models/${encodeURIComponent(name)}`, { method: "DELETE" });
     await loadModels();
@@ -1060,7 +1060,7 @@ async function loadSettings() {
   renderSourceId(data);
   renderModelProfessors(data);
   renderFolderChoices(await api("/api/settings/conversation-folder"));
-  // Fetched separately, and not awaited with the rest: the catalogue is read
+  // Fetched separately, and not awaited with the rest: the catalog is read
   // from disk per model and this section is far down the page. Letting it
   // arrive late keeps the settings anyone actually came for on screen first.
   loadModels();

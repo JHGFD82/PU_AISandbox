@@ -3635,7 +3635,7 @@ class TestTheSettingsPageSaysThingsOnce:
         assert 'id="lock-btn"' in source
         assert "hidden = embeddedInModal" in source
         # The bar specifically. Other things on this page are hidden and shown
-        # by their own logic — an empty-catalogue note, for one — and reading
+        # by their own logic — an empty-catalog note, for one — and reading
         # any of those as this rule made the check fail for the wrong reason.
         assert not re.search(r'getElementById\("topbar"\)\.hidden\s*=\s*(true|false)', source)
 
@@ -4543,8 +4543,8 @@ class TestTheReferenceCodeCanActuallyBeLookedUp:
 
 
 @pytest.fixture
-def a_catalogue(monkeypatch, tmp_path):
-    """A small real catalogue on disk, read through the ordinary path.
+def a_catalog(monkeypatch, tmp_path):
+    """A small real catalog on disk, read through the ordinary path.
 
     One model tested and able to read images, one recorded as text-only by the
     old assumption with nothing to show it was ever asked.
@@ -4583,8 +4583,8 @@ class TestAddingAModelFromTheBrowser:
             "provider_model": "openai/gpt-4o", "professor": "smith",
         }).status_code == 401
 
-    def test_the_catalogue_is_listed_with_what_each_model_can_do(
-        self, unlocked_client, a_catalogue
+    def test_the_catalog_is_listed_with_what_each_model_can_do(
+        self, unlocked_client, a_catalog
     ):
         models = unlocked_client.get("/api/settings/models").json()["models"]
         assert [m["name"] for m in models] == ["gpt-4o", "old-text-model"]
@@ -4594,7 +4594,7 @@ class TestAddingAModelFromTheBrowser:
         assert seen["gpt-4o"]["input"] == 2.5
 
     def test_a_model_nobody_has_tested_is_not_called_text_only(
-        self, unlocked_client, a_catalogue
+        self, unlocked_client, a_catalog
     ):
         """The distinction the whole section turns on.
 
@@ -4605,12 +4605,12 @@ class TestAddingAModelFromTheBrowser:
                   unlocked_client.get("/api/settings/models").json()["models"]}
         assert models["old-text-model"]["tested"] is False
 
-    def test_a_missing_catalogue_is_an_empty_list_not_a_failure(
+    def test_a_missing_catalog_is_an_empty_list_not_a_failure(
         self, unlocked_client, monkeypatch, tmp_path
     ):
         """An ordinary state on a copy that has not been set up yet.
 
-        Pointed at a catalogue that is not there, rather than relying on the
+        Pointed at a catalog that is not there, rather than relying on the
         suite's fixture being empty — it is not, and a test that passes only
         because of what another file happens to contain is not testing this.
         """
@@ -4679,7 +4679,7 @@ class TestTestingAModelAgainFromTheBrowser:
         from src.models.capabilities import CapabilityReport
         return CapabilityReport(**kw)
 
-    def test_a_model_not_in_the_catalogue_is_a_404(self, unlocked_client, monkeypatch):
+    def test_a_model_not_in_the_catalog_is_a_404(self, unlocked_client, monkeypatch):
         monkeypatch.setattr("src.models.load_model_catalog",
                             lambda: {"config": {}, "models": {}})
         resp = unlocked_client.post("/api/settings/models/no-such-model/test",
@@ -4687,7 +4687,7 @@ class TestTestingAModelAgainFromTheBrowser:
         assert resp.status_code == 404
 
     def test_a_successful_test_saves_and_reports(
-        self, unlocked_client, monkeypatch, a_catalogue
+        self, unlocked_client, monkeypatch, a_catalog
     ):
         """A model recorded as text-only by assumption is corrected in place."""
         saved = {}
@@ -4708,7 +4708,7 @@ class TestTestingAModelAgainFromTheBrowser:
         assert saved["old-text-model"]["input"] == 1.0
 
     def test_a_model_that_cannot_be_reached_changes_nothing(
-        self, unlocked_client, monkeypatch, a_catalogue
+        self, unlocked_client, monkeypatch, a_catalog
     ):
         """The restraint that matters, carried through to the browser.
 
@@ -4716,7 +4716,7 @@ class TestTestingAModelAgainFromTheBrowser:
         to read images — that is indistinguishable from having tested it.
         """
         def must_not_save(catalog):
-            raise AssertionError("a failed test wrote to the catalogue")
+            raise AssertionError("a failed test wrote to the catalog")
 
         monkeypatch.setattr("src.models.save_model_catalog", must_not_save)
         monkeypatch.setattr("src.config.get_api_key", lambda netid: ("sk-test", "primary"))
@@ -4786,12 +4786,12 @@ class TestAModelThatNoLongerExists:
     """
 
     def test_it_is_reported_as_gone_not_as_a_failed_test(
-        self, unlocked_client, monkeypatch, a_catalogue
+        self, unlocked_client, monkeypatch, a_catalog
     ):
         from src.models.capabilities import CapabilityReport
 
         def must_not_save(catalog):
-            raise AssertionError("a retired model was written to the catalogue")
+            raise AssertionError("a retired model was written to the catalog")
 
         monkeypatch.setattr("src.models.save_model_catalog", must_not_save)
         monkeypatch.setattr("src.config.get_api_key", lambda netid: ("sk-test", "primary"))
@@ -4806,13 +4806,13 @@ class TestAModelThatNoLongerExists:
         assert resp.status_code == 410
         assert "no longer exists" in resp.json()["detail"]
 
-    def test_it_can_be_removed(self, unlocked_client, a_catalogue):
+    def test_it_can_be_removed(self, unlocked_client, a_catalog):
         assert unlocked_client.delete("/api/settings/models/old-text-model").status_code == 200
         remaining = [m["name"] for m in
                      unlocked_client.get("/api/settings/models").json()["models"]]
         assert remaining == ["gpt-4o"]
 
-    def test_removing_one_that_is_not_there_is_a_404(self, unlocked_client, a_catalogue):
+    def test_removing_one_that_is_not_there_is_a_404(self, unlocked_client, a_catalog):
         assert unlocked_client.delete("/api/settings/models/never-existed").status_code == 404
 
     def test_removing_needs_an_unlocked_session(self, client):
@@ -5343,26 +5343,26 @@ class TestTheWebFirstRunExplainsItself:
         fn = page.split("async function loadModels")[1].split("\n}")[0]
         assert "note.hidden = data.models.length > 0;" in fn
 
-    def test_a_catalogue_that_would_not_load_is_a_different_thing(self):
+    def test_a_catalog_that_would_not_load_is_a_different_thing(self):
         """Not the same as having none, and it must not read as advice."""
         page = _rendered_template("settings.html")
         fn = page.split("async function loadModels")[1].split("\n}")[0]
         failure = fn.split("catch")[1]
         assert "note.hidden = true;" in failure
-        assert "Could not read the model catalogue" in failure
+        assert "Could not read the model catalog" in failure
 
 
 class TestAddingTheFirstModel:
     """The one thing a new installation must be able to do.
 
-    Adding a model reads the catalogue, puts the entry in, and saves it. While
-    an empty catalogue refused to be read, that first step raised — so the very
+    Adding a model reads the catalog, puts the entry in, and saves it. While
+    an empty catalog refused to be read, that first step raised — so the very
     situation the Models panel exists for was the one it could not handle, and
     the person was told "there are no models set up yet" while trying to set
     one up.
     """
 
-    def _empty_catalogue(self, monkeypatch, tmp_path):
+    def _empty_catalog(self, monkeypatch, tmp_path):
         import src.models.catalog as catalog_module
         path = tmp_path / "model_catalog.json"
         path.write_text(json.dumps(
@@ -5374,7 +5374,7 @@ class TestAddingTheFirstModel:
     def test_the_models_panel_loads_with_none(
         self, unlocked_client, monkeypatch, tmp_path
     ):
-        self._empty_catalogue(monkeypatch, tmp_path)
+        self._empty_catalog(monkeypatch, tmp_path)
         resp = unlocked_client.get("/api/settings/models")
         assert resp.status_code == 200
         assert resp.json()["models"] == []
@@ -5382,21 +5382,21 @@ class TestAddingTheFirstModel:
     def test_the_settings_page_still_answers(
         self, unlocked_client, monkeypatch, tmp_path
     ):
-        """It reports has_models, which means reading a catalogue with none."""
-        self._empty_catalogue(monkeypatch, tmp_path)
+        """It reports has_models, which means reading a catalog with none."""
+        self._empty_catalog(monkeypatch, tmp_path)
         resp = unlocked_client.get("/api/settings")
         assert resp.status_code == 200
         assert resp.json()["has_models"] is False
 
-    def test_adding_one_gets_past_reading_the_catalogue(
+    def test_adding_one_gets_past_reading_the_catalog(
         self, unlocked_client, monkeypatch, tmp_path, settings_env
     ):
         """Not a test of the provider call — of the step that used to raise first.
 
         Whatever the request to the provider does, it has to be *reached*.
-        While an empty catalogue refused to be read, it never was.
+        While an empty catalog refused to be read, it never was.
         """
-        self._empty_catalogue(monkeypatch, tmp_path)
+        self._empty_catalog(monkeypatch, tmp_path)
         settings_store_mod.add_professor("jh43", "Jeff Heller", "a-key")
         reached = {}
         import src.models as models_module
@@ -5409,7 +5409,7 @@ class TestAddingTheFirstModel:
         unlocked_client.post("/api/settings/models",
                              json={"provider_model": "openai/gpt-4o", "professor": "jh43"})
         assert reached.get("name") == "openai/gpt-4o", (
-            "the catalogue read raised before the model could be looked up"
+            "the catalog read raised before the model could be looked up"
         )
 
 

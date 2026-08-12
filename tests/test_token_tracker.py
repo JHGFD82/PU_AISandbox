@@ -1441,7 +1441,7 @@ class TestAlternateEndpointsAreNotPriced:
         """Not merely zeroed afterwards.
 
         Looking the model up would log a warning telling someone to add it to
-        the catalogue — advice that makes no sense for a service the catalogue
+        the catalog — advice that makes no sense for a service the catalog
         does not describe.
         """
         t = self._make_tracker(tmp_path)

@@ -362,13 +362,13 @@ def _key_for_testing(requested: str | None) -> str:
 def _settings_test_model(args: argparse.Namespace) -> None:
     """Find out what a model can do by trying it, and save the answers.
 
-    The catalogue has to know several things about a model — whether it can
+    The catalog has to know several things about a model — whether it can
     read images, what it wants the response-length setting called, and so on —
     that no provider publishes anywhere readable. This settles them by sending
     the model a few very small requests and seeing which it accepts.
 
-    With no model named, tests every model in the catalogue. That is the way to
-    correct a catalogue built before testing existed, where anything added
+    With no model named, tests every model in the catalog. That is the way to
+    correct a catalog built before testing existed, where anything added
     automatically was recorded as unable to read images because there was no
     way to find out.
     """
@@ -383,7 +383,7 @@ def _settings_test_model(args: argparse.Namespace) -> None:
     available = get_available_models()
     if args.model is not None and args.model not in available:
         raise CLIError(
-            f"'{args.model}' isn't in the catalogue, so there is nothing to test. "
+            f"'{args.model}' isn't in the catalog, so there is nothing to test. "
             f"Models it knows about: {', '.join(sorted(available, key=str.lower))}"
         )
     targets = [args.model] if args.model else sorted(available, key=str.lower)
@@ -428,7 +428,7 @@ def _settings_test_model(args: argparse.Namespace) -> None:
             catalog["models"][name] = after
             changed += 1
             # Written now rather than at the end. A sweep of the whole
-            # catalogue is a few minutes of requests, and keeping it all until
+            # catalog is a few minutes of requests, and keeping it all until
             # the last one means an interruption anywhere throws away every
             # answer already paid for.
             save_model_catalog(catalog)
@@ -464,7 +464,7 @@ def _settings_model_quirks(args: argparse.Namespace) -> None:
     and leaves it out from then on, so the same failure doesn't happen twice.
     Nothing is ever forgotten on its own — that would bring the failure back on
     a schedule — but providers do change, and this is how somebody says "try
-    that again" without opening the catalogue file and editing it by hand.
+    that again" without opening the catalog file and editing it by hand.
 
     With no model named, lists what has been learned and when. With one, forgets
     it: the next request includes those parts again, and if the provider still
@@ -488,7 +488,7 @@ def _settings_model_quirks(args: argparse.Namespace) -> None:
                 print(f"  {field}  (noted {when})")
                 # What a provider says when it refuses something is often a
                 # wall of machine-readable detail. The whole of it stays in the
-                # catalogue; enough to recognise it is what belongs on screen.
+                # catalog; enough to recognise it is what belongs on screen.
                 said = " ".join(said.split())
                 print(f"    {said[:110] + '…' if len(said) > 110 else said}")
         print(

@@ -132,7 +132,7 @@ class ModePlugin(Protocol):
                         length, roughly one token per word), if the user
                         specified a value with ``-M``. ``None`` means use the
                         service's own limit, or whatever the
-                        catalogue says the model can manage.
+                        catalog says the model can manage.
 
         Note:
             Token tracking is mandatory — every API call made here must be

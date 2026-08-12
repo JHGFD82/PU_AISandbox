@@ -27,7 +27,7 @@ def _isolate(tmp_path, monkeypatch):
     templates.mkdir(parents=True)
     (templates / "settings.template").write_text("# starting point\n", encoding="utf-8")
     (templates / "preferences.template.toml").write_text("# preferences\n", encoding="utf-8")
-    # Shaped like the real template: a catalogue is a config section and a
+    # Shaped like the real template: a catalog is a config section and a
     # models section, and code that reads one is entitled to expect both.
     (templates / "model_catalog.template.json").write_text(
         '{"config": {"pricing_unit": 1000000}, "models": {}}\n', encoding="utf-8")
@@ -397,7 +397,7 @@ class TestAskingWhoIsUsingThisAndWhatTheyMaySendTo:
         import src.models.catalog as catalog_module
 
         client, chosen, _page = self._at_step_two(client_and_result)
-        # The catalogue setup just made, not the suite's fixture one — this is
+        # The catalog setup just made, not the suite's fixture one — this is
         # about what a brand-new installation holds.
         monkeypatch.setattr(
             catalog_module, "get_model_catalog_path",
@@ -414,7 +414,7 @@ class TestAskingWhoIsUsingThisAndWhatTheyMaySendTo:
 
         client, chosen, _page = self._at_step_two(client_and_result)
         client.post("/people", json={"netid": "jh43", "name": "J", "key": "sk-t"})
-        # The model is put in the catalogue directly: adding one through the
+        # The model is put in the catalog directly: adding one through the
         # route would call a provider, and what is being tested here is the
         # ending, not the looking-up.
         import src.models.catalog as catalog_module

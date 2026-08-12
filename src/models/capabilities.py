@@ -400,7 +400,7 @@ _PROBES = (
 
 # Long enough for a slow provider to answer sixteen tokens, short enough that
 # one unresponsive model cannot hold up the rest. Without it a sweep of the
-# catalogue stalled for seven minutes on a single request and would have waited
+# catalog stalled for seven minutes on a single request and would have waited
 # indefinitely — and in the browser that is a page that never comes back.
 _TESTING_TIMEOUT_SECONDS = 60.0
 
@@ -489,7 +489,7 @@ def probe_model_capabilities(model_name: str, client: Any) -> CapabilityReport:
                 ]
                 logger.warning(
                     "'%s' does not exist for this installation, so nothing was "
-                    "recorded against it. It can be removed from the catalogue.",
+                    "recorded against it. It can be removed from the catalog.",
                     model_name,
                 )
                 return report

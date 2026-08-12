@@ -48,7 +48,7 @@ python main.py --show-config
 
 ### `--list-models`
 
-Print every model in the catalogue with its pricing and capability flags.
+Print every model in the catalog with its pricing and capability flags.
 
 ```bash
 python main.py --list-models
@@ -114,7 +114,7 @@ than invented.
 | `set <dotted.path>` | Sets one value, prompting for it. Add `--generate` for a random secret. |
 | `unset <dotted.path>` | Removes one value. |
 | `model-quirks [model]` | Shows what parts of a request each model has been found to refuse, and when. Name a model to forget its notes, so those parts are tried once more — useful when a provider has since started accepting something. Costs one failed request at worst: if it is still refused, that is noted again. Quirks written into `model_catalog.json` by hand are left alone. See [Configuration](configuration.md#when-a-model-turns-part-of-a-request-down). |
-| `test-model [model]` | Finds out what a model can do by trying it — whether it can read images, what it wants the response-length setting called, which label it expects on an opening instruction, and whether it accepts being told how varied its wording should be — then saves the answers. This happens on its own when a model is added; run it by hand to check a model again, or with no model named to go through the whole catalogue. Sends a few one-token requests per model, billed to the key used; `--professor` says whose when more than one person is set up. Anything it can't settle is left as it was and reported, never guessed. |
+| `test-model [model]` | Finds out what a model can do by trying it — whether it can read images, what it wants the response-length setting called, which label it expects on an opening instruction, and whether it accepts being told how varied its wording should be — then saves the answers. This happens on its own when a model is added; run it by hand to check a model again, or with no model named to go through the whole catalog. Sends a few one-token requests per model, billed to the key used; `--professor` says whose when more than one person is set up. Anything it can't settle is left as it was and reported, never guessed. |
 | `export-shared` | Writes a draft settings file for a group to follow — every setting the sandbox and its plugins have, commented out, with each author's explanation. `--output` chooses where; `--from` carries decisions across from a file already in use and marks anything new since. You place the result yourself. The web interface can produce the same file — **Settings → Shared settings → Download a shared settings draft** — so neither the person maintaining it nor the members need a terminal. See [Configuration](configuration.md#setting-up-a-shared-file-for-a-group). |
 
 API keys and other secrets are always typed at a hidden prompt, never accepted as a flag, so they can't end up in shell history or be read by another process listing running commands.
@@ -439,14 +439,14 @@ Leave it off to process everything.
 
 ## Specifying models
 
-**Already in the catalogue** — use the bare name:
+**Already in the catalog** — use the bare name:
 
 ```bash
 python main.py jh43 prompt -m gpt-4o
 python main.py jh43 prompt -m gpt-4o-mini
 ```
 
-**Not in the catalogue yet** — put `provider/` in front and the price is fetched from PortKey and saved:
+**Not in the catalog yet** — put `provider/` in front and the price is fetched from PortKey and saved:
 
 ```bash
 python main.py jh43 prompt -m openai/gpt-4o-new
@@ -462,7 +462,7 @@ python main.py jh43 prompt -m my_cluster:llama-3-70b-instruct
 python main.py jh43 translate jp-en -i paper.pdf -m my_cluster:llama-3-70b-instruct
 ```
 
-The part before the colon names the endpoint; everything after is passed to it as the model name. The catalogue is bypassed entirely, and the endpoint's API key is read from `endpoints.<name>.key` in `settings.toml`. Token usage is still recorded.
+The part before the colon names the endpoint; everything after is passed to it as the model name. The catalog is bypassed entirely, and the endpoint's API key is read from `endpoints.<name>.key` in `settings.toml`. Token usage is still recorded.
 
 **Everything at once** — if `[config] default_endpoint` is set in any settings layer, every bare model name goes there rather than to the built-in service.
 

@@ -191,7 +191,7 @@ Your files are already here
     /Users/you/PU_AISandbox_data
 
     your settings and API keys (2 people configured)
-    your model catalogue
+    your model catalog
     your usage history (11 months)
 
     [ Use these files ]

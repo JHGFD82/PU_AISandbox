@@ -38,7 +38,7 @@ def _describe(candidate: first_run.ExtrasCandidate) -> list[str]:
         )
         lines.append(f"    your settings and API keys   ({who})")
     if candidate.has_catalog:
-        lines.append("    your model catalogue")
+        lines.append("    your model catalog")
     if candidate.months:
         months = "1 month" if candidate.months == 1 else f"{candidate.months} months"
         lines.append(f"    your usage history           ({months})")

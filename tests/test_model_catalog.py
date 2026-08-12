@@ -95,7 +95,7 @@ class TestGetModelCatalogPath:
         assert path.name == "model_catalog.json"
 
     def test_path_is_in_the_folder_this_installation_keeps_its_files_in(self):
-        """The catalogue belongs to the person, not the package.
+        """The catalog belongs to the person, not the package.
 
         It used to live under src/, which meant replacing the package
         replaced their pricing and model list too.
@@ -137,13 +137,13 @@ class TestLoadModelCatalog:
         with pytest.raises(ValueError, match="'models' section"):
             load_model_catalog()
 
-    def test_reading_an_empty_catalogue_is_allowed(self, monkeypatch, tmp_path):
+    def test_reading_an_empty_catalog_is_allowed(self, monkeypatch, tmp_path):
         """Because adding the first model has to read the file before writing it.
 
         Objecting here made the first model impossible to add: the web
-        interface's Add-and-test loads the catalogue, puts the new entry in, and
+        interface's Add-and-test loads the catalog, puts the new entry in, and
         saves it — and the load raised before it got that far. An empty
-        catalogue is an ordinary state on a copy that has just been set up.
+        catalog is an ordinary state on a copy that has just been set up.
         """
         catalog = tmp_path / "model_catalog.json"
         catalog.write_text(json.dumps({"config": {}, "models": {}}))
@@ -177,7 +177,7 @@ class TestLoadModelCatalog:
         assert str(catalog) in message
 
     def test_the_first_model_can_actually_be_added(self, monkeypatch, tmp_path):
-        """The whole point: read an empty catalogue, add to it, save, use it."""
+        """The whole point: read an empty catalog, add to it, save, use it."""
         catalog = tmp_path / "model_catalog.json"
         catalog.write_text(json.dumps(
             {"config": {"pricing_unit": 1000000}, "models": {}}))
@@ -224,7 +224,7 @@ class TestGetModelPricing:
         assert pricing["output"] == 11.0
 
     def test_unknown_model_is_priced_at_the_cheapest_models_rates(self, mock_catalog):
-        """An uncatalogued model is recorded rather than lost, at the cheapest rates.
+        """An uncatalogd model is recorded rather than lost, at the cheapest rates.
 
         Deliberately not a named stand-in: whichever model were named here
         would one day be retired, and then this path would raise instead of
@@ -514,11 +514,11 @@ class TestLoadModelCatalogMissingFileError:
             lmc()
 
     def test_missing_file_error_names_the_one_command_that_fixes_it(self, monkeypatch, tmp_path):
-        """Setup creates the catalogue, so that is the whole answer.
+        """Setup creates the catalog, so that is the whole answer.
 
         This used to also suggest passing 'openai/model-name' to -m to
         auto-register a model. That advice is unusable at this exact moment:
-        auto-registering writes *into* the catalogue, which is the thing
+        auto-registering writes *into* the catalog, which is the thing
         that isn't there. Offering someone a second option that cannot work
         makes the first one harder to find.
         """
@@ -1295,7 +1295,7 @@ class TestForgettingWhatAModelRefuses:
         path = self._catalog(tmp_path, monkeypatch, {"m": {"input": 1.0, "output": 2.0}})
         before = path.read_text()
         assert clear_rejected_fields("m") == {}
-        assert path.read_text() == before, "the catalogue was rewritten for nothing"
+        assert path.read_text() == before, "the catalog was rewritten for nothing"
 
     def test_a_model_that_is_not_there_at_all_is_not_an_error(self, tmp_path, monkeypatch):
         from src.models.catalog import clear_rejected_fields
@@ -1383,7 +1383,7 @@ class TestWhoseModelIsIt:
 
         assert model_owner("strange-thing") == "Other"
 
-    def test_every_model_in_this_catalogue_is_placed(self, monkeypatch):
+    def test_every_model_in_this_catalog_is_placed(self, monkeypatch):
         from src.models.catalog import model_owner
 
         self._catalog(monkeypatch, {
@@ -1432,7 +1432,7 @@ class TestAModelThatCannotReadImagesSaysSo:
         """It read 'No able to read images models available' at one point.
 
         Reached when models exist and none of them can read images — a real
-        search that found nothing. An empty catalogue is a different answer
+        search that found nothing. An empty catalog is a different answer
         (see below), because there was nothing to search.
         """
         # Models exist; none of them can read images. That is a search that
@@ -1443,13 +1443,13 @@ class TestAModelThatCannotReadImagesSaysSo:
             resolve_model(require_vision=True)
         assert "No model in the catalog can read images" in str(raised.value)
 
-    def test_an_empty_catalogue_is_told_apart_from_a_search_that_failed(
+    def test_an_empty_catalog_is_told_apart_from_a_search_that_failed(
         self, mock_catalog, monkeypatch
     ):
         """"None of them can read images" is no use when there are none at all.
 
         The second says what to do; the first sends somebody looking through a
-        catalogue that is empty.
+        catalog that is empty.
         """
         monkeypatch.setattr(catalog_module, "get_available_models", lambda: [])
         with pytest.raises(CLIError) as raised:
@@ -1477,7 +1477,7 @@ class TestAnAutoAddedModelAnnouncesWhatItCannotDo:
         assert entry["supports_vision"] is False
         assert "chat" in caplog.text.lower()
         # Names the command that settles it, rather than asking anyone to open
-        # the catalogue — which is the whole point of testing on add.
+        # the catalog — which is the whole point of testing on add.
         assert "settings test-model" in caplog.text
 
     def test_it_says_nothing_when_the_answer_was_reported(self, monkeypatch, tmp_path, caplog):

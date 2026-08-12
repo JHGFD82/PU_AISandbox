@@ -497,7 +497,7 @@ class TestHandleInfoCommandsSettings:
 
 
 class TestTheModelQuirksCommand:
-    """Saying "try that again" without editing the catalogue by hand."""
+    """Saying "try that again" without editing the catalog by hand."""
 
     def _args(self, model=None):
         import argparse

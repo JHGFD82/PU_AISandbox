@@ -215,7 +215,7 @@ def required_models(settings: dict, key: str, *, where: str) -> list[str]:
         raise ValueError(
             f"This plugin is incomplete: {where} should give '{key}' as a list of "
             f"model names, best first, and gives {names!r} instead. Without it the "
-            "sandbox would fall back to whichever model in the catalogue happens "
+            "sandbox would fall back to whichever model in the catalog happens "
             "to be cheapest. Whoever maintains the plugin needs to fix this — it "
             "is not something you can correct from your own settings."
         )

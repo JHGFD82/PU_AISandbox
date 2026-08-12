@@ -290,7 +290,7 @@ def effective_sampling(conversation: "Conversation") -> dict[str, Any]:
     A conversation that sets none of these is not sent without them, and the
     model does not fall back to a preference of its own: the sandbox fills in
     its own values, from the ``[prompt]`` section of ``settings.default.toml``
-    (and, for the response-length cap, whatever the model catalogue says that
+    (and, for the response-length cap, whatever the model catalog says that
     model can manage). So there is always a real number, and recording the word
     "default" instead of it would hide the one thing worth knowing — what the
     answer was actually produced with.
@@ -304,7 +304,7 @@ def effective_sampling(conversation: "Conversation") -> dict[str, Any]:
         sandbox's.
     """
     # Imported here rather than at the top: this module is the plain store for
-    # conversations, and it should not drag the model catalogue in on import.
+    # conversations, and it should not drag the model catalog in on import.
     from src.models.catalog import get_model_max_completion_tokens
     from src.settings import PROMPT_MAX_TOKENS, PROMPT_TEMPERATURE, PROMPT_TOP_P
 
@@ -314,7 +314,7 @@ def effective_sampling(conversation: "Conversation") -> dict[str, Any]:
         try:
             max_tokens = get_model_max_completion_tokens(conversation.model, PROMPT_MAX_TOKENS)
         except Exception:
-            # A model no longer in the catalogue still had a conversation; the
+            # A model no longer in the catalog still had a conversation; the
             # sandbox's own figure is what it would fall back to.
             max_tokens = PROMPT_MAX_TOKENS
     return {
@@ -359,7 +359,7 @@ class Conversation:
                model-support caveat as ``temperature``.
         max_tokens: This conversation's response-length cap override, or
                     ``None`` for the sandbox's own, which for this one is
-                    whatever the catalogue says the model can manage. Same
+                    whatever the catalog says the model can manage. Same
                     persistence as
                     ``temperature``, but (unlike temperature/top-p) every
                     model accepts a max-tokens cap of some kind.

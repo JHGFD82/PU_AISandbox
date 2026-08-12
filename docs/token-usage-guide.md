@@ -247,8 +247,8 @@ Daily Breakdown:
 ### Usage isn't being recorded
 
 1. Check the `data` folder can be written to.
-2. Check the model name in `model_catalog.json` matches the name the API reports back. Run with `--verbose` to see the model name used on each call, and compare it with the keys in the catalogue.
-3. Check `monthly_limit` is set in the catalogue's `config` section.
+2. Check the model name in `model_catalog.json` matches the name the API reports back. Run with `--verbose` to see the model name used on each call, and compare it with the keys in the catalog.
+3. Check `monthly_limit` is set in the catalog's `config` section.
 
 ### Error messages
 
@@ -256,6 +256,6 @@ Daily Breakdown:
 |---------|------------|
 | `Model catalog file not found` | `python main.py settings setup` |
 | `Invalid JSON in model catalog file` | Fix the syntax error in `model_catalog.json` |
-| `Missing required 'models' section` | Add a `"models"` key to the catalogue |
+| `Missing required 'models' section` | Add a `"models"` key to the catalog |
 | `No models configured` | Add at least one model to `"models"` |
 | `No archive found for YYYY-MM` | Nothing was recorded that month — `usage months` lists the ones that exist |

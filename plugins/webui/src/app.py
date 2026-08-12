@@ -303,7 +303,7 @@ def _any_models() -> bool:
 
     A freshly set-up copy has none — which models exist depends on the
     institution's AI sandbox rather than on this software, so none are shipped.
-    An empty catalogue is an ordinary state here, not a fault, which is why this
+    An empty catalog is an ordinary state here, not a fault, which is why this
     answers False rather than letting the error out.
     """
     from src.models import load_model_catalog
@@ -318,7 +318,7 @@ def _capability_summary(model: str) -> dict:
     """Describe what one model can do, in terms the settings page can show.
 
     Args:
-        model: The model's name as the catalogue holds it.
+        model: The model's name as the catalog holds it.
 
     Returns:
         What the page needs to render one row: whether it can read images,
@@ -349,10 +349,10 @@ def _capability_summary(model: str) -> dict:
 
 
 def _models_with_capabilities() -> list[dict]:
-    """List every catalogue model with its price and what it can do.
+    """List every catalog model with its price and what it can do.
 
     Returns:
-        One entry per model, or an empty list if there is no catalogue yet —
+        One entry per model, or an empty list if there is no catalog yet —
         which is an ordinary state on a copy that hasn't been set up, and not
         a reason for the settings page to fail to load.
     """
@@ -990,7 +990,7 @@ def create_app() -> FastAPI:
 
     @app.get("/api/settings/models")
     async def api_settings_models(request: Request):
-        """List every model in the catalogue with what is known about each."""
+        """List every model in the catalog with what is known about each."""
         _require_unlocked(request)
         return {"models": _models_with_capabilities()}
 
@@ -1024,7 +1024,7 @@ def create_app() -> FastAPI:
 
     @app.post("/api/settings/models/{model_name}/test")
     def api_test_model(request: Request, model_name: str, body: TestModelBody):
-        """Try a model already in the catalogue again and save what comes back.
+        """Try a model already in the catalog again and save what comes back.
 
         The way to correct an entry recorded before any of this existed, when
         a model added automatically was simply assumed unable to read images.
@@ -1039,7 +1039,7 @@ def create_app() -> FastAPI:
 
         catalog = load_model_catalog()
         if model_name not in catalog.get("models", {}):
-            raise HTTPException(404, f"'{model_name}' isn't in the catalogue.")
+            raise HTTPException(404, f"'{model_name}' isn't in the catalog.")
 
         api_key, _ = get_api_key(professor)
         report = probe_model_capabilities(model_name, client_for_testing(api_key))
@@ -1051,7 +1051,7 @@ def create_app() -> FastAPI:
             raise HTTPException(
                 410,
                 f"'{model_name}' no longer exists, so there was nothing to test. "
-                "Every request for it will fail. You can remove it from the catalogue.",
+                "Every request for it will fail. You can remove it from the catalog.",
             )
         if not report.reachable:
             raise HTTPException(
@@ -1072,7 +1072,7 @@ def create_app() -> FastAPI:
 
     @app.delete("/api/settings/models/{model_name}")
     async def api_remove_model(request: Request, model_name: str):
-        """Take a model out of the catalogue.
+        """Take a model out of the catalog.
 
         For an entry a provider has retired: it cannot be used, and every
         request naming it fails. Removing is not automatic — see the note on
@@ -1082,7 +1082,7 @@ def create_app() -> FastAPI:
         from src.models import remove_model_from_catalog
 
         if not remove_model_from_catalog(model_name):
-            raise HTTPException(404, f"'{model_name}' isn't in the catalogue.")
+            raise HTTPException(404, f"'{model_name}' isn't in the catalog.")
         return {"ok": True, "removed": model_name}
 
     @app.get("/api/models")
