@@ -301,3 +301,97 @@ class TestThePauseBeforeInstalling:
         monkeypatch.setattr(start.sys.stdin, "isatty", lambda: True)
         monkeypatch.setattr(start, "read_one_key", lambda: "")
         assert start.wait_for_go_ahead() is False
+
+
+class TestSayingWhereTheSoftwareGoes:
+    """Somebody who has made an environment of their own and activated it has
+    no way to tell whether this is about to fill that one or make another.
+    Both are reasonable to expect, so the script says which."""
+
+    def _said(self, start, monkeypatch, **environment):
+        for name in ("CONDA_DEFAULT_ENV", "VIRTUAL_ENV"):
+            monkeypatch.delenv(name, raising=False)
+        for name, value in environment.items():
+            monkeypatch.setenv(name, value)
+        lines = []
+        monkeypatch.setattr(start, "say", lines.append)
+        start.explain_where_the_software_goes()
+        return "\n".join(lines)
+
+    def test_it_always_says_where_the_software_is_going(self, start, monkeypatch):
+        said = self._said(start, monkeypatch)
+        assert ".venv" in said
+        assert "inside this one" in said
+
+    def test_a_conda_environment_is_named(self, start, monkeypatch):
+        said = self._said(start, monkeypatch, CONDA_DEFAULT_ENV="humanities")
+        assert "conda environment 'humanities'" in said
+
+    def test_conda_base_is_not_called_a_name(self, start, monkeypatch):
+        """"the conda environment 'base'" reads as somebody's own project."""
+        said = self._said(start, monkeypatch, CONDA_DEFAULT_ENV="base")
+        assert "base environment" in said
+        assert "'base'" not in said
+
+    def test_an_activated_venv_is_named(self, start, monkeypatch):
+        said = self._said(start, monkeypatch, VIRTUAL_ENV="/Users/x/project/.venv")
+        assert "/Users/x/project/.venv" in said
+
+    def test_conda_wins_when_both_are_set(self, start, monkeypatch):
+        """Activating a conda environment sets VIRTUAL_ENV on some setups, and
+        the conda name is the one the person recognises."""
+        said = self._said(start, monkeypatch,
+                          CONDA_DEFAULT_ENV="humanities", VIRTUAL_ENV="/somewhere")
+        assert "humanities" in said
+        assert "/somewhere" not in said
+
+    def test_it_promises_not_to_touch_theirs(self, start, monkeypatch):
+        said = self._said(start, monkeypatch, CONDA_DEFAULT_ENV="humanities")
+        assert "will not be changed" in said
+
+    def test_and_says_how_to_use_theirs_instead(self, start, monkeypatch):
+        """The offer has to be real: the sandbox runs from whatever is active
+        when there is no .venv, which is what makes this work."""
+        said = self._said(start, monkeypatch, CONDA_DEFAULT_ENV="humanities")
+        assert "pip install -r requirements.txt" in said
+        assert "python main.py" in said
+
+    def test_nothing_is_said_about_an_environment_that_is_not_there(
+        self, start, monkeypatch
+    ):
+        """Nothing activated: a paragraph about leaving it alone would be a
+        paragraph about nothing."""
+        import sys as _sys
+
+        monkeypatch.setattr(_sys, "base_prefix", _sys.prefix, raising=False)
+        said = self._said(start, monkeypatch)
+        assert "currently in" not in said
+        assert "pip install" not in said
+
+    def test_the_sandboxs_own_environment_is_not_called_the_persons(
+        self, start, monkeypatch
+    ):
+        """Running this from inside .venv is ordinary on a second run. Naming
+        it would promise not to install into the very folder being installed
+        into."""
+        said = self._said(start, monkeypatch, VIRTUAL_ENV=str(start.VENV_DIR))
+        assert "currently in" not in said
+
+    def test_even_when_reached_by_a_different_spelling_of_the_same_path(
+        self, start, monkeypatch
+    ):
+        said = self._said(start, monkeypatch,
+                          VIRTUAL_ENV=str(start.VENV_DIR) + "/./")
+        assert "currently in" not in said
+
+    def test_the_person_is_told_this_before_being_asked_to_press_return(self, start):
+        """It is the answer to "what is about to happen", so it belongs above
+        the question, not after it."""
+        source = _START.read_text(encoding="utf-8")
+        main = source[source.index("def main():"):]
+        assert main.index("explain_where_the_software_goes()") < main.index(
+            "wait_for_go_ahead()")
+
+    def test_and_told_where_it_went_afterwards(self, start):
+        source = _START.read_text(encoding="utf-8")
+        assert "Software installed into %s." in source

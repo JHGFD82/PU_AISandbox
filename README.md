@@ -68,6 +68,24 @@ The first time, it tells you what it is about to install and waits for you to pr
 
 The first run takes a few minutes — about 200 MB of software is downloaded. Every run after that reaches the web interface in about a second, so this is also the normal way to open the sandbox day to day.
 
+### If you already have an environment of your own
+
+`start.py` makes an environment of its own, in a folder named `.venv` inside
+the sandbox folder, and installs into that. It never installs into a conda
+environment or a virtualenv you have activated, and it says so before it
+starts — naming yours, so there is no doubt which one it means.
+
+If you would rather it used yours, don't run `start.py`. With your environment
+activated:
+
+```bash
+pip install -r requirements.txt
+python main.py webui serve
+```
+
+Both work. `main.py` uses `.venv` whenever there is one and whatever is
+active when there is not, so the choice is simply whether `.venv` exists.
+
 Leave the terminal window open while you're using it. Closing it, or pressing Ctrl-C, stops the sandbox.
 
 ### If it says you need a newer Python

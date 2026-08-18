@@ -143,6 +143,76 @@ def wait_for_go_ahead():
         return False
 
 
+def active_environment():
+    """Return a plain description of the environment this is running in.
+
+    Somebody who has made an environment of their own and activated it is
+    entitled to expect this script to say what it intends to do with it. It
+    does not use it — it makes one of its own — and saying so is the whole
+    point of knowing this.
+
+    Returns:
+        A phrase that finishes "You are currently in ...", or None when this
+        is running against a plain system Python with nothing activated.
+    """
+    conda = os.environ.get("CONDA_DEFAULT_ENV")
+    if conda:
+        if conda == "base":
+            return "conda's base environment"
+        return "the conda environment '%s'" % conda
+
+    activated = os.environ.get("VIRTUAL_ENV")
+    if activated and not is_the_sandboxes_own(activated):
+        return "the environment in %s" % activated
+
+    # Nothing activated in the shell, but running from inside one anyway —
+    # somebody who called an environment's python by its full path.
+    base = getattr(sys, "base_prefix", sys.prefix)
+    if sys.prefix != base and not is_the_sandboxes_own(sys.prefix):
+        return "the environment in %s" % sys.prefix
+    return None
+
+
+def is_the_sandboxes_own(folder):
+    """Whether *folder* is the environment this script makes and manages.
+
+    Running this from inside .venv is an ordinary thing to do on a second run,
+    and without this check the script would name that folder as the person's
+    own and promise not to install anything into it — while installing into
+    exactly it.
+    """
+    try:
+        return os.path.realpath(folder) == os.path.realpath(VENV_DIR)
+    except OSError:
+        return False
+
+
+def explain_where_the_software_goes():
+    """Say where the sandbox's software is about to be put, and where it isn't.
+
+    Without this the script said only that it was installing something, and a
+    person who had just made an environment of their own had no way to tell
+    whether it was about to fill that or make another. Both answers are
+    reasonable to expect; the script owes them the one that is true.
+    """
+    say("The sandbox keeps its software in an environment of its own, in a")
+    say("folder named .venv inside this one. That is what is about to be made.")
+
+    active = active_environment()
+    if active is None:
+        return
+    say("")
+    say("You are currently in %s." % active)
+    say("Nothing will be installed into it and it will not be changed.")
+    say("")
+    say("If you would rather the sandbox used it instead, press Q, then run:")
+    say("    pip install -r requirements.txt")
+    say("    python main.py webui serve")
+    say("")
+    say("Either way works. The sandbox uses .venv whenever there is one, and")
+    say("whatever is active when there is not.")
+
+
 def venv_python():
     """Return the path to the Python inside the sandbox's own environment."""
     if os.name == "nt":
@@ -318,9 +388,10 @@ def main():
         return 1
 
     if not environment_is_ready():
-        say("Installing dependencies for the sandbox. About 200 MB will be")
-        say("automatically downloaded and installed. This can take several minutes,")
-        say("depending on your internet connection.")
+        explain_where_the_software_goes()
+        say("")
+        say("About 200 MB will be automatically downloaded and installed. This can")
+        say("take several minutes, depending on your internet connection.")
         say("")
         if not wait_for_go_ahead():
             say("Nothing was installed. Run this again when you are ready.")
@@ -329,7 +400,7 @@ def main():
         if not build_environment(python):
             return 1
         say("")
-        say("Software installed.")
+        say("Software installed into %s." % VENV_DIR)
     say("")
 
     sandbox = os.path.join(HERE, "main.py")
