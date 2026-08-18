@@ -30,7 +30,7 @@ import sys
 import threading
 from pathlib import Path
 
-from fastapi import FastAPI, Form, HTTPException, Request
+from fastapi import FastAPI, Form, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel
 
@@ -690,23 +690,28 @@ def create_setup_app(on_complete) -> FastAPI:
     @app.post("/", response_class=HTMLResponse)
     async def submit(
         request: Request,
-        folder: str = Form(...),
+        # Defaulted rather than required, so an empty box reaches the handler.
+        # Form(...) counts an empty value as an absent one, so submitting the
+        # page with nothing typed was answered with a raw 422 from the
+        # framework and the sentence written for exactly that case below could
+        # never be shown.
+        folder: str = Form(""),
         acknowledged: str = Form(""),
-    ) -> str:
+    ) -> Response:
         typed = folder.strip()
         if not typed:
-            return _render(
+            return HTMLResponse(_render(
                 "No folder was given. Type where your settings should be kept, or "
                 "use the Browse button to find it."
-            )
+            ))
         chosen = Path(typed).expanduser()
         if not chosen.is_absolute():
-            return _render(
+            return HTMLResponse(_render(
                 f"'{folder}' isn't a full path. It needs to start with a / so "
                 "the sandbox knows exactly which folder you mean."
-            )
+            ))
         if chosen.exists() and not chosen.is_dir():
-            return _render(f"{chosen} is a file, not a folder. Please choose another.")
+            return HTMLResponse(_render(f"{chosen} is a file, not a folder. Please choose another."))
 
         # The page shows this warning beside the folder it suggests, and says
         # so in the hidden field when it does. A folder somebody typed or
@@ -715,7 +720,7 @@ def create_setup_app(on_complete) -> FastAPI:
         # Dropbox" is a perfectly ordinary reason to have picked it.
         sync_warning = paths.cloud_sync_warning(chosen)
         if sync_warning and acknowledged.strip() != str(chosen):
-            return _render_sync_confirm(chosen, sync_warning)
+            return HTMLResponse(_render_sync_confirm(chosen, sync_warning))
 
         try:
             # Never initialises over a settings file — see first_run's module
@@ -725,13 +730,22 @@ def create_setup_app(on_complete) -> FastAPI:
                 first_run.initialize_extras(chosen)
             first_run.complete_setup(chosen)
         except OSError as e:
-            return _render(f"Could not prepare {chosen}: {e}")
+            return HTMLResponse(_render(f"Could not prepare {chosen}: {e}"))
 
         # Not finished yet. The folder is only the first of three things this
         # has to end with — the other two are somebody to bill and something to
         # send to, and neither can be guessed. Setup carries on to ask for them
         # rather than handing over a sandbox that cannot do anything.
-        return _render_people(chosen)
+        #
+        # Sent to that page rather than answered with it. Answering a form
+        # submission with the next page leaves the browser holding a POST as
+        # the entry for the page on screen — and step two reloads itself every
+        # time somebody is added, which then means re-sending that POST.
+        # Firefox says so out loud ("must send information that will repeat any
+        # action"), the others mostly do it quietly, and neither is what was
+        # meant. A redirect makes the page on screen a GET, so reloading it is
+        # just asking for it again.
+        return RedirectResponse("/people", status_code=303)
 
     @app.get("/people", response_class=HTMLResponse)
     async def people_page() -> str:

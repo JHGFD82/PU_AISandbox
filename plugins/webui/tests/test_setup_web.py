@@ -894,3 +894,70 @@ class TestASharedFolderCanBeGivenDuringSetup:
         page = module._render_people(tmp_path)
         at = page.index('id="browse-usage-btn"')
         assert "display:none" in page[at:at + 120]
+
+
+class TestSettlingTheFolderDoesNotLeaveAPostOnScreen:
+    """Answering a form submission with the next page leaves the browser
+    holding a POST as the entry for the page on screen. Step two reloads
+    itself every time somebody is added, so that reload re-sent the folder
+    submission — Firefox says so out loud, the others mostly do it quietly."""
+
+    def test_it_sends_you_to_step_two_rather_than_answering_with_it(
+        self, client_and_result
+    ):
+        client, _ = client_and_result
+        client.follow_redirects = False
+        resp = client.post("/", data={"folder": str(paths.DEFAULT_EXTRAS_ROOT)})
+        assert resp.status_code == 303
+        assert resp.headers["location"] == "/people"
+
+    def test_so_the_page_on_screen_is_one_a_reload_can_ask_for_again(
+        self, client_and_result
+    ):
+        client, _ = client_and_result
+        client.post("/", data={"folder": str(paths.DEFAULT_EXTRAS_ROOT)})
+        # What location.reload() does on that page: an ordinary GET.
+        again = client.get("/people")
+        assert again.status_code == 200
+        assert "Add a person" in again.text
+
+    def test_the_page_step_two_reloads_itself(self, client_and_result):
+        """If it stopped reloading, this would stop mattering — and the reason
+        for the redirect would be gone with it."""
+        client, _ = client_and_result
+        page = client.post("/", data={"folder": str(paths.DEFAULT_EXTRAS_ROOT)}).text
+        assert "location.reload()" in page
+
+    def test_an_answer_that_cannot_be_used_still_shows_the_page(self, client_and_result):
+        """A redirect on the way out must not turn a correctable mistake into
+        a page with no form on it."""
+        client, _ = client_and_result
+        resp = client.post("/", data={"folder": "my files"})
+        assert resp.status_code == 200
+        assert "isn't a full path" in resp.text
+
+
+class TestAnEmptyFolderBoxIsAnswered:
+    """The sentence for this case was written and could never be shown:
+    Form(...) counts an empty value as an absent one, so submitting the page
+    with nothing typed was answered with the framework's own 422."""
+
+    def _post_empty(self, client):
+        return client.post(
+            "/", content="folder=&acknowledged=",
+            headers={"Content-Type": "application/x-www-form-urlencoded"})
+
+    def test_it_is_answered_in_words(self, client_and_result):
+        client, _ = client_and_result
+        resp = self._post_empty(client)
+        assert resp.status_code == 200
+        assert "No folder was given" in resp.text
+
+    def test_and_nothing_is_set_up_from_it(self, client_and_result):
+        client, _ = client_and_result
+        self._post_empty(client)
+        assert paths.is_installed() is False
+
+    def test_the_form_is_still_there_to_correct(self, client_and_result):
+        client, _ = client_and_result
+        assert 'name="folder"' in self._post_empty(client).text
