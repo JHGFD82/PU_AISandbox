@@ -358,6 +358,90 @@ def build_environment(python):
     return True
 
 
+def has_the_web_interface(sandbox):
+    """Whether this copy has the web interface at all.
+
+    It is a plugin, and removing it is a supported thing to do: the sandbox
+    keeps every one of its commands except that one. This script is the part
+    that does not — it opens a browser and asks for two commands that plugin
+    provides — so it has to know.
+
+    Asked of the sandbox rather than worked out from whether a folder is
+    there. A plugin that is present but cannot load is the same problem as one
+    that is absent, and this question is exactly the one that matters: does
+    the command exist.
+
+    Args:
+        sandbox: The path to main.py.
+
+    Returns:
+        True if "webui" is a command this copy has.
+    """
+    try:
+        quiet = open(os.devnull, "w")
+    except IOError:
+        return True
+    try:
+        return subprocess.call([venv_python(), sandbox, "webui", "--help"],
+                               cwd=HERE, stdout=quiet, stderr=quiet) == 0
+    except (OSError, subprocess.CalledProcessError):
+        return False
+    finally:
+        quiet.close()
+
+
+def finish_without_the_web_interface(sandbox):
+    """Set the sandbox up in this window, for a copy that has no web interface.
+
+    Everything except the browser still works, so this does the part that is
+    still possible rather than failing. Without it the script announced a
+    browser window, opened one at an address nothing was listening on, and
+    then printed the argument parser's complaint about a command that no
+    longer exists — with the wrong word quoted, because "webui" had been read
+    as somebody's name.
+
+    Args:
+        sandbox: The path to main.py.
+
+    Returns:
+        What to exit with.
+    """
+    say("")
+    say("The web interface is not installed in this copy, so there is no")
+    say("browser window to open. Everything else works from this window.")
+
+    if not is_set_up(sandbox):
+        say("")
+        say("Setting up here instead. It asks the same questions.")
+        say("")
+        result = subprocess.call([venv_python(), sandbox, "settings", "setup"],
+                                 cwd=HERE)
+        if result != 0:
+            return result
+
+    say("")
+    say("To see what the sandbox can do:")
+    say("    python main.py --help")
+    say("")
+    say("To put the web interface back, restore the plugins/webui folder and")
+    say("run this again.")
+    return 0
+
+
+def is_set_up(sandbox):
+    """Whether this copy has been told where the person's settings are kept.
+
+    Asks the sandbox rather than looking for the marker file here, so there is
+    one answer to "is this set up?" rather than two that can disagree.
+    """
+    return subprocess.call(
+        [venv_python(), "-c",
+         "import sys; from src import paths; "
+         "sys.exit(0 if paths.is_installed() else 1)"],
+        cwd=HERE,
+    ) == 0
+
+
 def open_browser_shortly(url):
     """Open *url* in the browser a moment from now, in the background.
 
@@ -405,16 +489,14 @@ def main():
 
     sandbox = os.path.join(HERE, "main.py")
 
-    # First-time setup, but only if this copy has never been used. Asking the
-    # sandbox itself rather than checking for the marker file here, so there
-    # is one answer to "is this set up?" rather than two that can disagree.
-    already = subprocess.call(
-        [venv_python(), "-c",
-         "import sys; from src import paths; sys.exit(0 if paths.is_installed() else 1)"],
-        cwd=HERE,
-    )
+    # Before anything is promised. Everything below this line is about a
+    # browser, and a copy with the web interface removed has none.
+    if not has_the_web_interface(sandbox):
+        return finish_without_the_web_interface(sandbox)
+
     url = "http://127.0.0.1:8000"
-    needs_setup = already != 0
+    # First-time setup, but only if this copy has never been used.
+    needs_setup = not is_set_up(sandbox)
     if needs_setup:
         # Setup runs as its own step, on the same address the web interface
         # will use afterwards, and it stops as soon as it has an answer. The

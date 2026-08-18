@@ -86,6 +86,14 @@ python main.py webui serve
 Both work. `main.py` uses `.venv` whenever there is one and whatever is
 active when there is not, so the choice is simply whether `.venv` exists.
 
+### If you don't want the web interface
+
+It is a plugin. Delete `plugins/webui` and every other command keeps working —
+`translate`, `transcribe`, `prompt`, `usage`, `settings`. `start.py` notices
+and sets the sandbox up in the terminal instead of opening a browser, and
+tells you what to run. Put the folder back and it returns to opening the
+browser.
+
 Leave the terminal window open while you're using it. Closing it, or pressing Ctrl-C, stops the sandbox.
 
 ### If it says you need a newer Python

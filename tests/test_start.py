@@ -395,3 +395,84 @@ class TestSayingWhereTheSoftwareGoes:
     def test_and_told_where_it_went_afterwards(self, start):
         source = _START.read_text(encoding="utf-8")
         assert "Software installed into %s." in source
+
+
+class TestACopyWithNoWebInterface:
+    """The web interface is a plugin, and removing it is a supported choice —
+    every other command keeps working. This script is the part that did not:
+    it opened a browser at an address nothing was listening on, then printed
+    the argument parser's complaint about a command that no longer exists,
+    with the wrong word quoted because "webui" had been read as a name."""
+
+    def _run_main(self, start, monkeypatch, *, has_web, set_up):
+        """Run main() with the two questions answered, and collect what it said."""
+        said = []
+        monkeypatch.setattr(start, "say", said.append)
+        monkeypatch.setattr(start, "find_python", lambda: "/usr/bin/python3")
+        monkeypatch.setattr(start, "environment_is_ready", lambda: True)
+        monkeypatch.setattr(start, "has_the_web_interface", lambda sandbox: has_web)
+        monkeypatch.setattr(start, "is_set_up", lambda sandbox: set_up)
+        opened = []
+        monkeypatch.setattr(start, "open_browser_shortly", opened.append)
+        ran = []
+
+        def fake_call(args, **kwargs):
+            ran.append(args)
+            return 0
+
+        monkeypatch.setattr(start.subprocess, "call", fake_call)
+        code = start.main()
+        return code, "\n".join(said), opened, ran
+
+    def test_no_browser_is_opened(self, start, monkeypatch):
+        _code, _said, opened, _ran = self._run_main(
+            start, monkeypatch, has_web=False, set_up=True)
+        assert opened == [], "it opened a browser at a server that will not start"
+
+    def test_it_says_why_rather_than_failing(self, start, monkeypatch):
+        code, said, _opened, _ran = self._run_main(
+            start, monkeypatch, has_web=False, set_up=True)
+        assert code == 0
+        assert "web interface is not installed" in said
+        assert "python main.py --help" in said
+
+    def test_it_never_asks_for_a_command_that_is_not_there(self, start, monkeypatch):
+        _code, _said, _opened, ran = self._run_main(
+            start, monkeypatch, has_web=False, set_up=True)
+        for args in ran:
+            assert "webui" not in args, args
+
+    def test_it_still_sets_the_sandbox_up_in_this_window(self, start, monkeypatch):
+        """Setup works perfectly well without the web interface, so a first
+        run should still finish rather than stop at an explanation."""
+        _code, said, _opened, ran = self._run_main(
+            start, monkeypatch, has_web=False, set_up=False)
+        assert any(args[-2:] == ["settings", "setup"] for args in ran), ran
+        assert "asks the same questions" in said
+
+    def test_and_does_not_when_it_is_already_set_up(self, start, monkeypatch):
+        _code, _said, _opened, ran = self._run_main(
+            start, monkeypatch, has_web=False, set_up=True)
+        assert not any("setup" in args for args in ran)
+
+    def test_it_says_how_to_get_the_web_interface_back(self, start, monkeypatch):
+        _code, said, _opened, _ran = self._run_main(
+            start, monkeypatch, has_web=False, set_up=True)
+        assert "plugins/webui" in said
+
+    def test_with_the_plugin_there_nothing_changes(self, start, monkeypatch):
+        _code, said, opened, ran = self._run_main(
+            start, monkeypatch, has_web=True, set_up=True)
+        assert opened, "the browser should still be opened"
+        assert "web interface is not installed" not in said
+        assert any("webui" in args for args in ran)
+
+    def test_the_question_is_asked_of_the_sandbox_not_of_a_folder(self, start):
+        """A plugin that is there but cannot load is the same problem as one
+        that is absent, and only the sandbox can tell you which commands it
+        actually has."""
+        source = _START.read_text(encoding="utf-8")
+        block = source[source.index("def has_the_web_interface"):
+                       source.index("def finish_without_the_web_interface")]
+        assert '"webui", "--help"' in block
+        assert "isdir" not in block and "exists" not in block
