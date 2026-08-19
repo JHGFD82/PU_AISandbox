@@ -1,11 +1,11 @@
-# PU AI Sandbox
+# Princeton University AI Sandbox
 
 [![Python](https://img.shields.io/python/required-version-toml?tomlFilePath=https%3A%2F%2Fraw.githubusercontent.com%2FJHGFD82%2FPU_AISandbox%2Fmain%2Fpyproject.toml&logo=python&logoColor=white)](https://www.python.org/downloads/)
 [![codecov](https://codecov.io/gh/JHGFD82/PU_AISandbox/branch/main/graph/badge.svg)](https://codecov.io/gh/JHGFD82/PU_AISandbox)
 
-Modular AI platform for Princeton University faculty. Commands are implemented as plugins, so capabilities can be added or updated independently without touching core code.
+A toolkit for accessing the Princeton University AI Sandbox service from OIT. Accessible through both web-based or command-line interface, with a modular plug-in architecture.
 
-> **Access requirement:** Each user must have a valid Princeton University AI Sandbox API key (available through OIT). This tool is for Princeton faculty and authorized delegates only.
+> **Access requirement:** Each person must have a valid Princeton University AI Sandbox API key (available through OIT). This tool is for Princeton faculty and authorized delegates only.
 
 ## Architecture
 
@@ -26,19 +26,16 @@ main.py
   → src/processors/       document ingestion (PDF, DOCX, TXT, MD, JSON, XLSX, image)
   → src/tracking/         per-professor token accounting and budget reporting
   → src/output/           text / Markdown / PDF / Word / Excel / JSON output
-  → plugins/
+  → plugins/              added capabilities that can come bundled or downloaded into this folder
       prompt/             bundled plugin (ships with this repo)
       translation/        bundled plugin — base English translation (ships with this repo)
       transcription/      bundled plugin — base English OCR (ships with this repo)
       webui/              bundled plugin — the browser interface (ships with this repo)
-      translation-ea/     optional: separate git repo — EA language translation
-      transcription-ea/   optional: separate git repo — EA language OCR
 ```
 
-The AI services themselves — `TranslationService`, `ImageProcessorService` and the
-rest — live inside the plugin that owns them, not in `src/`. `src/services/` keeps
-only what all of them share. That is what lets a new capability be added without
-editing core.
+Currently, there are no additional plugins available, however East Asia-specific modules for the translation and transcription plugins are available via [Jeff Heller's GitHub profile](https://www.github.com/JHGFD82).
+
+Services can be built within a plugin to allow for additional processing capabilities (translation has `TranslationService` and `ImageProcessorService` built into it) and should not live within the code of this package.
 
 `src/cli.py` decides *what* to run. Plugins decide *how* to run it. Only the `usage` subcommand is built in.
 
@@ -54,7 +51,9 @@ For deeper documentation, see the `docs/` folder:
 
 ## Getting Started
 
-### The short version
+### Installation
+
+This package may be installed either by downloading this package and unzipping it in a folder of your choice, or through the command line:
 
 ```bash
 git clone https://github.com/JHGFD82/PU_AISandbox.git
@@ -62,39 +61,20 @@ cd PU_AISandbox
 python3 start.py
 ```
 
-That's it. `start.py` does everything else: finds a Python new enough to run the sandbox, installs what it needs, asks where to keep your files, and opens the web interface in your browser.
+`start.py` does everything: detects whether to install in an existing environment or create a new one, finds a Python new enough to run the sandbox (version 3.11 or higher), installs what it needs (approximately 200 MB), and opens the web interface in your browser for first-time setup. In the case of an error message, wait a few seconds and reload the page.
 
-The first time, it tells you what it is about to install and waits for you to press return, so nothing several minutes long starts by surprise. Then a page opens asking where to keep your files. Answer it and the same window moves straight on to the sandbox. (If you would rather answer at the command line, `python main.py settings setup` asks the same thing — but nothing makes you.)
+### If you already have a virutal environment of your own
 
-The first run takes a few minutes — about 200 MB of software is downloaded. Every run after that reaches the web interface in about a second, so this is also the normal way to open the sandbox day to day.
-
-### If you already have an environment of your own
-
-`start.py` makes an environment of its own, in a folder named `.venv` inside
-the sandbox folder, and installs into that. It never installs into a conda
-environment or a virtualenv you have activated, and it says so before it
-starts — naming yours, so there is no doubt which one it means.
-
-If you would rather it used yours, don't run `start.py`. With your environment
-activated:
+If you would rather install this package within your own pre-configured virtual environment, activate it first and run:
 
 ```bash
 pip install -r requirements.txt
 python main.py webui serve
 ```
 
-Both work. `main.py` uses `.venv` whenever there is one and whatever is
-active when there is not, so the choice is simply whether `.venv` exists.
+### Setup without the web interface
 
-### If you don't want the web interface
-
-It is a plugin. Delete `plugins/webui` and every other command keeps working —
-`translate`, `transcribe`, `prompt`, `usage`, `settings`. `start.py` notices
-and sets the sandbox up in the terminal instead of opening a browser, and
-tells you what to run. Put the folder back and it returns to opening the
-browser.
-
-Leave the terminal window open while you're using it. Closing it, or pressing Ctrl-C, stops the sandbox.
+Plugins are the core of the feature set within this package, but maybe be deleted if not needed. This is especially true of the web UI plugin, located at `plugins/webui`. Every other command will continue to function properly, including `translate`, `transcribe`, `prompt`, `usage`, and `settings`. `start.py` will notice the missing plugin and sets up the sandbox in the terminal instead of opening a browser.
 
 ### If it says you need a newer Python
 
@@ -104,40 +84,52 @@ If it does, it will tell you exactly what to do: install Python from [python.org
 
 ### Adding people
 
-Once the sandbox is running, add whoever will be using it. When there is nobody configured yet, the web interface opens straight onto its Settings page for exactly this reason — fill in the **Professors** panel and press *Add professor*.
+#### Via web UI
 
-The same thing at the command line:
+Once the sandbox is running, the package will detect that no professors have been added yet and will display the Settings page.
+
+#### Via command line
+
+Adding a professor can also be done at the command line without the web UI:
 
 ```bash
 python main.py settings add-professor
 ```
 
-Either way it asks for three things:
+#### Required Information
+
+You will be prompted for three required fields:
 
 | | |
 |---|---|
-| **NetID** | The university username they sign in with — `jh43`. Letters and digits only, not their name and not an email address. This is how the sandbox tells one person from another: it picks their API key, names their usage file, and is what you type to run a command as them. It can't be changed later without removing them and adding them again. |
-| **Display name** | `Jeff Heller`. Only ever shown to people — in reports and in the person picker — so write it however reads best. |
-| **API key** | Princeton faculty obtain these through OIT; each person registers independently. A backup key is optional, and gets used automatically if the primary one ever stops working. |
+| **NetID** | Their University username (i.e. `jh43`). Letters and digits only, without "@princeton.edu". This is how the sandbox tells one person from another: it picks their API key, names their usage file, and is what you type to run a command as them. This value is unchanged once confirmed. |
+| **Display name** | `Jeff Heller`. Only ever shown publicly, in both the web interface and in reports. |
+| **API key** | Princeton faculty obtain these through OIT; each person registers independently. A backup key is optional. |
 
 Keys are never displayed once saved — the settings page shows only whether one is set. At the command line they're typed hidden, never as a flag.
 
-### Adding a model
+### Optional Information
 
-A fresh copy has no models in it. Which ones you can use depends on your
-institution's AI sandbox rather than on this software, so the list is not
-something this repository can ship — **check Princeton's own AI Sandbox
-documentation for the models currently offered**, and add the ones you want.
+A separate folder can be designated as the location to share a professor's conversations and usage reports. Remote storage options like Dropbox or OneDrive are welcome to be used for this purpose, in the case of sharing access to the sandbox with multiple users through a single API key.
 
-On the Settings page, under **Models**, type a name in the form
-`provider/model` — `openai/gpt-4o`, `anthropic/claude-opus-4-8`,
-`google/gemini-3-pro-preview` — and press *Add and test*. The price is looked
-up, and the model is then asked a few one-token questions to find out what it
-can do: whether it can read a scanned page, and which settings it turns down.
-That takes a few seconds and a fraction of a cent, once.
+### The Model Catalog has no models upon installation
 
-If you only ever use an alternate endpoint of your own — a departmental cluster,
-say — you need no models here at all. See
+A fresh copy of this package comes with no models installed. **Check the [official AI Sandbox documentation](https://princeton.service-now.com/service?id=kb_article_view&sysparm_article=KB0014337) for the models currently offered**, and add the ones you want.
+
+#### Adding a model
+
+On the Settings page, under **Models**, type a name in the form `provider/model`. Examples:
+- openai/gpt-5.2
+- anthropic/claude-opus-4-8
+- google/gemini-3-pro-preview
+- mistral/mistral-7b-instruct-v0.1
+- meta/llama-3-70b-instruct
+
+Press *Add and test* after each entry and after specifying who covers the initial token cost. The sandbox looks up pricing information for the model and then sends a series of one-token prompts to query which features are supported. This process takes a few seconds, and the designated person will be charged a tiny fraction of a penny (the total cost of the model capability test).
+
+#### The clusters
+
+This package also supports sending prompts to models located on Princeton University clusters. See
 [Alternate endpoints](docs/configuration.md#alternate-ai-endpoints).
 
 ### Your first five minutes
