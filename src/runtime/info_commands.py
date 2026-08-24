@@ -368,26 +368,72 @@ def _settings_test_model(args: argparse.Namespace) -> None:
     that no provider publishes anywhere readable. This settles them by sending
     the model a few very small requests and seeing which it accepts.
 
+    A model that is not in the catalog yet is added by this, provided it is
+    named as its provider and then the model — ``anthropic/claude-sonnet-5``.
+    The two are the same job: both come down to asking the provider what the
+    model can do and writing the answer down, and somebody who has just been
+    told a model is missing is asking for it to be there.
+
+    A model already in the catalog can be named either way. The catalog is
+    keyed by the model alone, but every other place a model is typed takes the
+    provider too, and refusing that here meant saying 'anthropic/claude-sonnet-5'
+    was not in a catalog while listing claude-sonnet-5 in the same breath.
+
     With no model named, tests every model in the catalog. That is the way to
     correct a catalog built before testing existed, where anything added
     automatically was recorded as unable to read images because there was no
     way to find out.
     """
     from ..console import print_banner
-    from ..models import get_available_models, load_model_catalog, save_model_catalog
+    from ..models import (
+        add_model_to_catalog, get_available_models, load_model_catalog,
+        save_model_catalog,
+    )
     from ..models.capabilities import (
         apply_capability_report, client_for_testing, probe_model_capabilities,
     )
 
-    # The name is checked before anyone is asked whose key to use: a typo is
-    # the likelier mistake, and it costs nothing to catch.
     available = get_available_models()
-    if args.model is not None and args.model not in available:
-        raise CLIError(
-            f"'{args.model}' isn't in the catalog, so there is nothing to test. "
-            f"Models it knows about: {', '.join(sorted(available, key=str.lower))}"
-        )
-    targets = [args.model] if args.model else sorted(available, key=str.lower)
+    typed = args.model
+
+    # The catalog is keyed by the model alone — 'claude-sonnet-5'. Everywhere
+    # else a model is named as its provider and then the model, which is what
+    # -m takes, what the web interface asks for and what the documentation
+    # shows. Both are accepted here, because the alternative was telling
+    # somebody that 'anthropic/claude-sonnet-5' is not in a catalog and then
+    # listing claude-sonnet-5 among the models it knows about.
+    wanted = typed.split("/", 1)[1] if typed and "/" in typed else typed
+
+    if typed is not None and wanted not in available:
+        if "/" not in typed:
+            raise CLIError(
+                f"'{typed}' isn't in the catalog. To add it, name it as its "
+                "provider and then the model — for example "
+                f"'openai/{typed}' or 'anthropic/{typed}' — and this will look "
+                "up its price and find out what it can do.\n"
+                f"Already in the catalog: {', '.join(sorted(available, key=str.lower))}"
+            )
+        # Named with a provider and not here yet, so this is the request to
+        # add it. Testing a model that is not in the catalog and adding one
+        # are the same job: both come down to asking the provider what it can
+        # do and writing the answer down.
+        api_key = _key_for_testing(getattr(args, 'professor', None))
+        print_banner("ADDING A MODEL")
+        print(f"{typed} is not in the catalog yet. Looking up its price and\n"
+              "finding out what it can do. This costs a fraction of a cent.\n")
+        try:
+            added, _entry = add_model_to_catalog(typed, api_key=api_key)
+        except Exception as e:
+            raise CLIError(
+                f"Could not add '{typed}': {e}\n"
+                "A model that does not exist, or one this key cannot reach, "
+                "looks like this."
+            ) from e
+        print(f"\n{added} added.")
+        print("=" * 60)
+        return
+
+    targets = [wanted] if typed else sorted(available, key=str.lower)
 
     api_key = _key_for_testing(getattr(args, 'professor', None))
     remove_missing = bool(getattr(args, 'remove_missing', False))

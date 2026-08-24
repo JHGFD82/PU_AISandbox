@@ -215,13 +215,24 @@ class TestAFreshInstallLeavesYouReady:
         assert "README.md" in text
 
     def test_the_readme_says_the_same_thing(self):
-        """Setup's message scrolls away; the README is still there tomorrow."""
+        """Setup's message scrolls away; the README is still there tomorrow.
+
+        Read as "the README covers the same ground", not as one sentence. The
+        sentence this used to match was reworded and the test went red on main
+        — which is a test punishing somebody for improving the prose it was
+        meant to protect.
+        """
         from pathlib import Path
 
         readme = (Path(__file__).resolve().parent.parent / "README.md").read_text()
-        assert "A fresh copy has no models in it" in readme
+        lowered = readme.lower()
+        # A fresh copy has none, and here is where to find out which to add.
+        assert "no models" in lowered
+        assert "documentation" in lowered
+        # Something to try, and how to see what it cost.
         assert "Your first five minutes" in readme
         assert "--dry-run" in readme
+        assert "usage report" in lowered
 
 
 def _with_shared_folder(root: Path, netid: str, folder: Path, *,
