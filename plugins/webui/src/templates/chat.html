@@ -2092,16 +2092,19 @@ async function startJobFromModal() {
   }
 
   const model = jobModelName();
-  if (!state.conversationId) {
+  // A job gets a conversation to itself. What it produces is a piece of work
+  // with its own documents, its own settings note and its own outputs, and
+  // dropping that into the middle of a conversation about something else
+  // leaves both harder to read and harder to cite afterwards.
+  //
+  // Unless the conversation in view has nothing in it yet, in which case it
+  // is already the fresh one this would otherwise go and make. That covers
+  // both the blank view before anything is saved and a conversation that was
+  // started and not used.
+  if (!state.conversationId || state.conversationHasMessages) {
     // A conversation started by running a job begins on the model that job
     // used, there being nothing else to go on.
-    const conv = await api("/api/conversations", {
-      method: "POST",
-      body: JSON.stringify({ professor: state.professor, model }),
-    });
-    state.conversationId = conv.id;
-    state.conversationModel = conv.model;
-    await loadConversations();
+    await beginConversationOn(model);
   }
 
   const startBtn = document.getElementById("job-modal-start");
@@ -2743,10 +2746,12 @@ async function openConversation(id) {
   await loadConversations();
 }
 
-document.getElementById("new-conv").addEventListener("click", async () => {
-  stopJobPolling();
-  setComposerLocked(false);
-  const model = document.getElementById("model-field").value || state.defaultModel;
+// Begin a conversation and move the view to it. Both the New conversation
+// button and a job that needs one of its own end up here, so that "a new
+// conversation" means the same thing however it was arrived at — including
+// the sampling settings, which belong to a conversation and should not be
+// inherited by the one that replaces it.
+async function beginConversationOn(model) {
   const conv = await api("/api/conversations", {
     method: "POST",
     body: JSON.stringify({ professor: state.professor, model }),
@@ -2757,6 +2762,14 @@ document.getElementById("new-conv").addEventListener("click", async () => {
   state.sampling = { temperature: null, top_p: null, max_tokens: null, system_prompt: null };
   renderMessages(conv);
   await loadConversations();
+  return conv;
+}
+
+document.getElementById("new-conv").addEventListener("click", async () => {
+  stopJobPolling();
+  setComposerLocked(false);
+  await beginConversationOn(
+    document.getElementById("model-field").value || state.defaultModel);
 });
 
 function appendPendingMessage(text) {

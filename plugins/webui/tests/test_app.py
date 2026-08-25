@@ -5998,3 +5998,70 @@ class TestAModalDoesNotCloseOnADragThatLeavesIt:
             r'closeWhenTheBackdropItselfIsClicked\("([a-z-]+)"', script))
         assert used == {"install-plugin-backdrop", "job-modal-backdrop",
                         "settings-modal-backdrop"}, used
+
+
+class TestAJobGetsAConversationToItself:
+    """What a job produces is a piece of work with its own documents, its own
+    settings note and its own outputs. Dropping that into the middle of a
+    conversation about something else leaves both harder to read and harder
+    to cite, so a job starts its own — unless the one in view has nothing in
+    it yet, which is already the fresh one it would otherwise go and make."""
+
+    def _decision(self):
+        """The lines that choose where a job runs."""
+        import re
+
+        script = "\n".join(re.findall(r"<script>(.*?)</script>", _rendered_chat(), re.S))
+        start = script.index("// A job gets a conversation to itself.")
+        return script[start:script.index('const startBtn', start)]
+
+    def test_an_empty_conversation_is_used_as_it_is(self):
+        block = self._decision()
+        assert "!state.conversationId || state.conversationHasMessages" in block
+
+    def test_a_conversation_with_anything_in_it_is_left_alone(self):
+        """The condition above is the whole of it, but it is easy to read the
+        wrong way round, so this says which way it goes."""
+        block = self._decision()
+        at = block.index("state.conversationHasMessages")
+        # Inside the branch that makes a new one, not outside it.
+        assert "beginConversationOn" in block[at:]
+
+    def test_both_ways_of_starting_one_do_the_same_thing(self):
+        """The button and a job both mean "a new conversation", and that has
+        to include the sampling settings — those belong to a conversation and
+        must not be inherited by the one replacing it. The job path used to
+        set the id and the model and nothing else."""
+        import re
+
+        script = "\n".join(re.findall(r"<script>(.*?)</script>", _rendered_chat(), re.S))
+        assert script.count("async function beginConversationOn") == 1
+        helper = script[script.index("async function beginConversationOn"):]
+        helper = helper[:helper.index("\n}")]
+        for reset in ("conversationHasMessages = false", "state.sampling = {",
+                      "renderMessages(conv)"):
+            assert reset in helper, reset
+        # The button and the job both go through it.
+        assert script.count("beginConversationOn(") == 3, (
+            "one definition and two callers — the New conversation button and "
+            "a job")
+
+    def test_sending_a_message_still_makes_its_own(self):
+        """Deliberately not through the helper. Sending from the blank view
+        carries whatever sampling was set in the composer straight into the
+        request, so resetting it on the way would throw away the temperature
+        somebody had just chosen. "A new conversation" and "the conversation
+        this message is starting" are not the same act.
+        """
+        import re
+
+        script = "\n".join(re.findall(r"<script>(.*?)</script>", _rendered_chat(), re.S))
+        send = script[script.index("appendPendingMessage(text);") - 900:]
+        send = send[:send.index("appendPendingMessage(text);")]
+        assert 'api("/api/conversations"' in send
+        assert "state.sampling = {" not in send
+
+    def test_the_new_conversation_starts_on_the_model_the_job_uses(self):
+        """There being nothing else to go on."""
+        block = self._decision()
+        assert "beginConversationOn(model)" in block
