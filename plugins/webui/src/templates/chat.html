@@ -1441,17 +1441,31 @@ function addInstallEntry(picker) {
 // ── Installing one ──────────────────────────────────────────────────────────
 
 function openInstallDialog() {
-  document.getElementById("install-repo").value = "";
-  document.getElementById("install-folder").value = "";
+  const repo = document.getElementById("install-repo");
+  const folder = document.getElementById("install-folder");
+  repo.value = "";
+  folder.value = "";
+  // Cleared as well as emptied: the box stops suggesting once it has been
+  // typed in, and that has to be forgotten between one opening and the next.
+  delete folder.dataset.editedByHand;
   document.getElementById("install-error").hidden = true;
   document.getElementById("install-busy").hidden = true;
   document.getElementById("install-go").disabled = false;
-  document.getElementById("install-plugin-backdrop").hidden = false;
-  document.getElementById("install-repo").focus();
+
+  const backdrop = document.getElementById("install-plugin-backdrop");
+  backdrop.hidden = false;
+  // .modal-backdrop is opacity 0 until it is opened, and it covers the whole
+  // window. Unhiding it without this leaves an invisible sheet over the page
+  // that swallows every click — which is exactly what it did.
+  requestAnimationFrame(() => backdrop.classList.add("open"));
+  repo.focus();
 }
 
 function closeInstallDialog() {
-  document.getElementById("install-plugin-backdrop").hidden = true;
+  const backdrop = document.getElementById("install-plugin-backdrop");
+  backdrop.classList.remove("open");
+  // Hidden after it has finished fading, the same 200ms the other modals use.
+  setTimeout(() => { backdrop.hidden = true; }, 200);
 }
 
 // The folder name the address suggests, worked out in the browser so the box
@@ -1475,6 +1489,11 @@ document.getElementById("install-folder").addEventListener("input", (e) => {
 
 document.getElementById("install-plugin-close")
   .addEventListener("click", closeInstallDialog);
+
+// The two ways out every other modal here offers.
+document.getElementById("install-plugin-backdrop").addEventListener("click", (e) => {
+  if (e.target.id === "install-plugin-backdrop") closeInstallDialog();
+});
 
 document.getElementById("install-go").addEventListener("click", async () => {
   const error = document.getElementById("install-error");
@@ -2177,6 +2196,11 @@ document.getElementById("job-modal-cancel").addEventListener("click", () => clos
 document.getElementById("job-modal-reset").addEventListener("click", resetJobModalFields);
 document.getElementById("job-modal-start").addEventListener("click", startJobFromModal);
 document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape"
+      && !document.getElementById("install-plugin-backdrop").hidden) {
+    closeInstallDialog();
+    return;
+  }
   if (e.key === "Escape" && !document.getElementById("job-modal-backdrop").hidden) {
     closeJobModal();
   }

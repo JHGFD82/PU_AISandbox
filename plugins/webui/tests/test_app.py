@@ -5885,3 +5885,61 @@ class TestTheInstallEntryInThePluginMenu:
         chat = _rendered_chat()
         at = chat.index('error.textContent = readableError(e)')
         assert "innerHTML" not in chat[at - 300:at + 100]
+
+
+class TestAModalThatIsShownIsAlsoVisible:
+    """`.modal-backdrop` is `opacity: 0` and covers the whole window at
+    z-index 100. Unhiding one without adding `.open` therefore does not open
+    anything — it lays an invisible sheet over the page that swallows every
+    click, which is what "nothing happens and the window is unresponsive"
+    turned out to be."""
+
+    def _chat(self):
+        return _rendered_chat()
+
+    def test_the_backdrop_is_transparent_until_it_is_opened(self):
+        """The premise. If this stops being true the rest stops mattering."""
+        chat = self._chat()
+        rule = chat[chat.index(".modal-backdrop {"):]
+        assert "opacity: 0" in rule[:rule.index("}")]
+        assert ".modal-backdrop.open { opacity: 1; }" in chat
+
+    def test_every_backdrop_that_is_unhidden_is_also_opened(self):
+        """Whichever modal it is. Each one is a separate chance to make the
+        page unclickable in a way that looks like nothing happening."""
+        import re
+
+        chat = self._chat()
+        script = "\n".join(re.findall(r"<script>(.*?)</script>", chat, re.S))
+        missing = []
+        for shown in re.finditer(r"(\w+)\.hidden = false;", script):
+            name = shown.group(1)
+            if "backdrop" not in name.lower():
+                continue
+            # The class has to be added near where it is unhidden.
+            after = script[shown.end():shown.end() + 400]
+            if 'classList.add("open")' not in after:
+                line = script[:shown.start()].count("\n") + 1
+                missing.append(f"line {line}: {name}")
+        assert not missing, (
+            "unhidden without being made visible, so it covers the page "
+            "invisibly:\n" + "\n".join(missing))
+
+    def test_the_install_dialog_can_be_left(self):
+        """A modal nobody can dismiss is the same problem arrived at slowly."""
+        chat = self._chat()
+        assert "install-plugin-close" in chat
+        # Clicking away, and Escape, as the other modals allow.
+        assert 'if (e.target.id === "install-plugin-backdrop") closeInstallDialog();' in chat
+        # This dialog's own Escape handler, not the first one in the file —
+        # the combobox has one too, several hundred lines earlier.
+        at = chat.index('!document.getElementById("install-plugin-backdrop").hidden')
+        assert 'e.key === "Escape"' in chat[at - 120:at]
+        assert "closeInstallDialog" in chat[at:at + 120]
+
+    def test_it_is_hidden_only_after_it_has_faded(self):
+        chat = self._chat()
+        close = chat[chat.index("function closeInstallDialog"):]
+        close = close[:close.index("\n}")]
+        assert 'classList.remove("open")' in close
+        assert "setTimeout" in close
