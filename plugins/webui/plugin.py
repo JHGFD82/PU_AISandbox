@@ -79,6 +79,7 @@ _register("_pu_webui_attachments", "src/attachments.py")
 _register("_pu_webui_export", "src/export.py")
 _register("_pu_webui_jobs", "src/jobs.py")
 _register("src.services.chat_service", "src/services/chat_service.py")
+_register("_pu_webui_plugin_install", "src/plugin_install.py")
 _register("_pu_webui_setup_web", "src/setup_web.py")
 _register("_pu_webui_app", "src/app.py")
 

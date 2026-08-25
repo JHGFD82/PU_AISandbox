@@ -470,6 +470,33 @@
     opacity: 0; transition: opacity 0.2s ease;
   }
   .modal-backdrop[hidden] { display: none; }
+  .install-panel { width: min(30rem, 92vw); }
+  .install-body { padding: var(--space-4) var(--space-6) var(--space-6); }
+  .install-body label {
+    display: block; font-size: var(--text-xs); color: var(--text-muted);
+    margin: var(--space-4) 0 var(--space-1);
+  }
+  .install-body input[type=text] {
+    width: 100%; padding: 0.5rem; font-size: var(--text-md);
+    border: 1px solid var(--border); border-radius: var(--radius-md);
+    background: var(--input-bg); color: var(--text); font-family: inherit;
+  }
+  .install-body button { margin-top: var(--space-4); }
+  .install-note {
+    font-size: var(--text-xs); color: var(--text-muted); line-height: 1.4;
+    margin: var(--space-2) 0 0;
+  }
+  .install-error {
+    font-size: var(--text-sm); color: var(--danger-text); line-height: 1.4;
+    border: 1px solid var(--danger-border); background: var(--danger-hover-bg);
+    border-radius: var(--radius-md); padding: 0.5rem 0.7rem;
+    margin: var(--space-4) 0 0; white-space: pre-wrap;
+  }
+  .install-busy {
+    font-size: var(--text-sm); color: var(--text-muted); font-style: italic;
+    margin: var(--space-4) 0 0;
+  }
+  .install-error[hidden], .install-busy[hidden] { display: none; }
   .modal-backdrop.open { opacity: 1; }
   .modal-panel {
     width: min(760px, 92vw); height: min(85vh, 780px); background: var(--panel-bg);
@@ -492,6 +519,11 @@
     box-shadow: 0 8px 24px var(--shadow-raised); z-index: 30; padding: 0.25rem;
   }
   .action-picker[hidden] { display: none; }
+  /* A rule above the last entry, because installing something is a different
+     kind of act from running something already installed. */
+  .action-picker .picker-separator {
+    border-top: 1px solid var(--border); margin: 0.25rem 0;
+  }
   .action-picker-empty { padding: 0.5rem 0.7rem; font-size: var(--text-sm); color: var(--text-muted); max-width: 220px; }
 
   /* job_result/job_error still render as bubbles in the transcript — a
@@ -844,6 +876,36 @@
       </div>
     </div>
   </aside>
+
+  <div id="install-plugin-backdrop" class="modal-backdrop" hidden>
+    <div class="modal-panel install-panel">
+      <div class="modal-header">
+        <h2 style="margin:0; text-transform:none; font-size:var(--text-lg); letter-spacing:normal">Install a plugin</h2>
+        <button type="button" class="icon-btn" id="install-plugin-close" title="Close" aria-label="Close">
+          {{ icons.plus("icon-as-cross") }}
+        </button>
+      </div>
+      <div class="install-body">
+        <p class="install-note">
+          A plugin becomes part of the sandbox: it runs alongside everything
+          else, with your API keys. Install one only from somewhere you trust.
+        </p>
+        <label for="install-repo">Repository address</label>
+        <input type="text" id="install-repo" spellcheck="false" autocapitalize="none"
+               autocorrect="off" placeholder="https://github.com/someone/their-plugin">
+        <label for="install-folder">Install into <code>plugins/</code></label>
+        <input type="text" id="install-folder" spellcheck="false" autocapitalize="none"
+               autocorrect="off" placeholder="their-plugin">
+        <p class="install-note">
+          Suggested from the address above, and usually right. Change it only
+          if the plugin should be known by a different name.
+        </p>
+        <p class="install-error" id="install-error" hidden></p>
+        <p class="install-busy" id="install-busy" hidden></p>
+        <button type="button" id="install-go">Install</button>
+      </div>
+    </div>
+  </div>
 
   <div id="settings-modal-backdrop" class="modal-backdrop" hidden>
     <div class="modal-panel">
@@ -1340,8 +1402,9 @@ function renderActionPicker() {
     empty.className = "action-picker-empty";
     empty.textContent = "No installed plugin offers a composer action.";
     picker.appendChild(empty);
-    return;
   }
+  // No early return above: a sandbox with nothing installed is exactly where
+  // somebody wants to install something.
   state.pluginActions.forEach(action => {
     const btn = document.createElement("button");
     btn.type = "button";
@@ -1353,6 +1416,114 @@ function renderActionPicker() {
     });
     picker.appendChild(btn);
   });
+  addInstallEntry(picker);
+}
+
+// Last, and under a rule: everything above it runs something already here,
+// and this one goes and gets something that is not.
+function addInstallEntry(picker) {
+  if (picker.childElementCount) {
+    const rule = document.createElement("div");
+    rule.className = "picker-separator";
+    picker.appendChild(rule);
+  }
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "conv-menu-option";
+  btn.textContent = "Install plugin…";
+  btn.addEventListener("click", () => {
+    closeActionPicker();
+    openInstallDialog();
+  });
+  picker.appendChild(btn);
+}
+
+// ── Installing one ──────────────────────────────────────────────────────────
+
+function openInstallDialog() {
+  document.getElementById("install-repo").value = "";
+  document.getElementById("install-folder").value = "";
+  document.getElementById("install-error").hidden = true;
+  document.getElementById("install-busy").hidden = true;
+  document.getElementById("install-go").disabled = false;
+  document.getElementById("install-plugin-backdrop").hidden = false;
+  document.getElementById("install-repo").focus();
+}
+
+function closeInstallDialog() {
+  document.getElementById("install-plugin-backdrop").hidden = true;
+}
+
+// The folder name the address suggests, worked out in the browser so the box
+// fills in as it is typed. The server settles whether it will do; this is only
+// the offer, and stops offering the moment somebody types their own.
+function suggestedFolderFor(address) {
+  let tail = address.trim().replace(/\/+$/, "").split("/").pop() || "";
+  if (tail.endsWith(".git")) tail = tail.slice(0, -4);
+  return tail.replace(/[^A-Za-z0-9_-]/g, "-").replace(/^[-_]+|[-_]+$/g, "");
+}
+
+document.getElementById("install-repo").addEventListener("input", (e) => {
+  const folder = document.getElementById("install-folder");
+  if (folder.dataset.editedByHand === "true") return;
+  folder.value = suggestedFolderFor(e.target.value);
+});
+
+document.getElementById("install-folder").addEventListener("input", (e) => {
+  e.target.dataset.editedByHand = "true";
+});
+
+document.getElementById("install-plugin-close")
+  .addEventListener("click", closeInstallDialog);
+
+document.getElementById("install-go").addEventListener("click", async () => {
+  const error = document.getElementById("install-error");
+  const busy = document.getElementById("install-busy");
+  const button = document.getElementById("install-go");
+  const repository = document.getElementById("install-repo").value.trim();
+  const folder = document.getElementById("install-folder").value.trim();
+
+  error.hidden = true;
+  if (!repository || !folder) {
+    error.textContent = "Both the address and the folder name are needed.";
+    error.hidden = false;
+    return;
+  }
+
+  button.disabled = true;
+  busy.textContent = "Downloading…";
+  busy.hidden = false;
+  try {
+    const result = await api("/api/plugins/install", {
+      method: "POST", body: JSON.stringify({ repository, folder }),
+    });
+    const commands = (result.commands || []).length
+      ? " It adds: " + result.commands.join(", ") + "."
+      : "";
+    busy.textContent = result.installed + " installed." + commands
+      + " Restarting the sandbox so it can be used…";
+    waitForTheSandboxToComeBack();
+  } catch (e) {
+    // textContent: git's own words come back in here, and they are words.
+    error.textContent = readableError(e);
+    error.hidden = false;
+    busy.hidden = true;
+    button.disabled = false;
+  }
+});
+
+// The sandbox restarts into the new plugin, so this page outlives the server
+// that sent it. How long that takes depends on the computer, so this asks
+// until it answers rather than guessing a number and reloading onto nothing.
+// The same wait the last page of setup does.
+function waitForTheSandboxToComeBack() {
+  setTimeout(function () {
+    (function ask() {
+      fetch("/api/plugin-actions", { cache: "no-store" })
+        .then(function (r) { if (r.ok) { location.reload(); } else { setTimeout(ask, 500); } })
+        .catch(function () { setTimeout(ask, 500); });
+    })();
+  }, 1200);
 }
 
 document.getElementById("plugin-action-btn").addEventListener("click", (e) => {

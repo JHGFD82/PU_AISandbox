@@ -481,6 +481,33 @@ Which side of the job `token` refers to depends on the action: the *destination*
 
 ---
 
+## Installing a plugin from the web interface
+
+The puzzle-piece menu beside the message box ends with **Install plugin…**,
+which takes an `https://` git address and a folder name and fetches the
+repository into `plugins/`. The sandbox then restarts into it.
+
+For a plugin to be installable this way it needs only what any plugin needs: a
+`plugin.py` at the top of the repository. Anything without one is refused and
+the download removed, rather than left as a folder the sandbox will complain
+about at every start.
+
+Three limits are deliberate, and worth knowing before you wonder why:
+
+- **`https://` only.** Git understands addresses that run a program rather
+  than fetch a repository — `ext::` is a documented transport that executes
+  what it is given — and `file://` would reach anything on the computer.
+- **From the same computer only.** Installing a plugin puts new program code
+  on the machine running the sandbox and runs it with the API keys. A
+  passphrase says somebody may use the sandbox; it does not say they may add
+  code to it. Anybody administering an installation remotely has the command
+  line.
+- **A restart, not a reload.** `SandboxProcessor` gathers plugin orchestration
+  methods when its class statement first runs, which has long since happened
+  by the time anybody is looking at a chat window. Re-scanning `plugins/` in
+  the running process would list the new plugin and leave the methods behind
+  it missing.
+
 ## Moving a plugin's files when somebody's folder changes
 
 A professor can have a shared folder set on them, and their work is kept there

@@ -35,6 +35,7 @@ import secrets
 import shutil
 import sys
 import tempfile
+import threading
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -261,6 +262,11 @@ def _move_their_work(netid: str, was) -> dict:
     if not moved and not moved.left_behind:
         return {}
     return {"moved": moved.summary(), "left_behind": moved.left_behind}
+
+
+class InstallPluginBody(BaseModel):
+    repository: str
+    folder: str
 
 
 class SourceBody(BaseModel):
@@ -495,6 +501,32 @@ def _require_same_computer(request: Request) -> None:
             403,
             "The Browse button only works in a browser on the same computer as "
             "the sandbox. Type the path instead.",
+        )
+
+
+def _require_installing_from_this_computer(request: Request) -> None:
+    """Raise a 403 error unless the browser asking is on this computer.
+
+    Shares its test with ``_require_same_computer()`` above and says something
+    different, because the reason is different. That one is about a window
+    opening on somebody else's screen. This one is about what installing a
+    plugin *is*: new program code placed on the computer running the sandbox
+    and then run as part of it, with the API keys.
+
+    A passphrase says somebody may use this sandbox. It does not say they may
+    add code to the machine it runs on, and those are not the same permission
+    — so this is refused across a network however good the passphrase is.
+    Anybody genuinely administering an installation remotely has the command
+    line, which is the honest way to do it.
+    """
+    client = request.client.host if request.client else None
+    if client not in _SAME_COMPUTER:
+        raise HTTPException(
+            403,
+            "A plugin can only be installed from a browser on the same computer "
+            "as the sandbox. Installing one puts new program code on that "
+            "computer and runs it with your API keys, which is not something "
+            "this interface will do on behalf of another machine.",
         )
 
 
@@ -1327,6 +1359,49 @@ def create_app() -> FastAPI:
         actions = jobs.list_ui_actions(_get_plugins())
         return {"actions": [asdict(a) for a in actions]}
 
+    @app.post("/api/plugins/install")
+    def api_install_plugin(request: Request, body: InstallPluginBody):
+        """Fetch a plugin from a git repository, then restart into it.
+
+        Restarted rather than reloaded, and that is not caution — it is the
+        only thing that works. A plugin contributes orchestration methods to
+        SandboxProcessor, and those are gathered by its class statement the
+        first time it is imported (see _discover_plugin_mixins). By the time
+        anybody is looking at a chat window that has happened. Re-scanning the
+        plugins folder in this process would put the new plugin in the menu
+        and leave the methods behind it missing, which is worse than not
+        showing it at all. Setup takes the same route for the same shape of
+        reason — see _serve_setup's docstring.
+        """
+        _require_unlocked(request)
+
+        # From this computer only, whatever the passphrase says. Everything
+        # else the web interface can do is bounded by what the sandbox does:
+        # spend a budget, read a conversation, change a setting. This one puts
+        # new program code on the machine and runs it as part of the sandbox,
+        # with the API keys, and that is not something to be reachable across
+        # a network because somebody knew a passphrase. The command line is
+        # still there for anybody genuinely administering this remotely.
+        _require_installing_from_this_computer(request)
+
+        install = sys.modules["_pu_webui_plugin_install"]
+        plugins_dir = Path(__file__).resolve().parents[3]
+        try:
+            installed = install.install_from_git(
+                body.repository, body.folder, plugins_dir)
+        except install.InstallError as e:
+            raise HTTPException(400, str(e)) from e
+
+        # After the answer has gone, so the browser is told where to look
+        # before there is nothing listening. It then waits for the sandbox to
+        # answer again, the same way the last page of setup does.
+        threading.Timer(0.5, _restart_into_the_new_plugin).start()
+        return {
+            "installed": installed.name,
+            "commands": installed.commands,
+            "restarting": True,
+        }
+
     @app.get("/api/languages")
     async def api_languages(request: Request):
         """List every registered language, for populating a 'language'-kind UiField as a dropdown.
@@ -1779,6 +1854,29 @@ def start_logging_to_a_file() -> Optional[Path]:
         logging.warning("Could not open the log file, so this run is not being "
                         "kept anywhere but this window: %s", e)
         return None
+
+
+def _restart_into_the_new_plugin() -> None:
+    """Replace this process with a fresh one, running the same command.
+
+    The same argv, under the same interpreter, so whatever was typed —
+    a port, an address — is what comes back. main.py's handover to the
+    sandbox's own environment has already happened and marks itself done in
+    the environment, which os.execv carries across, so this does not set off a
+    second one.
+
+    Nothing is returned because nothing comes back: on success this call does
+    not return at all. If it fails, the server carries on running the plugins
+    it already had, which is the safe way to fail — the plugin is on disk
+    either way and the next ordinary start will find it.
+    """
+    sandbox = str(Path(__file__).resolve().parents[3] / "main.py")
+    try:
+        os.execv(sys.executable, [sys.executable, sandbox] + sys.argv[1:])
+    except OSError as e:
+        logging.error(
+            "Installed the plugin but could not restart into it (%s). "
+            "It will be there the next time the sandbox starts.", e)
 
 
 def run_server(host: str, port: int) -> None:

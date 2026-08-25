@@ -5719,3 +5719,169 @@ class TestTheSidebarSaysWhenAFolderCannotBeRead:
                      chat.index("const byModel = document.getElementById")]
         assert "textContent" in block
         assert "innerHTML" not in block
+
+
+class TestInstallingAPluginOverTheWeb:
+    """Installing a plugin puts new program code on the computer and runs it
+    as part of the sandbox, with the API keys. What is tested here is mostly
+    what the endpoint declines to do."""
+
+    def _install(self, client, **body):
+        payload = {"repository": "https://github.com/someone/thing.git",
+                   "folder": "thing"}
+        payload.update(body)
+        return client.post("/api/plugins/install", json=payload)
+
+    def test_it_needs_the_interface_unlocked(self, client):
+        assert self._install(client).status_code == 401
+
+    def test_it_is_refused_from_another_computer(self, tmp_path, monkeypatch):
+        """A passphrase says somebody may use the sandbox. It does not say
+        they may put new code on the machine it runs on."""
+        import sys
+
+        app_module = sys.modules["_pu_webui_app"]
+        conversation = sys.modules["_pu_webui_conversation"]
+        jobs = sys.modules["_pu_webui_jobs"]
+        monkeypatch.setattr(conversation, "CONVERSATIONS_DIR", tmp_path / "conversations")
+        monkeypatch.setattr(jobs, "_CONVERSATIONS_DIR", tmp_path / "conversations")
+        fetched = []
+        monkeypatch.setattr(sys.modules["_pu_webui_plugin_install"], "install_from_git",
+                            lambda *a, **k: fetched.append(a))
+
+        elsewhere = TestClient(app_module.create_app(), client=("10.0.0.5", 50000))
+        elsewhere.post("/unlock", data={"passphrase": ""})
+        resp = elsewhere.post("/api/plugins/install",
+                              json={"repository": "https://github.com/x/y.git",
+                                    "folder": "y"})
+        assert resp.status_code == 403
+        assert fetched == [], "it went and fetched it anyway"
+
+    def test_the_address_it_judges_by_is_the_connection(self, tmp_path, monkeypatch):
+        """Not a header. Anybody can send X-Forwarded-For; nobody can forge
+        which socket they connected on."""
+        import sys
+
+        app_module = sys.modules["_pu_webui_app"]
+        conversation = sys.modules["_pu_webui_conversation"]
+        jobs = sys.modules["_pu_webui_jobs"]
+        monkeypatch.setattr(conversation, "CONVERSATIONS_DIR", tmp_path / "conversations")
+        monkeypatch.setattr(jobs, "_CONVERSATIONS_DIR", tmp_path / "conversations")
+
+        elsewhere = TestClient(app_module.create_app(), client=("10.0.0.5", 50000))
+        elsewhere.post("/unlock", data={"passphrase": ""})
+        resp = elsewhere.post("/api/plugins/install",
+                              json={"repository": "https://github.com/x/y.git",
+                                    "folder": "y"},
+                              headers={"X-Forwarded-For": "127.0.0.1"})
+        assert resp.status_code == 403
+
+    def test_a_folder_name_that_would_escape_is_refused(self, unlocked_client):
+        resp = self._install(unlocked_client, folder="../../src")
+        assert resp.status_code == 400
+        assert "not a folder name" in resp.text
+
+    def test_an_address_that_names_a_program_is_refused(self, unlocked_client):
+        resp = self._install(unlocked_client, repository="ext::sh -c whoami")
+        assert resp.status_code == 400
+        assert "https://" in resp.text
+
+    def test_nothing_restarts_when_nothing_was_installed(self, unlocked_client,
+                                                          monkeypatch):
+        """A restart on a failed install would throw away every running job to
+        load a plugin that is not there.
+
+        What is watched is the scheduling, not the firing. An earlier version
+        of this replaced the restart itself and then looked straight away —
+        half a second before the timer it was waiting for, so it could not
+        have seen anything either way.
+        """
+        import sys
+
+        app_module = sys.modules["_pu_webui_app"]
+        scheduled = []
+        monkeypatch.setattr(
+            app_module.threading, "Timer",
+            lambda delay, fn: type("T", (), {"start": lambda s: scheduled.append(fn)})())
+        self._install(unlocked_client, folder="../../src")
+        assert scheduled == [], "a failed install asked for a restart"
+
+    def test_a_successful_install_asks_for_a_restart(self, unlocked_client, monkeypatch):
+        """Re-scanning in this process would put the plugin in the menu with
+        its orchestration methods missing — SandboxProcessor gathers those at
+        first import, which has long since happened."""
+        import sys
+
+        app_module = sys.modules["_pu_webui_app"]
+        installed = app_module.sys.modules["_pu_webui_plugin_install"].Installed
+        monkeypatch.setattr(
+            app_module.sys.modules["_pu_webui_plugin_install"], "install_from_git",
+            lambda *a, **k: installed(name="thing", path=Path("/x"), commands=["do"]))
+        timers = []
+        monkeypatch.setattr(app_module.threading, "Timer",
+                            lambda delay, fn: type("T", (), {"start": lambda s: timers.append(fn)})())
+        resp = self._install(unlocked_client)
+        assert resp.status_code == 200
+        assert resp.json()["restarting"] is True
+        assert resp.json()["commands"] == ["do"]
+        assert timers, "nothing was scheduled to restart the sandbox"
+
+    def test_the_response_goes_before_the_restart(self, unlocked_client, monkeypatch):
+        """os.execv replaces this process. Restarting inside the handler would
+        mean the browser never hears where to look."""
+        import sys
+
+        app_module = sys.modules["_pu_webui_app"]
+        source = Path(app_module.__file__).read_text()
+        handler = source[source.index("def api_install_plugin"):]
+        handler = handler[:handler.index("@app.get")]
+        assert handler.index("threading.Timer") < handler.index("return {")
+
+
+class TestTheInstallEntryInThePluginMenu:
+
+    def test_it_is_offered(self):
+        chat = _rendered_chat()
+        assert "Install plugin…" in chat
+
+    def test_it_comes_last(self):
+        """Everything above it runs something already installed."""
+        chat = _rendered_chat()
+        picker = chat[chat.index("function renderActionPicker"):]
+        picker = picker[:picker.index("function openInstallDialog")]
+        assert picker.index("state.pluginActions.forEach") < picker.index(
+            "addInstallEntry(picker)")
+
+    def test_it_is_offered_even_when_no_plugin_has_an_action(self):
+        """A sandbox with nothing installed is exactly where this is wanted.
+
+        There used to be an early return on the empty case, which meant the
+        one menu that most needed this entry was the one menu without it.
+        Measured inside the function: "action-picker-empty" appears in the
+        stylesheet too, and slicing from there ran the check across half the
+        file.
+        """
+        chat = _rendered_chat()
+        body = chat[chat.index("function renderActionPicker"):]
+        body = body[:body.index("addInstallEntry(picker);")]
+        assert "return;" not in body, "it gives up before offering the entry"
+
+    def test_the_dialog_says_what_a_plugin_is(self):
+        chat = _rendered_chat()
+        assert "runs alongside everything" in chat
+        assert "API keys" in chat
+
+    def test_the_folder_box_stops_guessing_once_it_is_typed_in(self):
+        chat = _rendered_chat()
+        assert 'dataset.editedByHand === "true"' in chat
+
+    def test_it_waits_for_the_sandbox_rather_than_guessing(self):
+        chat = _rendered_chat()
+        assert "waitForTheSandboxToComeBack" in chat
+        assert "setTimeout(ask, 500)" in chat
+
+    def test_what_git_says_is_shown_as_text(self):
+        """git's own words come back through here, and they are words."""
+        chat = _rendered_chat()
+        at = chat.index('error.textContent = readableError(e)')
+        assert "innerHTML" not in chat[at - 300:at + 100]
