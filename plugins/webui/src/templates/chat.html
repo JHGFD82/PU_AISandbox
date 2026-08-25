@@ -1490,10 +1490,36 @@ document.getElementById("install-folder").addEventListener("input", (e) => {
 document.getElementById("install-plugin-close")
   .addEventListener("click", closeInstallDialog);
 
+// Clicking the dark area around a modal closes it. Saying that in the obvious
+// way — "was this click on the backdrop?" — closes it in a case nobody means:
+// select text in a field, drag past the edge of the panel, let go. A click
+// event is delivered to the nearest common ancestor of where the button went
+// down and where it came up, so a drag that starts in a field and ends outside
+// reports the backdrop as its target, and the modal shuts on what was really a
+// text selection.
+//
+// So both ends have to be the backdrop. Anything that began inside the panel
+// finished inside it as far as this is concerned, wherever the mouse ended up.
+function closeWhenTheBackdropItselfIsClicked(backdropId, close) {
+  const backdrop = document.getElementById(backdropId);
+  let startedOnTheBackdrop = false;
+  backdrop.addEventListener("mousedown", (e) => {
+    startedOnTheBackdrop = e.target.id === backdropId;
+  });
+  // Both ends, and read from mouseup rather than from click, because click
+  // reports the ancestor the two ends have in common — which is the backdrop
+  // for any drag between it and the panel, in either direction. Asking where
+  // the button actually came up is the only way to tell those apart.
+  backdrop.addEventListener("mouseup", (e) => {
+    const endedOnTheBackdrop = e.target.id === backdropId;
+    const both = startedOnTheBackdrop && endedOnTheBackdrop;
+    startedOnTheBackdrop = false;
+    if (both) close();
+  });
+}
+
 // The two ways out every other modal here offers.
-document.getElementById("install-plugin-backdrop").addEventListener("click", (e) => {
-  if (e.target.id === "install-plugin-backdrop") closeInstallDialog();
-});
+closeWhenTheBackdropItselfIsClicked("install-plugin-backdrop", closeInstallDialog);
 
 document.getElementById("install-go").addEventListener("click", async () => {
   const error = document.getElementById("install-error");
@@ -2205,9 +2231,7 @@ document.addEventListener("keydown", (e) => {
     closeJobModal();
   }
 });
-document.getElementById("job-modal-backdrop").addEventListener("click", (e) => {
-  if (e.target.id === "job-modal-backdrop") closeJobModal();
-});
+closeWhenTheBackdropItselfIsClicked("job-modal-backdrop", closeJobModal);
 
 // ── Background job lock + polling ───────────────────────────────────────────
 // While a job runs in the currently open conversation, the composer is
@@ -2918,9 +2942,7 @@ function closeSettingsModal() {
 
 document.getElementById("settings-btn").addEventListener("click", openSettingsModal);
 document.getElementById("settings-modal-close").addEventListener("click", closeSettingsModal);
-document.getElementById("settings-modal-backdrop").addEventListener("click", (e) => {
-  if (e.target.id === "settings-modal-backdrop") closeSettingsModal();
-});
+closeWhenTheBackdropItselfIsClicked("settings-modal-backdrop", closeSettingsModal);
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && !document.getElementById("settings-modal-backdrop").hidden) {
     closeSettingsModal();

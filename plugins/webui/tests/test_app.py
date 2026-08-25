@@ -5929,8 +5929,11 @@ class TestAModalThatIsShownIsAlsoVisible:
         """A modal nobody can dismiss is the same problem arrived at slowly."""
         chat = self._chat()
         assert "install-plugin-close" in chat
-        # Clicking away, and Escape, as the other modals allow.
-        assert 'if (e.target.id === "install-plugin-backdrop") closeInstallDialog();' in chat
+        # Clicking away, and Escape, as the other modals allow. How clicking
+        # away is decided is TestAModalDoesNotCloseOnADragThatLeavesIt's
+        # business; all that matters here is that it is offered at all.
+        assert ('closeWhenTheBackdropItselfIsClicked("install-plugin-backdrop", '
+                "closeInstallDialog)") in chat
         # This dialog's own Escape handler, not the first one in the file —
         # the combobox has one too, several hundred lines earlier.
         at = chat.index('!document.getElementById("install-plugin-backdrop").hidden')
@@ -5943,3 +5946,55 @@ class TestAModalThatIsShownIsAlsoVisible:
         close = close[:close.index("\n}")]
         assert 'classList.remove("open")' in close
         assert "setTimeout" in close
+
+
+class TestAModalDoesNotCloseOnADragThatLeavesIt:
+    """Select text in a field, drag past the edge of the panel, let go — and
+    the modal shut, losing whatever had been filled in.
+
+    A click event is delivered to the nearest ancestor the two ends of the
+    gesture have in common, so a drag beginning in a field and ending outside
+    reports the backdrop as its target. Asking "was this click on the
+    backdrop?" is therefore true for a text selection that happened to
+    overshoot."""
+
+    def _script(self):
+        import re
+
+        return "\n".join(re.findall(r"<script>(.*?)</script>", _rendered_chat(), re.S))
+
+    def test_both_ends_of_the_gesture_are_checked(self):
+        script = self._script()
+        helper = script[script.index("function closeWhenTheBackdropItselfIsClicked"):]
+        helper = helper[:helper.index("\n}")]
+        assert 'addEventListener("mousedown"' in helper
+        assert 'addEventListener("mouseup"' in helper
+        assert "startedOnTheBackdrop && endedOnTheBackdrop" in helper
+
+    def test_it_does_not_decide_from_the_click_target(self):
+        """Which is the ancestor in common, and so the backdrop for any drag
+        between it and the panel — in either direction."""
+        script = self._script()
+        helper = script[script.index("function closeWhenTheBackdropItselfIsClicked"):]
+        helper = helper[:helper.index("\n}")]
+        assert 'addEventListener("click"' not in helper
+
+    def test_the_flag_does_not_survive_into_the_next_gesture(self):
+        """Otherwise a drag out of a field arms the next click anywhere."""
+        script = self._script()
+        helper = script[script.index("function closeWhenTheBackdropItselfIsClicked"):]
+        helper = helper[:helper.index("\n}")]
+        assert helper.index("startedOnTheBackdrop = false;") < helper.index("if (both)")
+
+    def test_every_modal_uses_it(self):
+        """Three modals, one rule. A fourth written by hand would be a fourth
+        chance to lose what somebody had typed."""
+        import re
+
+        script = self._script()
+        by_hand = re.findall(r'e\.target\.id === "([a-z-]*backdrop)"', script)
+        assert not by_hand, f"deciding for itself rather than using the helper: {by_hand}"
+        used = set(re.findall(
+            r'closeWhenTheBackdropItselfIsClicked\("([a-z-]+)"', script))
+        assert used == {"install-plugin-backdrop", "job-modal-backdrop",
+                        "settings-modal-backdrop"}, used
