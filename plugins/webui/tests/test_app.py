@@ -6065,3 +6065,74 @@ class TestAJobGetsAConversationToItself:
         """There being nothing else to go on."""
         block = self._decision()
         assert "beginConversationOn(model)" in block
+
+
+class TestTheTranscriptDoesNotDragTheReaderAround:
+    """Text arriving used to pull the view to the bottom whatever the reader
+    was doing — every streamed chunk, and every poll of a running job, which
+    happens on a timer. Scrolling up to read an earlier page lasted until the
+    next tick."""
+
+    def _script(self):
+        import re
+
+        return "\n".join(re.findall(r"<script>(.*?)</script>", _rendered_chat(), re.S))
+
+    def test_nothing_scrolls_the_transcript_except_the_two_named_ways(self):
+        """One place decides what "the end" means and one place goes there."""
+        script = self._script()
+        raw = script.count("scrollTop = box.scrollHeight")
+        assert raw == 1, f"{raw} places move the transcript by hand"
+        assert "function goToTheEnd" in script
+
+    def test_a_streamed_chunk_asks_before_it_lands(self):
+        """Adding the text is what moves the end away, so asking afterwards
+        always answers yes."""
+        script = self._script()
+        block = script[script.index("const following = isWatchingTheEnd(box);"):]
+        block = block[:block.index("if (following) goToTheEnd(box);")]
+        assert "assistantDiv.textContent += event.text;" in block
+
+    def test_it_asks_every_chunk_rather_than_deciding_once(self):
+        """So that scrolling back down yourself starts it following again,
+        with nothing to press."""
+        script = self._script()
+        stream = script[script.index("assistantDiv.textContent += event.text;") - 400:]
+        stream = stream[:stream.index("if (following) goToTheEnd(box);")]
+        assert "const following = isWatchingTheEnd(box);" in stream
+
+    def test_a_re_render_puts_the_reader_back_rather_than_leaving_them(self):
+        """Emptying the box collapses the scroll position to the top, so
+        merely declining to jump to the bottom moves them to the beginning —
+        which is worse than the jump it replaced."""
+        script = self._script()
+        helper = script[script.index("function rememberWhereTheReaderIs"):]
+        helper = helper[:helper.index("\n}\n")]
+        assert "const wasAt = box.scrollTop;" in helper
+        assert "else box.scrollTop = wasAt;" in helper
+
+    def test_opening_a_conversation_still_lands_at_the_end(self):
+        """Where somebody had scrolled to in the conversation being left says
+        nothing about where they want to be in this one."""
+        script = self._script()
+        opening = script[script.index("async function openConversation"):]
+        opening = opening[:opening.index("if (conv.active_job_id)")]
+        assert "goToTheEnd(" in opening
+
+    def test_sending_a_message_still_brings_you_down(self):
+        """You pressed send; being shown what you sent is the answer to it."""
+        script = self._script()
+        pending = script[script.index("function appendPendingMessage"):]
+        pending = pending[:pending.index("\n}\n")]
+        assert "goToTheEnd(box)" in pending
+        assert "isWatchingTheEnd" not in pending
+
+    def test_close_to_the_end_counts_as_the_end(self):
+        """Scroll positions come back fractional and a trackpad leaves you a
+        pixel short; exact equality would stop it following for no reason
+        anybody could see."""
+        script = self._script()
+        assert "const AT_THE_BOTTOM = 24;" in script
+        check = script[script.index("function isWatchingTheEnd"):]
+        check = check[:check.index("\n}")]
+        assert "<= AT_THE_BOTTOM" in check

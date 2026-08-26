@@ -2646,8 +2646,43 @@ function messageLeaf(role, source, extraClasses) {
   return { leaf, body };
 }
 
+// Whether the transcript is showing its end. Within a line of it counts:
+// scroll positions come back fractional, a trackpad leaves you a pixel short,
+// and somebody two pixels from the bottom plainly means "I am watching the
+// end of this".
+const AT_THE_BOTTOM = 24;
+
+function isWatchingTheEnd(box) {
+  return box.scrollHeight - box.scrollTop - box.clientHeight <= AT_THE_BOTTOM;
+}
+
+function goToTheEnd(box) {
+  // Past the end, which a browser clamps to exactly the end.
+  box.scrollTop = box.scrollHeight;
+}
+
+// Note where the reader is, and hand back the way to put them there again.
+//
+// Needed because re-rendering empties the box, and emptying it collapses the
+// scroll position to the top — so leaving it alone does not leave the reader
+// alone. It moves them from wherever they were reading to the beginning,
+// which is a worse answer than the jump to the bottom this replaced.
+function rememberWhereTheReaderIs(box) {
+  const watchingTheEnd = isWatchingTheEnd(box);
+  const wasAt = box.scrollTop;
+  return function putThemBack() {
+    // Following the end means the *new* end, which is further down than the
+    // one they were watching.
+    if (watchingTheEnd) goToTheEnd(box);
+    else box.scrollTop = wasAt;
+  };
+}
+
 function renderMessages(conv) {
   const box = document.getElementById("messages");
+  // Asked before anything is replaced: emptying the box moves the scroll
+  // position, so afterwards there is nothing left to read it from.
+  const putTheReaderBack = rememberWhereTheReaderIs(box);
   if (!conv) { box.innerHTML = '<div class="empty">Select or start a conversation.</div>'; return; }
   box.innerHTML = "";
   conv.messages.forEach(m => {
@@ -2717,7 +2752,16 @@ function renderMessages(conv) {
     if (!isJobMessage || isJobPage) div.appendChild(messageActionsElement(m));
     box.appendChild(leaf);
   });
-  box.scrollTop = box.scrollHeight;
+  // This runs on a timer while a job is going — every poll re-renders the
+  // whole transcript — so reading page three of a translation used to last
+  // until the next tick and then throw you back to the bottom.
+  //
+  // Opening a conversation is the other thing that comes through here, and
+  // that should land at the end. It says so itself rather than being inferred
+  // here, because the box still holds the conversation being left at this
+  // point, and where somebody had scrolled to in *that* one says nothing
+  // about where they want to be in this one.
+  putTheReaderBack();
 }
 
 async function openConversation(id) {
@@ -2733,6 +2777,9 @@ async function openConversation(id) {
   document.getElementById("model-field").value = conv.model;
   applySamplingVisibility();
   renderMessages(conv);
+  // A conversation just opened is read from its end, whatever the one being
+  // left was scrolled to.
+  goToTheEnd(document.getElementById("messages"));
   if (conv.active_job_id) {
     // Reopening a conversation that has a job running (e.g. after
     // switching away and back) — resume the lock and polling rather than
@@ -2784,7 +2831,9 @@ function appendPendingMessage(text) {
   meta.textContent = "waiting...";
   body.appendChild(meta);
   box.appendChild(leaf);
-  box.scrollTop = box.scrollHeight;
+  // Unconditional: you have just pressed send, and being shown what you sent
+  // is the answer to having pressed it.
+  goToTheEnd(box);
 }
 
 async function sendMessage() {
@@ -2860,8 +2909,13 @@ async function sendMessage() {
             assistantDiv.classList.add("verbatim");
             box.appendChild(streaming.leaf);
           }
+          // Asked before the text lands, since adding it is what moves the
+          // end away. Asked every time rather than settled once, so that
+          // scrolling back down yourself starts it following again without
+          // anything to press.
+          const following = isWatchingTheEnd(box);
           assistantDiv.textContent += event.text;
-          box.scrollTop = box.scrollHeight;
+          if (following) goToTheEnd(box);
         } else if (event.type === "done") {
           // Authoritative re-render (adds the model/cost meta line, and
           // matches exactly what's now saved server-side).
