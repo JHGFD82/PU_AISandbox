@@ -1562,12 +1562,34 @@ document.getElementById("install-go").addEventListener("click", async () => {
 // that sent it. How long that takes depends on the computer, so this asks
 // until it answers rather than guessing a number and reloading onto nothing.
 // The same wait the last page of setup does.
+//
+// It asks for "/", which answers whoever is asking. The first version asked
+// for /api/plugin-actions — the very thing it was waiting to see change —
+// and that endpoint requires an unlocked session. Restarting mints a new
+// session secret unless one is configured, so every session from before the
+// restart is void: the poll got 401 once a second, forever, and the page
+// never reloaded.
+const RESTART_PATIENCE_MS = 60000;
+
 function waitForTheSandboxToComeBack() {
+  const busy = document.getElementById("install-busy");
+  const gaveUpAt = Date.now() + RESTART_PATIENCE_MS;
   setTimeout(function () {
     (function ask() {
-      fetch("/api/plugin-actions", { cache: "no-store" })
-        .then(function (r) { if (r.ok) { location.reload(); } else { setTimeout(ask, 500); } })
-        .catch(function () { setTimeout(ask, 500); });
+      fetch("/", { method: "HEAD", cache: "no-store" })
+        .then(function () { location.reload(); })
+        .catch(function () {
+          // Only a failure to connect reaches here, which is what a server
+          // that is still starting looks like. Any answer at all, including
+          // one asking to unlock again, means it is back.
+          if (Date.now() > gaveUpAt) {
+            busy.textContent =
+              "The plugin was installed, but the sandbox is taking longer than "
+              + "expected to restart. Reload this page in a moment.";
+            return;
+          }
+          setTimeout(ask, 500);
+        });
     })();
   }, 1200);
 }

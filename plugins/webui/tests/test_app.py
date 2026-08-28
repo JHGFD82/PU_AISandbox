@@ -6277,3 +6277,58 @@ class TestWhereAnInstalledPluginLands:
         assert any("install a plugin" in r.message.lower() or
                    "install a plugin" in r.getMessage().lower()
                    for r in caplog.records), caplog.text
+
+
+class TestWaitingForTheSandboxToComeBack:
+    """After an install the sandbox restarts, and the page waits for it. The
+    first version waited on /api/plugin-actions — the very thing it wanted to
+    see change — which requires an unlocked session. Restarting mints a new
+    session secret unless one is configured, so every session from before it
+    is void: the poll got 401 once a second, forever, and the page never
+    reloaded."""
+
+    def _wait_block(self):
+        import re
+
+        chat = _rendered_chat()
+        script = "\n".join(re.findall(r"<script>(.*?)</script>", chat, re.S))
+        start = script.index("function waitForTheSandboxToComeBack")
+        return script[start:script.index("\n}", start)]
+
+    def test_it_waits_on_something_that_answers_when_locked(self):
+        block = self._wait_block()
+        assert 'fetch("/"' in block
+        assert "plugin-actions" not in block, (
+            "waiting on an endpoint that 401s until the session is remade")
+
+    def test_the_path_it_waits_on_really_does_answer_a_new_session(self, client):
+        """Not an assumption about the route table: asked of the app itself,
+        with a session that has never unlocked — which is what a browser has
+        after the restart."""
+        assert client.get("/").status_code == 200
+        assert client.get("/api/plugin-actions").status_code == 401
+
+    def test_any_answer_counts_as_back(self):
+        """Including one asking to unlock again. Only a failure to connect
+        means still starting."""
+        block = self._wait_block()
+        assert "location.reload()" in block
+        # Reload sits in .then, not behind a check of what came back.
+        then = block[block.index(".then("):block.index(".catch(")]
+        assert "location.reload()" in then
+
+    def test_it_gives_up_rather_than_asking_for_ever(self):
+        """The comparison, not the names. Checking only that "gaveUpAt"
+        appears passes against `if (false)`, which keeps every name and asks
+        for ever anyway."""
+        block = self._wait_block()
+        assert "RESTART_PATIENCE_MS" in block
+        assert "Date.now() > gaveUpAt" in block, (
+            "nothing compares the clock to the deadline, so it never stops")
+        # And stops rather than falling through to another attempt.
+        after = block[block.index("Date.now() > gaveUpAt"):]
+        assert "return;" in after[:after.index("setTimeout(ask")]
+
+    def test_and_says_what_to_do_when_it_does(self):
+        block = self._wait_block()
+        assert "Reload this page" in block
