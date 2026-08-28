@@ -8,6 +8,7 @@
 {% include "_forms.html" %}
 {% include "_panels.html" %}
 {% include "_combobox.html" %}
+{% include "_helpers.html" %}
 <style>
   /* Said explicitly, because the rule below sets display and would otherwise
      win against the browser's own meaning for the attribute — which is why
@@ -382,22 +383,6 @@ async function api(path, opts) {
 function badge(el, isSet, setText, unsetText) {
   el.textContent = isSet ? (setText || "set") : (unsetText || "not set");
   el.className = "badge " + (isSet ? "set" : "unset");
-}
-
-// The server answers errors as JSON ({"detail": "..."}), and that wrapper is
-// not something to show anyone. Anything unrecognisable is passed through as
-// it came, on the grounds that some text beats none.
-function readableError(err) {
-  const raw = (err && err.message) || String(err);
-  try {
-    const parsed = JSON.parse(raw);
-    if (typeof parsed.detail === "string") return parsed.detail;
-    // FastAPI reports a missing or malformed field as a list of objects.
-    if (Array.isArray(parsed.detail)) {
-      return parsed.detail.map(d => d.msg || JSON.stringify(d)).join("; ");
-    }
-  } catch (e) { /* not JSON: show it as it is */ }
-  return raw;
 }
 
 // ── "Browse…" ────────────────────────────────────────────────────────────

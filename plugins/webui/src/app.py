@@ -1384,12 +1384,25 @@ def create_app() -> FastAPI:
         # still there for anybody genuinely administering this remotely.
         _require_installing_from_this_computer(request)
 
+        from src.paths import PACKAGE_ROOT
+
         install = sys.modules["_pu_webui_plugin_install"]
-        plugins_dir = Path(__file__).resolve().parents[3]
+        # The same folder the loader scans, named the same way it is named
+        # everywhere else in this file. Worked out here by counting parents it
+        # came to one short — the repository root rather than the plugins
+        # folder inside it — so every install landed beside the code instead
+        # of among the plugins, was never found afterwards, and left a folder
+        # for the next attempt to collide with.
         try:
             installed = install.install_from_git(
-                body.repository, body.folder, plugins_dir)
+                body.repository, body.folder, PACKAGE_ROOT / "plugins")
         except install.InstallError as e:
+            # Written down as well as answered. A browser is not always what
+            # is looking, and until this was here a refused install left no
+            # trace anywhere — not in the page, which could not show it, and
+            # not in the log either.
+            logging.warning("Could not install a plugin from %r into %r: %s",
+                            body.repository, body.folder, e)
             raise HTTPException(400, str(e)) from e
 
         # After the answer has gone, so the browser is told where to look

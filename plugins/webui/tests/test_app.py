@@ -5886,6 +5886,18 @@ class TestTheInstallEntryInThePluginMenu:
         at = chat.index('error.textContent = readableError(e)')
         assert "innerHTML" not in chat[at - 300:at + 100]
 
+    def test_and_the_thing_that_shows_them_exists(self):
+        """This test used to check only that the line calling readableError
+        was written, which it was — on a page that did not have the function.
+        Every failed install therefore threw a ReferenceError inside its own
+        catch, and the dialog sat on "Downloading…" saying nothing.
+        """
+        import re
+
+        chat = _rendered_chat()
+        assert re.search(r"function\s+readableError\s*\(", chat), (
+            "chat.html calls readableError and nothing defines it")
+
 
 class TestAModalThatIsShownIsAlsoVisible:
     """`.modal-backdrop` is `opacity: 0` and covers the whole window at
@@ -6136,3 +6148,132 @@ class TestTheTranscriptDoesNotDragTheReaderAround:
         check = script[script.index("function isWatchingTheEnd"):]
         check = check[:check.index("\n}")]
         assert "<= AT_THE_BOTTOM" in check
+
+
+class TestNoPageCallsAHelperItHasNot:
+    """These pages share behaviour by including partials, and a helper written
+    into one page directly is a helper the next page will call and not have.
+    That is not a theory: readableError lived in settings.html, chat.html
+    called it, and every failed plugin install threw a ReferenceError inside
+    its own error handler — so the dialog said nothing at all and the only
+    sign was a bare 400 in the network tab."""
+
+    PAGES = ("chat.html", "settings.html", "shared_settings.html", "unlock.html")
+
+    def _script(self, name):
+        import re
+
+        from fastapi.templating import Jinja2Templates
+
+        directory = Path(__file__).resolve().parents[1] / "src" / "templates"
+        page = Jinja2Templates(directory=str(directory)).get_template(name).render(
+            request=None)
+        return "\n".join(re.findall(r"<script>(.*?)</script>", page, re.S))
+
+    def _defined_and_called(self, name):
+        import re
+
+        js = re.sub(r"//[^\n]*", "", self._script(name))
+        defined = set(re.findall(r"function\s+([A-Za-z_$][\w$]*)", js))
+        # Bare calls only: anything after a dot is a method on something else,
+        # and whether that exists is not a question this can answer.
+        called = set(re.findall(r"(?<![.\w$])([a-z_$][A-Za-z0-9_$]*)\s*\(", js))
+        return defined, called
+
+    def test_every_helper_a_page_calls_is_a_helper_it_has(self):
+        """Only names some page defines are considered, which is what keeps
+        this quiet: a browser built-in, a local variable or a word inside a
+        string is never a project helper and is never flagged.
+
+        Deliberately no attempt to strip string or regex literals first.
+        chat.html's markdown parser holds backticks inside regex literals, and
+        every regex-based way of removing literals swallowed real code along
+        with them — including the function definitions this needs to see.
+        """
+        everything = {}
+        for page in self.PAGES:
+            everything[page] = self._defined_and_called(page)
+        helpers = set().union(*(defined for defined, _ in everything.values()))
+
+        missing = {}
+        for page, (defined, called) in everything.items():
+            absent = sorted((called & helpers) - defined)
+            if absent:
+                missing[page] = absent
+        assert not missing, (
+            "called on a page that does not define it, and defined on another:\n"
+            + "\n".join(f"  {page}: {', '.join(names)}" for page, names in missing.items()))
+
+    def test_the_shared_helper_is_shared_rather_than_copied(self):
+        """One definition reaching four pages, not four definitions."""
+        import re
+        from pathlib import Path as P
+
+        directory = P(__file__).resolve().parents[1] / "src" / "templates"
+        partial = (directory / "_helpers.html").read_text()
+        assert "function readableError" in partial
+        for page in self.PAGES:
+            source = (directory / page).read_text()
+            assert '{% include "_helpers.html" %}' in source, page
+            assert "function readableError" not in source, f"{page} has its own copy"
+            # And it arrives exactly once in what the browser receives.
+            assert len(re.findall(r"function\s+readableError",
+                                  self._script(page))) == 1, page
+
+
+class TestWhereAnInstalledPluginLands:
+    """It landed in the repository root rather than plugins/, so the sandbox
+    restarted and never found it — and the folder left behind was there for
+    the next attempt to collide with."""
+
+    def test_the_endpoint_installs_into_the_plugins_folder(self, unlocked_client,
+                                                            monkeypatch):
+        import sys
+
+        from src.paths import PACKAGE_ROOT
+
+        app_module = sys.modules["_pu_webui_app"]
+        install_module = sys.modules["_pu_webui_plugin_install"]
+        asked = {}
+
+        def remember(repository, folder, plugins_dir):
+            asked["plugins_dir"] = plugins_dir
+            return install_module.Installed(name=folder, path=plugins_dir / folder,
+                                            commands=[])
+
+        monkeypatch.setattr(install_module, "install_from_git", remember)
+        monkeypatch.setattr(app_module.threading, "Timer",
+                            lambda d, fn: type("T", (), {"start": lambda s: None})())
+        resp = unlocked_client.post("/api/plugins/install", json={
+            "repository": "https://github.com/x/y.git", "folder": "y"})
+        assert resp.status_code == 200
+        assert asked["plugins_dir"] == PACKAGE_ROOT / "plugins"
+        assert asked["plugins_dir"].name == "plugins", "it is not the plugins folder"
+
+    def test_it_is_the_folder_the_loader_reads(self, unlocked_client, monkeypatch):
+        """Installing somewhere the loader does not look is the same as not
+        installing."""
+        import sys
+
+        from src.paths import PACKAGE_ROOT
+
+        app_module = sys.modules["_pu_webui_app"]
+        source = Path(app_module.__file__).read_text()
+        loader = source[source.index("def _get_plugins"):]
+        loader = loader[:loader.index("return _plugins_cache")]
+        assert '"plugins"' in loader
+        assert (PACKAGE_ROOT / "plugins").is_dir()
+
+    def test_a_refused_install_is_written_down(self, unlocked_client, monkeypatch,
+                                               caplog):
+        """A browser is not always what is looking, and the page could not show
+        this at all until the helper it needed was shared."""
+        import logging
+
+        with caplog.at_level(logging.WARNING):
+            resp = unlocked_client.post("/api/plugins/install", json={
+                "repository": "ext::sh -c whoami", "folder": "y"})
+        assert resp.status_code == 400
+        assert any("install a plugin" in r.message.lower() or
+                   "install a plugin" in r.getMessage().lower()
+                   for r in caplog.records), caplog.text

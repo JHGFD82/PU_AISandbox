@@ -124,7 +124,17 @@ def check_folder_name(name: str, plugins_dir: Path) -> Path:
         InstallError: If the name is not a plain folder name, or something is
                       already there.
     """
-    cleaned = name.strip()
+    # The box is labelled "Install into plugins/", so typing that prefix back
+    # is the natural reading of it rather than a mistake, and refusing it for
+    # containing a slash would be answering a reasonable answer with a lecture
+    # about slashes. Only that prefix, and only at the front: anything else
+    # with a separator in it is still refused below.
+    cleaned = name.strip().strip("/")
+    for prefix in ("plugins/", "./"):
+        while cleaned.startswith(prefix):
+            cleaned = cleaned[len(prefix):]
+    cleaned = cleaned.strip("/")
+
     if not _FOLDER_NAME.fullmatch(cleaned):
         raise InstallError(
             f"'{name}' is not a folder name. Use letters, digits, hyphens and "
@@ -169,13 +179,7 @@ def install_from_git(repository: str, name: str, plugins_dir: Path) -> Installed
     address = check_repository(repository)
     target = check_folder_name(name, plugins_dir)
 
-    git = shutil.which("git")
-    if git is None:
-        raise InstallError(
-            "git is not installed on this computer, and it is what fetches a "
-            "plugin. Install it and try again — on a Mac, `xcode-select "
-            "--install` is enough."
-        )
+    git = _usable_git()
 
     # Arguments as a list, never a command line: nothing here is handed to a
     # shell to take apart. The `--` says that what follows is a place and a
@@ -220,6 +224,42 @@ def install_from_git(repository: str, name: str, plugins_dir: Path) -> Installed
     return Installed(name=target.name, path=target, commands=_commands_named_in(target))
 
 
+def _usable_git() -> str:
+    """Return the path to a git that works, or say why there isn't one.
+
+    Being on the computer is not the same as working. A Mac without the Xcode
+    command line tools still has ``/usr/bin/git`` — a stub that exists, is
+    found, and then fails with an xcrun error the moment it is run. Asking it
+    its version is a cheap way to tell the two apart, and turns "could not
+    fetch, here is a paragraph about xcrun" into something somebody can act
+    on.
+
+    Raises:
+        InstallError: If git is missing, or is there and cannot run.
+    """
+    found = shutil.which("git")
+    advice = ("Install it and try again — on a Mac, `xcode-select --install` "
+              "is enough.")
+    if found is None:
+        raise InstallError(
+            "git is not installed on this computer, and it is what fetches a "
+            f"plugin. {advice}"
+        )
+    try:
+        done = subprocess.run([found, "--version"], capture_output=True,
+                              text=True, timeout=30, check=False)
+    except (OSError, subprocess.SubprocessError) as e:
+        raise InstallError(f"git is installed at {found} but cannot be run: {e}") from e
+    if done.returncode != 0:
+        said = (done.stderr or done.stdout or "").strip()
+        raise InstallError(
+            f"There is a git at {found}, but running it does not work, so a "
+            f"plugin cannot be fetched.\n\n{said}\n\n{advice}" if said else
+            f"There is a git at {found}, but running it does not work. {advice}"
+        )
+    return found
+
+
 def _commands_named_in(folder: Path) -> list[str]:
     """Return the commands a plugin's source says it adds, as text.
 
@@ -234,7 +274,12 @@ def _commands_named_in(folder: Path) -> list[str]:
         source = (folder / "plugin.py").read_text(encoding="utf-8", errors="replace")
     except OSError:
         return []
-    found = re.search(r"^\s*commands\s*[:=].*?\[([^\]]*)\]", source, re.M | re.S)
+    # The annotation is stepped over rather than searched through: every
+    # plugin writes `commands: list[str] = [...]`, and a pattern that took the
+    # first pair of brackets after the name took the ones in `list[str]` and
+    # came back with nothing for every real plugin there is.
+    found = re.search(r"^\s*commands\s*(?::[^=\n]*)?=\s*\[([^\]]*)\]",
+                      source, re.M | re.S)
     if not found:
         return []
     return [c for c in re.findall(r"[\"']([A-Za-z0-9_-]+)[\"']", found.group(1))]

@@ -177,12 +177,140 @@ class TestFetchingOne:
         as one argument in a list, never as part of a command line."""
         plugins = tmp_path / "plugins"
         plugins.mkdir()
-        with patch.object(install.subprocess, "run") as ran:
-            ran.return_value = subprocess.CompletedProcess([], 1, "", "no")
+
+        def fake_run(command, **kwargs):
+            # git is asked its version first, and has to answer, or the fetch
+            # this is about never happens.
+            if command[1:] == ["--version"]:
+                return subprocess.CompletedProcess(command, 0, "git version 2.0", "")
+            return subprocess.CompletedProcess(command, 1, "", "no")
+
+        with patch.object(install.subprocess, "run", side_effect=fake_run) as ran:
             with pytest.raises(install.InstallError):
                 install.install_from_git("https://example.com/x.git", "x", plugins)
-        args, kwargs = ran.call_args
+
+        clone = [c for c in ran.call_args_list if "clone" in c.args[0]]
+        assert clone, "it never got as far as fetching"
+        args, kwargs = clone[0]
         assert isinstance(args[0], list)
         assert kwargs.get("shell") in (None, False)
         # Everything after -- is a place and a folder, whatever it starts with.
         assert "--" in args[0]
+
+
+class TestTheFolderBoxForgivesThePrefix:
+    """The box is labelled "Install into plugins/", so typing that back is
+    the natural reading of the label rather than a mistake."""
+
+    @pytest.mark.parametrize("typed", [
+        "plugins/transcription-ea",
+        "./transcription-ea",
+        "plugins/transcription-ea/",
+        "  plugins/transcription-ea  ",
+    ])
+    def test_a_leading_plugins_is_taken_off(self, typed, tmp_path):
+        assert install.check_folder_name(typed, tmp_path).name == "transcription-ea"
+
+    def test_it_still_lands_inside_the_plugins_folder(self, tmp_path):
+        got = install.check_folder_name("plugins/thing", tmp_path)
+        assert got.parent == tmp_path
+
+    @pytest.mark.parametrize("typed", [
+        "plugins/../src", "../../src", "a/b", "plugins/a/b", "..",
+    ])
+    def test_and_nothing_else_with_a_separator_in_it(self, typed, tmp_path):
+        """Forgiving one prefix is not the same as allowing paths."""
+        with pytest.raises(install.InstallError):
+            install.check_folder_name(typed, tmp_path)
+
+
+class TestGitHasToWorkNotJustExist:
+    """A Mac without the Xcode command line tools still has /usr/bin/git — a
+    stub that is found, and then fails with an xcrun error the moment it runs.
+    Only checking that the file is there turned that into "could not fetch"
+    followed by a paragraph about xcrun."""
+
+    def test_a_git_that_cannot_run_is_reported_as_that(self, tmp_path):
+        plugins = tmp_path / "plugins"
+        plugins.mkdir()
+        broken = subprocess.CompletedProcess(
+            [], 1, "", "xcrun: error: invalid active developer path")
+        with patch.object(install.shutil, "which", return_value="/usr/bin/git"), \
+             patch.object(install.subprocess, "run", return_value=broken):
+            with pytest.raises(install.InstallError) as raised:
+                install.install_from_git("https://example.com/x.git", "x", plugins)
+        said = str(raised.value)
+        assert "/usr/bin/git" in said
+        assert "xcode-select" in said, "it does not say what to do about it"
+
+    def test_it_is_asked_before_anything_is_fetched(self, tmp_path):
+        """Otherwise the answer is a clone failure with git's confusion in it
+        rather than a sentence about git."""
+        plugins = tmp_path / "plugins"
+        plugins.mkdir()
+        calls = []
+
+        def fake_run(command, **kwargs):
+            calls.append(command)
+            return subprocess.CompletedProcess(command, 1, "", "no")
+
+        with patch.object(install.shutil, "which", return_value="/usr/bin/git"), \
+             patch.object(install.subprocess, "run", side_effect=fake_run):
+            with pytest.raises(install.InstallError):
+                install.install_from_git("https://example.com/x.git", "x", plugins)
+        assert calls, "git was never asked anything"
+        assert calls[0][1:] == ["--version"], calls[0]
+
+    def test_a_working_git_is_used(self, tmp_path):
+        """The check must not get in the way of the ordinary case."""
+        origin = _a_repository(tmp_path / "origin", A_PLUGIN)
+        plugins = tmp_path / "plugins"
+        plugins.mkdir()
+        with patch.object(install, "check_repository", side_effect=lambda a: a):
+            got = install.install_from_git(f"file://{origin}", "thing", plugins)
+        assert got.name == "thing"
+
+
+class TestSayingWhatAPluginAdds:
+    """The dialog names the commands the plugin brings, so somebody can see
+    what they just fetched. It read the source rather than importing it —
+    importing is how a plugin's code starts running, and this happens before
+    the decision to keep it."""
+
+    def test_the_form_every_plugin_actually_uses(self, tmp_path):
+        """`commands: list[str] = [...]`. A pattern taking the first brackets
+        after the name took the ones in `list[str]` and found nothing, which
+        is every plugin in this repository."""
+        folder = tmp_path / "p"
+        folder.mkdir()
+        (folder / "plugin.py").write_text(
+            'class P:\n    commands: list[str] = ["translate", "transcribe"]\n',
+            encoding="utf-8")
+        assert install._commands_named_in(folder) == ["translate", "transcribe"]
+
+    def test_the_plain_form_too(self, tmp_path):
+        folder = tmp_path / "p"
+        folder.mkdir()
+        (folder / "plugin.py").write_text(
+            'class P:\n    commands = ["prompt"]\n', encoding="utf-8")
+        assert install._commands_named_in(folder) == ["prompt"]
+
+    def test_every_plugin_in_this_repository_is_read_correctly(self):
+        """The real check: guessing at source is only worth doing if it works
+        on the plugins that exist."""
+        from pathlib import Path as P
+
+        plugins = P(__file__).resolve().parents[3] / "plugins"
+        read = {d.name: install._commands_named_in(d)
+                for d in sorted(plugins.iterdir()) if (d / "plugin.py").is_file()}
+        assert read, "no plugins found to check against"
+        empty = [name for name, commands in read.items() if not commands]
+        assert not empty, f"named nothing for: {empty}"
+
+    def test_a_plugin_that_does_not_say_plainly_gives_nothing(self, tmp_path):
+        """A guess is not worth making twice; nothing is an honest answer."""
+        folder = tmp_path / "p"
+        folder.mkdir()
+        (folder / "plugin.py").write_text(
+            "class P:\n    commands = build_them()\n", encoding="utf-8")
+        assert install._commands_named_in(folder) == []
