@@ -190,12 +190,18 @@ def _render_markdown_tables_as_ascii(content: str) -> str:
 def save_to_text_file(content: str, output_path: str, label: str) -> None:
     """Save text to a plain .txt file, replacing the file if it already exists.
 
+    Any table written in Markdown's notation — the one with upright bars
+    between the columns — is drawn out with text characters on the way, since
+    a plain text file has no other way to show a table and the bars alone are
+    hard to read down. Everything else is written exactly as given.
+
     Args:
         content: The text to write to the file.
         output_path: The file path to write to, e.g. ``'response.txt'``.
         label: A short description used in the saved-confirmation message
                shown to the user (e.g. ``'Translation'`` or ``'Response'``).
     """
+    content = _render_markdown_tables_as_ascii(content)
     try:
         with open(output_path, 'w', encoding='utf-8') as f:
             f.write(content)
@@ -220,11 +226,14 @@ def append_to_text_file(content: str, output_path: str, label: str) -> None:
     to complete, so no progress is lost if the run is interrupted.
 
     Args:
-        content: The text to append.
+        content: The text to append. Tables written in Markdown's notation
+                 are drawn out with text characters, the same as when a whole
+                 file is saved at once.
         output_path: The file path to append to, e.g. ``'response.txt'``.
         label: A short description used in the saved-confirmation message
                shown to the user (e.g. ``'Translation'`` or ``'Response'``).
     """
+    content = _render_markdown_tables_as_ascii(content)
     try:
         with open(output_path, 'a', encoding='utf-8') as f:
             f.write(content + '\n\n')
