@@ -1280,7 +1280,7 @@ def create_app() -> FastAPI:
     async def api_export_conversation(
         request: Request, conversation_id: str, professor: str, format: str = "docx"
     ):
-        """Download a conversation as a formatted transcript (Word, PDF, or Markdown)."""
+        """Download a conversation as a transcript (Word, PDF, Markdown or plain text)."""
         _require_unlocked(request)
         professor = _validated_professor(professor)
         store = conversation.ConversationStore(professor)

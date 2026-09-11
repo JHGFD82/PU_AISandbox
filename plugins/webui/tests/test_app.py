@@ -1397,6 +1397,7 @@ class TestExportConversation:
         ("docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
         ("pdf", "application/pdf"),
         ("md", "text/markdown"),
+        ("txt", "text/plain"),
     ])
     def test_exports_each_supported_format(self, unlocked_client, conv_id, fmt, content_type):
         resp = unlocked_client.get(
@@ -1426,6 +1427,34 @@ class TestExportConversation:
             "/api/conversations/c_1/export", params={"professor": "heller", "format": "docx"}
         )
         assert resp.status_code == 401
+
+    def test_plain_text_really_is_plain_text(self, unlocked_client, conv_id):
+        """Not Markdown with a different extension.
+
+        The writer used to be chosen by a chain ending in a bare else that
+        meant Markdown, so any format added without touching it would have
+        produced a Markdown file under whatever name was asked for.
+        """
+        resp = unlocked_client.get(
+            f"/api/conversations/{conv_id}/export",
+            params={"professor": "heller", "format": "txt"},
+        )
+        assert resp.status_code == 200
+        body = resp.content.decode("utf-8")
+        assert "Princeton University AI Sandbox — Conversation Transcript" in body
+        # save_to_markdown writes a heading for the label; the text writer
+        # writes the transcript and nothing else.
+        assert not body.lstrip().startswith("#")
+
+    def test_every_format_has_a_writer_of_its_own(self):
+        """A format in the table with no branch to match it is the fault this
+        guards: it would be written by whichever branch happened to be last."""
+        export_module = sys.modules["_pu_webui_export"]
+        import inspect
+
+        source = inspect.getsource(export_module.export_conversation)
+        for fmt in export_module.FORMATS:
+            assert f'fmt == "{fmt}"' in source, f"{fmt} has no writer named for it"
 
 
 # ---------------------------------------------------------------------------
@@ -6386,3 +6415,26 @@ class TestTheTabIcon:
         assert "%23ffffff" in link
         # Same artwork as the header's, not a second drawing of it.
         assert "%23f58025" in link
+
+
+class TestTheFormatsAreListedInOnePlace:
+    """They are offered in two menus, and two copies would not stay the same."""
+
+    def test_the_menu_is_built_from_the_shared_list(self):
+        chat = _rendered_chat()
+        assert "const EXPORT_FORMATS = [" in chat
+        # The literal the menu used to carry inline is gone.
+        assert '[["docx", "Export as Word (.docx)"], ["pdf"' not in chat
+
+    def test_plain_text_is_offered(self):
+        chat = _rendered_chat()
+        assert '["txt", "Export as plain text (.txt)"]' in chat
+
+    def test_the_page_offers_exactly_what_the_server_can_write(self):
+        """A format in one and not the other is a menu item that 400s, or a
+        format nobody can reach."""
+        export_module = sys.modules["_pu_webui_export"]
+        chat = _rendered_chat()
+        listed = chat.split("const EXPORT_FORMATS = [")[1].split("];")[0]
+        offered = set(re.findall(r'\["(\w+)",', listed))
+        assert offered == set(export_module.FORMATS)
