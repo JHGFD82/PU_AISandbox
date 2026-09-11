@@ -3300,7 +3300,29 @@ class TestTheInterfaceCanBeReachedWithoutAMouse:
             rule = chat.split(selector)[1].split("}")[0]
             size = int(re.search(r"width:\s*(\d+)px", rule).group(1))
             assert size >= 28, f"{selector} is still {size}px"
-        assert "inset: -8px" in chat, "no expanded pointer target"
+        for selector in (".conv-menu-btn::after {", ".msg-action-btn::after {"):
+            rule = chat.split(selector)[1].split("}")[0]
+            assert "inset:" in rule, f"{selector} has no expanded pointer target"
+
+    def test_the_menu_button_does_not_reach_back_over_the_title(self):
+        """Its expanded target is invisible, and invisible is still clickable.
+
+        Eight pixels of it used to lie across the end of the conversation's
+        name. A click there landed on the button, which stops the event, so the
+        row never heard it: the words looked clickable and opened a menu.
+        """
+        import re
+
+        chat = self._chat()
+        rule = chat.split(".conv-menu-btn::after {")[1].split("}")[0]
+        insets = re.search(r"inset:\s*([^;]+);", rule).group(1).split()
+        # top right bottom left, in the order CSS reads them.
+        assert len(insets) == 4, f"expected four sides, got {insets}"
+        top, right, bottom, left = insets
+        assert left == "0", f"it still grows {left} into the title"
+        # Still a fingertip tall, out of a button drawn at 28px.
+        assert top == bottom == "-8px"
+        assert 28 + 8 + 8 >= 44
 
     def test_the_page_says_what_it_is(self):
         """Eight second-level headings and no first-level one."""
@@ -6386,3 +6408,60 @@ class TestTheTabIcon:
         assert "%23ffffff" in link
         # Same artwork as the header's, not a second drawing of it.
         assert "%23f58025" in link
+
+
+class TestAConversationOpensFromAnywhereOnItsRow:
+    """The row is the target, because the row is what the list draws.
+
+    The hand cursor was on the row and the listener was on the title inside it,
+    so every part of the row the words did not reach — the padding, and the
+    height the menu button adds beyond one line of text — invited a click and
+    then ignored it.
+    """
+
+    def _chat(self) -> str:
+        return _rendered_chat()
+
+    def test_the_row_carries_the_listener_not_the_title(self):
+        chat = self._chat()
+        assert 'item.addEventListener("click"' in chat
+        assert 'titleSpan.addEventListener("click"' not in chat, \
+            "the title is listening again, and the row's edges are dead"
+
+    def test_the_hand_and_the_listener_are_on_the_same_element(self):
+        """The defect in one line: whatever shows a pointer must accept one."""
+        chat = self._chat()
+        rule = chat.split(".conv-item {")[1].split("}")[0]
+        assert "cursor: pointer" in rule
+        assert 'item.addEventListener("click"' in chat
+
+    def test_renaming_still_does_not_reopen_the_conversation(self):
+        """Clicking into the editable title places a cursor, nothing more."""
+        chat = self._chat()
+        assert "titleSpan.isContentEditable" in chat
+
+    def test_the_menu_keeps_its_own_meaning(self):
+        """The row is the menu button's ancestor now, so its clicks must not
+        also open the conversation."""
+        chat = self._chat()
+        assert '.closest(".conv-menu-btn, .conv-menu")' in chat
+
+    def test_a_conversation_can_be_opened_without_a_mouse(self):
+        """There was no way to at all: a bare div, no tabindex, no key handler."""
+        chat = self._chat()
+        assert "item.tabIndex = 0" in chat
+        assert 'item.addEventListener("keydown"' in chat
+        assert 'e.key !== "Enter" && e.key !== " "' in chat
+
+    def test_the_open_conversation_says_so_to_a_screen_reader(self):
+        """The active row was marked by background colour alone."""
+        assert 'item.setAttribute("aria-current", "true")' in self._chat()
+
+    def test_a_sticky_heading_does_not_cover_the_rows_it_passes(self):
+        """It outranked them, so a scrolled list had rows that could not be
+        clicked at all — the heading was on top, opaque, and taking them."""
+        chat = self._chat()
+        heading = chat.split(".conv-group {")[1].split("}")[0]
+        row = chat.split(".conv-item {")[1].split("}")[0]
+        assert "z-index" not in heading, "the heading is above the rows again"
+        assert "z-index: 1" in row

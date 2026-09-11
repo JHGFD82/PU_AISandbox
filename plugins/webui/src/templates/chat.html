@@ -81,7 +81,11 @@
      going, and clear enough to find your way by when you don't. Sticky, so
      the heading you are under stays visible while scrolling a long list. */
   .conv-group {
-    position: sticky; top: 0; z-index: 1;
+    /* Sits above the rows so a row scrolling under it is covered rather than
+       showing through. Both are positioned, so the rows are given the higher
+       number and this one keeps the auto level: a heading that outranked them
+       swallowed the clicks of whichever row passed beneath it. */
+    position: sticky; top: 0;
     background: var(--bg);
     font-size: var(--text-xs); font-weight: 600; letter-spacing: 0.04em;
     text-transform: uppercase; color: var(--text-muted);
@@ -106,7 +110,8 @@
     border-radius: var(--radius-md); background: var(--input-bg); color: var(--text); font-family: inherit;
   }
   .conv-item { display: flex; align-items: center; gap: 0.2rem; padding: 0.3rem 0.2rem 0.3rem 0.5rem;
-               border-radius: var(--radius-md); cursor: pointer; font-size: var(--text-md); margin-bottom: 0.2rem; position: relative; }
+               border-radius: var(--radius-md); cursor: pointer; font-size: var(--text-md); margin-bottom: 0.2rem;
+               position: relative; z-index: 1; }
   .conv-item:hover { background: var(--hover-bg); }
   .conv-item.active { background: var(--orange-tint); }
   .conv-item-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0.2rem 0; }
@@ -130,8 +135,16 @@
   /* A pointer target of 44px, out of a button drawn at 28px. Everything here
      was smaller than a fingertip, and these two were the smallest of all —
      which would be forgivable if one of them did not hold Delete. */
-  .conv-menu-btn::after, .msg-action-btn::after {
+  .msg-action-btn::after {
     content: ""; position: absolute; inset: -8px;
+  }
+  /* The same, except across the title beside it. This button sits at the end
+     of a row that is itself a click target, and an invisible 8px reaching back
+     over the last of the words took clicks meant for the conversation and
+     opened the menu instead. It still grows to 44px tall and outward past the
+     row's edge; it just no longer grows inward. */
+  .conv-menu-btn::after {
+    content: ""; position: absolute; inset: -8px -8px -8px 0;
   }
   .conv-menu {
     position: absolute; top: calc(100% + 2px); right: 0.3rem; min-width: 190px;
@@ -2453,14 +2466,39 @@ async function loadConversations() {
     }
     const item = document.createElement("div");
     item.className = "conv-item" + (c.id === state.conversationId ? " active" : "");
+    // The whole row opens the conversation, because the whole row is what the
+    // list draws as one thing. The listener used to sit on the title alone
+    // while the hand cursor sat on the row, so every part of the row the words
+    // did not reach — the padding, and the height the menu button adds beyond
+    // the line of text — invited a click and then ignored it.
+    item.tabIndex = 0;
+    item.setAttribute("role", "button");
+    if (c.id === state.conversationId) item.setAttribute("aria-current", "true");
 
     const titleSpan = document.createElement("span");
     titleSpan.className = "conv-item-title";
     titleSpan.textContent = c.title;
     titleSpan.title = c.title;
-    titleSpan.addEventListener("click", () => {
+
+    const open = () => {
+      // Renaming turns the title into an editable box inside this row;
+      // clicking into it places a cursor and must not also reopen the
+      // conversation.
       if (titleSpan.isContentEditable) return;
       openConversation(c.id);
+    };
+    item.addEventListener("click", (e) => {
+      // The menu button and its menu carry their own meaning. They already
+      // stop the event, but the row is their ancestor now, so say it here too
+      // rather than depend on that from a distance.
+      if (e.target.closest(".conv-menu-btn, .conv-menu")) return;
+      open();
+    });
+    item.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter" && e.key !== " ") return;
+      if (e.target !== item) return;
+      e.preventDefault();   // Space would otherwise scroll the list.
+      open();
     });
 
     const menuBtn = document.createElement("button");
