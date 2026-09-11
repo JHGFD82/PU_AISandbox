@@ -3079,10 +3079,13 @@ class TestTheSuppliedButtonIcons:
         # calls in the source now, and it is the drawing that reaches the
         # browser that these tests are about.
         page = _rendered_chat()
-        # The one button with no drawing of its own: the artwork supplied for a
-        # "sidebar toggle" was a second copy of the padlock, so this button —
-        # which only appears on a narrow screen — is still on a plain one.
-        awaiting_artwork = {"sidebar-toggle-btn"}
+        # Buttons with no supplied drawing to use. The artwork for a "sidebar
+        # toggle" was a second copy of the padlock, so that button — which only
+        # appears on a narrow screen — is still on a plain one. Nothing was
+        # supplied for a folder or a download either, so those two are drawn,
+        # in the same stroked style as the download arrow on a single message.
+        awaiting_artwork = {"sidebar-toggle-btn", "conv-bar-folder",
+                            "conv-bar-download-btn"}
         for m in re.finditer(r'<button\b[^>]*id="([^"]+)"[^>]*>(.*?)</button>', page, re.S):
             block = m.group(2)
             if "<svg" not in block or m.group(1) in awaiting_artwork:
@@ -6438,3 +6441,94 @@ class TestTheFormatsAreListedInOnePlace:
         listed = chat.split("const EXPORT_FORMATS = [")[1].split("];")[0]
         offered = set(re.findall(r'\["(\w+)",', listed))
         assert offered == set(export_module.FORMATS)
+
+
+class TestTheBarAboveTheMessageBox:
+    """What is open, what it cost, and the two things done with a finished one.
+
+    The conversation's name appeared only in the sidebar list, truncated; what
+    a single conversation had cost was not shown anywhere at all, and the only
+    way to its folder or its transcript was the hover menu on its sidebar row.
+    """
+
+    def _chat(self) -> str:
+        return _rendered_chat()
+
+    def test_it_sits_between_the_transcript_and_the_message_box(self):
+        """A bar about this conversation belongs against the conversation, not
+        in the top bar, which is about the sandbox."""
+        page = self._chat()
+        assert page.index('id="messages"') < page.index('id="conv-bar"') < page.index('id="composer"')
+
+    def test_it_is_hidden_until_a_conversation_is_open(self):
+        page = self._chat()
+        bar = page[page.index('<div id="conv-bar"'):]
+        assert bar[:bar.index(">")].find("hidden") != -1
+
+    def test_it_shows_the_whole_title_and_keeps_it_reachable_when_cut(self):
+        page = self._chat()
+        assert 'id="conv-bar-title"' in page
+        rule = page.split("#conv-bar-title {")[1].split("}")[0]
+        assert "text-overflow: ellipsis" in rule
+        # Cut on screen, still readable on hover — the sidebar's own convention.
+        assert 'titleEl.title = conv.title' in page
+
+    def test_the_spend_is_summed_from_the_messages_in_hand(self):
+        """There is no per-conversation total on the server to ask for; usage
+        is kept per person and per month."""
+        page = self._chat()
+        assert "function conversationTotals(" in page
+        assert "m.prompt_tokens" in page and "m.completion_tokens" in page
+        assert "fmtSmallMoney(totals.cost)" in page
+
+    def test_a_conversation_costing_less_than_a_penny_is_not_shown_as_nothing(self):
+        """The month's figure is dollars; one conversation is often a penny or
+        two, and $0.00 beside a conversation that plainly cost something reads
+        as a broken number."""
+        page = self._chat()
+        fn = page.split("function fmtSmallMoney(")[1].split("\n}")[0]
+        assert "toFixed(4)" in fn
+        assert "0.01" in fn
+
+    def test_the_figures_do_not_jitter_as_they_change(self):
+        rule = self._chat().split("#conv-bar-spend {")[1].split("}")[0]
+        assert "tabular-nums" in rule
+
+    def test_the_folder_button_is_hidden_where_it_could_not_work(self):
+        """Hidden, not disabled — the convention the Browse buttons set."""
+        page = self._chat()
+        assert 'document.getElementById("conv-bar-folder").hidden = !state.canReveal' in page
+
+    def test_the_download_picker_offers_the_shared_list(self):
+        page = self._chat()
+        picker = page.split("function toggleFormatPicker(")[1].split("\n}")[0]
+        assert "EXPORT_FORMATS.forEach" in picker
+        assert "exportConversation(state.conversationId, format)" in picker
+
+    def test_the_picker_opens_upward(self):
+        """The bar is at the bottom of the page, so a menu below it is off
+        the end."""
+        rule = self._chat().split(".format-picker {")[1].split("}")[0]
+        assert "bottom: calc(100% + 6px)" in rule
+
+    def test_the_picker_closes_like_every_other_floating_panel(self):
+        page = self._chat()
+        closer = page.split('if (!document.getElementById("model-add").contains')[1][:600]
+        assert "closeFormatPicker()" in closer
+
+    def test_the_bar_follows_whatever_the_transcript_shows(self):
+        """renderMessages already receives the whole conversation and runs when
+        one is opened, when a reply finishes, and while a job is running."""
+        page = self._chat()
+        body = page.split("function renderMessages(conv) {")[1][:600]
+        assert "updateConversationBar(conv)" in body
+
+    def test_renaming_the_open_conversation_renames_it_here_too(self):
+        """renderMessages is not called on that path."""
+        assert "id === state.conversationId" in self._chat()
+
+    def test_the_bar_changes_with_the_theme_like_every_other_surface(self):
+        """It is a panel-coloured surface, so it eases like the rest of them."""
+        page = self._chat()
+        rule = page.split("body, #sidebar")[1].split("{")[0]
+        assert "#conv-bar" in rule
