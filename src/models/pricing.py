@@ -9,9 +9,10 @@ lookup.
 
 import json
 import logging
+import urllib.error
 import urllib.request
 from datetime import datetime, timedelta
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple
 
 from . import catalog as _catalog
 
@@ -58,8 +59,28 @@ def _fetch_model_pricing(provider_model: str, pricing_unit: int) -> Dict[str, An
         url,
         headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"},
     )
-    with urllib.request.urlopen(req, timeout=8) as response:  # nosec B310
-        data = json.loads(response.read())
+    try:
+        with urllib.request.urlopen(req, timeout=8) as response:  # nosec B310
+            data = json.loads(response.read())
+    except urllib.error.HTTPError as error:
+        # The promise this function's docstring already makes, kept. A raw
+        # "HTTP Error 404: Not Found" reached the person adding the model,
+        # which names neither the model nor what to do about it.
+        if error.code == 404:
+            raise RuntimeError(
+                f"No pricing is published for '{provider_model}', so it could not be "
+                "added. The usual cause is a misspelling — check the provider and the "
+                "model name against the provider's own documentation."
+            ) from error
+        raise RuntimeError(
+            f"The pricing service could not be asked about '{provider_model}' "
+            f"(it answered {error.code}). Trying again in a few minutes usually works."
+        ) from error
+    except urllib.error.URLError as error:
+        raise RuntimeError(
+            f"Could not reach the pricing service to look up '{provider_model}': "
+            f"{error.reason}. Check this computer's internet connection."
+        ) from error
 
     pay = data.get("pay_as_you_go", {})
     input_price = float(pay.get("request_token", {}).get("price", 0))
@@ -77,7 +98,8 @@ def _fetch_model_pricing(provider_model: str, pricing_unit: int) -> Dict[str, An
 
 
 def _test_and_describe(
-    model_name: str, entry: Dict[str, Any], api_key: str
+    model_name: str, entry: Dict[str, Any], api_key: str,
+    on_progress: Optional[Callable[[str], None]] = None,
 ) -> Dict[str, Any]:
     """Ask a model what it can do and fold the answers into its catalog entry.
 
@@ -91,6 +113,9 @@ def _test_and_describe(
         entry: Its catalog entry so far.
         api_key: A professor's API key, used to make the test requests. They
                  are billed to whoever's key this is — a few tokens in total.
+        on_progress: Passed straight through to the testing, which calls it
+                     once before each question with a short phrase naming what
+                     it is about to try. ``None`` reports nothing.
 
     Returns:
         The entry with whatever was learned applied to it, or unchanged if
@@ -101,7 +126,9 @@ def _test_and_describe(
     )
 
     try:
-        report = probe_model_capabilities(model_name, client_for_testing(api_key))
+        report = probe_model_capabilities(
+            model_name, client_for_testing(api_key), on_progress=on_progress
+        )
     except Exception as error:
         # Never fatal. Adding a model that hasn't been tested is a worse
         # catalog entry, not a broken one, and this runs in the middle of
@@ -118,7 +145,8 @@ def _test_and_describe(
 
 
 def add_model_to_catalog(
-    provider_model: str, api_key: Optional[str] = None, probe: bool = True
+    provider_model: str, api_key: Optional[str] = None, probe: bool = True,
+    on_progress: Optional[Callable[[str], None]] = None,
 ) -> Tuple[str, Dict[str, Any]]:
     """Look up a new model's pricing from PortKey and save it to the local catalog.
 
@@ -141,6 +169,10 @@ def add_model_to_catalog(
                  unknown and a warning says so.
         probe: Set ``False`` to add the model without testing it, for when the
                answers are already known or a test would be unwelcome.
+        on_progress: Somewhere to say what is happening, called with a short
+                     phrase before the price lookup and again before each
+                     question the testing asks. Meant for an interface showing
+                     someone how far along a wait is; ``None`` reports nothing.
 
     Returns:
         A two-item tuple of ``(model_name, entry)``: the model's catalog key
@@ -182,6 +214,8 @@ def add_model_to_catalog(
     entry: Dict[str, Any] = dict(catalog["models"].get(model_name, {}))
     entry["portkey_id"] = provider_model
 
+    if on_progress is not None:
+        on_progress("Looking up what it costs")
     fetched = _fetch_model_pricing(provider_model, pricing_unit)
     entry["input"] = fetched["input"]
     entry["output"] = fetched["output"]
@@ -198,7 +232,7 @@ def add_model_to_catalog(
     # with, or if the model can't be reached, the questions stay unanswered —
     # see below for what that costs and why it is still better than guessing.
     if api_key and probe:
-        entry = _test_and_describe(model_name, entry, api_key)
+        entry = _test_and_describe(model_name, entry, api_key, on_progress=on_progress)
 
     if "supports_vision" not in entry:
         entry["supports_vision"] = False

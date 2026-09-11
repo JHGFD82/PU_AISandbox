@@ -31,6 +31,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import queue
 import secrets
 import shutil
 import sys
@@ -319,6 +320,38 @@ def _any_models() -> bool:
         return bool(load_model_catalog()["models"])
     except Exception:
         return False
+
+
+def _sse(event: dict) -> str:
+    """Write one event in the shape a browser's EventSource reads.
+
+    Args:
+        event: What to send. Anything JSON can carry.
+
+    Returns:
+        The event as a line of text, ending in the blank line that tells the
+        browser one event has finished and the next has not started.
+    """
+    return f"data: {json.dumps(event)}\n\n"
+
+
+def _catalog_model_names() -> set:
+    """Every model the catalog currently holds, by the name it is filed under.
+
+    Used to tell an already-added model from a new one before spending
+    anything finding out. A catalog that cannot be read counts as holding
+    nothing, which errs towards doing the work rather than skipping it.
+
+    Returns:
+        The model names (e.g. ``{'gpt-4o', 'claude-opus-4-8'}``), or an empty
+        set if the catalog is missing or unreadable.
+    """
+    from src.models import load_model_catalog
+
+    try:
+        return set(load_model_catalog().get("models", {}))
+    except Exception:
+        return set()
 
 
 def _capability_summary(model: str) -> dict:
@@ -1056,6 +1089,97 @@ def create_app() -> FastAPI:
             # PortKey doesn't price. Either way the model was not added.
             raise HTTPException(400, str(e)) from e
         return {"model": model_name, "capabilities": _capability_summary(model_name)}
+
+    @app.post("/api/settings/models/stream")
+    def api_add_model_streaming(request: Request, body: AddModelBody):
+        """Add a model the same way, but say what is happening while it runs.
+
+        Testing a model is five provider requests one after another, which is
+        long enough that a box saying nothing reads as a box that has stopped.
+        This reports each step as it starts, so the wait can be shown as a bar
+        that moves and a line that names what is being asked.
+
+        Sends a stream of events rather than one answer at the end: a
+        ``progress`` event per step, then either ``done`` with what was found
+        or ``error`` with what went wrong.
+        """
+        _require_unlocked(request)
+        professor = _validated_professor(body.professor)
+        name = body.provider_model.strip()
+        if "/" not in name:
+            raise HTTPException(
+                400,
+                "A model is named as its provider and then the model, separated by a "
+                "slash — for example openai/gpt-5.2 or anthropic/claude-opus-4-8.",
+            )
+        from src.config import get_api_key
+        from src.models import add_model_to_catalog
+        from src.models.capabilities import TESTING_STEPS
+
+        api_key, _ = get_api_key(professor)
+
+        # Already here: say so and spend nothing. Adding it again would repeat
+        # every billed request to learn what the catalog already records.
+        existing = _catalog_model_names()
+        if name.split("/", 1)[1] in existing:
+            already = name.split("/", 1)[1]
+            def already_stream():
+                yield _sse({"type": "done", "model": already, "already": True,
+                            "capabilities": _capability_summary(already)})
+            return StreamingResponse(
+                already_stream(), media_type="text/event-stream",
+                headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+            )
+
+        def event_stream():
+            # A plain generator, for the reason given at the chat stream below:
+            # everything here blocks, and Starlette runs a non-async generator
+            # in a worker thread instead of on the event loop.
+            #
+            # The work itself runs in a thread of its own because the steps are
+            # reported from inside it, partway through a call that does not
+            # return until all of them are done. The queue is how the two meet:
+            # the worker puts each step in as it starts, this loop takes them
+            # out and sends them on.
+            updates: "queue.Queue[Optional[str]]" = queue.Queue()
+            outcome: dict = {}
+
+            def work():
+                try:
+                    model_name, _entry = add_model_to_catalog(
+                        name, api_key=api_key, on_progress=updates.put
+                    )
+                    outcome["model"] = model_name
+                except Exception as error:
+                    # Almost always the price lookup: a misspelled name, or a
+                    # provider PortKey doesn't price.
+                    outcome["error"] = str(error)
+                finally:
+                    updates.put(None)   # However it ended, stop the loop below.
+
+            threading.Thread(target=work, daemon=True).start()
+
+            step = 0
+            while True:
+                label = updates.get()
+                if label is None:
+                    break
+                step += 1
+                yield _sse({"type": "progress", "step": step,
+                            "total": TESTING_STEPS, "label": label})
+
+            if "error" in outcome:
+                yield _sse({"type": "error", "message": outcome["error"]})
+                return
+            model_name = outcome["model"]
+            yield _sse({"type": "done", "model": model_name, "already": False,
+                        "capabilities": _capability_summary(model_name)})
+
+        return StreamingResponse(
+            event_stream(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
 
     @app.post("/api/settings/models/{model_name}/test")
     def api_test_model(request: Request, model_name: str, body: TestModelBody):

@@ -935,7 +935,7 @@ function modelRow(m) {
     </div>
     <span class="badge ${m.supports_vision ? "can" : "unset"}">${m.supports_vision ? "images" : "text"}</span>
     <button type="button" class="secondary" data-test-model="${m.name}">Test</button>
-    <button type="button" class="danger" data-remove-model="${m.name}" style="display:none">Remove</button>
+    <button type="button" class="danger" data-remove-model="${m.name}">Remove</button>
   `;
   return row;
 }
@@ -984,9 +984,9 @@ document.getElementById("models-list").addEventListener("click", async (ev) => {
     button.textContent = "Test";
     // 410 means the model is gone, not that the test went wrong. Offer to take
     // the entry out rather than leaving a row that can never work.
+    // 410 means the model is gone, not that the test went wrong. Remove sits
+    // on every row now, so this only has to say so.
     if (String(e.message || "").includes("410") || /no longer exists/.test(readableError(e))) {
-      const remove = button.parentElement.querySelector("[data-remove-model]");
-      if (remove) remove.style.display = "";
       alert(readableError(e));
       return;
     }
@@ -998,7 +998,7 @@ document.getElementById("models-list").addEventListener("click", async (ev) => {
   const button = ev.target.closest("[data-remove-model]");
   if (!button) return;
   const name = button.dataset.removeModel;
-  if (!confirm(`Remove ${name} from the catalog?\n\nIt no longer exists, so every request naming it fails. Adding it back later is one line in the box below.`)) return;
+  if (!confirm(`Remove ${name} from the list of models?\n\nNothing else is affected, and adding it back later is one line in the box below.`)) return;
   try {
     await api(`/api/settings/models/${encodeURIComponent(name)}`, { method: "DELETE" });
     await loadModels();
@@ -1022,9 +1022,14 @@ document.getElementById("add-model-form").addEventListener("submit", async (ev) 
     nameBox.value = "";
     await loadModels();
     const caps = result.capabilities;
-    alert(`${result.model} was added.\n\n` +
-          (caps.supports_vision ? "It can read images." : "It cannot read images — text only.") +
-          (caps.refuses.length ? `\nIt turns down: ${caps.refuses.join(", ")}.` : ""));
+    // Three states, the same three the row below shows. Saying "it cannot read
+    // images" about a model nothing was ever able to ask is the exact
+    // conflation the testing was written to end.
+    const found = !caps.tested
+      ? "It could not be tested, so nothing is recorded about what it can do yet."
+      : (caps.supports_vision ? "It can read images." : "It cannot read images — text only.")
+        + (caps.refuses.length ? `\nIt turns down: ${caps.refuses.join(", ")}.` : "");
+    alert(`${result.model} was added.\n\n${found}`);
   } catch (e) {
     errorBox.textContent = readableError(e);
     errorBox.style.display = "";
