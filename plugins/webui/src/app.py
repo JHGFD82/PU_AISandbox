@@ -86,6 +86,7 @@ conversation = sys.modules["_pu_webui_conversation"]
 attachments = sys.modules["_pu_webui_attachments"]
 jobs = sys.modules["_pu_webui_jobs"]
 export = sys.modules["_pu_webui_export"]
+branding = sys.modules["_pu_webui_branding"]
 
 _TEMPLATES_DIR = Path(__file__).parent / "templates"
 templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
@@ -652,6 +653,8 @@ def create_app() -> FastAPI:
     app.add_middleware(
         SessionMiddleware, secret_key=secret, session_cookie=WEBUI_SESSION_COOKIE_NAME
     )
+
+    branding.add_favicon_route(app)
 
     @app.get("/", response_class=HTMLResponse)
     async def index(request: Request):

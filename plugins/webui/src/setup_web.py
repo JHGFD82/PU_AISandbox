@@ -37,6 +37,7 @@ from pydantic import BaseModel
 from src import first_run, paths
 
 file_picker = sys.modules["_pu_webui_file_picker"]
+branding = sys.modules["_pu_webui_branding"]
 
 
 class PickFolderBody(BaseModel):
@@ -657,6 +658,7 @@ def create_setup_app(on_complete) -> FastAPI:
         A FastAPI application serving the setup page at ``/``.
     """
     app = FastAPI()
+    branding.add_favicon_route(app)
 
     @app.get("/", response_class=HTMLResponse)
     async def show_form() -> str:

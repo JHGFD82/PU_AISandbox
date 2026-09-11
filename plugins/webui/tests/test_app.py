@@ -6332,3 +6332,57 @@ class TestWaitingForTheSandboxToComeBack:
     def test_and_says_what_to_do_when_it_does(self):
         block = self._wait_block()
         assert "Reload this page" in block
+
+
+class TestTheTabIcon:
+    """The mark reaches the browser's tab, on every page and both applications.
+
+    A browser asks for /favicon.ico by itself, whether or not a page mentions
+    one, so the address has to answer even where no template was involved.
+    """
+
+    def test_the_icon_is_served(self, client):
+        resp = client.get("/favicon.ico")
+        assert resp.status_code == 200
+        # A real icon file, not an HTML error page dressed as one.
+        assert resp.content[:4] == b"\x00\x00\x01\x00"
+
+    def test_the_icon_needs_no_passphrase(self, client):
+        """The unlock screen is itself a page in a tab, and an icon is no secret."""
+        assert client.get("/favicon.ico").status_code == 200
+
+    def test_the_setup_pages_show_it_too(self):
+        """Two applications, one mark — otherwise setup looks like other software."""
+        setup_web = sys.modules["_pu_webui_setup_web"]
+        setup_client = TestClient(setup_web.create_setup_app(lambda: None))
+        assert setup_client.get("/favicon.ico").status_code == 200
+
+    def test_the_icon_holds_the_three_sizes_a_browser_picks_between(self):
+        """Read from the file's own table of contents rather than with an
+        image library, because nothing here depends on one."""
+        branding = sys.modules["_pu_webui_branding"]
+        raw = Path(branding.FAVICON_PATH).read_bytes()
+
+        # An .ico opens with a 6-byte header whose last two bytes count the
+        # drawings inside, then one 16-byte entry per drawing beginning with
+        # its width and height.
+        count = int.from_bytes(raw[4:6], "little")
+        sizes = sorted((raw[6 + i * 16], raw[7 + i * 16]) for i in range(count))
+        assert sizes == [(16, 16), (32, 32), (48, 48)]
+
+    def test_every_page_names_it(self):
+        for name in ("chat.html", "unlock.html", "settings.html",
+                     "shared_settings.html", "setup.html"):
+            page = _rendered_template(name)
+            assert 'href="/favicon.ico"' in page, name
+            assert 'type="image/svg+xml"' in page, name
+
+    def test_the_drawn_version_carries_a_ground_the_header_mark_does_not(self):
+        """In the artwork the tiger is the page showing through. A tab bar is
+        not ours to colour, and a dark one turned the tiger dark."""
+        page = _rendered_template("chat.html")
+        link = page[page.index('type="image/svg+xml"'):]
+        link = link[:link.index(">")]
+        assert "%23ffffff" in link
+        # Same artwork as the header's, not a second drawing of it.
+        assert "%23f58025" in link
