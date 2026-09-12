@@ -15,7 +15,7 @@
 <style>
   /* Shared by every element whose color comes from a theme variable, so
      switching data-theme fades smoothly instead of snapping instantly. */
-  body, #sidebar, #spend, #topbar, #composer, .msg.assistant, .conv-item,
+  body, #sidebar, #spend, #topbar, #conv-bar, #composer, .msg.assistant, .conv-item,
   .combobox-list, .model-add-popover, .conv-menu, button.secondary,
   input, select, textarea {
     transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease;
@@ -431,6 +431,37 @@
   .attachment-chip svg { width: 12px; height: 12px; flex: none; }
   .msg-attachment-chip { background: var(--hover-bg); color: inherit; margin-top: var(--space-2); }
 
+  /* One line above the message box, about the conversation rather than about
+     the sandbox: what is open, what it has cost, and the two things anyone
+     does with a finished one. Thin on purpose — it is a label with a couple of
+     buttons on the end, not a second toolbar. */
+  #conv-bar {
+    flex: none; display: flex; align-items: center; gap: var(--space-2);
+    padding: var(--space-1) 1rem; border-top: 1px solid var(--border);
+    background: var(--panel-bg); font-size: var(--text-sm); min-width: 0;
+  }
+  #conv-bar[hidden] { display: none; }
+  /* The title takes what is left and gives it back when the figures beside it
+     need room, ending in an ellipsis rather than pushing the buttons off. */
+  #conv-bar-title {
+    flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    font-weight: 600; color: var(--text);
+  }
+  #conv-bar-spend {
+    flex: none; color: var(--text-muted); font-variant-numeric: tabular-nums;
+  }
+  #conv-bar .icon-btn { flex: none; width: 30px; height: 30px; }
+  #conv-bar .icon-btn svg { width: 16px; height: 16px; }
+  .conv-bar-download { position: relative; flex: none; }
+  /* Opens upward: the bar sits at the bottom of the page, against the message
+     box, so a menu hanging below it would be off the end. The same way the
+     plugin picker above the composer opens. */
+  .format-picker {
+    position: absolute; bottom: calc(100% + 6px); right: 0; min-width: 200px;
+    background: var(--surface-raised); border: 1px solid var(--border); border-radius: var(--radius-md);
+    box-shadow: 0 8px 24px var(--shadow-raised); z-index: 30; padding: 0.25rem;
+  }
+  .format-picker[hidden] { display: none; }
   #composer { display: flex; align-items: flex-end; gap: 0.5rem; padding: 1rem; border-top: 1px solid var(--border); background: var(--panel-bg); }
   #composer textarea {
     flex: 1; resize: none; height: 2.6rem; max-height: 40vh; overflow-y: auto;
@@ -870,6 +901,30 @@
       </div>
     </div>
     <div id="messages"><div class="empty">Select or start a conversation.</div></div>
+    <!-- What is open, what it has cost, and the two things anyone does with a
+         finished conversation. Sits against the message box rather than in the
+         top bar because it is about this conversation, not about the sandbox. -->
+    <div id="conv-bar" hidden>
+      <div id="conv-bar-title"></div>
+      <div id="conv-bar-spend" title="What this conversation has cost so far"></div>
+      <button type="button" class="icon-btn neutral" id="conv-bar-folder" hidden
+              title="Open this conversation's folder" aria-label="Open this conversation's folder">
+        {{ icons.folder() }}
+      </button>
+      <div class="conv-bar-download" id="conv-bar-download">
+        <button type="button" class="icon-btn neutral" id="conv-bar-download-btn"
+                title="Download this conversation" aria-label="Download this conversation"
+                aria-haspopup="true" aria-expanded="false">
+          {{ icons.download() }}
+        </button>
+        <div class="format-picker" id="format-picker" hidden></div>
+      </div>
+    </div>
+    <!-- The same arrow, for the button the script builds on each message. It
+         is put here rather than written into the script because a template is
+         read as JavaScript by an editor and a Jinja call in one is a syntax
+         error to it — the rule the body tag's attributes follow too. -->
+    <template id="icon-download">{{ icons.download() }}</template>
     <div id="composer">
       <div class="plugin-action-wrap" id="plugin-action-wrap">
         <button type="button" class="icon-btn plugin-action-btn" id="plugin-action-btn"
@@ -1091,6 +1146,16 @@ async function api(path, opts) {
 }
 
 function fmtMoney(v) { return "$" + (v || 0).toFixed(2); }
+
+// The same, for figures small enough that two decimal places would round them
+// away. A month's spending is dollars; one conversation is often a penny or
+// two, and "$0.00" next to a conversation that plainly cost something reads as
+// a broken number rather than a small one.
+function fmtSmallMoney(v) {
+  const amount = v || 0;
+  if (amount === 0) return "$0.00";
+  return amount < 0.01 ? "$" + amount.toFixed(4) : "$" + amount.toFixed(2);
+}
 
 async function loadProfessors() {
   const data = await api("/api/professors");
@@ -1513,6 +1578,7 @@ document.addEventListener("click", (e) => {
   if (!document.getElementById("model-add").contains(e.target)) closeModelAddPopover();
   if (!document.getElementById("plugin-action-wrap").contains(e.target)) closeActionPicker();
   if (!document.getElementById("sampling-options").contains(e.target)) closeSamplingPopover();
+  if (!document.getElementById("conv-bar-download").contains(e.target)) closeFormatPicker();
   closeConvMenu();
 });
 
@@ -1666,6 +1732,82 @@ async function revealConversationFolder(id) {
     alert(e.message || "Could not open the folder.");
   }
 }
+
+// ── The bar above the message box ────────────────────────────────────────
+// What is open, what it has cost, and the two things anyone does with a
+// finished conversation. Filled from the conversation already in hand rather
+// than from a request of its own: every message carries what it cost and how
+// many tokens it took, so the total is a sum of what is on screen. There is no
+// per-conversation figure on the server to ask for — usage is kept per person,
+// per month.
+function conversationTotals(conv) {
+  let cost = 0, promptTokens = 0, completionTokens = 0, counted = 0;
+  (conv.messages || []).forEach(m => {
+    if (m.cost == null) return;      // A question, or a job's status ping.
+    cost += m.cost;
+    promptTokens += m.prompt_tokens || 0;
+    completionTokens += m.completion_tokens || 0;
+    counted++;
+  });
+  return { cost, tokens: promptTokens + completionTokens, counted };
+}
+
+function updateConversationBar(conv) {
+  const bar = document.getElementById("conv-bar");
+  if (!conv) { bar.hidden = true; closeFormatPicker(); return; }
+  bar.hidden = false;
+
+  const titleEl = document.getElementById("conv-bar-title");
+  titleEl.textContent = conv.title || "";
+  // The whole title is here for anyone whose window is too narrow for it,
+  // the same way the sidebar offers it.
+  titleEl.title = conv.title || "";
+
+  const totals = conversationTotals(conv);
+  const spend = document.getElementById("conv-bar-spend");
+  spend.textContent = totals.counted
+    ? `${fmtSmallMoney(totals.cost)} · ${totals.tokens.toLocaleString()} tokens`
+    : "";
+
+  // Only where it can work: the folder opens on the computer running the
+  // sandbox, which is the person's own only when the browser is there too.
+  document.getElementById("conv-bar-folder").hidden = !state.canReveal;
+}
+
+function closeFormatPicker() {
+  const picker = document.getElementById("format-picker");
+  if (picker.hidden) return;
+  picker.hidden = true;
+  document.getElementById("conv-bar-download-btn").setAttribute("aria-expanded", "false");
+}
+
+function toggleFormatPicker() {
+  const picker = document.getElementById("format-picker");
+  if (!picker.hidden) { closeFormatPicker(); return; }
+  picker.innerHTML = "";
+  EXPORT_FORMATS.forEach(([format, label]) => {
+    const option = document.createElement("button");
+    option.type = "button";
+    option.className = "conv-menu-option";
+    option.textContent = label;
+    option.addEventListener("click", (e) => {
+      e.stopPropagation();
+      closeFormatPicker();
+      if (state.conversationId) exportConversation(state.conversationId, format);
+    });
+    picker.appendChild(option);
+  });
+  picker.hidden = false;
+  document.getElementById("conv-bar-download-btn").setAttribute("aria-expanded", "true");
+}
+
+document.getElementById("conv-bar-download-btn").addEventListener("click", (e) => {
+  e.stopPropagation();
+  toggleFormatPicker();
+});
+document.getElementById("conv-bar-folder").addEventListener("click", () => {
+  if (state.conversationId) revealConversationFolder(state.conversationId);
+});
 
 // The formats a conversation can be saved as, in the order they are offered.
 // One list, because they are offered in two places — this menu and the bar
@@ -2697,6 +2839,14 @@ function startRenaming(titleSpan, id, currentTitle) {
       } catch (e) {
         alert("Couldn't rename conversation: " + e.message);
       }
+      // The bar above the message box names the open conversation, so it has
+      // to hear about a rename too — renderMessages, which normally keeps it
+      // up to date, is not called on this path.
+      if (id === state.conversationId) {
+        const titleEl = document.getElementById("conv-bar-title");
+        titleEl.textContent = newTitle;
+        titleEl.title = newTitle;
+      }
     }
     await loadConversations();
   };
@@ -2976,9 +3126,7 @@ function messageActionsElement(m) {
   const exportBtn = document.createElement("button");
   exportBtn.type = "button"; exportBtn.className = "msg-action-btn";
   exportBtn.title = "Export message"; exportBtn.setAttribute("aria-label", "Export this message");
-  exportBtn.innerHTML = '<svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" '
-    + 'stroke-linecap="round" stroke-linejoin="round"><path d="M9 2.2v8.3M9 10.5l-3-3M9 10.5l3-3"/>'
-    + '<path d="M3 12.2v2a1.3 1.3 0 001.3 1.3h9.4A1.3 1.3 0 0015 14.2v-2"/></svg>';
+  exportBtn.innerHTML = document.getElementById("icon-download").innerHTML;
   exportBtn.addEventListener("click", (e) => { e.stopPropagation(); exportMessageText(m.content, m.role); });
 
   actions.appendChild(copyBtn);
@@ -3042,6 +3190,7 @@ function renderMessages(conv) {
   // Asked before anything is replaced: emptying the box moves the scroll
   // position, so afterwards there is nothing left to read it from.
   const putTheReaderBack = rememberWhereTheReaderIs(box);
+  updateConversationBar(conv);
   if (!conv) { box.innerHTML = '<div class="empty">Select or start a conversation.</div>'; return; }
   box.innerHTML = "";
   conv.messages.forEach(m => {
