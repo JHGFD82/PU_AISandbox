@@ -6506,14 +6506,22 @@ class TestAConversationOpensFromAnywhereOnItsRow:
         """The active row was marked by background colour alone."""
         assert 'item.setAttribute("aria-current", "true")' in self._chat()
 
-    def test_a_sticky_heading_does_not_cover_the_rows_it_passes(self):
-        """It outranked them, so a scrolled list had rows that could not be
-        clicked at all — the heading was on top, opaque, and taking them."""
+    def test_a_row_does_not_trap_the_menu_hanging_from_it(self):
+        """The row is positioned so the menu can hang from it, and must stop
+        there. Given a z-index as well it became a stacking context, which
+        held the menu's own z-index inside it — so the next row along, at the
+        same level and later in the page, painted over an open menu and the
+        conversation titles showed through it.
+
+        The heading keeps its z-index: it is opaque, and a row scrolled
+        underneath it cannot be seen, so it should not be clickable either.
+        """
         chat = self._chat()
-        heading = chat.split(".conv-group {")[1].split("}")[0]
         row = chat.split(".conv-item {")[1].split("}")[0]
-        assert "z-index" not in heading, "the heading is above the rows again"
-        assert "z-index: 1" in row
+        assert "position: relative" in row
+        assert "z-index" not in row, "an open menu will be painted over by the next row"
+        heading = chat.split(".conv-group {")[1].split("}")[0]
+        assert "z-index: 1" in heading
 
 class TestAddingAModelSaysWhatItIsDoing:
     """Five provider requests in a row is long enough to need narrating.

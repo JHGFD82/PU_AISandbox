@@ -81,11 +81,7 @@
      going, and clear enough to find your way by when you don't. Sticky, so
      the heading you are under stays visible while scrolling a long list. */
   .conv-group {
-    /* Sits above the rows so a row scrolling under it is covered rather than
-       showing through. Both are positioned, so the rows are given the higher
-       number and this one keeps the auto level: a heading that outranked them
-       swallowed the clicks of whichever row passed beneath it. */
-    position: sticky; top: 0;
+    position: sticky; top: 0; z-index: 1;
     background: var(--bg);
     font-size: var(--text-xs); font-weight: 600; letter-spacing: 0.04em;
     text-transform: uppercase; color: var(--text-muted);
@@ -111,7 +107,7 @@
   }
   .conv-item { display: flex; align-items: center; gap: 0.2rem; padding: 0.3rem 0.2rem 0.3rem 0.5rem;
                border-radius: var(--radius-md); cursor: pointer; font-size: var(--text-md); margin-bottom: 0.2rem;
-               position: relative; z-index: 1; }
+               position: relative; }
   .conv-item:hover { background: var(--hover-bg); }
   .conv-item.active { background: var(--orange-tint); }
   .conv-item-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0.2rem 0; }
