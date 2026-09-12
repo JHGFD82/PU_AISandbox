@@ -1667,6 +1667,16 @@ async function revealConversationFolder(id) {
   }
 }
 
+// The formats a conversation can be saved as, in the order they are offered.
+// One list, because they are offered in two places — this menu and the bar
+// above the message box — and two copies of it would not stay the same.
+const EXPORT_FORMATS = [
+  ["docx", "Export as Word (.docx)"],
+  ["pdf", "Export as PDF"],
+  ["md", "Export as Markdown (.md)"],
+  ["txt", "Export as plain text (.txt)"],
+];
+
 function exportConversation(id, format) {
   const url = `/api/conversations/${id}/export`
     + `?professor=${encodeURIComponent(state.professor)}&format=${format}`;
@@ -2828,7 +2838,7 @@ async function loadConversations() {
     divider1.className = "conv-menu-divider";
     menu.appendChild(divider1);
 
-    [["docx", "Export as Word (.docx)"], ["pdf", "Export as PDF"], ["md", "Export as Markdown (.md)"]]
+    EXPORT_FORMATS
       .forEach(([format, label]) => {
         const exportBtn = document.createElement("button");
         exportBtn.type = "button"; exportBtn.className = "conv-menu-option"; exportBtn.textContent = label;

@@ -744,3 +744,54 @@ class TestPdfBuilderInlineMarkdownAndParagraphError:
                     table_registry=table_registry,
                 )
         assert any("Could not render PDF table" in r.message for r in caplog.records)
+
+
+class TestTablesInPlainText:
+    """A .txt has no way to render a table, so the bars are drawn out.
+
+    The renderer for this existed and said in its own docstring that it was
+    for .txt output, but nothing ever called it — so every plain-text file
+    this project wrote carried Markdown's upright bars instead.
+    """
+
+    TABLE = (
+        "Here is the breakdown:\n\n"
+        "| Privilege | Effect |\n"
+        "|---|---|\n"
+        "| Read | View only |\n"
+        "| Edit | View and change |\n\n"
+        "That is all."
+    )
+
+    def test_a_markdown_table_is_drawn_out(self, tmp_path):
+        path = tmp_path / "out.txt"
+        FileOutputHandler.save_to_text_file(self.TABLE, str(path), "Response")
+        written = path.read_text(encoding="utf-8")
+        assert "+-----" in written
+        assert "| Privilege | Effect          |" in written
+        # The Markdown separator row is not content and should not survive.
+        assert "|---|---|" not in written
+
+    def test_the_words_around_it_are_untouched(self, tmp_path):
+        path = tmp_path / "out.txt"
+        FileOutputHandler.save_to_text_file(self.TABLE, str(path), "Response")
+        written = path.read_text(encoding="utf-8")
+        assert "Here is the breakdown:" in written
+        assert "That is all." in written
+
+    def test_text_with_no_table_is_written_exactly_as_given(self, tmp_path):
+        path = tmp_path / "out.txt"
+        plain = "One line.\n\nAnother line."
+        FileOutputHandler.save_to_text_file(plain, str(path), "Response")
+        assert path.read_text(encoding="utf-8") == plain
+
+    def test_appending_a_page_draws_its_tables_too(self, tmp_path):
+        """Pages are appended one at a time as a long document is worked
+        through, and a table does not become readable by arriving later."""
+        path = tmp_path / "out.txt"
+        FileOutputHandler.save_to_text_file("First page.", str(path), "Translation")
+        FileOutputHandler.append_to_text_file(self.TABLE, str(path), "Translation")
+        written = path.read_text(encoding="utf-8")
+        assert "First page." in written
+        assert "+-----" in written
+        assert "|---|---|" not in written

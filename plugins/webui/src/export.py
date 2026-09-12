@@ -14,6 +14,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
+from src.output import FileOutputHandler
 from src.output.docx_builder import save_to_docx
 from src.output.markdown_builder import save_to_markdown
 from src.output.pdf_builder import save_to_pdf
@@ -26,6 +27,7 @@ FORMATS: dict[str, tuple[str, str]] = {
     ),
     "pdf": ("application/pdf", "pdf"),
     "md": ("text/markdown", "md"),
+    "txt": ("text/plain", "txt"),
 }
 
 
@@ -76,7 +78,8 @@ def export_conversation(conversation: Any, fmt: str, output_path: str) -> None:
 
     Args:
         conversation: The ``Conversation`` to export.
-        fmt: One of ``'docx'``, ``'pdf'``, or ``'md'`` (see ``FORMATS``).
+        fmt: One of ``'docx'``, ``'pdf'``, ``'md'`` or ``'txt'`` (see
+             ``FORMATS``).
         output_path: Where to write the file. The caller is responsible for
                      choosing a path with a matching extension and cleaning
                      the file up afterward (e.g. after streaming it back as
@@ -90,9 +93,16 @@ def export_conversation(conversation: Any, fmt: str, output_path: str) -> None:
         raise ExportError(f"Unsupported export format '{fmt}'. Supported: {supported}.")
 
     content = build_transcript(conversation)
+    # Named one by one, with no catch-all. The last branch used to be a bare
+    # else meaning "Markdown", so adding a format here would have written a
+    # Markdown file to whatever extension it was given, silently.
     if fmt == "docx":
         save_to_docx(content, output_path, label="Conversation")
     elif fmt == "pdf":
         save_to_pdf(content, output_path, label="Conversation")
-    else:
+    elif fmt == "md":
         save_to_markdown(content, output_path, label="Conversation")
+    elif fmt == "txt":
+        FileOutputHandler.save_to_text_file(content, output_path, label="Conversation")
+    else:   # pragma: no cover — FORMATS is checked above, so this cannot run
+        raise ExportError(f"No writer for format '{fmt}'.")
