@@ -221,19 +221,31 @@
   .model-picker .combobox { flex: 1; }
 
   .model-add { position: relative; }
+  /* Opens from its left edge, because the button it hangs from is now the
+     leftmost thing in the row: anchored to the right it would have reached
+     back past the side of the window. */
   .model-add-popover {
-    position: absolute; top: calc(100% + 4px); right: 0; width: 26rem;
-    max-width: calc(100vw - 2rem); display: flex; gap: 0.4rem;
+    position: absolute; top: calc(100% + 4px); left: 0; width: 26rem;
+    max-width: calc(100vw - 2rem); display: flex; flex-direction: column; gap: 0.5rem;
     background: var(--surface-raised); border: 1px solid var(--border); border-radius: var(--radius-md);
     box-shadow: 0 8px 24px var(--shadow-raised); z-index: 20; padding: 0.5rem;
   }
+  .model-add-row { display: flex; gap: 0.4rem; }
+  .model-add-progress[hidden], .model-add-result[hidden], .model-add-actions[hidden] { display: none; }
+  .model-add-result { font-size: var(--text-sm); color: var(--text); }
+  .model-add-result .model-add-detail { color: var(--text-muted); font-size: var(--text-xs); }
+  .model-add-result.bad { color: var(--danger-text); }
+  .model-add-actions { display: flex; gap: 0.4rem; justify-content: flex-end; }
+  .model-add-actions button { padding: 0.35rem 0.6rem; font-size: var(--text-sm); }
+  .model-add-actions .danger { color: var(--danger-text); border-color: var(--danger-border); }
+  .model-add-actions .danger:hover { background: var(--danger-hover-bg); }
   /* Without this, [hidden] and the rule above both have equal specificity
      and this stylesheet's own "display: flex" (loaded after the browser's
      built-in [hidden] rule) would win, leaving the popover visible even
      when its hidden attribute is set. */
   .model-add-popover[hidden] { display: none; }
-  .model-add-popover input { flex: 1; min-width: 0; padding: 0.4rem; font-size: var(--text-sm); }
-  .model-add-popover button { padding: 0.4rem 0.6rem; font-size: var(--text-sm); flex: none; }
+  .model-add-row input { flex: 1; min-width: 0; padding: 0.4rem; font-size: var(--text-sm); }
+  .model-add-row button { padding: 0.4rem 0.6rem; font-size: var(--text-sm); flex: none; }
 
   .sampling-options { position: relative; }
   .sampling-options-popover {
@@ -785,6 +797,30 @@
   <main id="main">
     <div id="topbar">
       <div class="model-picker">
+        <div class="model-add" id="model-add">
+          <button type="button" class="icon-btn neutral" id="model-add-btn" title="Add a model" aria-label="Add a model">
+            {{ icons.plus() }}
+          </button>
+          <div class="model-add-popover" id="model-add-popover" hidden>
+            <div class="model-add-row">
+              <input type="text" id="model-add-input" placeholder="openai/gpt-4o, or della:alibaba/qwen35" autocomplete="off">
+              <button type="button" id="model-add-confirm">Add</button>
+            </div>
+            <!-- Everything below is the testing: hidden until there is
+                 something to say, so the box is one field and one button
+                 until it is pressed. -->
+            <div class="model-add-progress" id="model-add-progress" hidden>
+              <div class="job-progress-track"><div class="job-progress-fill" id="model-add-fill"></div></div>
+              <div class="job-progress-label" id="model-add-step"></div>
+            </div>
+            <div class="model-add-result" id="model-add-result" hidden></div>
+            <div class="model-add-actions" id="model-add-actions" hidden>
+              <button type="button" class="secondary" id="model-add-retry">Test again</button>
+              <button type="button" class="secondary danger" id="model-add-remove">Remove</button>
+              <button type="button" id="model-add-done">Done</button>
+            </div>
+          </div>
+        </div>
         <div class="combobox" id="model-combobox">
           <input class="combobox-field" id="model-field" type="text" readonly
                  placeholder="Model (e.g. gpt-4o, anthropic/claude-fable-5)" autocomplete="off">
@@ -792,15 +828,6 @@
             {{ icons.chevron_down() }}
           </button>
           <div class="combobox-list" id="model-list" hidden></div>
-        </div>
-        <div class="model-add" id="model-add">
-          <button type="button" class="icon-btn neutral" id="model-add-btn" title="Use a custom model" aria-label="Use a custom model">
-            {{ icons.plus() }}
-          </button>
-          <div class="model-add-popover" id="model-add-popover" hidden>
-            <input type="text" id="model-add-input" placeholder="openai/gpt-4o, or della:alibaba/qwen35" autocomplete="off">
-            <button type="button" id="model-add-confirm">Use</button>
-          </div>
         </div>
         <div class="sampling-options" id="sampling-options">
           <button type="button" class="icon-btn neutral" id="sampling-options-btn"
@@ -1119,10 +1146,35 @@ async function loadModels() {
   // gateway stopped allowing, dropped automatically on the failed request —
   // fall back to the default rather than leaving a name in the box that
   // cannot work, which invites sending the same doomed message again.
-  else if (!state.models.some(m => m.name === field.value)) {
+  else if (!knownModel(field.value)) {
     field.value = data.default || "";
     applySamplingVisibility();
   }
+}
+
+// Whether the catalog has this model, whichever way it is written.
+//
+// The catalog files a model under the part after the slash — "openai/gpt-4o"
+// is stored, and listed, as "gpt-4o" — while the box people type into takes
+// the whole thing. Comparing the two forms directly meant a model that had
+// just been added successfully did not match anything in the list, so the
+// next load of the list decided it had gone and quietly put the default back.
+// That happened on nearly every refresh: choosing a professor, closing
+// Settings, or any failed send.
+function catalogKey(name) {
+  const text = (name || "").trim();
+  // An endpoint of one's own ("della:alibaba/qwen35") is not a catalog model
+  // at all, so it keeps its whole name and is matched against what has been
+  // remembered instead.
+  if (text.includes(":")) return text;
+  return text.includes("/") ? text.split("/").pop() : text;
+}
+function knownModel(name) {
+  const text = (name || "").trim();
+  if (!text) return false;
+  if (text.includes(":")) return rememberedEndpointModels().includes(text);
+  const key = catalogKey(text);
+  return (state.models || []).some(m => m.name === key);
 }
 
 // Models this person has reached on an AI service of their own. They are not
@@ -1195,25 +1247,253 @@ wireCombobox("model");
 // "+" next to the model field: a small in-app popover for typing a custom
 // model name, rather than relying on people discovering that the combobox
 // text field itself accepts free text.
-function openModelAddPopover() {
-  document.getElementById("model-add-popover").hidden = false;
-  const input = document.getElementById("model-add-input");
-  input.value = "";
-  input.focus();
+function modelAddParts() {
+  return {
+    popover: document.getElementById("model-add-popover"),
+    input: document.getElementById("model-add-input"),
+    confirm: document.getElementById("model-add-confirm"),
+    progress: document.getElementById("model-add-progress"),
+    fill: document.getElementById("model-add-fill"),
+    step: document.getElementById("model-add-step"),
+    result: document.getElementById("model-add-result"),
+    actions: document.getElementById("model-add-actions"),
+    retry: document.getElementById("model-add-retry"),
+    remove: document.getElementById("model-add-remove"),
+  };
 }
-function closeModelAddPopover() { document.getElementById("model-add-popover").hidden = true; }
-function confirmModelAdd() {
-  const val = document.getElementById("model-add-input").value.trim();
-  if (val) {
+
+// Whatever the box was last saying, cleared back to one field and one button.
+function resetModelAddBox() {
+  const p = modelAddParts();
+  p.progress.hidden = true;
+  p.result.hidden = true;
+  p.actions.hidden = true;
+  p.result.className = "model-add-result";
+  p.result.textContent = "";
+  p.fill.style.width = "0%";
+  p.fill.classList.remove("indeterminate");
+  p.confirm.disabled = false;
+  p.confirm.textContent = "Add";
+  p.input.disabled = false;
+}
+
+function openModelAddPopover() {
+  const p = modelAddParts();
+  p.popover.hidden = false;
+  resetModelAddBox();
+  // What was typed is kept. Retyping a whole provider/model string because a
+  // first attempt was refused is the kind of small punishment that makes
+  // people stop trying.
+  p.input.focus();
+  p.input.select();
+}
+function closeModelAddPopover() {
+  document.getElementById("model-add-popover").hidden = true;
+}
+
+// The name last added, so Test again and Remove know what they act on.
+let modelAddSubject = null;
+
+// Adds the model and tests it here, in the box, rather than leaving both to
+// happen later inside somebody's first message. Testing is five requests to
+// the provider one after another, so each one says what it is as it starts.
+async function confirmModelAdd() {
+  const p = modelAddParts();
+  const val = p.input.value.trim();
+  if (!val) {
+    // Saying nothing and closing looked exactly like it had worked.
+    showModelAddResult("Type a model's name first — for example openai/gpt-4o.", true);
+    p.input.focus();
+    return;
+  }
+
+  // An endpoint of your own ("della:alibaba/qwen35") is not in the catalog and
+  // cannot be: its models are whatever that service runs, and nothing here can
+  // ask it. So it is remembered rather than tested.
+  if (val.includes(":")) {
+    rememberEndpointModel(val);
+    renderModelList();
     document.getElementById("model-field").value = val;
-    // "della:alibaba/qwen35" — an endpoint of your own, then the model on it.
-    if (val.includes(":")) {
-      rememberEndpointModel(val);
-      renderModelList();
+    applySamplingVisibility();
+    closeModelAddPopover();
+    return;
+  }
+
+  if (!val.includes("/")) {
+    showModelAddResult(
+      "A model is named as its provider and then the model, separated by a slash — "
+      + "for example openai/gpt-4o.", true);
+    p.input.focus();
+    return;
+  }
+
+  p.confirm.disabled = true;
+  p.confirm.textContent = "Adding…";
+  p.input.disabled = true;
+  p.result.hidden = true;
+  p.actions.hidden = true;
+  p.progress.hidden = false;
+  p.step.textContent = "Starting…";
+  p.fill.classList.add("indeterminate");
+
+  try {
+    await streamModelAdd(val, p);
+  } catch (e) {
+    p.progress.hidden = true;
+    showModelAddResult(e.message || "The model could not be added.", true);
+    offerModelAddActions({ canTest: false });
+  }
+  p.confirm.disabled = false;
+  p.confirm.textContent = "Add";
+  p.input.disabled = false;
+}
+
+// Reads the stream of steps the server sends while it works.
+async function streamModelAdd(provider_model, p) {
+  const resp = await fetch("/api/settings/models/stream", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ provider_model, professor: state.professor }),
+  });
+  if (!resp.ok) {
+    let detail = "The model could not be added.";
+    try { detail = (await resp.json()).detail || detail; } catch (e) { /* not JSON */ }
+    throw new Error(detail);
+  }
+
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let finished = null;
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    // Events are separated by a blank line; the last piece may be a partial
+    // one still arriving, so it stays in the buffer.
+    const chunks = buffer.split("\n\n");
+    buffer = chunks.pop();
+    for (const chunk of chunks) {
+      const line = chunk.split("\n").find(l => l.startsWith("data: "));
+      if (!line) continue;
+      const event = JSON.parse(line.slice(6));
+      if (event.type === "progress") {
+        p.fill.classList.remove("indeterminate");
+        p.fill.style.width = Math.round((event.step / event.total) * 100) + "%";
+        p.step.textContent = event.label;
+      } else {
+        finished = event;
+      }
     }
   }
+
+  p.progress.hidden = true;
+  if (!finished) throw new Error("The model could not be added: nothing came back.");
+  if (finished.type === "error") {
+    modelAddSubject = null;
+    showModelAddResult(finished.message, true);
+    offerModelAddActions({ canTest: false });
+    return;
+  }
+
+  modelAddSubject = finished.model;
+  await loadModels();
+  document.getElementById("model-field").value = finished.model;
   applySamplingVisibility();
-  closeModelAddPopover();
+
+  const caps = finished.capabilities || {};
+  if (finished.already) {
+    showModelAddResult(`${finished.model} was already added.`, false,
+                       describeModelCapabilities(caps));
+  } else if (caps.tested) {
+    showModelAddResult(`${finished.model} was added and tested.`, false,
+                       describeModelCapabilities(caps));
+  } else {
+    // Added, but nothing was settled about it — a rejected key, a timeout.
+    // Said plainly rather than reported as "cannot read images", which is
+    // what having tested it and found out would look like.
+    showModelAddResult(`${finished.model} was added, but could not be tested.`, false,
+                       "Nothing is recorded about what it can do yet.");
+  }
+  offerModelAddActions({ canTest: true });
+}
+
+function describeModelCapabilities(caps) {
+  if (!caps.tested) return "Not tested yet.";
+  const bits = [caps.supports_vision ? "Can read images." : "Cannot read images — text only."];
+  if ((caps.refuses || []).length) bits.push(`Turns down: ${caps.refuses.join(", ")}.`);
+  return bits.join(" ");
+}
+
+function showModelAddResult(message, isBad, detail) {
+  const p = modelAddParts();
+  p.result.className = "model-add-result" + (isBad ? " bad" : "");
+  p.result.textContent = message;
+  if (detail) {
+    const small = document.createElement("div");
+    small.className = "model-add-detail";
+    small.textContent = detail;
+    p.result.appendChild(small);
+  }
+  p.result.hidden = false;
+}
+
+// A model that could not be tested is kept rather than thrown away — the test
+// may have failed for reasons that say nothing about the model — but it should
+// not take somebody a trip to the Settings page to undo a typo either.
+function offerModelAddActions({ canTest }) {
+  const p = modelAddParts();
+  p.retry.hidden = !canTest || !modelAddSubject;
+  p.remove.hidden = !modelAddSubject;
+  p.actions.hidden = false;
+}
+
+async function retryModelTest() {
+  if (!modelAddSubject) return;
+  const p = modelAddParts();
+  p.actions.hidden = true;
+  p.result.hidden = true;
+  p.progress.hidden = false;
+  p.fill.classList.add("indeterminate");
+  p.step.textContent = "Testing…";
+  try {
+    const data = await api(`/api/settings/models/${encodeURIComponent(modelAddSubject)}/test`, {
+      method: "POST", body: JSON.stringify({ professor: state.professor }),
+    });
+    p.progress.hidden = true;
+    showModelAddResult(`${modelAddSubject} was tested.`, false,
+                       describeModelCapabilities(data.capabilities || {}));
+    await loadModels();
+    applySamplingVisibility();
+  } catch (e) {
+    p.progress.hidden = true;
+    showModelAddResult(e.message || "The model could not be tested.", true);
+  }
+  offerModelAddActions({ canTest: true });
+}
+
+async function removeAddedModel() {
+  if (!modelAddSubject) return;
+  if (!confirm(`Remove ${modelAddSubject} from the list of models?`)) return;
+  try {
+    await api(`/api/settings/models/${encodeURIComponent(modelAddSubject)}`
+              + `?professor=${encodeURIComponent(state.professor)}`, { method: "DELETE" });
+  } catch (e) {
+    showModelAddResult(e.message || "The model could not be removed.", true);
+    return;
+  }
+  const removed = modelAddSubject;
+  modelAddSubject = null;
+  await loadModels();
+  const field = document.getElementById("model-field");
+  if (catalogKey(field.value) === removed) {
+    field.value = state.defaultModel || "";
+    applySamplingVisibility();
+  }
+  resetModelAddBox();
+  document.getElementById("model-add-input").value = "";
+  showModelAddResult(`${removed} was removed.`, false);
 }
 document.getElementById("model-add-btn").addEventListener("click", (e) => {
   e.stopPropagation();
@@ -1221,6 +1501,9 @@ document.getElementById("model-add-btn").addEventListener("click", (e) => {
   if (pop.hidden) openModelAddPopover(); else closeModelAddPopover();
 });
 document.getElementById("model-add-confirm").addEventListener("click", confirmModelAdd);
+document.getElementById("model-add-retry").addEventListener("click", retryModelTest);
+document.getElementById("model-add-remove").addEventListener("click", removeAddedModel);
+document.getElementById("model-add-done").addEventListener("click", closeModelAddPopover);
 document.getElementById("model-add-input").addEventListener("keydown", (e) => {
   if (e.key === "Enter") { e.preventDefault(); confirmModelAdd(); }
   if (e.key === "Escape") closeModelAddPopover();
@@ -1242,7 +1525,11 @@ document.addEventListener("click", (e) => {
 // shown disabled with no explanation.
 function applySamplingVisibility() {
   const modelName = document.getElementById("model-field").value || state.defaultModel;
-  const model = (state.models || []).find(m => m.name === modelName);
+  // By catalog key, because the field may hold the provider-and-model form
+  // somebody typed. Matched literally, a freshly added model was not found
+  // here either, so the section saying what it can do quietly disappeared for
+  // exactly the models nobody knows anything about yet.
+  const model = (state.models || []).find(m => m.name === catalogKey(modelName));
   const accepts = !model || model.accepts_sampling_params !== false;
   document.getElementById("sampling-temperature-field").style.display = accepts ? "" : "none";
   document.getElementById("sampling-top-p-field").style.display = accepts ? "" : "none";

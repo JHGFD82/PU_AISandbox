@@ -4845,13 +4845,30 @@ class TestAModelThatNoLongerExists:
     def test_removing_needs_an_unlocked_session(self, client):
         assert client.delete("/api/settings/models/gpt-4o").status_code == 401
 
-    def test_the_page_offers_removal_only_for_a_model_that_is_gone(self):
+    def test_every_model_can_be_removed_from_its_own_row(self):
+        """Removal used to appear only after a test came back 410.
+
+        That meant finding out a model was gone cost a billed request, and a
+        model somebody simply no longer wanted could not be taken out here at
+        all. It is offered on every row now; the confirmation is what stops an
+        accidental one, and the entry can be added back in a line.
+        """
         from pathlib import Path
         page = (Path(__file__).resolve().parents[1] / "src" / "templates"
                 / "settings.html").read_text()
-        # Hidden by default: a working model must not carry a delete button.
-        assert 'data-remove-model="${m.name}" style="display:none"' in page
+        assert 'data-remove-model="${m.name}">Remove' in page
+        assert 'data-remove-model="${m.name}" style="display:none"' not in page
+        # Still says so when a test proves the model is gone.
         assert "no longer exists" in page
+
+    def test_the_confirmation_no_longer_claims_the_model_is_gone(self):
+        """It could say so when it only appeared after a 410 had proved it."""
+        from pathlib import Path
+        page = (Path(__file__).resolve().parents[1] / "src" / "templates"
+                / "settings.html").read_text()
+        confirm = page.split("Remove ${name} from")[1].split("`")[0]
+        assert "no longer exists" not in confirm
+        assert "Nothing else is affected" in confirm
 
 
 class TestTheSettingsPageIsInThreeTabs:
@@ -6465,3 +6482,158 @@ class TestAConversationOpensFromAnywhereOnItsRow:
         row = chat.split(".conv-item {")[1].split("}")[0]
         assert "z-index" not in heading, "the heading is above the rows again"
         assert "z-index: 1" in row
+
+class TestAddingAModelSaysWhatItIsDoing:
+    """Five provider requests in a row is long enough to need narrating.
+
+    The box used to be silent while a model was added and tested — and in the
+    chat page it did not add or test anything at all, so the wait landed later,
+    in the middle of the first message, with nothing on screen to explain it.
+    """
+
+    def _events(self, resp) -> list:
+        """The stream, read back as the list of events the browser would see."""
+        out = []
+        for line in resp.text.splitlines():
+            if line.startswith("data: "):
+                out.append(json.loads(line[len("data: "):]))
+        return out
+
+    def test_it_needs_an_unlocked_session(self, client):
+        assert client.post("/api/settings/models/stream", json={
+            "provider_model": "openai/gpt-4o", "professor": "smith",
+        }).status_code == 401
+
+    def test_a_name_without_a_provider_is_refused_before_anything_is_billed(
+        self, unlocked_client, monkeypatch
+    ):
+        import src.models.pricing as pricing_module
+
+        def must_not_run(*args, **kwargs):
+            raise AssertionError("the provider was contacted for a name that can't work")
+
+        monkeypatch.setattr(pricing_module, "add_model_to_catalog", must_not_run)
+        resp = unlocked_client.post("/api/settings/models/stream", json={
+            "provider_model": "gpt-5.2", "professor": "smith",
+        })
+        assert resp.status_code == 400
+        assert "slash" in resp.json()["detail"]
+
+    def test_every_step_is_named_as_it_starts(self, unlocked_client, monkeypatch):
+        """The point of the whole endpoint: the wait is accounted for."""
+        app_module = sys.modules["_pu_webui_app"]
+
+        def fake_add(provider_model, api_key=None, probe=True, on_progress=None):
+            for label in ("Looking up what it costs", "Checking how to ask it for a length",
+                          "Checking how to give it instructions",
+                          "Checking which settings it accepts",
+                          "Checking whether it can read images"):
+                on_progress(label)
+            return "gpt-5.2", {"input": 1.0, "output": 2.0}
+
+        monkeypatch.setattr("src.models.add_model_to_catalog", fake_add)
+        monkeypatch.setattr(app_module, "_capability_summary",
+                            lambda m: {"supports_vision": True, "refuses": [],
+                                       "prefers": {}, "tested": True})
+        monkeypatch.setattr("src.config.get_api_key", lambda netid: ("sk-test", "primary"))
+
+        events = self._events(unlocked_client.post("/api/settings/models/stream", json={
+            "provider_model": "openai/gpt-5.2", "professor": "smith",
+        }))
+        progress = [e for e in events if e["type"] == "progress"]
+        assert [e["label"] for e in progress] == [
+            "Looking up what it costs",
+            "Checking how to ask it for a length",
+            "Checking how to give it instructions",
+            "Checking which settings it accepts",
+            "Checking whether it can read images",
+        ]
+        # Numbered, so a bar has something to fill against.
+        assert [e["step"] for e in progress] == [1, 2, 3, 4, 5]
+        assert all(e["total"] == 5 for e in progress)
+        assert events[-1]["type"] == "done"
+        assert events[-1]["capabilities"]["supports_vision"] is True
+
+    def test_a_model_that_could_not_be_added_says_so_instead_of_finishing(
+        self, unlocked_client, monkeypatch
+    ):
+        """Almost always the price lookup, on a misspelled name."""
+        def fake_add(provider_model, api_key=None, probe=True, on_progress=None):
+            on_progress("Looking up what it costs")
+            raise RuntimeError("No valid pricing data for 'openai/gpt-nope'")
+
+        monkeypatch.setattr("src.models.add_model_to_catalog", fake_add)
+        monkeypatch.setattr("src.config.get_api_key", lambda netid: ("sk-test", "primary"))
+
+        events = self._events(unlocked_client.post("/api/settings/models/stream", json={
+            "provider_model": "openai/gpt-nope", "professor": "smith",
+        }))
+        assert events[-1]["type"] == "error"
+        assert "pricing" in events[-1]["message"]
+        assert not any(e["type"] == "done" for e in events)
+
+    def test_a_model_already_in_the_catalog_is_not_paid_for_twice(
+        self, unlocked_client, monkeypatch, a_catalog
+    ):
+        """Re-adding repeated every billed request to learn what was on file."""
+        def must_not_run(*args, **kwargs):
+            raise AssertionError("an already-added model was tested again")
+
+        monkeypatch.setattr("src.models.add_model_to_catalog", must_not_run)
+        monkeypatch.setattr("src.config.get_api_key", lambda netid: ("sk-test", "primary"))
+
+        events = self._events(unlocked_client.post("/api/settings/models/stream", json={
+            "provider_model": "openai/gpt-4o", "professor": "smith",
+        }))
+        assert len(events) == 1
+        assert events[0]["type"] == "done"
+        assert events[0]["already"] is True
+        assert events[0]["model"] == "gpt-4o"
+
+
+class TestWhatAModelThatCannotBeAddedSays:
+    """The reason reached the person as the network library phrased it.
+
+    "HTTP Error 404: Not Found" names neither the model nor anything to do
+    about it, and 404 from the pricing service almost always means the name
+    was mistyped.
+    """
+
+    def _raise(self, error):
+        def fake_urlopen(*args, **kwargs):
+            raise error
+        return fake_urlopen
+
+    def test_a_name_the_pricing_service_does_not_know_says_to_check_it(self, monkeypatch):
+        import urllib.error
+        import src.models.pricing as pricing
+
+        monkeypatch.setattr(pricing.urllib.request, "urlopen", self._raise(
+            urllib.error.HTTPError("u", 404, "Not Found", {}, None)))
+        with pytest.raises(RuntimeError) as caught:
+            pricing._fetch_model_pricing("openai/gpt-typo", 1_000_000)
+        message = str(caught.value)
+        assert "openai/gpt-typo" in message
+        assert "misspelling" in message
+        assert "404" not in message
+
+    def test_a_service_that_is_down_is_not_reported_as_a_bad_name(self, monkeypatch):
+        import urllib.error
+        import src.models.pricing as pricing
+
+        monkeypatch.setattr(pricing.urllib.request, "urlopen", self._raise(
+            urllib.error.HTTPError("u", 503, "Service Unavailable", {}, None)))
+        with pytest.raises(RuntimeError) as caught:
+            pricing._fetch_model_pricing("openai/gpt-4o", 1_000_000)
+        assert "misspelling" not in str(caught.value)
+        assert "again" in str(caught.value)
+
+    def test_no_connection_says_so(self, monkeypatch):
+        import urllib.error
+        import src.models.pricing as pricing
+
+        monkeypatch.setattr(pricing.urllib.request, "urlopen", self._raise(
+            urllib.error.URLError("nodename nor servname provided")))
+        with pytest.raises(RuntimeError) as caught:
+            pricing._fetch_model_pricing("openai/gpt-4o", 1_000_000)
+        assert "internet connection" in str(caught.value)

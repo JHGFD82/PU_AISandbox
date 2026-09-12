@@ -30,7 +30,7 @@ unanswered and reported as untested.
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from .catalog import is_sampling_param_deprecated_error
 from ..services.api_errors import is_transient_error, rejected_request_field
@@ -390,12 +390,21 @@ def _probe_vision(asker: _Asker, report: CapabilityReport) -> bool:
 
 # Run in this order because each depends on the ones before it having settled
 # how a request to this model has to be addressed.
+#
+# Each is paired with a short phrase naming what it is about to find out, in
+# the words someone waiting on it would use. The web interface shows these as
+# the testing goes along, because four provider requests in a row is long
+# enough that a box saying nothing looks like a box that has stopped.
 _PROBES = (
-    _probe_max_tokens_field,
-    _probe_system_role,
-    _probe_sampling_params,
-    _probe_vision,
+    ("Checking how to ask it for a length", _probe_max_tokens_field),
+    ("Checking how to give it instructions", _probe_system_role),
+    ("Checking which settings it accepts", _probe_sampling_params),
+    ("Checking whether it can read images", _probe_vision),
 )
+
+# How many steps a caller showing progress should expect in total: the probes
+# above, plus the price lookup that happens before any of them.
+TESTING_STEPS = len(_PROBES) + 1
 
 
 # Long enough for a slow provider to answer sixteen tokens, short enough that
@@ -439,7 +448,9 @@ def client_for_testing(api_key: str) -> Any:
     )
 
 
-def probe_model_capabilities(model_name: str, client: Any) -> CapabilityReport:
+def probe_model_capabilities(
+    model_name: str, client: Any, on_progress: Optional[Callable[[str], None]] = None
+) -> CapabilityReport:
     """Ask a model what it can do, and report the answers.
 
     Sends a few very small requests — one per question — and reads the
@@ -453,6 +464,12 @@ def probe_model_capabilities(model_name: str, client: Any) -> CapabilityReport:
         client: Something that can take ``chat.completions.create(...)`` — in
                 normal use the same PortKey client the sandbox makes requests
                 with, built from a professor's API key.
+        on_progress: Somewhere to say what is about to be tried, called once
+                     before each question with a short phrase naming it (e.g.
+                     ``'Checking whether it can read images'``). Meant for an
+                     interface that shows someone how far along a wait is;
+                     leave it out and nothing is reported. Whatever is passed
+                     here must not raise — see below.
 
     Returns:
         A ``CapabilityReport``. If the model could not be reached at all, its
@@ -462,7 +479,12 @@ def probe_model_capabilities(model_name: str, client: Any) -> CapabilityReport:
     report = CapabilityReport()
     asker = _Asker(client, model_name)
 
-    for probe in _PROBES:
+    for label, probe in _PROBES:
+        if on_progress is not None:
+            # Outside the try below on purpose. A failure to *say* what is
+            # happening is a fault in the watching interface, not an answer
+            # about the model, and must not be recorded as one.
+            on_progress(label)
         try:
             if not probe(asker, report):
                 # The request shape itself is unsettled, so nothing addressed to
