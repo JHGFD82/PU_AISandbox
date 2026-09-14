@@ -488,6 +488,16 @@
      the muted grey the ordinary figures use, because the absence is the point:
      grey would read as one more quiet statistic. */
   .meta-unpriced { color: var(--badge-can-text); font-style: italic; }
+  /* Plain words rather than a button, because it sits under a figure and is
+     not the thing anyone came to this panel to do. Still a real button
+     underneath, so it is reachable by keyboard and named to a screen reader
+     like any other. */
+  .spend-link {
+    display: inline-block; margin-top: var(--space-2); padding: 0;
+    background: none; border: none; color: var(--link);
+    font-size: var(--text-xs); font-family: inherit; cursor: pointer; text-align: left;
+  }
+  .spend-link:hover { text-decoration: underline; }
   .spend-figure { font-size: var(--text-xxl); font-weight: 600; }
   .spend-label { font-size: var(--text-xs); color: var(--text-muted); }
   .spend-row { display: flex; justify-content: space-between; font-size: var(--text-md); padding: 0.2rem 0; }
@@ -970,7 +980,6 @@
          reason as the one above it: it is about whether to believe them. -->
     <div class="spend-warning" id="spend-uncounted" hidden>
       <p id="spend-uncounted-text"></p>
-      <button type="button" class="secondary" id="spend-adjust-btn">Correct this month&rsquo;s total</button>
     </div>
     <h2>This month</h2>
     <div class="spend-figure" id="spend-month">$0.00</div>
@@ -979,6 +988,7 @@
          one. -->
     <div class="spend-label" id="spend-adjusted" hidden></div>
     <div class="spend-label" id="spend-budget"></div>
+    <button type="button" class="spend-link" id="spend-adjust-btn">Correct this total…</button>
     <h2>All time</h2>
     <div class="spend-figure" id="spend-alltime">$0.00</div>
     <h2>By model (this month)</h2>
@@ -1057,12 +1067,12 @@
         </button>
       </div>
       <div class="modal-body">
-        <p class="spend-label" style="margin-top:0;">
-          Some calls this month could not be priced, because the AI service did not
-          report what they used. The tokens were still spent and still billed, so the
-          figure below is lower than the real one.
+        <p class="spend-label" id="adjust-why" style="margin-top:0;" hidden>
+          Some replies this month could not be priced, because the AI service did not
+          report what they used. Those tokens were still spent and still billed, so
+          the figure below is lower than the real one.
         </p>
-        <p class="spend-label">
+        <p class="spend-label" style="margin-top:0;">
           Ask OIT for this month&rsquo;s actual total and enter it here. The sandbox works
           out the difference and records it as a correction; what it measured is kept
           as it was and still shown separately.
@@ -3604,6 +3614,9 @@ function openAdjustModal() {
   document.getElementById("adjust-note").value = "";
   document.getElementById("adjust-error").hidden = true;
   document.getElementById("adjust-preview").textContent = "";
+  // Only where it applies: the box can be opened at any time, and a month
+  // whose replies were all priced should not be told otherwise.
+  document.getElementById("adjust-why").hidden = !(month.unreported > 0);
   backdrop.hidden = false;
   requestAnimationFrame(() => backdrop.classList.add("open"));
   document.getElementById("adjust-total").focus();

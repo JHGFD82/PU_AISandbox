@@ -6835,6 +6835,28 @@ class TestAReplyNobodyCouldPrice:
         assert "Ask OIT" in chat
         assert 'id="spend-adjust-btn"' in chat
 
+    def test_the_correction_can_be_reached_without_anything_going_wrong(self):
+        """It lived inside the warning about unpriced replies, so it existed
+        only while that warning did — which is almost never, and never at all
+        for a month whose unpriced replies happened before this noticed them.
+        A month can disagree with the bill for reasons the sandbox never sees.
+        """
+        chat = self._chat()
+        warning = chat.split('id="spend-uncounted"')[1].split("</div>")[0]
+        assert "spend-adjust-btn" not in warning, "the control is inside the warning again"
+        # Sitting with the figure it corrects, and not hidden.
+        after_month = chat.split('id="spend-month"')[1].split("<h2>")[0]
+        assert "spend-adjust-btn" in after_month
+        button = after_month.split('id="spend-adjust-btn"')[0].rsplit("<button", 1)[1]
+        assert "hidden" not in button
+
+    def test_the_box_does_not_claim_a_problem_that_did_not_happen(self):
+        """It can be opened at any time now, so the line about unpriced
+        replies has to be the exception rather than the greeting."""
+        chat = self._chat()
+        assert 'id="adjust-why"' in chat
+        assert 'document.getElementById("adjust-why").hidden = !(month.unreported > 0)' in chat
+
     def test_the_box_asks_for_the_total_not_the_difference(self):
         """The total is the number on the bill; the difference is arithmetic."""
         chat = self._chat()
