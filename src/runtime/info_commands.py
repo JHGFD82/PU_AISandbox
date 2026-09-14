@@ -265,9 +265,63 @@ def handle_info_commands(args: argparse.Namespace) -> bool:
             _print_daily_usage(token_tracker, args.professor, date)
             return True
 
-        raise CLIError("Invalid usage subcommand. Use 'report', 'months', 'daily', or 'sources'.")
+        if usage_subcommand == 'adjust':
+            _adjust_monthly_total(
+                token_tracker,
+                args.professor,
+                stated_total=args.total,
+                month=getattr(args, 'month', None),
+                note=getattr(args, 'note', '') or '',
+            )
+            return True
+
+        raise CLIError(
+            "Invalid usage subcommand. Use 'report', 'months', 'daily', 'adjust', or 'sources'."
+        )
 
     return False
+
+
+def _adjust_monthly_total(
+    token_tracker: "TokenTracker", professor: str, stated_total: float,
+    month: str | None, note: str,
+) -> None:
+    """Correct one month's total to match what was really billed, and say what changed.
+
+    The sandbox can only price a call the provider reported. Where one went
+    unreported the tokens were still spent, so the month reads low — this is
+    how the real figure gets in. What was measured is left exactly as it was
+    recorded; the difference is stored beside it and shown separately, so
+    nobody later mistakes a corrected month for a measured one.
+
+    Args:
+        token_tracker: The tracker for this person's records.
+        professor: Their netID, for the messages printed here.
+        stated_total: What the month really cost, in dollars.
+        month: The month to correct as ``YYYY-MM``, or ``None`` for this one.
+        note: Where the figure came from, kept with the adjustment.
+
+    Raises:
+        CLIError: If the total is not a figure a month could have cost.
+    """
+    try:
+        entry = token_tracker.record_cost_adjustment(stated_total, month=month, note=note)
+    except ValueError as error:
+        raise CLIError(str(error)) from error
+
+    which = month or datetime.now().strftime("%Y-%m")
+    amount = entry["amount"]
+    print(f"\n{which} for {professor}:")
+    print(f"  Measured by the sandbox:  ${entry['measured_total']:.2f}")
+    if entry["previous_adjustment"]:
+        print(f"  Adjusted earlier by:      ${entry['previous_adjustment']:+.2f}")
+    print(f"  You said it really cost:  ${entry['stated_total']:.2f}")
+    if amount == 0:
+        print("\n  Nothing to change — that is already what the month shows.")
+        return
+    print(f"  Adjustment recorded:      ${amount:+.2f}")
+    print(f"\nThe month now reports ${entry['stated_total']:.2f}. What the sandbox "
+          "measured is unchanged and still shown separately.")
 
 
 def _handle_settings_command(args: argparse.Namespace) -> None:

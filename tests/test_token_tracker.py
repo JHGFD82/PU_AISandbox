@@ -1624,3 +1624,119 @@ class TestSeparateReports:
         out = capsys.readouterr().out
         assert "my_cluster" in out
         assert "42" in out
+
+
+class TestCallsThatCouldNotBePriced:
+    """A call the provider never reported still spent money.
+
+    The sandbox prices a call from the usage the service reports. Where none
+    is reported the tokens were read and written and billed all the same, so
+    the month reads lower than the bill — and said nothing about it.
+    """
+
+    @pytest.fixture
+    def tracker(self, tmp_path, monkeypatch):
+        import src.tracking.token_tracker as module
+
+        monkeypatch.setattr(module, "data_root", lambda: tmp_path)
+        t = module.TokenTracker(professor="demo")
+        t.monthly_limit = 250.0
+        return t
+
+    def test_a_month_with_nothing_wrong_says_nothing(self, tracker):
+        status = tracker.get_monthly_budget_status()
+        assert status["unreported_calls"] == 0
+        assert status["cost_adjustment"] == 0
+
+    def test_an_unpriced_call_is_counted(self, tracker):
+        tracker.record_unreported_call("claude-opus-4-8", note="cut off")
+        tracker.record_unreported_call("claude-opus-4-8")
+        assert tracker.unreported_call_count() == 2
+        assert tracker.get_monthly_budget_status()["unreported_calls"] == 2
+
+    def test_counting_one_does_not_invent_a_cost(self, tracker):
+        """It is not known what the call cost. That is the whole problem."""
+        tracker.record_unreported_call("claude-opus-4-8")
+        assert tracker.get_monthly_budget_status()["monthly_usage"]["total_cost"] == 0
+
+    def test_the_note_survives(self, tracker):
+        tracker.record_unreported_call("gpt-5.4", note="reply cut off")
+        recorded = tracker._month_corrections()["unreported_calls"]
+        assert recorded[0]["model"] == "gpt-5.4"
+        assert recorded[0]["note"] == "reply cut off"
+
+
+class TestCorrectingAMonthToMatchTheBill:
+    """The figure on the bill is the one that settles it."""
+
+    @pytest.fixture
+    def tracker(self, tmp_path, monkeypatch):
+        import src.tracking.token_tracker as module
+
+        monkeypatch.setattr(module, "data_root", lambda: tmp_path)
+        t = module.TokenTracker(professor="demo")
+        t.monthly_limit = 250.0
+        return t
+
+    def test_the_difference_is_worked_out_from_the_total(self, tracker):
+        """The total is what the bill says; the difference is arithmetic
+        nobody should have to do themselves."""
+        entry = tracker.record_cost_adjustment(4.00, note="OIT")
+        assert entry["amount"] == pytest.approx(4.00)
+        assert entry["measured_total"] == 0
+        assert tracker.get_monthly_budget_status()["monthly_usage"]["total_cost"] == pytest.approx(4.00)
+
+    def test_what_was_measured_is_left_alone(self, tracker):
+        """A corrected month must still be able to say what it measured."""
+        tracker.record_cost_adjustment(4.00)
+        status = tracker.get_monthly_budget_status()
+        assert status["monthly_usage"]["measured_cost"] == 0
+        assert status["cost_adjustment"] == pytest.approx(4.00)
+
+    def test_entering_the_same_total_twice_changes_nothing(self, tracker):
+        """Someone will press it again, unsure whether the first took."""
+        tracker.record_cost_adjustment(4.00)
+        second = tracker.record_cost_adjustment(4.00)
+        assert second["amount"] == 0
+        assert tracker.get_monthly_budget_status()["monthly_usage"]["total_cost"] == pytest.approx(4.00)
+
+    def test_a_revised_figure_replaces_the_first(self, tracker):
+        tracker.record_cost_adjustment(4.00)
+        revised = tracker.record_cost_adjustment(6.50, note="corrected invoice")
+        assert revised["amount"] == pytest.approx(2.50)
+        assert tracker.get_monthly_budget_status()["monthly_usage"]["total_cost"] == pytest.approx(6.50)
+
+    def test_a_month_can_be_corrected_downwards(self, tracker):
+        tracker.record_cost_adjustment(10.00)
+        down = tracker.record_cost_adjustment(3.00)
+        assert down["amount"] == pytest.approx(-7.00)
+        assert tracker.get_monthly_budget_status()["monthly_usage"]["total_cost"] == pytest.approx(3.00)
+
+    def test_a_negative_total_is_refused(self, tracker):
+        """A minus sign is a likelier explanation than a refund."""
+        with pytest.raises(ValueError, match="cannot be negative"):
+            tracker.record_cost_adjustment(-5.0)
+
+    def test_the_budget_is_measured_against_the_corrected_figure(self, tracker):
+        """The point of correcting it: what is left must account for the
+        spending the sandbox could not see."""
+        tracker.record_cost_adjustment(200.00)
+        status = tracker.get_monthly_budget_status()
+        assert status["remaining_budget"] == pytest.approx(50.00)
+        assert status["usage_percentage"] == pytest.approx(80.0)
+
+    def test_every_correction_is_kept_not_just_the_last(self, tracker):
+        tracker.record_cost_adjustment(4.00, note="first guess")
+        tracker.record_cost_adjustment(6.50, note="corrected invoice")
+        entries = tracker.list_cost_adjustments()
+        assert [e["note"] for e in entries] == ["first guess", "corrected invoice"]
+
+    def test_corrections_outlive_the_object_that_made_them(self, tracker, tmp_path, monkeypatch):
+        """They are kept in a file of their own, not in the usage data, which
+        in shared-write mode is rebuilt from the call records on every read."""
+        import src.tracking.token_tracker as module
+
+        tracker.record_cost_adjustment(4.00)
+        monkeypatch.setattr(module, "data_root", lambda: tmp_path)
+        fresh = module.TokenTracker(professor="demo")
+        assert fresh.get_cost_adjustment() == pytest.approx(4.00)

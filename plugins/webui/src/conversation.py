@@ -258,6 +258,12 @@ class Message:
     progress_done: Optional[int] = None
     progress_total: Optional[int] = None
     page_number: Optional[int] = None
+    # Whether the reply stopped before the provider said it had finished.
+    # A cut-off answer reads exactly like a complete one otherwise — the
+    # words simply stop — and its cost goes unreported, so the turn is
+    # money spent that nothing counted. False for everything else,
+    # including every message written before this was recorded.
+    incomplete: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -282,6 +288,7 @@ class Message:
             progress_done=data.get("progress_done"),
             progress_total=data.get("progress_total"),
             page_number=data.get("page_number"),
+            incomplete=bool(data.get("incomplete", False)),
         )
 
 

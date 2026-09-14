@@ -283,6 +283,16 @@ class PickPathBody(BaseModel):
     prompt: str = "Choose a folder"
 
 
+class AdjustUsageBody(BaseModel):
+    professor: str
+    # What the month really cost, in dollars, as the bill states it.
+    stated_total: float
+    # Which month, as YYYY-MM. Empty means the current one.
+    month: str = ""
+    # Where the figure came from, kept with the adjustment.
+    note: str = ""
+
+
 class AddModelBody(BaseModel):
     # 'provider/model-name', the same form the -m flag takes.
     provider_model: str
@@ -1307,6 +1317,13 @@ def create_app() -> FastAPI:
         return {
             "unreadable_folders": missing,
             "month": budget["monthly_usage"],
+            # Money put back by hand, and how many calls made it necessary.
+            # Kept as their own figures rather than folded into the month, so
+            # the page can show a corrected total and still say it was
+            # corrected.
+            "cost_adjustment": budget.get("cost_adjustment", 0.0),
+            "unreported_calls": budget.get("unreported_calls", 0),
+            "adjustments": tracker.list_cost_adjustments(),
             "all_time": tracker.get_all_time_usage(),
             "model_usage": tracker.usage_data.get("model_usage", {}),
             # Alternate services, each on its own, carrying tokens and no money.
@@ -1349,6 +1366,26 @@ def create_app() -> FastAPI:
                 f"{folder}",
             )
         return {"opened": True, "path": str(folder)}
+
+    @app.post("/api/usage/adjust")
+    async def api_adjust_usage(request: Request, body: AdjustUsageBody):
+        """Correct a month's total to match what was actually billed.
+
+        Takes the real figure — the one on the bill, which at Princeton means
+        asking OIT — and records the difference between it and what the
+        sandbox measured. The measurements are left as they are; the
+        correction stands beside them.
+        """
+        _require_unlocked(request)
+        professor = _validated_professor(body.professor)
+        tracker = TokenTracker(professor=professor)
+        try:
+            entry = tracker.record_cost_adjustment(
+                body.stated_total, month=body.month or None, note=body.note or "",
+            )
+        except ValueError as error:
+            raise HTTPException(400, str(error)) from error
+        return {"adjustment": entry, "total": tracker.get_monthly_budget_status()}
 
     @app.get("/api/conversations")
     async def api_list_conversations(request: Request, professor: str):
@@ -1903,6 +1940,7 @@ def create_app() -> FastAPI:
                 prompt_tokens=final["prompt_tokens"],
                 completion_tokens=final["completion_tokens"],
                 cost=final["cost"],
+                incomplete=final.get("incomplete", False),
             ))
             if conv.title == "New conversation" and len(conv.messages) >= 2:
                 # Ask the model for a real title first (see

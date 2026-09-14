@@ -129,7 +129,7 @@ def add_notes_flags(parser: argparse.ArgumentParser) -> None:
 
 
 def _build_usage_subparser(subparsers: argparse._SubParsersAction) -> None:
-    """Register the 'usage' command and its subcommands (report, months, daily)."""
+    """Register the 'usage' command and its subcommands (report, months, daily, adjust)."""
     usage_parser = subparsers.add_parser('usage', help='View token usage and costs')
     _add_debug_flags(usage_parser)
     usage_subparsers = usage_parser.add_subparsers(dest='usage_subcommand', help='Usage subcommand')
@@ -168,6 +168,41 @@ def _build_usage_subparser(subparsers: argparse._SubParsersAction) -> None:
         nargs='?',
         default='today',
         help='Date in YYYY-MM-DD format (defaults to today)',
+    )
+
+    # usage adjust <total> [YYYY-MM]
+    adjust_parser = usage_subparsers.add_parser(
+        'adjust',
+        help="Correct a month's total to match the bill (e.g. after asking OIT)",
+        description=(
+            "Bring a month into line with what was actually billed. Give the real "
+            "total for the month and the sandbox works out the difference, storing "
+            "it as an adjustment beside the figures it measured rather than "
+            "changing them. Use this when calls went unpriced — the report says so "
+            "when they did — since the tokens were spent whether or not the "
+            "provider reported them."
+        ),
+    )
+    _add_debug_flags(adjust_parser)
+    adjust_parser.add_argument(
+        'total',
+        type=float,
+        metavar='TOTAL',
+        help="What the month really cost, in dollars (e.g. 48.15).",
+    )
+    adjust_parser.add_argument(
+        'month',
+        type=str,
+        nargs='?',
+        default=None,
+        metavar='YYYY-MM',
+        help='Month to correct (e.g. 2026-09). Omit for the current month.',
+    )
+    adjust_parser.add_argument(
+        '--note',
+        type=str,
+        default='',
+        help='Where the figure came from (e.g. "OIT invoice, 14 Oct").',
     )
 
     # usage sources list|add|remove

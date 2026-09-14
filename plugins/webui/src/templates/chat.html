@@ -484,6 +484,10 @@
     border-radius: var(--radius-md); word-break: break-word;
   }
   .spend-warning[hidden] { display: none; }
+  /* A reply whose cost nobody knows. Marked in the warning colour rather than
+     the muted grey the ordinary figures use, because the absence is the point:
+     grey would read as one more quiet statistic. */
+  .meta-unpriced { color: var(--badge-can-text); font-style: italic; }
   .spend-figure { font-size: var(--text-xxl); font-weight: 600; }
   .spend-label { font-size: var(--text-xs); color: var(--text-muted); }
   .spend-row { display: flex; justify-content: space-between; font-size: var(--text-md); padding: 0.2rem 0; }
@@ -563,6 +567,18 @@
     padding: 0.7rem 1rem; border-bottom: 1px solid var(--border); background: var(--panel-bg); flex: none;
   }
   .modal-header h2 { margin: 0; }
+  /* A panel the size of what is in it, for a modal that asks one short
+     question. The ordinary one is a fixed 85vh, which is right for the
+     settings page inside a frame and far too much for three fields. */
+  .modal-panel.compact { width: min(460px, 92vw); height: auto; max-height: 85vh; }
+  .modal-body { padding: 1rem; overflow-y: auto; }
+  .modal-body .job-field { margin-top: var(--space-3); }
+  .modal-footer {
+    display: flex; justify-content: flex-end; gap: 0.4rem; flex: none;
+    padding: 0.7rem 1rem; border-top: 1px solid var(--border);
+  }
+  #adjust-measured { color: var(--text-muted); }
+  #adjust-error[hidden], #adjust-preview:empty { display: none; }
   #settings-iframe { flex: 1; border: none; width: 100%; background: var(--panel-bg); }
 
   /* ── Composer plugin actions ─────────────────────────────────────────── */
@@ -950,8 +966,18 @@
          folder that cannot be read contributes nothing, and nothing looks
          exactly like a month with no spending in it. -->
     <p class="spend-warning" id="spend-unreadable" hidden></p>
+    <!-- Shown only where calls went unpriced. Above the figures for the same
+         reason as the one above it: it is about whether to believe them. -->
+    <div class="spend-warning" id="spend-uncounted" hidden>
+      <p id="spend-uncounted-text"></p>
+      <button type="button" class="secondary" id="spend-adjust-btn">Correct this month&rsquo;s total</button>
+    </div>
     <h2>This month</h2>
     <div class="spend-figure" id="spend-month">$0.00</div>
+    <!-- Only where a month has been corrected: the measured figure and the
+         amount put back, so the total above is never mistaken for a measured
+         one. -->
+    <div class="spend-label" id="spend-adjusted" hidden></div>
     <div class="spend-label" id="spend-budget"></div>
     <h2>All time</h2>
     <div class="spend-figure" id="spend-alltime">$0.00</div>
@@ -1017,6 +1043,52 @@
        This is --dry-run made
        interactive: the right side re-renders after every change to a field
        on the left, without ever making a real API call. -->
+  <!-- Correcting a month to match the bill. Asks for the total rather than the
+       difference, because the total is the number on the bill and the
+       difference is arithmetic nobody should have to do. -->
+  <div id="adjust-modal-backdrop" class="modal-backdrop" hidden>
+    <div class="modal-panel compact">
+      <div class="modal-header">
+        <h2 style="margin:0; text-transform:none; font-size:var(--text-lg); letter-spacing:normal;">
+          Correct this month&rsquo;s total
+        </h2>
+        <button type="button" class="icon-btn" id="adjust-modal-close" title="Close" aria-label="Close">
+          {{ icons.plus("icon-as-cross") }}
+        </button>
+      </div>
+      <div class="modal-body">
+        <p class="spend-label" style="margin-top:0;">
+          Some calls this month could not be priced, because the AI service did not
+          report what they used. The tokens were still spent and still billed, so the
+          figure below is lower than the real one.
+        </p>
+        <p class="spend-label">
+          Ask OIT for this month&rsquo;s actual total and enter it here. The sandbox works
+          out the difference and records it as a correction; what it measured is kept
+          as it was and still shown separately.
+        </p>
+        <div class="job-field">
+          <label for="adjust-measured">What the sandbox measured</label>
+          <input type="text" id="adjust-measured" readonly>
+        </div>
+        <div class="job-field">
+          <label for="adjust-total">What the month really cost (dollars)</label>
+          <input type="text" id="adjust-total" inputmode="decimal" placeholder="48.15" autocomplete="off">
+        </div>
+        <div class="job-field">
+          <label for="adjust-note">Where the figure came from (optional)</label>
+          <input type="text" id="adjust-note" placeholder="OIT invoice, 14 Oct" autocomplete="off">
+        </div>
+        <p class="spend-warning" id="adjust-error" hidden></p>
+        <p class="spend-label" id="adjust-preview"></p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="secondary" id="adjust-cancel">Cancel</button>
+        <button type="button" id="adjust-save">Record the correction</button>
+      </div>
+    </div>
+  </div>
+
   <div id="job-modal-backdrop" class="modal-backdrop" hidden>
     <div class="modal-panel job-modal-panel">
       <div class="modal-header">
@@ -3045,6 +3117,34 @@ async function loadUsage() {
       + missing.join(", ");
   }
 
+  // What the month cost but nothing could count, and what has been put back.
+  // Both are kept beside the total rather than folded into it: a corrected
+  // month should never read as a measured one.
+  state.usageMonth = {
+    measured: data.month.measured_cost != null ? data.month.measured_cost : data.month.total_cost,
+    total: data.month.total_cost,
+    adjustment: data.cost_adjustment || 0,
+    unreported: data.unreported_calls || 0,
+  };
+  const adjusted = document.getElementById("spend-adjusted");
+  adjusted.hidden = !state.usageMonth.adjustment;
+  if (state.usageMonth.adjustment) {
+    adjusted.textContent =
+      `${fmtMoney(state.usageMonth.measured)} measured, `
+      + `${state.usageMonth.adjustment >= 0 ? "+" : "−"}`
+      + `${fmtMoney(Math.abs(state.usageMonth.adjustment)).slice(1)} corrected`;
+  }
+  const uncounted = document.getElementById("spend-uncounted");
+  uncounted.hidden = state.usageMonth.unreported === 0;
+  if (state.usageMonth.unreported) {
+    const n = state.usageMonth.unreported;
+    document.getElementById("spend-uncounted-text").textContent =
+      `${n} ${n === 1 ? "reply" : "replies"} this month could not be priced — the AI `
+      + "service did not report what they used. Those tokens were still spent and "
+      + "still billed, so this month's figure is lower than the real one. Ask OIT "
+      + "for the actual total.";
+  }
+
   const byModel = document.getElementById("spend-by-model");
   byModel.innerHTML = "";
   Object.entries(data.model_usage || {}).forEach(([model, stats]) => {
@@ -3241,6 +3341,16 @@ function renderMessages(conv) {
         bits.push(`${m.prompt_tokens} in / ${m.completion_tokens} out tokens`);
       }
       meta.textContent = bits.join(" · ");
+      div.appendChild(meta);
+    } else if (m.role === "assistant" && m.kind === "message") {
+      // No cost because no usage was reported. Said where the reply is, rather
+      // than left blank: a reply with nothing under it reads as one that cost
+      // nothing, and this one cost whatever the tokens cost.
+      const meta = document.createElement("div");
+      meta.className = "meta meta-unpriced";
+      meta.textContent = m.incomplete
+        ? "This reply was cut off before the service finished sending it, so its cost was never reported."
+        : "The service did not report this reply's cost.";
       div.appendChild(meta);
     }
     if (m.kind === "job_result" && m.job_id) {
@@ -3485,6 +3595,88 @@ document.getElementById("lock-btn").addEventListener("click", async () => {
   window.location.href = "/";
 });
 // ── Settings modal ──────────────────────────────────────────────────────
+// ── Correcting a month to match the bill ─────────────────────────────────
+function openAdjustModal() {
+  const backdrop = document.getElementById("adjust-modal-backdrop");
+  const month = state.usageMonth || { measured: 0, total: 0, adjustment: 0 };
+  document.getElementById("adjust-measured").value = fmtMoney(month.total);
+  document.getElementById("adjust-total").value = "";
+  document.getElementById("adjust-note").value = "";
+  document.getElementById("adjust-error").hidden = true;
+  document.getElementById("adjust-preview").textContent = "";
+  backdrop.hidden = false;
+  requestAnimationFrame(() => backdrop.classList.add("open"));
+  document.getElementById("adjust-total").focus();
+}
+
+function closeAdjustModal() {
+  const backdrop = document.getElementById("adjust-modal-backdrop");
+  backdrop.classList.remove("open");
+  setTimeout(() => { backdrop.hidden = true; }, 200);
+}
+
+// The difference, worked out as it is typed, so nobody has to do the
+// subtraction themselves or wonder what the button is about to do.
+function previewAdjustment() {
+  const typed = parseFloat(document.getElementById("adjust-total").value);
+  const preview = document.getElementById("adjust-preview");
+  const month = state.usageMonth || { total: 0 };
+  if (!isFinite(typed)) { preview.textContent = ""; return; }
+  const delta = typed - month.total;
+  if (Math.abs(delta) < 0.005) {
+    preview.textContent = "That is already what the month shows — nothing would change.";
+    return;
+  }
+  preview.textContent =
+    `${delta > 0 ? "Adds" : "Takes off"} ${fmtMoney(Math.abs(delta))}, `
+    + `bringing the month to ${fmtMoney(typed)}.`;
+}
+
+async function saveAdjustment() {
+  const error = document.getElementById("adjust-error");
+  const typed = parseFloat(document.getElementById("adjust-total").value);
+  if (!isFinite(typed)) {
+    error.textContent = "Enter the month's total as a number, for example 48.15.";
+    error.hidden = false;
+    return;
+  }
+  if (typed < 0) {
+    error.textContent = "A month cannot have cost less than nothing.";
+    error.hidden = false;
+    return;
+  }
+  const button = document.getElementById("adjust-save");
+  button.disabled = true;
+  try {
+    await api("/api/usage/adjust", {
+      method: "POST",
+      body: JSON.stringify({
+        professor: state.professor,
+        stated_total: typed,
+        note: document.getElementById("adjust-note").value.trim(),
+      }),
+    });
+  } catch (e) {
+    error.textContent = e.message || "The correction could not be recorded.";
+    error.hidden = false;
+    button.disabled = false;
+    return;
+  }
+  button.disabled = false;
+  closeAdjustModal();
+  await loadUsage();
+}
+
+document.getElementById("spend-adjust-btn").addEventListener("click", openAdjustModal);
+document.getElementById("adjust-modal-close").addEventListener("click", closeAdjustModal);
+document.getElementById("adjust-cancel").addEventListener("click", closeAdjustModal);
+document.getElementById("adjust-save").addEventListener("click", saveAdjustment);
+document.getElementById("adjust-total").addEventListener("input", previewAdjustment);
+document.getElementById("adjust-total").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") { e.preventDefault(); saveAdjustment(); }
+  if (e.key === "Escape") closeAdjustModal();
+});
+
 function openSettingsModal() {
   const backdrop = document.getElementById("settings-modal-backdrop");
   const iframe = document.getElementById("settings-iframe");

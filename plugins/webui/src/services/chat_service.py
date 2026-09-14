@@ -164,6 +164,13 @@ class ChatService(BaseService):
         prompt_tokens: Optional[int] = None
         completion_tokens: Optional[int] = None
         total_tokens: Optional[int] = None
+        # Why the model stopped. A stream that runs to the end says so —
+        # "end_turn" when the model finished, "max_tokens" when it hit the
+        # length cap. A stream that is cut off partway says nothing at all,
+        # and simply stops arriving: no error is raised, because nothing went
+        # wrong as far as this end is concerned. That silence is the only
+        # thing separating a cut-off answer from a complete one.
+        finish_reason: Optional[str] = None
 
         try:
             stream = self._create_completion_stream(
@@ -177,6 +184,9 @@ class ChatService(BaseService):
                 if getattr(chunk, "model", None):
                     response_model = chunk.model
                 if chunk.choices:
+                    reason = getattr(chunk.choices[0], "finish_reason", None)
+                    if reason:
+                        finish_reason = reason
                     text = getattr(chunk.choices[0].delta, "content", None)
                     if text:
                         content_parts.append(text)
@@ -202,6 +212,8 @@ class ChatService(BaseService):
             handle_api_errors(e, model)
             raise
 
+        incomplete = finish_reason is None
+
         cost: Optional[float] = None
         if prompt_tokens is not None and completion_tokens is not None and total_tokens is not None:
             usage_record = self.token_tracker.record_usage(
@@ -213,7 +225,15 @@ class ChatService(BaseService):
             )
             cost = usage_record.total_cost
         else:
-            logging.warning("webui chat turn (streamed): no token usage information in final chunk.")
+            # The provider read the question and wrote as much of the answer as
+            # arrived, and bills for both, so this is money spent that nothing
+            # has counted. Noted against the month rather than passed over, so
+            # a report can say how much of itself it could not measure.
+            self.token_tracker.record_unreported_call(
+                response_model,
+                note=("the reply was cut off before the provider said it had finished"
+                      if incomplete else "the provider reported no usage for this call"),
+            )
 
         yield {
             "type": "done",
@@ -222,6 +242,11 @@ class ChatService(BaseService):
             "prompt_tokens": prompt_tokens,
             "completion_tokens": completion_tokens,
             "cost": cost,
+            # Whether the answer arrived in full. A cut-off reply reads as a
+            # finished one otherwise: the words simply stop, and nothing says
+            # that more was coming.
+            "incomplete": incomplete,
+            "finish_reason": finish_reason,
         }
 
     def generate_title(self, messages: list[dict[str, Any]]) -> Optional[str]:

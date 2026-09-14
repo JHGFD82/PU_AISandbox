@@ -54,6 +54,20 @@ ARCHIVES_SUBDIR = "archives"
 # that is what each file is: one call, and what it cost.
 CALLS_SUBDIR = "calls"
 
+# Corrections to what the sandbox measured, kept apart from the measurements
+# themselves so the two can never be confused for each other. Two kinds live
+# here, both about calls the sandbox could not price:
+#
+#   * a turn whose usage the provider never reported, noted so a month can say
+#     how many of its calls went uncounted;
+#   * an amount added by hand to bring a month into line with the real bill.
+#
+# Its own file rather than a corner of the usage data, because in shared-write
+# mode that data is rebuilt from the call records every time it is read (see
+# _refresh_shared_usage_data), and anything written alongside it would be
+# discarded on the next read.
+CORRECTIONS_FILENAME = "usage_corrections"
+
 
 # Every path below uses the netID exactly as given, with no rewriting.
 #
@@ -1296,6 +1310,179 @@ class TokenTracker:
             archive_dir = get_archive_dir(self.professor)
         return sorted(p.stem for p in archive_dir.glob("*.json")) if archive_dir.exists() else []
 
+    # ── Corrections: calls that could not be priced, and money put back ──────
+
+    def _corrections_path(self) -> Path:
+        """The file holding this person's corrections, wherever their records live.
+
+        Beside their archives, so a shared folder carries its corrections with
+        it and an installation's own stay local — the same split
+        ``_archive_path_for()`` makes.
+
+        Returns:
+            The file's path. It may not exist yet; whoever writes makes it.
+        """
+        if self.source_mode == "shared-write":
+            base = _shared_archive_dir(self._require_shared_source()).parent
+        else:
+            base = data_root()
+        return base / f"{CORRECTIONS_FILENAME}_{self.professor}.json"
+
+    def _load_corrections(self) -> dict[str, Any]:
+        """Everything recorded against this person's months, or nothing.
+
+        A file that cannot be read counts as empty. Corrections describe money
+        that was already spent; failing to read them must not stop a report
+        being printed or a request being made.
+
+        Returns:
+            A dictionary keyed by month (``'2026-09'``), each holding
+            ``'adjustments'`` and ``'unreported_calls'`` lists.
+        """
+        path = self._corrections_path()
+        if not path.exists():
+            return {}
+        try:
+            with open(path, "r") as f:
+                loaded = json.load(f)
+            return loaded if isinstance(loaded, dict) else {}
+        except (json.JSONDecodeError, OSError) as error:
+            logging.warning("Could not read %s: %s", path.name, error)
+            return {}
+
+    def _save_corrections(self, corrections: dict[str, Any]) -> None:
+        """Write the corrections back, replacing the file in one step.
+
+        Args:
+            corrections: The whole structure, as ``_load_corrections()``
+                         returns it.
+        """
+        path = self._corrections_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_suffix(".json.tmp")
+        with open(temporary, "w") as f:
+            json.dump(corrections, f, indent=2)
+        os.replace(temporary, path)
+
+    def _month_corrections(self, month: str | None = None) -> dict[str, Any]:
+        """One month's corrections, with both lists present even when empty."""
+        month = month or self._get_current_month()
+        entry = self._load_corrections().get(month) or {}
+        return {
+            "adjustments": entry.get("adjustments") or [],
+            "unreported_calls": entry.get("unreported_calls") or [],
+        }
+
+    def record_unreported_call(self, model: str, note: str = "") -> None:
+        """Note that a call happened whose cost the provider never reported.
+
+        The tokens were spent either way — the provider read the question and
+        wrote the answer, and bills for both — so the only thing missing is
+        this sandbox's record of it. Noting it means a month can say how much
+        of itself it could not count, instead of quietly reporting too little.
+
+        Args:
+            model: The model the call was made to, as the sandbox names it.
+            note: Anything worth keeping about why it went unreported (e.g.
+                  that the reply arrived incomplete).
+        """
+        month = self._get_current_month()
+        corrections = self._load_corrections()
+        entry = corrections.setdefault(month, {})
+        entry.setdefault("unreported_calls", []).append({
+            "at": datetime.now().isoformat(timespec="seconds"),
+            "model": model,
+            "note": note,
+        })
+        self._save_corrections(corrections)
+        logging.warning(
+            "A call to '%s' reported no usage, so it could not be priced. It is "
+            "noted as uncounted; the month's total is lower than the real bill "
+            "until it is adjusted.", model,
+        )
+
+    def unreported_call_count(self, month: str | None = None) -> int:
+        """How many of a month's calls went uncounted.
+
+        Args:
+            month: The month in ``YYYY-MM`` form. Defaults to this one.
+
+        Returns:
+            The number of calls recorded as unpriced.
+        """
+        return len(self._month_corrections(month)["unreported_calls"])
+
+    def record_cost_adjustment(
+        self, stated_total: float, month: str | None = None, note: str = "",
+    ) -> dict[str, Any]:
+        """Bring a month into line with what was actually billed.
+
+        Takes the real total for the month — the figure on the bill, which for
+        Princeton means asking OIT — and works out what has to be added to what
+        the sandbox measured to arrive at it. The difference is what gets
+        stored, so the measurements stay exactly as they were recorded and the
+        correction stands beside them as its own, visible thing.
+
+        Adjusting twice does the right thing: the second adjustment is measured
+        against the total including the first, so entering the same figure again
+        changes nothing.
+
+        Args:
+            stated_total: What the month really cost, in dollars.
+            month: The month being corrected, in ``YYYY-MM`` form. Defaults to
+                   this one.
+            note: Anything worth keeping about where the figure came from.
+
+        Returns:
+            The entry as it was stored, including ``'amount'`` — the difference
+            that was applied, which is negative if the sandbox had recorded too
+            much.
+
+        Raises:
+            ValueError: If *stated_total* is negative. A month cannot have cost
+                        less than nothing, and a minus sign is a likelier
+                        explanation than a refund.
+        """
+        if stated_total < 0:
+            raise ValueError(
+                f"A month's total cannot be negative (got {stated_total}). To take "
+                "money off a month, enter the smaller total it should show."
+            )
+        month = month or self._get_current_month()
+        measured = self.get_monthly_usage(month)["total_cost"]
+        already = self.get_cost_adjustment(month)
+        entry = {
+            "at": datetime.now().isoformat(timespec="seconds"),
+            "stated_total": round(stated_total, 6),
+            "measured_total": round(measured, 6),
+            "previous_adjustment": round(already, 6),
+            "amount": round(stated_total - measured - already, 6),
+            "note": note,
+        }
+        corrections = self._load_corrections()
+        corrections.setdefault(month, {}).setdefault("adjustments", []).append(entry)
+        self._save_corrections(corrections)
+        return entry
+
+    def get_cost_adjustment(self, month: str | None = None) -> float:
+        """How much has been added to a month by hand, in dollars.
+
+        Args:
+            month: The month in ``YYYY-MM`` form. Defaults to this one.
+
+        Returns:
+            The sum of every adjustment against that month. Zero where none
+            were made, which is the ordinary case.
+        """
+        return sum(
+            float(a.get("amount") or 0.0)
+            for a in self._month_corrections(month)["adjustments"]
+        )
+
+    def list_cost_adjustments(self, month: str | None = None) -> list[dict[str, Any]]:
+        """Every adjustment made against a month, oldest first."""
+        return list(self._month_corrections(month)["adjustments"])
+
     def get_monthly_budget_status(self, month: str | None = None) -> dict[str, Any]:
         """Answer "how much of this professor's monthly budget is left?".
 
@@ -1314,7 +1501,16 @@ class TokenTracker:
         Returns:
             A dictionary with:
 
-            * ``monthly_usage`` — that month's totals (tokens, cost, calls).
+            * ``monthly_usage`` — that month's totals (tokens, cost, calls),
+              with ``total_cost`` standing for everything the month cost:
+              what was measured, plus anything put back by hand. The
+              measured figure on its own is kept alongside as
+              ``measured_cost``.
+            * ``cost_adjustment`` — dollars added by hand, zero in the
+              ordinary case.
+            * ``unreported_calls`` — how many of the month's calls the
+              provider never priced, so a report can say what it could not
+              count.
             * ``usage_percentage`` — how much of the budget is spent, 0–100
               (and possibly above 100).
             * ``remaining_budget`` — dollars left, never below zero.
@@ -1324,16 +1520,51 @@ class TokenTracker:
             Both flags are advisory. Nothing in the sandbox stops work when
             a budget runs out; see the module docstring.
         """
-        monthly_usage = self.get_monthly_usage(month)
-        usage_pct = (monthly_usage["total_cost"] / self.monthly_limit) * 100 if self.monthly_limit > 0 else 0.0
-        remaining = max(0.0, self.monthly_limit - monthly_usage["total_cost"])
+        measured = self.get_monthly_usage(month)
+        adjustment = self.get_cost_adjustment(month)
+        # A copy, because for the current month get_monthly_usage() hands back
+        # the live totals themselves — adding to those would spend the
+        # adjustment again on every read.
+        monthly_usage = dict(measured)
+        monthly_usage["measured_cost"] = measured["total_cost"]
+        monthly_usage["total_cost"] = measured["total_cost"] + adjustment
+
+        spent = monthly_usage["total_cost"]
+        usage_pct = (spent / self.monthly_limit) * 100 if self.monthly_limit > 0 else 0.0
+        remaining = max(0.0, self.monthly_limit - spent)
         return {
             "monthly_usage": monthly_usage,
+            "cost_adjustment": adjustment,
+            "unreported_calls": self.unreported_call_count(month),
             "usage_percentage": usage_pct,
             "remaining_budget": remaining,
-            "is_exceeded": monthly_usage["total_cost"] >= self.monthly_limit,
+            "is_exceeded": spent >= self.monthly_limit,
             "approaching_limit": usage_pct > BUDGET_WARNING_THRESHOLD,
         }
+
+    def _print_unreported_warning(self, unreported: int, month: str) -> None:
+        """Say how much of a month could not be counted, and what to do about it.
+
+        Printed only when there is something to say. The sandbox can price a
+        call only if the provider reports what it used; where one does not, the
+        tokens were still spent and still billed, so the figures above are
+        lower than the real ones by an amount only the bill can settle.
+
+        Args:
+            unreported: How many of the month's calls went unpriced.
+            month: The month being reported on, as ``YYYY-MM``.
+        """
+        if not unreported:
+            return
+        calls = "call" if unreported == 1 else "calls"
+        were = "was" if unreported == 1 else "were"
+        print_subsection("Uncounted Spending")
+        print(f"⚠️  {unreported} {calls} this month {were} not priced, because the AI "
+              "service did not")
+        print("    report what they used. The tokens were still spent and still billed,")
+        print("    so the figures above are lower than the real ones.")
+        print("\n    Ask OIT for this month's actual total, then record it:")
+        print(f"      python main.py {self.professor} usage adjust <total> {month}")
 
     def _print_endpoint_reports(self, endpoint_usage: dict[str, Any], when: str) -> None:
         """Print a separate report for each alternate AI service that was used.
@@ -1453,15 +1684,24 @@ class TokenTracker:
 
         # Monthly budget
         budget_status = self.get_monthly_budget_status()
+        adjustment = budget_status["cost_adjustment"]
         print_subsection(f"Monthly Budget ({current_month})")
         print(f"Monthly Limit: ${self.monthly_limit:.2f}")
-        print(f"Used:          ${monthly_total['total_cost']:.4f} ({budget_status['usage_percentage']:.1f}%)")
+        if adjustment:
+            # Shown as two figures and a sum, so a corrected month can never be
+            # mistaken for a measured one.
+            print(f"Measured:      ${budget_status['monthly_usage']['measured_cost']:.4f}")
+            print(f"Adjusted by:   ${adjustment:+.2f}")
+        print(f"Used:          ${budget_status['monthly_usage']['total_cost']:.4f} "
+              f"({budget_status['usage_percentage']:.1f}%)")
         print(f"Remaining:     ${budget_status['remaining_budget']:.2f}")
 
         if budget_status["is_exceeded"]:
             print("⚠️  MONTHLY LIMIT EXCEEDED!")
         elif budget_status["approaching_limit"]:
             print("⚠️  Approaching monthly limit!")
+
+        self._print_unreported_warning(budget_status["unreported_calls"], current_month)
 
         self._print_endpoint_reports(
             self.usage_data.get("endpoint_usage", {}), "this month"

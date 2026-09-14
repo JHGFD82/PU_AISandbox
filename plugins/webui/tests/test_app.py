@@ -434,6 +434,7 @@ class TestChat:
             "attachments": [], "api_content": None,
             "kind": "message", "job_id": None, "output_filename": None, "output_path": None,
             "progress_done": None, "progress_total": None, "page_number": None,
+            "incomplete": False,
         }
         assert conv["messages"][-1]["content"] == "Hello back!"
         assert conv["messages"][-1]["cost"] == 0.001
@@ -606,6 +607,7 @@ class TestChat:
             "attachments": [], "api_content": None,
             "kind": "message", "job_id": None, "output_filename": None, "output_path": None,
             "progress_done": None, "progress_total": None, "page_number": None,
+            "incomplete": False,
         }
 
     def test_attachment_becomes_message_attachment_and_api_content(self, unlocked_client, monkeypatch):
@@ -6790,3 +6792,171 @@ class TestTheBarAboveTheMessageBox:
         page = self._chat()
         rule = page.split("body, #sidebar")[1].split("{")[0]
         assert "#conv-bar" in rule
+
+
+class TestAReplyNobodyCouldPrice:
+    """A cut-off reply reads exactly like a finished one, and costs nothing.
+
+    The stream simply stops arriving; no error is raised, because as far as
+    this end is concerned nothing went wrong. The words end mid-sentence, the
+    usage never comes, and the turn is saved looking complete and free — while
+    the provider bills for every token it read and wrote.
+    """
+
+    def _chat(self) -> str:
+        return _rendered_chat()
+
+    def test_a_stream_that_never_says_it_finished_is_marked_incomplete(self):
+        chat_service = sys.modules["src.services.chat_service"]
+        import inspect
+
+        source = inspect.getsource(chat_service.ChatService.stream_message)
+        assert "finish_reason" in source
+        assert "incomplete = finish_reason is None" in source
+
+    def test_an_unpriced_turn_is_noted_against_the_month(self):
+        """Not silently passed over: the month has to be able to say how much
+        of itself it could not count."""
+        chat_service = sys.modules["src.services.chat_service"]
+        import inspect
+
+        source = inspect.getsource(chat_service.ChatService.stream_message)
+        assert "record_unreported_call" in source
+
+    def test_the_transcript_says_why_a_reply_has_no_cost(self):
+        """Blank reads as free."""
+        chat = self._chat()
+        assert "cut off before the service finished sending it" in chat
+        assert "did not report this reply's cost" in chat
+
+    def test_the_spend_panel_offers_the_correction(self):
+        chat = self._chat()
+        assert 'id="spend-uncounted"' in chat
+        assert "Ask OIT" in chat
+        assert 'id="spend-adjust-btn"' in chat
+
+    def test_the_box_asks_for_the_total_not_the_difference(self):
+        """The total is the number on the bill; the difference is arithmetic."""
+        chat = self._chat()
+        assert "What the month really cost" in chat
+        assert "function previewAdjustment(" in chat
+
+    def test_a_corrected_month_still_shows_what_was_measured(self):
+        chat = self._chat()
+        assert 'id="spend-adjusted"' in chat
+        assert "measured," in chat
+
+
+class TestRecordingACorrectionOverHttp:
+    def test_it_needs_an_unlocked_session(self, client):
+        assert client.post("/api/usage/adjust", json={
+            "professor": "heller", "stated_total": 5.0,
+        }).status_code == 401
+
+    def test_a_correction_is_recorded_and_the_month_reports_it(
+        self, unlocked_client, monkeypatch
+    ):
+        recorded = {}
+
+        class _Tracker:
+            def __init__(self, professor=None, **kw):
+                recorded["professor"] = professor
+
+            def record_cost_adjustment(self, stated_total, month=None, note=""):
+                recorded["stated_total"] = stated_total
+                recorded["note"] = note
+                return {"amount": 4.0, "stated_total": stated_total}
+
+            def get_monthly_budget_status(self, month=None):
+                return {"monthly_usage": {"total_cost": 4.0}}
+
+        app_module = sys.modules["_pu_webui_app"]
+        monkeypatch.setattr(app_module, "TokenTracker", _Tracker)
+
+        resp = unlocked_client.post("/api/usage/adjust", json={
+            "professor": "heller", "stated_total": 4.0, "note": "OIT invoice",
+        })
+        assert resp.status_code == 200
+        assert recorded["stated_total"] == 4.0
+        assert recorded["note"] == "OIT invoice"
+        assert resp.json()["adjustment"]["amount"] == 4.0
+
+    def test_a_negative_total_is_refused_with_a_reason(self, unlocked_client, monkeypatch):
+        class _Tracker:
+            def __init__(self, professor=None, **kw):
+                pass
+
+            def record_cost_adjustment(self, stated_total, month=None, note=""):
+                raise ValueError("A month's total cannot be negative (got -5.0).")
+
+        app_module = sys.modules["_pu_webui_app"]
+        monkeypatch.setattr(app_module, "TokenTracker", _Tracker)
+
+        resp = unlocked_client.post("/api/usage/adjust", json={
+            "professor": "heller", "stated_total": -5.0,
+        })
+        assert resp.status_code == 400
+        assert "negative" in resp.json()["detail"]
+
+
+class TestACutOffStreamEndToEnd:
+    """The whole path, from a stream that stops early to what is saved."""
+
+    def test_a_reply_that_stops_early_is_saved_as_incomplete_and_unpriced(
+        self, unlocked_client, monkeypatch, tmp_path
+    ):
+        """No usage chunk and no finish_reason — which is what a dropped
+        connection looks like from this end."""
+        create = unlocked_client.post("/api/conversations",
+                                      json={"professor": "heller", "model": "gpt-4o"})
+        conv_id = create.json()["id"]
+
+        noted = {}
+
+        class _FakeTracker:
+            def record_usage(self, **kw):
+                raise AssertionError("an unpriced call was recorded as if it had a price")
+
+            def record_unreported_call(self, model, note=""):
+                noted["model"] = model
+                noted["note"] = note
+
+        class _FakeChat:
+            token_tracker = _FakeTracker()
+
+            def stream_message(self, messages, system_prompt=None):
+                # Exactly what the real service yields for a stream that
+                # stopped before the provider said it had finished.
+                yield {"type": "delta", "text": "Half a sen"}
+                self.token_tracker.record_unreported_call(
+                    "gpt-4o", note="the reply was cut off before the provider said it had finished")
+                yield {
+                    "type": "done", "content": "Half a sen", "model": "gpt-4o",
+                    "prompt_tokens": None, "completion_tokens": None, "cost": None,
+                    "incomplete": True, "finish_reason": None,
+                }
+
+            def generate_title(self, messages):
+                return None
+
+        class _FakeSandbox:
+            def __init__(self, *a, **kw):
+                self.chat_service = _FakeChat()
+
+        monkeypatch.setattr("src.runtime.sandbox_processor.SandboxProcessor", _FakeSandbox)
+
+        resp = unlocked_client.post("/api/chat", json={
+            "professor": "heller", "conversation_id": conv_id,
+            "message": "Tell me something", "model": "gpt-4o",
+        })
+        assert resp.status_code == 200
+        done = [json.loads(line[6:]) for line in resp.text.splitlines()
+                if line.startswith("data: ") and '"done"' in line]
+        saved = done[-1]["conversation"]["messages"][-1]
+
+        assert saved["content"] == "Half a sen"
+        assert saved["cost"] is None
+        assert saved["incomplete"] is True
+        # And it was counted as spending nobody could measure.
+        assert noted["model"] == "gpt-4o"
+        assert "cut off" in noted["note"]
