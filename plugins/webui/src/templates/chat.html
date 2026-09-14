@@ -983,12 +983,11 @@
     </div>
     <h2>This month</h2>
     <div class="spend-figure" id="spend-month">$0.00</div>
-    <!-- Only where a month has been corrected: the measured figure and the
-         amount put back, so the total above is never mistaken for a measured
-         one. -->
+    <!-- Only where the bill and the measurements have been reconciled: both
+         figures, so the total above is never mistaken for a measured one. -->
     <div class="spend-label" id="spend-adjusted" hidden></div>
     <div class="spend-label" id="spend-budget"></div>
-    <button type="button" class="spend-link" id="spend-adjust-btn">Correct this total…</button>
+    <button type="button" class="spend-link" id="spend-adjust-btn">Compare with the bill…</button>
     <h2>All time</h2>
     <div class="spend-figure" id="spend-alltime">$0.00</div>
     <h2>By model (this month)</h2>
@@ -1060,7 +1059,7 @@
     <div class="modal-panel compact">
       <div class="modal-header">
         <h2 style="margin:0; text-transform:none; font-size:var(--text-lg); letter-spacing:normal;">
-          Correct this month&rsquo;s total
+          This month&rsquo;s billed total
         </h2>
         <button type="button" class="icon-btn" id="adjust-modal-close" title="Close" aria-label="Close">
           {{ icons.plus("icon-as-cross") }}
@@ -1073,16 +1072,17 @@
           the figure below is lower than the real one.
         </p>
         <p class="spend-label" style="margin-top:0;">
-          Ask OIT for this month&rsquo;s actual total and enter it here. The sandbox works
-          out the difference and records it as a correction; what it measured is kept
-          as it was and still shown separately.
+          The sandbox adds up what it can see. If the bill says something different —
+          ask OIT for the figure — enter it here and the difference is recorded
+          alongside. If the two agree, nothing is recorded. Either way what the
+          sandbox measured is kept as it is and still shown separately.
         </p>
         <div class="job-field">
           <label for="adjust-measured">What the sandbox measured</label>
           <input type="text" id="adjust-measured" readonly>
         </div>
         <div class="job-field">
-          <label for="adjust-total">What the month really cost (dollars)</label>
+          <label for="adjust-total">What the bill says (dollars)</label>
           <input type="text" id="adjust-total" inputmode="decimal" placeholder="48.15" autocomplete="off">
         </div>
         <div class="job-field">
@@ -1094,7 +1094,7 @@
       </div>
       <div class="modal-footer">
         <button type="button" class="secondary" id="adjust-cancel">Cancel</button>
-        <button type="button" id="adjust-save">Record the correction</button>
+        <button type="button" id="adjust-save">Record this total</button>
       </div>
     </div>
   </div>
@@ -3128,8 +3128,8 @@ async function loadUsage() {
   }
 
   // What the month cost but nothing could count, and what has been put back.
-  // Both are kept beside the total rather than folded into it: a corrected
-  // month should never read as a measured one.
+  // Both are kept beside the total rather than folded into it: a month
+  // reconciled against a bill should never read as a measured one.
   state.usageMonth = {
     measured: data.month.measured_cost != null ? data.month.measured_cost : data.month.total_cost,
     total: data.month.total_cost,
@@ -3142,7 +3142,7 @@ async function loadUsage() {
     adjusted.textContent =
       `${fmtMoney(state.usageMonth.measured)} measured, `
       + `${state.usageMonth.adjustment >= 0 ? "+" : "−"}`
-      + `${fmtMoney(Math.abs(state.usageMonth.adjustment)).slice(1)} corrected`;
+      + `${fmtMoney(Math.abs(state.usageMonth.adjustment)).slice(1)} from the bill`;
   }
   const uncounted = document.getElementById("spend-uncounted");
   uncounted.hidden = state.usageMonth.unreported === 0;
@@ -3151,8 +3151,8 @@ async function loadUsage() {
     document.getElementById("spend-uncounted-text").textContent =
       `${n} ${n === 1 ? "reply" : "replies"} this month could not be priced — the AI `
       + "service did not report what they used. Those tokens were still spent and "
-      + "still billed, so this month's figure is lower than the real one. Ask OIT "
-      + "for the actual total.";
+      + "still billed, so this month's figure is lower than the billed one by "
+      + "however much they came to. Ask OIT for the figure on the bill.";
   }
 
   const byModel = document.getElementById("spend-by-model");
@@ -3637,12 +3637,12 @@ function previewAdjustment() {
   if (!isFinite(typed)) { preview.textContent = ""; return; }
   const delta = typed - month.total;
   if (Math.abs(delta) < 0.005) {
-    preview.textContent = "That is already what the month shows — nothing would change.";
+    preview.textContent = "That matches what the sandbox measured — nothing to record.";
     return;
   }
   preview.textContent =
-    `${delta > 0 ? "Adds" : "Takes off"} ${fmtMoney(Math.abs(delta))}, `
-    + `bringing the month to ${fmtMoney(typed)}.`;
+    `That is ${fmtMoney(Math.abs(delta))} ${delta > 0 ? "more than" : "less than"} `
+    + `the sandbox measured. Recording it puts the month at ${fmtMoney(typed)}.`;
 }
 
 async function saveAdjustment() {
@@ -3670,7 +3670,7 @@ async function saveAdjustment() {
       }),
     });
   } catch (e) {
-    error.textContent = e.message || "The correction could not be recorded.";
+    error.textContent = e.message || "That total could not be recorded.";
     error.hidden = false;
     button.disabled = false;
     return;

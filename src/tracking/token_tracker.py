@@ -1397,8 +1397,8 @@ class TokenTracker:
         self._save_corrections(corrections)
         logging.warning(
             "A call to '%s' reported no usage, so it could not be priced. It is "
-            "noted as uncounted; the month's total is lower than the real bill "
-            "until it is adjusted.", model,
+            "noted as uncounted; the month's total is lower than the bill by "
+            "whatever it cost until that figure is recorded.", model,
         )
 
     def unreported_call_count(self, month: str | None = None) -> int:
@@ -1415,28 +1415,29 @@ class TokenTracker:
     def record_cost_adjustment(
         self, stated_total: float, month: str | None = None, note: str = "",
     ) -> dict[str, Any]:
-        """Bring a month into line with what was actually billed.
+        """Record what a month's bill says, and any difference from the measurements.
 
-        Takes the real total for the month — the figure on the bill, which for
-        Princeton means asking OIT — and works out what has to be added to what
-        the sandbox measured to arrive at it. The difference is what gets
-        stored, so the measurements stay exactly as they were recorded and the
-        correction stands beside them as its own, visible thing.
+        Takes the figure on the bill — which for Princeton means asking OIT —
+        and works out how it differs from what the sandbox measured. The
+        difference is what gets stored, so the measurements stay exactly as
+        they were recorded and anything added stands beside them as its own,
+        visible thing. Where the two agree the difference is zero and the month
+        is unchanged.
 
-        Adjusting twice does the right thing: the second adjustment is measured
-        against the total including the first, so entering the same figure again
+        Recording twice does the right thing: the second is measured against
+        the total including the first, so entering the same figure again
         changes nothing.
 
         Args:
-            stated_total: What the month really cost, in dollars.
-            month: The month being corrected, in ``YYYY-MM`` form. Defaults to
-                   this one.
+            stated_total: The figure on the bill for that month, in dollars.
+            month: Which month the figure is for, in ``YYYY-MM`` form. Defaults
+                   to this one.
             note: Anything worth keeping about where the figure came from.
 
         Returns:
             The entry as it was stored, including ``'amount'`` — the difference
-            that was applied, which is negative if the sandbox had recorded too
-            much.
+            that was applied. Zero where the two figures agreed, and negative
+            where the sandbox had recorded more than the bill.
 
         Raises:
             ValueError: If *stated_total* is negative. A month cannot have cost
@@ -1465,14 +1466,15 @@ class TokenTracker:
         return entry
 
     def get_cost_adjustment(self, month: str | None = None) -> float:
-        """How much has been added to a month by hand, in dollars.
+        """How much a month's recorded figures differ from its bill, in dollars.
 
         Args:
             month: The month in ``YYYY-MM`` form. Defaults to this one.
 
         Returns:
-            The sum of every adjustment against that month. Zero where none
-            were made, which is the ordinary case.
+            The sum of every difference recorded against that month. Zero where
+            none were — either because no bill has been entered, or because it
+            agreed with the measurements.
         """
         return sum(
             float(a.get("amount") or 0.0)
@@ -1480,7 +1482,7 @@ class TokenTracker:
         )
 
     def list_cost_adjustments(self, month: str | None = None) -> list[dict[str, Any]]:
-        """Every adjustment made against a month, oldest first."""
+        """Every billed figure recorded against a month, oldest first."""
         return list(self._month_corrections(month)["adjustments"])
 
     def get_monthly_budget_status(self, month: str | None = None) -> dict[str, Any]:
@@ -1506,8 +1508,9 @@ class TokenTracker:
               what was measured, plus anything put back by hand. The
               measured figure on its own is kept alongside as
               ``measured_cost``.
-            * ``cost_adjustment`` — dollars added by hand, zero in the
-              ordinary case.
+            * ``cost_adjustment`` — how far the month's bill was found to
+              differ from the measurements, zero where no bill has been
+              entered or where the two agreed.
             * ``unreported_calls`` — how many of the month's calls the
               provider never priced, so a report can say what it could not
               count.
@@ -1562,8 +1565,8 @@ class TokenTracker:
         print(f"⚠️  {unreported} {calls} this month {were} not priced, because the AI "
               "service did not")
         print("    report what they used. The tokens were still spent and still billed,")
-        print("    so the figures above are lower than the real ones.")
-        print("\n    Ask OIT for this month's actual total, then record it:")
+        print("    so the figures above are lower than the bill by whatever they cost.")
+        print("\n    Ask OIT for the figure on this month's bill, then record it:")
         print(f"      python main.py {self.professor} usage adjust <total> {month}")
 
     def _print_endpoint_reports(self, endpoint_usage: dict[str, Any], when: str) -> None:
@@ -1691,7 +1694,7 @@ class TokenTracker:
             # Shown as two figures and a sum, so a corrected month can never be
             # mistaken for a measured one.
             print(f"Measured:      ${budget_status['monthly_usage']['measured_cost']:.4f}")
-            print(f"Adjusted by:   ${adjustment:+.2f}")
+            print(f"From the bill: ${adjustment:+.2f}")
         print(f"Used:          ${budget_status['monthly_usage']['total_cost']:.4f} "
               f"({budget_status['usage_percentage']:.1f}%)")
         print(f"Remaining:     ${budget_status['remaining_budget']:.2f}")

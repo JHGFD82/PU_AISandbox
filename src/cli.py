@@ -173,14 +173,15 @@ def _build_usage_subparser(subparsers: argparse._SubParsersAction) -> None:
     # usage adjust <total> [YYYY-MM]
     adjust_parser = usage_subparsers.add_parser(
         'adjust',
-        help="Correct a month's total to match the bill (e.g. after asking OIT)",
+        help="Record what a month's bill says, and any difference from the measurements",
         description=(
-            "Bring a month into line with what was actually billed. Give the real "
-            "total for the month and the sandbox works out the difference, storing "
-            "it as an adjustment beside the figures it measured rather than "
-            "changing them. Use this when calls went unpriced — the report says so "
-            "when they did — since the tokens were spent whether or not the "
-            "provider reported them."
+            "The sandbox adds up what it can see. Give it the figure on the bill — "
+            "at Princeton, the one OIT holds — and it compares the two: where they "
+            "differ the difference is stored beside the measurements rather than "
+            "changing them, and where they agree nothing is recorded. Worth doing "
+            "when calls went unpriced, which the report says when it happened, "
+            "since those tokens were spent whether or not the provider reported "
+            "them."
         ),
     )
     _add_debug_flags(adjust_parser)
@@ -188,7 +189,7 @@ def _build_usage_subparser(subparsers: argparse._SubParsersAction) -> None:
         'total',
         type=float,
         metavar='TOTAL',
-        help="What the month really cost, in dollars (e.g. 48.15).",
+        help="The figure on the bill for that month, in dollars (e.g. 48.15).",
     )
     adjust_parser.add_argument(
         'month',
@@ -196,7 +197,7 @@ def _build_usage_subparser(subparsers: argparse._SubParsersAction) -> None:
         nargs='?',
         default=None,
         metavar='YYYY-MM',
-        help='Month to correct (e.g. 2026-09). Omit for the current month.',
+        help='Which month the figure is for (e.g. 2026-09). Omit for the current month.',
     )
     adjust_parser.add_argument(
         '--note',

@@ -286,20 +286,22 @@ def _adjust_monthly_total(
     token_tracker: "TokenTracker", professor: str, stated_total: float,
     month: str | None, note: str,
 ) -> None:
-    """Correct one month's total to match what was really billed, and say what changed.
+    """Record what a month's bill says, and any difference from the measurements.
 
-    The sandbox can only price a call the provider reported. Where one went
-    unreported the tokens were still spent, so the month reads low — this is
-    how the real figure gets in. What was measured is left exactly as it was
-    recorded; the difference is stored beside it and shown separately, so
-    nobody later mistakes a corrected month for a measured one.
+    The sandbox can only price a call the provider reported, so where one went
+    unreported the month reads lower than the bill by however much that call
+    came to. This is how the billed figure gets in. What was measured is left
+    exactly as recorded; any difference is stored beside it and shown
+    separately, so a reconciled month is never mistaken for a measured one.
+    Where the two figures agree, nothing is recorded.
 
     Args:
         token_tracker: The tracker for this person's records.
         professor: Their netID, for the messages printed here.
-        stated_total: What the month really cost, in dollars.
-        month: The month to correct as ``YYYY-MM``, or ``None`` for this one.
-        note: Where the figure came from, kept with the adjustment.
+        stated_total: The figure on the bill for that month, in dollars.
+        month: Which month the figure is for, as ``YYYY-MM``, or ``None`` for
+               this one.
+        note: Where the figure came from, kept with the entry.
 
     Raises:
         CLIError: If the total is not a figure a month could have cost.
@@ -314,12 +316,12 @@ def _adjust_monthly_total(
     print(f"\n{which} for {professor}:")
     print(f"  Measured by the sandbox:  ${entry['measured_total']:.2f}")
     if entry["previous_adjustment"]:
-        print(f"  Adjusted earlier by:      ${entry['previous_adjustment']:+.2f}")
-    print(f"  You said it really cost:  ${entry['stated_total']:.2f}")
+        print(f"  Recorded earlier:         ${entry['previous_adjustment']:+.2f}")
+    print(f"  The bill says:            ${entry['stated_total']:.2f}")
     if amount == 0:
-        print("\n  Nothing to change — that is already what the month shows.")
+        print("\n  The two agree — nothing recorded.")
         return
-    print(f"  Adjustment recorded:      ${amount:+.2f}")
+    print(f"  Difference recorded:      ${amount:+.2f}")
     print(f"\nThe month now reports ${entry['stated_total']:.2f}. What the sandbox "
           "measured is unchanged and still shown separately.")
 

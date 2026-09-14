@@ -6860,8 +6860,23 @@ class TestAReplyNobodyCouldPrice:
     def test_the_box_asks_for_the_total_not_the_difference(self):
         """The total is the number on the bill; the difference is arithmetic."""
         chat = self._chat()
-        assert "What the month really cost" in chat
+        assert "What the bill says" in chat
         assert "function previewAdjustment(" in chat
+
+    def test_nothing_assumes_the_figure_is_wrong_before_it_is_compared(self):
+        """The sandbox has no way of knowing whether a month disagrees with
+        the bill until someone says what the bill reads. Language that calls
+        it a correction in advance answers that question for them."""
+        chat = self._chat()
+        control = chat.split('id="spend-adjust-btn"')[1].split("</button>")[0]
+        assert "Correct" not in control, control
+        # The one place it may say so is where a reply genuinely went
+        # unpriced, and that is shown only on that condition.
+        opening = chat.split('id="adjust-why"')[1].split("</p>")[0]
+        assert "could not be priced" in opening
+        assert 'document.getElementById("adjust-why").hidden = !(month.unreported > 0)' in chat
+        # And agreement is a stated outcome, not a silent one.
+        assert "nothing to record" in chat
 
     def test_a_corrected_month_still_shows_what_was_measured(self):
         chat = self._chat()
