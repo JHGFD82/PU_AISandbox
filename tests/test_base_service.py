@@ -222,6 +222,41 @@ class TestRecordResponseUsage:
             svc._record_response_usage(resp, "gpt-4o", critical=True)
         assert "CRITICAL" in caplog.text
 
+    def test_an_unpriced_reply_is_counted_against_the_month(self, monkeypatch):
+        """The tokens were spent and billed; only the sandbox's record is missing."""
+        svc = _make_svc(monkeypatch)
+        svc._record_response_usage(_Response(with_usage=False), "gpt-4o")
+        svc.token_tracker.record_unreported_call.assert_called_once()
+        assert svc.token_tracker.record_unreported_call.call_args.args[0] == "gpt-4o"
+
+    def test_the_model_that_answered_is_the_one_recorded(self, monkeypatch):
+        svc = _make_svc(monkeypatch)
+        svc._record_response_usage(_Response(with_usage=False, model="gpt-4o-2024-08-06"), "gpt-4o")
+        assert (svc.token_tracker.record_unreported_call.call_args.args[0]
+                == "gpt-4o-2024-08-06")
+
+    def test_a_priced_reply_is_not_counted_as_unpriced(self, monkeypatch):
+        svc = _make_svc(monkeypatch)
+        svc._record_response_usage(_Response(with_usage=True), "gpt-4o")
+        svc.token_tracker.record_unreported_call.assert_not_called()
+
+    def test_counted_whether_or_not_the_caller_called_it_critical(self, monkeypatch):
+        """Whether losing the figure is serious changes the log, not the arithmetic."""
+        svc = _make_svc(monkeypatch)
+        svc._record_response_usage(_Response(with_usage=False), "gpt-4o", critical=True)
+        svc.token_tracker.record_unreported_call.assert_called_once()
+
+    def test_an_alternate_endpoint_is_not_counted(self, monkeypatch):
+        """Those carry no cost by design, so nothing about them is uncounted.
+
+        Counting one would tell a professor their university bill is understated
+        when it is not, and send them to OIT about a call OIT never saw.
+        """
+        svc = _make_svc(monkeypatch)
+        svc.endpoint_name = "my_cluster"
+        svc._record_response_usage(_Response(with_usage=False), "llama-3-70b")
+        svc.token_tracker.record_unreported_call.assert_not_called()
+
     def test_parallel_mode_logs_at_debug(self, monkeypatch, caplog):
         svc = _make_svc(monkeypatch)
         svc._suppress_inline_print = True
@@ -681,3 +716,41 @@ class TestARequestEventuallyGivesUp:
         monkeypatch.setattr(bs, "Portkey", FakePortkey)
         bs.BaseService(api_key="test-key", professor="jh43")
         assert "request_timeout" in seen and "http_client" in seen
+
+
+class TestAnUnpricedCallReachesTheReport:
+    """End to end with a real tracker, not a stand-in.
+
+    The unit tests above check the call is made. This checks it arrives
+    somewhere a professor will see it — which is the whole point of counting.
+    """
+
+    @pytest.fixture
+    def svc_with_a_real_tracker(self, monkeypatch, tmp_path):
+        import src.tracking.token_tracker as tt
+
+        monkeypatch.setattr(tt, "data_root", lambda: tmp_path)
+        svc = _make_svc(monkeypatch)
+        svc.token_tracker = tt.TokenTracker(professor="demo", monthly_limit=250.0)
+        return svc
+
+    def test_it_shows_in_the_month_s_budget_status(self, svc_with_a_real_tracker):
+        svc = svc_with_a_real_tracker
+        for _ in range(3):
+            svc._record_response_usage(_Response(with_usage=False), "gpt-4o")
+
+        status = svc.token_tracker.get_monthly_budget_status()
+        assert status["unreported_calls"] == 3
+        # Counting one must not invent a cost for it — what it cost is exactly
+        # what is not known.
+        assert status["monthly_usage"]["total_cost"] == 0
+
+    def test_the_report_says_what_it_could_not_count(self, svc_with_a_real_tracker, capsys):
+        svc = svc_with_a_real_tracker
+        svc._record_response_usage(_Response(with_usage=False), "gpt-4o")
+
+        svc.token_tracker.print_usage_report()
+        out = capsys.readouterr().out
+        assert "Uncounted Spending" in out
+        assert "1 call this month was not priced" in out
+        assert "usage adjust" in out
