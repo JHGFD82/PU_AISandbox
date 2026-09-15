@@ -449,9 +449,135 @@ def _run_job(
     conversation_store: "ConversationStore",
     job_store: JobStore,
 ) -> None:
-    """The background thread's body: run the plugin action and record what happened.
+    """The background thread's body: run the job, and let go of the conversation whatever happens.
+
+    A conversation is held while a job runs in it, so that ordinary chat cannot
+    arrive in the middle of one. Letting go of it is therefore not tidying up —
+    it is the thing that gives the composer back. The work below records what
+    happened and lets go as part of saying so; this makes sure that a failure
+    while *recording* cannot be what leaves it held.
 
     Not called directly outside this module — see ``start_job()``.
+    """
+    try:
+        _carry_out_job(plugin, job, fields, professor, model, conversation_store, job_store)
+    except Exception:
+        # A plugin that fails is ordinary and is recorded below as a result of
+        # its own. Getting here means something in the recording itself broke,
+        # which nothing further along can report — this thread has no caller to
+        # raise to, so an error let go of here would reach nobody but the
+        # server's stderr, as a bare traceback with no job named in it.
+        logger.error(
+            "Job %s (%s) stopped without recording what happened.",
+            job.id, job.action_id, exc_info=True,
+        )
+    finally:
+        _release_conversation(job, conversation_store, job_store)
+
+
+def _release_conversation(
+    job: Job, conversation_store: "ConversationStore", job_store: JobStore,
+) -> None:
+    """Give the composer back, if the job that was holding it has stopped without doing so.
+
+    Does nothing in the ordinary case, where the work has already let go as
+    part of recording its result. It is there for the cases that had no answer
+    at all:
+
+    * the conversation could not be read or written while recording a failure —
+      the one path with no guard of its own, so the error escaped the thread and
+      took the whole job down with the conversation still held;
+    * both attempts to record a *successful* result failed, which the code doing
+      it could only note in the log before giving up;
+    * anything at all went wrong before the plugin was even reached, such as the
+      job's output folder failing to be made.
+
+    Until now each of those left the composer held with nothing running behind
+    it, and nothing said why. Only restarting the server cleared it (see
+    ``sweep_stale_jobs()``), which then explained it as an interrupted job — a
+    restart that never happened.
+
+    Args:
+        job: The job that has stopped.
+        conversation_store: The store for the professor it ran under.
+        job_store: Where the job's outcome is recorded, so a job that stopped
+                   without saying how is not left reading as still running.
+    """
+    try:
+        conv = conversation_store.load(job.conversation_id)
+        # Only this job's own hold is released. A conversation that has been
+        # deleted, already let go, or taken up by a later job is none of this
+        # job's business — releasing that last one would unlock a composer with
+        # a job genuinely running behind it.
+        if conv is None or conv.active_job_id != job.id:
+            return
+
+        logger.error(
+            "Job %s (%s) stopped without releasing its conversation; releasing it now.",
+            job.id, job.action_id,
+        )
+        tracked = job_store.get(job.id)
+        if tracked is not None and tracked.status == "running":
+            job_store.set_status(job.id, "error", error="stopped without recording an outcome")
+
+        try:
+            conv.messages.append(conversation.Message(
+                role="assistant",
+                content=(
+                    f"The {job.action_id} job stopped without being able to record what "
+                    "happened, so there is nothing to show for it here. Whoever looks "
+                    "after this installation can find the reason in the server's log. "
+                    "Anything it did manage to write is still on the server."
+                ),
+                timestamp=datetime.now().isoformat(),
+                kind="job_error",
+                job_id=job.id,
+            ))
+            conv.active_job_id = None
+            conversation_store.save(conv)
+            return
+        except Exception:
+            logger.error(
+                "Job %s (%s): could not write the note saying it stopped; releasing "
+                "the conversation on its own instead.",
+                job.id, job.action_id, exc_info=True,
+            )
+
+        # Saying why is worth having, but giving the composer back is the point,
+        # and the note is the part most likely to be what prevented it — a value
+        # that will not write out, a conversation grown too large to save with
+        # one more message on it. So the smaller thing is tried on its own,
+        # reading the conversation again rather than reusing the copy whose
+        # saving just failed.
+        conv = conversation_store.load(job.conversation_id)
+        if conv is None or conv.active_job_id != job.id:
+            return
+        conv.active_job_id = None
+        conversation_store.save(conv)
+    except Exception:
+        # The last thing standing between a professor and a composer that never
+        # unlocks. There is nothing further to try, so say so as loudly as
+        # possible rather than raising into a thread nobody is watching.
+        logger.error(
+            "Job %s (%s): could not release its conversation. That conversation's "
+            "composer will stay locked until the web interface is restarted.",
+            job.id, job.action_id, exc_info=True,
+        )
+
+
+def _carry_out_job(
+    plugin: Any,
+    job: Job,
+    fields: dict,
+    professor: str,
+    model: Optional[str],
+    conversation_store: "ConversationStore",
+    job_store: JobStore,
+) -> None:
+    """Run the plugin action and record what happened.
+
+    Always called through ``_run_job()``, which makes sure the conversation is
+    let go of even when this cannot manage it itself.
     """
 
     # UiAction.progress_verb is a plain string a plugin sets itself (e.g.

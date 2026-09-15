@@ -970,3 +970,229 @@ class TestAJobsOutputFollowsItsConversation:
         monkeypatch.setattr("src.paths.data_root", lambda: tmp_path / "data")
         out = jobs.job_output_dir("smith", "job_1")
         assert out == tmp_path / "data" / "conversations" / "smith" / "_job_outputs" / "job_1"
+
+
+class TestAConversationIsNeverLeftLocked:
+    """Holding a conversation is what stops chat arriving mid-job; letting go is
+    what gives the composer back.
+
+    Every path below used to end with the conversation still held and nothing
+    running behind it. Only restarting the web server cleared that (see
+    ``sweep_stale_jobs()``), and the restart then explained it to the professor
+    as an interrupted job — a restart that had not happened at the time.
+    """
+
+    def _start_and_wait(self, tmp_path, store, conv, fake_run, job_store=None):
+        job_store = job_store or jobs.JobStore()
+        p = _FakePlugin(run_ui_action=fake_run)
+        job = jobs.start_job(
+            plugins={"translate": p}, action_id="translate", fields={},
+            professor="heller", model=None, conversation_id=conv.id,
+            conversation_store=store, job_store=job_store,
+        )
+        _wait_until(lambda: job_store.get(job.id).status != "running", timeout=5.0)
+        return job, job_store
+
+    def test_when_recording_a_failure_itself_fails(self, tmp_path):
+        """The failure path had no guard of its own, unlike the success path.
+
+        A job that failed, and then could not write that down, took the whole
+        background thread with it and left the conversation held.
+        """
+        store = _make_store(tmp_path)
+        conv = store.create(model="gpt-4o")
+
+        real_save = store.save
+
+        def save_but_not_the_error(c):
+            if any(m.kind == "job_error" for m in c.messages):
+                raise OSError("simulated disk error while saving the error")
+            real_save(c)
+
+        store.save = save_but_not_the_error
+
+        def fake_run(fields, professor, model, on_progress, output_dir):
+            raise RuntimeError("the translation failed")
+
+        job, job_store = self._start_and_wait(tmp_path, store, conv, fake_run)
+
+        store.save = real_save
+        assert store.load(conv.id).active_job_id is None
+        assert job_store.get(job.id).status == "error"
+
+    def test_when_the_conversation_cannot_be_read_at_the_first_attempt(self, tmp_path):
+        """A momentary read error while recording a failure.
+
+        Transient on purpose. A disk that never reads again cannot be recovered
+        from by anything here — that case is
+        ``test_a_disk_that_never_comes_back_is_reported_not_raised`` below.
+        """
+        store = _make_store(tmp_path)
+        conv = store.create(model="gpt-4o")
+
+        real_load = store.load
+        # Armed only once the job is under way: start_job() reads the
+        # conversation on the calling thread before the job exists, and a
+        # failure there is a different story with a different answer.
+        state = {"armed": False, "failures_left": 1}
+
+        def load_or_not(cid):
+            if state["armed"] and state["failures_left"]:
+                state["failures_left"] -= 1
+                raise OSError("simulated momentary disk error while reading")
+            return real_load(cid)
+
+        store.load = load_or_not
+
+        def fake_run(fields, professor, model, on_progress, output_dir):
+            state["armed"] = True
+            raise RuntimeError("the translation failed")
+
+        job, job_store = self._start_and_wait(tmp_path, store, conv, fake_run)
+
+        store.load = real_load
+        assert store.load(conv.id).active_job_id is None
+
+    def test_a_disk_that_never_comes_back_is_reported_not_raised(self, tmp_path, caplog):
+        """Nothing here can rescue a conversation that can never be written.
+
+        What it must still do is say so plainly and let the thread end quietly,
+        rather than raising where nobody is watching. The composer stays locked
+        until the server restarts, and the log is what explains why.
+        """
+        import logging as _logging
+
+        store = _make_store(tmp_path)
+        conv = store.create(model="gpt-4o")
+
+        real_save = store.save
+        dead = {"on": False}
+
+        def save_or_not(c):
+            if dead["on"]:
+                raise OSError("simulated disk that never comes back")
+            real_save(c)
+
+        store.save = save_or_not
+
+        def fake_run(fields, professor, model, on_progress, output_dir):
+            dead["on"] = True
+            raise RuntimeError("the translation failed")
+
+        with caplog.at_level(_logging.ERROR):
+            job, job_store = self._start_and_wait(tmp_path, store, conv, fake_run)
+
+        store.save = real_save
+        assert "could not release its conversation" in caplog.text
+        assert "stay locked until the web interface is restarted" in caplog.text
+
+    def test_when_recording_a_success_fails_twice_over(self, tmp_path):
+        """The success path already retried once and then gave up, still holding.
+
+        Its own comment said so: "the conversation stays locked, but this is now
+        loud in the logs at least." It no longer has to be.
+        """
+        store = _make_store(tmp_path)
+        conv = store.create(model="gpt-4o")
+
+        real_save = store.save
+
+        def never_save_an_outcome(c):
+            if any(m.kind in ("job_result", "job_error") for m in c.messages):
+                raise OSError("simulated disk error while saving")
+            real_save(c)
+
+        store.save = never_save_an_outcome
+
+        def fake_run(fields, professor, model, on_progress, output_dir):
+            from src.runtime.ui_action import UiJobResult
+            return UiJobResult(output_path=None, output_filename=None, summary="Done.")
+
+        job, job_store = self._start_and_wait(tmp_path, store, conv, fake_run)
+
+        store.save = real_save
+        assert store.load(conv.id).active_job_id is None
+        assert job_store.get(job.id).status == "error"
+
+    def test_when_nothing_gets_as_far_as_the_plugin(self, tmp_path, monkeypatch):
+        """Making the job's output folder is done before any of the guarding.
+
+        A folder that cannot be made — no permission, a full disk — left the
+        conversation held before the plugin was ever reached.
+        """
+        store = _make_store(tmp_path)
+        conv = store.create(model="gpt-4o")
+
+        def no_folder(*args, **kwargs):
+            raise OSError("simulated: could not make the output folder")
+
+        monkeypatch.setattr(jobs, "job_output_dir", no_folder)
+
+        def fake_run(fields, professor, model, on_progress, output_dir):
+            raise AssertionError("the plugin should never have been reached")
+
+        job, job_store = self._start_and_wait(tmp_path, store, conv, fake_run)
+
+        assert store.load(conv.id).active_job_id is None
+        assert job_store.get(job.id).status == "error"
+
+    def test_a_professor_is_told_rather_than_left_guessing(self, tmp_path):
+        """An unlocked composer with no explanation is its own small mystery."""
+        store = _make_store(tmp_path)
+        conv = store.create(model="gpt-4o")
+
+        real_save = store.save
+        attempts = {"n": 0}
+
+        def fail_the_first_error_save(c):
+            if any(m.kind == "job_error" for m in c.messages):
+                attempts["n"] += 1
+                if attempts["n"] == 1:
+                    raise OSError("simulated momentary disk error")
+            real_save(c)
+
+        store.save = fail_the_first_error_save
+
+        def fake_run(fields, professor, model, on_progress, output_dir):
+            raise RuntimeError("the translation failed")
+
+        self._start_and_wait(tmp_path, store, conv, fake_run)
+
+        store.save = real_save
+        reloaded = store.load(conv.id)
+        assert reloaded.active_job_id is None
+        errors = [m for m in reloaded.messages if m.kind == "job_error"]
+        assert errors, "the professor should be told the job stopped"
+        assert "stopped without being able to record" in errors[-1].content
+
+    def test_an_ordinary_job_is_released_once_and_says_so_once(self, tmp_path):
+        """The guard must stay out of the way when nothing has gone wrong."""
+        store = _make_store(tmp_path)
+        conv = store.create(model="gpt-4o")
+
+        def fake_run(fields, professor, model, on_progress, output_dir):
+            from src.runtime.ui_action import UiJobResult
+            return UiJobResult(output_path=None, output_filename=None, summary="Done.")
+
+        job, job_store = self._start_and_wait(tmp_path, store, conv, fake_run)
+
+        reloaded = store.load(conv.id)
+        assert reloaded.active_job_id is None
+        assert job_store.get(job.id).status == "done"
+        assert len([m for m in reloaded.messages if m.kind == "job_result"]) == 1
+        assert not [m for m in reloaded.messages if m.kind == "job_error"]
+
+    def test_a_later_job_s_hold_is_left_alone(self, tmp_path):
+        """Releasing whatever hold happens to be there would unlock a live job."""
+        store = _make_store(tmp_path)
+        conv = store.create(model="gpt-4o")
+        conv.active_job_id = "job_the_one_running_now"
+        store.save(conv)
+
+        finished = jobs.Job(
+            id="job_an_older_one", professor="heller",
+            conversation_id=conv.id, action_id="translate",
+        )
+        jobs._release_conversation(finished, store, jobs.JobStore())
+
+        assert store.load(conv.id).active_job_id == "job_the_one_running_now"
