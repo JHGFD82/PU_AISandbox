@@ -649,6 +649,28 @@ class BaseService:
             logging.error("CRITICAL: No token usage in response. Token tracking failed!")
         else:
             logging.warning("No token usage information available in response.")
+
+        # The provider read the question and wrote the answer, and bills for
+        # both. The only thing missing is this sandbox's record of it, so the
+        # call is noted as uncounted rather than passed over — that is what lets
+        # a month say how much of itself it could not measure, instead of
+        # quietly reporting too little.
+        #
+        # This is the one place every service finds out that a reply came back
+        # unpriced, which is why it belongs here. Noting it in one service and
+        # not the others is how translating a three-hundred-page book could go
+        # entirely uncounted while a single chat turn was reported faithfully.
+        #
+        # Not for an alternate endpoint, though. Those are recorded with tokens
+        # and no money on purpose — see ``TokenTracker._costs_for()`` — because
+        # the sandbox has no idea what somebody's own cluster charges. Counting
+        # one here would tell a professor their university bill is understated
+        # when it is not, and send them to OIT to ask about a call OIT never saw.
+        if not self.endpoint_name:
+            self.token_tracker.record_unreported_call(
+                response.model or model,
+                note="the provider reported no usage for this call",
+            )
         return None
 
     def _run_with_retry(
