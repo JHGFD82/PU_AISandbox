@@ -68,7 +68,7 @@ from src.models import (
     models_in_reading_order,
     resolve_model,
 )
-from src.runtime.info_commands import list_optional_settings
+from src.runtime.info_commands import list_optional_settings, setting_is_set
 from src.services.api_config import credential_path_for_endpoint
 from src.settings import (
     CHAT_ROLE,
@@ -311,8 +311,8 @@ class TestModelBody(BaseModel):
 # generic one.
 def _directly_editable_paths() -> set[str]:
     return {
-        path for path, _label, _section, _secret in list_optional_settings()
-        if path != "webui.passphrase_hash"
+        field.key for field in list_optional_settings()
+        if field.key != "webui.passphrase_hash"
     }
 
 
@@ -442,9 +442,13 @@ def _settings_snapshot() -> dict:
     professors = load_professor_config()
     has_professors = bool(professors)
 
+    # setting_is_set(), not settings_store.get_value(): an endpoint's credential
+    # may sit beside the rest of that endpoint's settings rather than in
+    # settings.toml, and asking only about settings.toml showed a working
+    # endpoint as having no credential at all.
     field_status = {
-        path: bool(settings_store.get_value(path))
-        for path, _label, _section, _secret in list_optional_settings()
+        field.key: setting_is_set(field.key)
+        for field in list_optional_settings()
     }
 
     endpoints = []
@@ -689,8 +693,8 @@ def create_app() -> FastAPI:
 
     # A random secret is fine for this session-cookie's purpose (signing,
     # not encrypting) — worst case on restart is everyone has to unlock
-    # again. Set webui.session_secret in settings.toml (e.g. via
-    # `python main.py env set webui.session_secret --generate`) to keep
+    # again. Set webui.session_secret in settings.toml (via
+    # `python main.py webui set-session-secret`) to keep
     # sessions alive across restarts instead.
     secret = settings_store.get_value("webui.session_secret") or secrets.token_hex(32)
     app.add_middleware(

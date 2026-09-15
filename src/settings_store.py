@@ -282,10 +282,22 @@ def add_professor(netid: str, name: str, key: str, backup_key: str | None = None
 
     existing = get_professors()
     if netid in existing:
+        # What somebody almost always wants here is to change the key, not to
+        # start again — and the web interface replaces one in place, so nothing
+        # has to be removed at all. Said before the removal, because the
+        # removal is the rarer thing and the harder one.
+        #
+        # This used to name `env remove-professor`, which has never existed
+        # under any command, so the one instruction it gave could not be
+        # followed. Nothing here removes a professor; the file does.
         raise ValueError(
             f"The netID '{netid}' is already configured, for "
-            f"{existing[netid]['name']}. Remove them first if you want to "
-            f"replace them: python main.py env remove-professor {netid}"
+            f"{existing[netid]['name']}.\n"
+            "To give them a different key, no need to remove anything — open the "
+            "web interface (python main.py webui serve) and change it on the "
+            "Settings page.\n"
+            f"To remove them entirely, delete the [professors.{netid}] section "
+            "from settings.toml."
         )
 
     doc = _load()

@@ -7,9 +7,11 @@ shared file -> ``preferences.toml``, same as every other setting).
 Each key under ``ENDPOINTS`` becomes the identifier used in colon syntax on
 the CLI (e.g. ``-m hpc_cluster:llama-3-70b``).
 
-The *credential* for each endpoint is kept separate, in ``settings.toml`` (see
-``src/settings_store.py``) at ``endpoints.<name>.key`` — credentials are
-never meant to be shared or layered the way definitions are.
+The *credential* may go in either of two places: beside the rest of that
+endpoint's settings, or on its own in ``settings.toml`` (see
+``src/settings_store.py``) at ``endpoints.<name>.key``. ``settings.toml``
+belongs to this installation alone and is never shared or layered, so a
+credential there wins over one in a file a group follows.
 
 Set ``[config] default_endpoint`` in any settings layer to route bare model
 names to a specific endpoint instead of the built-in Portkey service::
@@ -24,10 +26,14 @@ names to a specific endpoint instead of the built-in Portkey service::
     openai_compatible = true
     default_model = "llama-3-70b-instruct"
 
-Then, separately, in settings.toml (via `python main.py env set endpoints.hpc_cluster.key`):
+Then the credential. It can go beside the settings above, or on its own in
+settings.toml, which is this installation's alone and never shared:
 
     [endpoints.hpc_cluster]
     key = "sk-..."
+
+Either place works — see `endpoint_credential()` below, which is what reads it
+and what the settings page asks when it reports whether one is set.
 
 Colon syntax on the CLI::
 
@@ -53,6 +59,54 @@ def credential_path_for_endpoint(api_name: str) -> str:
     return f"endpoints.{api_name}.key"
 
 
+def endpoint_name_from_credential_path(path: str) -> str | None:
+    """Return the endpoint a credential path belongs to, or ``None`` if it is not one.
+
+    The inverse of ``credential_path_for_endpoint()``, and kept beside it so
+    that the two cannot come to disagree about the shape of the path.
+
+    Args:
+        path: A dotted settings path, which may name anything at all.
+
+    Returns:
+        The endpoint's name, or ``None`` when *path* does not name an
+        endpoint's credential.
+    """
+    parts = path.split(".")
+    if len(parts) == 3 and parts[0] == "endpoints" and parts[2] == "key":
+        return parts[1]
+    return None
+
+
+def endpoint_credential(api_name: str) -> str:
+    """Return one endpoint's credential, from whichever of the two places it was put.
+
+    An endpoint's credential may be written in ``settings.toml`` on its own, or
+    beside the rest of that endpoint's settings in ``preferences.toml`` or a
+    shared file. Both work, and the interface offers the second, so anything
+    asking whether an endpoint has a credential has to look in both — asking
+    only about ``settings.toml`` is how an endpoint that works perfectly came to
+    be shown as having no credential at all.
+
+    ``settings.toml`` is looked at first because it belongs to this installation
+    alone and is never shared or layered, so a personal credential there
+    overrides a group's without anybody having to arrange it.
+
+    Args:
+        api_name: The endpoint's name (e.g. ``'hpc_cluster'``).
+
+    Returns:
+        The credential, or an empty string if there isn't one anywhere. An
+        endpoint that isn't configured at all also answers with an empty
+        string, since it has no credential either.
+    """
+    raw: dict = settings.ENDPOINTS.get(api_name) or {}
+    return (
+        settings_store.get_value(credential_path_for_endpoint(api_name))
+        or str(raw.get("key", "") or "")
+    )
+
+
 @dataclass
 class APIConfig:
     """Configuration for a single AI API endpoint.
@@ -61,7 +115,8 @@ class APIConfig:
         api_name:           The endpoint key (e.g. ``hpc_cluster``).
         display_name:       Human-readable name shown in logs and --list-apis output.
         base_url:           The root URL for the API (e.g. ``https://example.com/v1``).
-        api_key:            Resolved API key (from ``settings.toml``).
+        api_key:            The resolved credential, from wherever it was put
+                            — see ``endpoint_credential()``.
         openai_compatible:  Whether this endpoint speaks the OpenAI API's
                             language, which nearly every self-hosted server and
                             provider does. True unless said otherwise, since it
@@ -94,11 +149,12 @@ def load_api_config(api_name: str) -> APIConfig:
     """Load and return the ``APIConfig`` for *api_name*.
 
     Combines the endpoint's definition (from the merged ``settings.*.toml``
-    layers) with its credential (from ``settings.toml``).
+    layers) with its credential (from either place it is allowed to be — see
+    ``endpoint_credential()``).
 
     Raises:
         ValueError: If the endpoint is missing from every settings layer, or
-                    if its credential isn't set in ``settings.toml``.
+                    if it has no credential in either place.
     """
     endpoints: dict = settings.ENDPOINTS
 
@@ -124,17 +180,10 @@ def load_api_config(api_name: str) -> APIConfig:
             f"Endpoint '{api_name}' is missing required field 'base_url'."
         )
 
-    # The key may be written beside the rest of the endpoint's settings, or on
-    # its own in settings.toml. Beside the rest is what somebody following the
-    # example in the interface will do, and it used to be read and thrown away:
-    # "key" was not a field this knew about, so it went into `extra` and the
-    # endpoint was reported as having no credential while one sat in the file.
-    #
-    # settings.toml is looked at first because it is this installation's own
-    # and is never shared or layered — so a personal key there overrides a
-    # group's without anybody having to arrange it.
-    credential_path = credential_path_for_endpoint(api_name)
-    api_key = settings_store.get_value(credential_path) or str(raw.get("key", "") or "")
+    # Either of the two places it may have been put — see endpoint_credential(),
+    # which is also what the settings page and `settings list` ask, so that what
+    # they report and what actually happens here cannot come apart.
+    api_key = endpoint_credential(api_name)
     if not api_key:
         raise ValueError(
             f"No API key for the endpoint '{api_name}'.\n"

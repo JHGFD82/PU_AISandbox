@@ -6,10 +6,14 @@ import logging
 from datetime import datetime
 
 from .. import settings_store
-from ..config import LANGUAGE_MAP, get_registered_settings, load_professor_config
+from ..config import (
+    LANGUAGE_MAP, SettingField, get_registered_settings, load_professor_config,
+)
 from ..errors import CLIError
 from ..models.catalog import get_pricing_unit, load_model_catalog
-from ..services.api_config import credential_path_for_endpoint, list_apis
+from ..services.api_config import (
+    credential_path_for_endpoint, endpoint_name_from_credential_path, list_apis,
+)
 from ..settings_store import (
     get_configured_sources,
     get_source_id,
@@ -19,7 +23,7 @@ from ..tracking.token_tracker import TokenTracker, get_archive_dir, get_usage_da
 logger = logging.getLogger(__name__)
 
 
-def list_optional_settings() -> list[tuple[str, str, str, bool]]:
+def list_optional_settings() -> list[SettingField]:
     """Return every optional ``settings.toml`` value this installation knows about, for display.
 
     Combines two sources: plugin-declared fields (registered via
@@ -30,21 +34,54 @@ def list_optional_settings() -> list[tuple[str, str, str, bool]]:
 
     Shared by both the CLI (``--show-config``/``settings list``) and the web
     UI's settings page, so the two never drift on what counts as a known,
-    safe-to-edit dotted path.
+    safe-to-edit dotted path. That was written down here before it was true:
+    the terminal listing went to the plugin registry directly and so left out
+    every endpoint credential, which the browser listed. Both now come through
+    here.
 
     Returns:
-        A list of ``(dotted_path, label, section, secret)`` tuples, sorted
-        by section then path.
+        Every known setting, sorted by section then path. Endpoint credentials
+        are described the same way registered ones are, so a caller never has
+        to know which of the two sources one came from.
     """
-    fields = [(f.key, f.label, f.section, f.secret) for f in get_registered_settings()]
+    fields = list(get_registered_settings())
     for api_name in list_apis():
-        fields.append((
-            credential_path_for_endpoint(api_name),
-            f"API key for the '{api_name}' endpoint (see settings.default.toml or preferences.toml)",
-            "Alternate API endpoints",
-            True,
+        fields.append(SettingField(
+            key=credential_path_for_endpoint(api_name),
+            label=f"API key for the '{api_name}' endpoint (see settings.default.toml or preferences.toml)",
+            section="Alternate API endpoints",
+            secret=True,
         ))
-    return sorted(fields, key=lambda t: (t[2], t[0]))
+    return sorted(fields, key=lambda f: (f.section, f.key))
+
+
+def setting_is_set(key: str) -> bool:
+    """Say whether one known optional setting currently has a value.
+
+    Asked wherever a listing reports "set" or "not set", so that every such
+    listing answers alike.
+
+    Nearly every setting lives in ``settings.toml`` and nowhere else. An
+    endpoint's credential is the exception: it may equally be written beside the
+    rest of that endpoint's settings, which is what somebody following the
+    example in the interface does. Looking only in ``settings.toml`` reported
+    those endpoints as having no credential while one sat in the file and the
+    endpoint worked perfectly.
+
+    Args:
+        key: The dotted path to ask about (e.g. ``'webui.session_secret'``).
+
+    Returns:
+        ``True`` if a value is set anywhere it is allowed to be.
+    """
+    if settings_store.get_value(key):
+        return True
+    api_name = endpoint_name_from_credential_path(key)
+    if api_name is None:
+        return False
+    from ..services.api_config import endpoint_credential
+
+    return bool(endpoint_credential(api_name))
 
 
 def show_professor_config() -> None:
@@ -106,9 +143,12 @@ def _print_optional_settings() -> None:
     tracking needed.
     """
     from .. import paths
-    from ..config import get_registered_settings
 
-    fields = get_registered_settings()
+    # list_optional_settings(), not the plugin registry directly: an endpoint's
+    # credential is a setting somebody may need to know is missing, and asking
+    # the registry left every one of them out of this listing while the browser
+    # showed them.
+    fields = list_optional_settings()
     if not fields:
         return
 
@@ -119,7 +159,7 @@ def _print_optional_settings() -> None:
         if field.section != current_section:
             print(f"\n  [{field.section}]")
             current_section = field.section
-        status = "set" if settings_store.get_value(field.key) else "not set"
+        status = "set" if setting_is_set(field.key) else "not set"
         print(f"    {field.key}  ({status})")
         print(f"        {field.label}")
         # How to change it: a command where the value cannot simply be typed —
@@ -778,6 +818,9 @@ def _settings_export_shared(args: argparse.Namespace) -> None:
         f"     Renaming now saves telling everyone a new path later.\n"
         f"  3. Put it somewhere every member can read: a synced folder, a\n"
         f"     network share, anywhere they all have access to.\n"
-        f"  4. Tell each member to run this once:\n"
-        f"         python main.py settings set shared_settings.path <where you put it>\n"
+        f"  4. Tell each member to point at it once, in either of these ways:\n"
+        f"       • the web interface: python main.py webui serve, then Settings\n"
+        f"       • settings.toml, by hand:\n"
+        f"             [shared_settings]\n"
+        f'             path = "<where you put it>"\n'
     )

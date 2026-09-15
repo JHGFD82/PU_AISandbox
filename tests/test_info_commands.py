@@ -549,3 +549,117 @@ class TestTheModelQuirksCommand:
 
         with pytest.raises(CLIError, match="Nothing has been recorded"):
             self._run(monkeypatch, {}, model="quiet")
+
+
+class TestWhatCountsAsSetAndWhereItIsListed:
+    """One answer to "is this set?", and one list of what there is to ask about.
+
+    Both were said to be shared already and neither was. The terminal listing
+    went to the plugin registry directly, so every endpoint credential was
+    missing from it while the browser showed them; and both sides asked only
+    settings.toml whether a credential was set, so an endpoint whose key sat
+    beside the rest of its settings — which is what the interface's own example
+    shows — was reported as having none while it worked perfectly.
+    """
+
+    ENDPOINT = {
+        "name": "My HPC Cluster",
+        "base_url": "http://my-cluster.internal:8000/v1",
+        "openai_compatible": True,
+    }
+
+    def _configured(self, monkeypatch, endpoint, settings_toml_key=None):
+        import src.settings as settings_mod
+        import src.settings_store as store
+
+        monkeypatch.setattr(settings_mod, "ENDPOINTS", {"my_cluster": endpoint})
+        monkeypatch.setattr(store, "get_value", lambda _p: settings_toml_key)
+
+    def test_a_credential_beside_the_definition_counts_as_set(self, monkeypatch):
+        from src.runtime.info_commands import setting_is_set
+
+        self._configured(monkeypatch, dict(self.ENDPOINT, key="from-preferences"))
+        assert setting_is_set("endpoints.my_cluster.key") is True
+
+    def test_a_credential_in_settings_toml_counts_as_set(self, monkeypatch):
+        from src.runtime.info_commands import setting_is_set
+
+        self._configured(monkeypatch, self.ENDPOINT, settings_toml_key="from-settings")
+        assert setting_is_set("endpoints.my_cluster.key") is True
+
+    def test_an_endpoint_with_no_credential_anywhere_is_not_set(self, monkeypatch):
+        from src.runtime.info_commands import setting_is_set
+
+        self._configured(monkeypatch, self.ENDPOINT)
+        assert setting_is_set("endpoints.my_cluster.key") is False
+
+    def test_an_ordinary_setting_is_still_just_settings_toml(self, monkeypatch):
+        """Only an endpoint credential has a second home; nothing else gains one."""
+        from src.runtime.info_commands import setting_is_set
+
+        self._configured(monkeypatch, self.ENDPOINT, settings_toml_key="something")
+        assert setting_is_set("webui.session_secret") is True
+
+        self._configured(monkeypatch, self.ENDPOINT, settings_toml_key=None)
+        assert setting_is_set("webui.session_secret") is False
+
+    def test_the_terminal_listing_includes_endpoint_credentials(self, monkeypatch, capsys):
+        """It used to leave every one of them out while the browser listed them."""
+        self._configured(monkeypatch, dict(self.ENDPOINT, key="from-preferences"))
+        info_mod._print_optional_settings()
+        out = capsys.readouterr().out
+        assert "endpoints.my_cluster.key" in out
+
+    def test_the_terminal_listing_says_set_when_it_is(self, monkeypatch, capsys):
+        self._configured(monkeypatch, dict(self.ENDPOINT, key="from-preferences"))
+        info_mod._print_optional_settings()
+        line = next(
+            ln for ln in capsys.readouterr().out.splitlines()
+            if "endpoints.my_cluster.key" in ln
+        )
+        assert "(set)" in line
+
+    def test_a_listed_setting_still_says_how_to_change_it(self, monkeypatch, capsys):
+        """set_with survived the move to a shared list.
+
+        It is the only place a person is told that a value which cannot simply
+        be typed — a hash, something generated — has a command of its own. The
+        list used to carry plain tuples, which had nowhere to put it.
+        """
+        from src.config import SettingField
+
+        self._configured(monkeypatch, self.ENDPOINT)
+        monkeypatch.setattr(info_mod, "get_registered_settings", lambda: [
+            SettingField(
+                key="webui.passphrase_hash",
+                label="Passphrase for the browser's unlock screen",
+                section="Web UI plugin",
+                secret=True,
+                set_with="webui set-passphrase",
+            ),
+        ])
+        info_mod._print_optional_settings()
+        out = capsys.readouterr().out
+        assert "Change it with: python main.py webui set-passphrase" in out
+
+    def test_a_setting_with_no_command_says_where_to_edit_it(self, monkeypatch, capsys):
+        self._configured(monkeypatch, dict(self.ENDPOINT, key="from-preferences"))
+        info_mod._print_optional_settings()
+        out = capsys.readouterr().out
+        assert "editing settings.toml" in out
+
+    def test_a_credential_path_names_its_endpoint_both_ways(self):
+        """The two halves are kept beside each other so they cannot disagree."""
+        from src.services.api_config import (
+            credential_path_for_endpoint, endpoint_name_from_credential_path,
+        )
+
+        assert endpoint_name_from_credential_path(
+            credential_path_for_endpoint("my_cluster")
+        ) == "my_cluster"
+
+    def test_something_that_is_not_a_credential_path_names_no_endpoint(self):
+        from src.services.api_config import endpoint_name_from_credential_path
+
+        assert endpoint_name_from_credential_path("webui.session_secret") is None
+        assert endpoint_name_from_credential_path("endpoints.my_cluster.base_url") is None

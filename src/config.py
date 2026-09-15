@@ -315,12 +315,12 @@ def get_api_key(netid: str) -> tuple[str, str]:
             error_msg = (
                 f"No one with the netID '{netid}' is configured.\n"
                 f"Configured netIDs: {known}\n\n"
-                f"To add someone: python main.py env add-professor"
+                f"To add someone: python main.py settings add-professor"
             )
         else:
             error_msg = (
                 "No one is configured yet.\n"
-                "Add someone with: python main.py env add-professor\n"
+                "Add someone with: python main.py settings add-professor\n"
                 "(or by hand — see templates/settings.template for the format)"
             )
         raise ValueError(error_msg)
@@ -334,8 +334,14 @@ def get_api_key(netid: str) -> tuple[str, str]:
         print(f"Warning: Using backup API key for {prof_config['name']}")
         return backup_key, prof_config['name']
 
+    # Not "add-professor": they are already added, which is exactly why there
+    # is nothing to add. That command refuses a netID it already knows, and
+    # used to send people round a loop — it answered with "remove them first"
+    # and named a removal command that has never existed.
     raise ValueError(
-        f"No API key found for professor '{prof_config['name']}'. "
-        f"Please set one with: python main.py env add-professor"
+        f"No API key is set for {prof_config['name']} ({netid}).\n"
+        "Their key can be added in either of these places:\n"
+        "  • the web interface: python main.py webui serve, then Settings\n"
+        f"  • settings.toml, by hand, under [professors.{netid}] as key = \"...\""
     )
 
