@@ -21,6 +21,8 @@ No API calls, no cloud I/O; disk writes are directed to tmp_path.
 """
 
 import json
+import os
+import threading
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch, MagicMock
@@ -1740,3 +1742,100 @@ class TestCorrectingAMonthToMatchTheBill:
         monkeypatch.setattr(module, "data_root", lambda: tmp_path)
         fresh = module.TokenTracker(professor="demo")
         assert fresh.get_cost_adjustment() == pytest.approx(4.00)
+
+
+class TestCorrectionsWrittenFromSeveralThreads:
+    """A parallel job records its unpriced calls from every worker at once.
+
+    The corrections file is read whole, added to, and written back. Before this
+    was a single turn per writer, eight workers doing it together lost seven
+    entries out of eight, raised FileNotFoundError inside translation workers
+    (both having filled and then moved the same scratch file), and left the real
+    file holding one write laid over another, which no longer parsed as JSON.
+
+    Under-counting here is worse than an ordinary lost write: the file exists to
+    say how many calls went uncounted, so losing entries makes it under-report
+    the very thing it is for.
+    """
+
+    N_THREADS = 32
+
+    @pytest.fixture
+    def tracker(self, tmp_path, monkeypatch):
+        import src.tracking.token_tracker as module
+
+        monkeypatch.setattr(module, "data_root", lambda: tmp_path)
+        t = module.TokenTracker(professor="demo")
+        t.monthly_limit = 250.0
+        return t
+
+    def _in_parallel(self, work):
+        """Run *work* on N_THREADS threads and return anything it raised."""
+        errors = []
+
+        def guarded():
+            try:
+                work()
+            except Exception as e:  # noqa: BLE001 - the point is to report it
+                errors.append(e)
+
+        threads = [threading.Thread(target=guarded) for _ in range(self.N_THREADS)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=30)
+            assert not t.is_alive()
+        return errors
+
+    def test_every_unpriced_call_is_counted(self, tracker):
+        errors = self._in_parallel(lambda: tracker.record_unreported_call("gpt-4o"))
+        assert errors == []
+        assert tracker.unreported_call_count() == self.N_THREADS
+
+    def test_the_file_is_still_readable_afterwards(self, tmp_path, tracker):
+        self._in_parallel(lambda: tracker.record_unreported_call("gpt-4o"))
+        path = tracker._corrections_path()
+        # Parses, rather than holding one write laid over another.
+        loaded = json.loads(path.read_text())
+        month = tracker._get_current_month()
+        assert len(loaded[month]["unreported_calls"]) == self.N_THREADS
+
+    def test_no_scratch_files_are_left_in_the_data_folder(self, tmp_path, tracker):
+        self._in_parallel(lambda: tracker.record_unreported_call("gpt-4o"))
+        assert list(tmp_path.glob("*.tmp")) == []
+
+    def test_one_bill_entered_twice_at_once_is_not_applied_twice(self, tracker):
+        """Each adjustment measures itself against what is already put back.
+
+        Reading that outside the writer's turn let two simultaneous entries both
+        measure against the same figure and each add the difference again.
+        """
+        errors = self._in_parallel(lambda: tracker.record_cost_adjustment(50.0, note="OIT"))
+        assert errors == []
+        assert tracker.get_cost_adjustment() == pytest.approx(50.0)
+
+    def test_the_scratch_file_is_named_for_the_writer(self, tracker):
+        """Two programs writing at once must not share one scratch file.
+
+        The lock above only covers threads inside one program. A run at the
+        terminal while the web interface is open is two programs, and they write
+        the same person's corrections file. Naming the scratch file after the
+        process and thread is what stops them filling one file together and both
+        moving it — which raised FileNotFoundError for the loser and left the
+        real file unparseable. One entry may still be lost that way, the same
+        narrow gap ``_refresh_from_disk_before_update()`` documents for the usage
+        file; a corrupted file is a different matter.
+        """
+        used = []
+        real_replace = os.replace
+
+        def remember(src, dst):
+            used.append(str(src))
+            return real_replace(src, dst)
+
+        with patch("src.tracking.token_tracker.os.replace", side_effect=remember):
+            tracker.record_unreported_call("gpt-4o")
+
+        assert len(used) == 1
+        assert str(os.getpid()) in used[0]
+        assert str(threading.get_ident()) in used[0]

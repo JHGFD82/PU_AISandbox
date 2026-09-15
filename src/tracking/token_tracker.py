@@ -579,6 +579,17 @@ class TokenTracker:
 
         self._lock = threading.Lock()
 
+        # Corrections are kept in their own file, so they get their own
+        # turn-taking lock rather than sharing the one above. Its own, because
+        # the two files have nothing to say to each other and making a page's
+        # usage wait on a corrections write would be a cost for no benefit.
+        # A lock at all, because every write here reads the whole file, adds
+        # one entry and writes it back, and a parallel job can have eight
+        # workers doing that at once — without it, seven of their entries are
+        # read, overwritten and lost, which is precisely the opposite of what
+        # counting uncounted calls is for.
+        self._corrections_lock = threading.Lock()
+
         # Running total for calls made through this one TokenTracker
         # instance specifically — separate from the persisted monthly/daily/
         # all-time totals above, which mix in everything else this
@@ -1359,10 +1370,29 @@ class TokenTracker:
         """
         path = self._corrections_path()
         path.parent.mkdir(parents=True, exist_ok=True)
-        temporary = path.with_suffix(".json.tmp")
-        with open(temporary, "w") as f:
-            json.dump(corrections, f, indent=2)
-        os.replace(temporary, path)
+        # The scratch file's name carries the process and thread writing it, so
+        # two writers never share one. A single fixed name looked harmless while
+        # only one thing ever wrote here, and stopped being harmless the moment
+        # a parallel job did: two threads filled the same scratch file at once
+        # and both then moved it, so the second move found nothing there and
+        # raised FileNotFoundError inside a translation worker — after leaving
+        # the real file holding one write laid over another, which no longer
+        # parsed as JSON. The usage data next door is written this way for the
+        # same reason; see ``_save_usage_data_to()``.
+        temporary = path.with_name(
+            f"{path.name}.{os.getpid()}.{threading.get_ident()}.tmp"
+        )
+        try:
+            with open(temporary, "w") as f:
+                json.dump(corrections, f, indent=2)
+            os.replace(temporary, path)
+        except Exception:
+            # Never leave scratch files behind in someone's data folder.
+            try:
+                os.unlink(temporary)
+            except OSError:
+                pass
+            raise
 
     def _month_corrections(self, month: str | None = None) -> dict[str, Any]:
         """One month's corrections, with both lists present even when empty."""
@@ -1381,20 +1411,28 @@ class TokenTracker:
         this sandbox's record of it. Noting it means a month can say how much
         of itself it could not count, instead of quietly reporting too little.
 
+        Safe to call from several threads at once, which a parallel job does:
+        the file is re-read inside the lock immediately before the new entry is
+        added, so every call is counted rather than the last writer's copy
+        winning. Across separate programs — a run at the terminal while the web
+        interface is open — the same narrow gap remains that
+        ``_refresh_from_disk_before_update()`` describes for the usage file.
+
         Args:
             model: The model the call was made to, as the sandbox names it.
             note: Anything worth keeping about why it went unreported (e.g.
                   that the reply arrived incomplete).
         """
         month = self._get_current_month()
-        corrections = self._load_corrections()
-        entry = corrections.setdefault(month, {})
-        entry.setdefault("unreported_calls", []).append({
-            "at": datetime.now().isoformat(timespec="seconds"),
-            "model": model,
-            "note": note,
-        })
-        self._save_corrections(corrections)
+        with self._corrections_lock:
+            corrections = self._load_corrections()
+            entry = corrections.setdefault(month, {})
+            entry.setdefault("unreported_calls", []).append({
+                "at": datetime.now().isoformat(timespec="seconds"),
+                "model": model,
+                "note": note,
+            })
+            self._save_corrections(corrections)
         logging.warning(
             "A call to '%s' reported no usage, so it could not be priced. It is "
             "noted as uncounted; the month's total is lower than the bill by "
@@ -1451,18 +1489,23 @@ class TokenTracker:
             )
         month = month or self._get_current_month()
         measured = self.get_monthly_usage(month)["total_cost"]
-        already = self.get_cost_adjustment(month)
-        entry = {
-            "at": datetime.now().isoformat(timespec="seconds"),
-            "stated_total": round(stated_total, 6),
-            "measured_total": round(measured, 6),
-            "previous_adjustment": round(already, 6),
-            "amount": round(stated_total - measured - already, 6),
-            "note": note,
-        }
-        corrections = self._load_corrections()
-        corrections.setdefault(month, {}).setdefault("adjustments", []).append(entry)
-        self._save_corrections(corrections)
+        # What was already put back has to be read, used and written inside one
+        # turn. Reading it outside would let two figures entered at the same
+        # moment both measure themselves against the same "already", and each
+        # would then put the same difference back a second time.
+        with self._corrections_lock:
+            already = self.get_cost_adjustment(month)
+            entry = {
+                "at": datetime.now().isoformat(timespec="seconds"),
+                "stated_total": round(stated_total, 6),
+                "measured_total": round(measured, 6),
+                "previous_adjustment": round(already, 6),
+                "amount": round(stated_total - measured - already, 6),
+                "note": note,
+            }
+            corrections = self._load_corrections()
+            corrections.setdefault(month, {}).setdefault("adjustments", []).append(entry)
+            self._save_corrections(corrections)
         return entry
 
     def get_cost_adjustment(self, month: str | None = None) -> float:
