@@ -257,6 +257,97 @@ class TestTqdmLoggingWhenTheRedirectionCannotBeMade:
             assert any(isinstance(h, _TqdmLoggingHandler) for h in root.handlers)
         assert root.handlers == before
 
+class TestDrawsAProgressBar:
+    def test_a_terminal_run_draws_one(self):
+        from src.services.parallel_utils import draws_a_progress_bar
+        assert draws_a_progress_bar(None) is True
+
+    def test_a_run_reporting_through_a_callback_does_not(self):
+        from src.services.parallel_utils import draws_a_progress_bar
+        assert draws_a_progress_bar(lambda done, total: None) is False
+
+
+class TestTqdmLoggingCanBeAskedToDoNothing:
+    """``active=False`` must leave the program's logging completely alone.
+
+    Not merely restore it afterwards — never touch it. A background job runs
+    for many minutes inside this block, and for all of them the web server's
+    own logging has to keep working the way its operator set it up.
+    """
+
+    def test_handlers_untouched_inside_and_after(self):
+        from src.services.parallel_utils import _TqdmLoggingHandler
+
+        root = logging.getLogger()
+        before = root.handlers[:]
+        with tqdm_logging(active=False):
+            assert root.handlers == before
+            assert not any(isinstance(h, _TqdmLoggingHandler) for h in root.handlers)
+        assert root.handlers == before
+
+    def test_chatty_loggers_are_left_at_their_own_levels(self):
+        from src.services.parallel_utils import _QUIET_LOGGERS
+
+        before = {n: logging.getLogger(n).level for n in _QUIET_LOGGERS}
+        with tqdm_logging(active=False):
+            assert {n: logging.getLogger(n).level for n in _QUIET_LOGGERS} == before
+        assert {n: logging.getLogger(n).level for n in _QUIET_LOGGERS} == before
+
+    def test_an_inactive_use_does_not_end_an_active_one(self):
+        """A browser job starting must not cancel the redirection a terminal run is relying on."""
+        from src.services.parallel_utils import _TqdmLoggingHandler
+
+        def tqdm_handlers():
+            return [h for h in logging.getLogger().handlers
+                    if isinstance(h, _TqdmLoggingHandler)]
+
+        with tqdm_logging(active=True):
+            assert tqdm_handlers()
+            with tqdm_logging(active=False):
+                pass
+            assert tqdm_handlers()
+        assert tqdm_handlers() == []
+
+
+class TestRunFolderParallelProgressBar:
+    """Whether anything is drawn, end to end, for each kind of caller."""
+
+    @staticmethod
+    def _run(tmp_path, on_progress):
+        from src.services.parallel_utils import run_folder_parallel
+
+        files = []
+        for i in range(3):
+            p = tmp_path / f"page_{i}.png"
+            p.write_bytes(b"")
+            files.append(str(p))
+        return run_folder_parallel(
+            image_files=files,
+            worker_fn=lambda i, path: (i, "name", "text"),
+            make_error_result=lambda filename, exc: (filename, ""),
+            usage_data={"total_usage": {"total_tokens": 0, "total_cost": 0.0}},
+            actual_workers=2,
+            desc="Testing",
+            on_progress=on_progress,
+        )
+
+    def test_a_browser_job_draws_nothing(self, tmp_path, capsys):
+        seen = []
+        results = self._run(tmp_path, on_progress=lambda d, t: seen.append((d, t)))
+
+        captured = capsys.readouterr()
+        assert captured.err == "", "a background job must not draw a bar"
+        assert captured.out == ""
+        # The work still happened, and progress still reached the browser.
+        assert len(results) == 3
+        assert seen == [(1, 3), (2, 3), (3, 3)]
+
+    def test_a_terminal_run_still_draws_its_bar(self, tmp_path, capsys):
+        results = self._run(tmp_path, on_progress=None)
+
+        assert len(results) == 3
+        assert "Testing" in capsys.readouterr().err
+
 
 class TestUpdatePbarPostfix:
     def test_sets_postfix_with_correct_values(self):

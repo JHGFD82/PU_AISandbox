@@ -125,14 +125,16 @@ def run_folder_parallel(
     baseline_tokens = usage_data["total_usage"].get("total_tokens", 0)
     baseline_cost = usage_data["total_usage"].get("total_cost", 0.0)
     completed = 0
+    on_screen = draws_a_progress_bar(on_progress)
 
-    with tqdm_logging():
+    with tqdm_logging(active=on_screen):
         with ThreadPoolExecutor(max_workers=actual_workers) as executor:
             future_map = {
                 executor.submit(worker_fn, i, path): i
                 for i, path in enumerate(image_files)
             }
-            with tqdm(total=len(image_files), desc=desc, ascii=True) as pbar:
+            with tqdm(total=len(image_files), desc=desc, ascii=True,
+                      disable=not on_screen) as pbar:
                 for future in futures_as_completed(future_map):
                     orig_idx = future_map[future]
                     try:
@@ -233,8 +235,36 @@ def _send_logging_through_tqdm() -> Callable[[], None]:
     return undo
 
 
+def draws_a_progress_bar(on_progress: Optional[Callable[[int, int], None]]) -> bool:
+    """Whether this run should draw a progress bar in the terminal.
+
+    A run started at the command line draws one. Somebody is watching that
+    terminal, and the bar is the only sign that a job of several hundred pages
+    is getting anywhere.
+
+    A run started from the browser does not. It was handed *on_progress* to
+    report through instead, and what it would draw goes to whichever terminal
+    the web server happens to have been started from — where nobody is looking,
+    and where a second job's bar overwrites the first's line for line, since
+    both redraw by returning the cursor to the start of the same line. Two
+    people each translating a document get one unreadable line between them.
+
+    Args:
+        on_progress: The progress callback this run was given, if any. Only
+                     the web interface's background job runner passes one;
+                     every command-line path leaves it unset. A future caller
+                     that passed one from the terminal would get no bar —
+                     which is the right answer, since it would then be
+                     reporting progress some other way itself.
+
+    Returns:
+        ``True`` when the bar should be drawn.
+    """
+    return on_progress is None
+
+
 @contextmanager
-def tqdm_logging() -> Generator[None, None, None]:
+def tqdm_logging(active: bool = True) -> Generator[None, None, None]:
     """Context manager that redirects root-logger output through tqdm.write().
 
     Use this around any block that runs a tqdm progress bar to prevent
@@ -249,8 +279,21 @@ def tqdm_logging() -> Generator[None, None, None]:
     made once, by whichever gets there first, and undone once, by whichever
     finishes last — see the note above ``_swap_lock`` for what went wrong
     when every run tried to undo it for itself.
+
+    Args:
+        active: Whether to redirect at all. ``False`` does nothing whatsoever,
+                for a run that is drawing no bar to protect — see
+                ``draws_a_progress_bar()``. That matters most in the web
+                interface: where logging goes, and which loggers are quietened,
+                belong to the whole server, and a background job has no
+                business rearranging them for twenty minutes on behalf of a bar
+                nobody is reading.
     """
     global _swap_depth, _undo_swap
+
+    if not active:
+        yield
+        return
 
     with _swap_lock:
         # Counted only once the change has actually been made. Counting first

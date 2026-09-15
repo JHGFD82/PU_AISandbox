@@ -30,7 +30,9 @@ from ..models import (
 )
 from .api_errors import APISignal
 from .base_service import BaseService
-from .parallel_utils import tqdm_logging, update_pbar_postfix, cap_worker_count
+from .parallel_utils import (
+    draws_a_progress_bar, tqdm_logging, update_pbar_postfix, cap_worker_count,
+)
 from .prompts import TranslationPromptSpec
 from ..output.file_output import FileOutputHandler
 from ..processors.pdf_processor import PDFProcessor, generate_process_text, detect_numbered_content
@@ -536,8 +538,10 @@ class TranslationService(BaseService):
                 baseline_tokens = self.token_tracker.usage_data["total_usage"].get("total_tokens", 0)
                 baseline_cost = self.token_tracker.usage_data["total_usage"].get("total_cost", 0.0)
 
-                with tqdm_logging():
-                    with tqdm(total=n_pages, desc=desc, ascii=True) as pbar:
+                on_screen = draws_a_progress_bar(on_progress)
+                with tqdm_logging(active=on_screen):
+                    with tqdm(total=n_pages, desc=desc, ascii=True,
+                              disable=not on_screen) as pbar:
                         for future in as_completed(futures):
                             idx = futures[future]
                             try:
@@ -674,7 +678,10 @@ class TranslationService(BaseService):
             previous_translated = ""
             completed_units = 0
 
-            for i, page_text, previous_page in tqdm(page_triples, desc="Translating... ", ascii=True):
+            for i, page_text, previous_page in tqdm(
+                page_triples, desc="Translating... ", ascii=True,
+                disable=not draws_a_progress_bar(on_progress),
+            ):
                 try:
                     translated_text = self.generate_text(
                         abstract_text, page_text, previous_page, i,
