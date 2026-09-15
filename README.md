@@ -5,6 +5,8 @@
 
 A toolkit for accessing the Princeton University AI Sandbox service from OIT. Accessible through both web-based or command-line interfaces, with a modular plug-in architecture.
 
+**This project is currently under active development and has not yet been reviewed, approved, or supported by OIT. Features, functionality, and security controls may change without notice. Use at your own risk.**
+
 > **Access requirement:** Each person must have a valid Princeton University AI Sandbox API key (available through OIT). This tool is for Princeton faculty and authorized delegates only.
 
 ## Where everything lives
@@ -18,48 +20,6 @@ An installation is three separate locations, referred to throughout this documen
 | **`data`** | Everything recorded as you work: the cost of each call, the months already closed, and your saved conversations. This lives inside `settings` unless a separate location is specified for a professor, described under [Optional information](#optional-information). |
 
 Keeping `settings` and `data` apart from `package` is what makes upgrading (or deleting the package outright) painless, as covered under [Upgrading](#upgrading).
-
-## Architecture
-
-```text
-main.py
-  → src/cli.py            controller + argument parser; loads plugins, routes commands
-    → src/config.py       language registry, netID lookup, optional-setting registry
-    → src/settings.py     layered settings (defaults → shared → preferences → plugin → flags)
-    → src/paths.py        resolves the `package`, `settings` and `data` locations
-    → src/first_run.py    what setup creates, and what it must never overwrite
-  → src/runtime/
-      plugin_loader.py    discovers plugins/*/plugin.py at startup
-      info_commands.py    built-in: --list-models, usage subcommands
-      sandbox_processor.py  shared service wiring used by plugins
-  → src/services/         shared plumbing every AI service builds on — BaseService
-                          (API client, retries, usage recording), error handling
-  → src/models/           model catalog, pricing, model-name resolution
-  → src/processors/       document ingestion (PDF, DOCX, TXT, MD, JSON, XLSX, image)
-  → src/tracking/         per-professor token accounting and budget reporting
-  → src/output/           text / Markdown / PDF / Word / Excel / JSON output
-  → plugins/              added capabilities that can come bundled or downloaded into this folder
-      prompt/             bundled plugin (ships with this repo)
-      translation/        bundled plugin — base English translation (ships with this repo)
-      transcription/      bundled plugin — base English OCR (ships with this repo)
-      webui/              bundled plugin — the browser interface (ships with this repo)
-```
-
-Currently, there are no additional plugins available, however East Asia-specific modules for the translation and transcription plugins are available via [Jeff Heller's GitHub profile](https://www.github.com/JHGFD82).
-
-Services can be built within a plugin to allow for additional processing capabilities (translation has `TranslationService` and `ImageProcessorService` built into it) and should not live within the code of this package.
-
-`src/cli.py` decides *what* to run. Plugins decide *how* to run it. Only the `usage` subcommand is built in.
-
-For deeper documentation, see the `docs/` folder:
-
-- [`docs/architecture.md`](docs/architecture.md) — request lifecycle, component descriptions, data-flow diagrams
-- [`docs/cli-reference.md`](docs/cli-reference.md) — full flag reference for all commands
-- [`docs/configuration.md`](docs/configuration.md) — where `settings` and `data` live, and the schema for `settings.toml`, `model_catalog.json` and `settings.default.toml`
-- [`docs/token-usage-guide.md`](docs/token-usage-guide.md) — token tracking, usage commands, budget settings, and troubleshooting
-- [`docs/plugin-authoring-guide.md`](docs/plugin-authoring-guide.md) — step-by-step guide to writing new plugins
-
----
 
 ## Getting Started
 
@@ -398,6 +358,48 @@ For any setting you wish to change:
 | `[budget]` | `warning_threshold_pct` | `80` | Warn when spend exceeds this % of monthly limit |
 
 See [`docs/configuration.md`](docs/configuration.md) for plugin-level settings (`[translation]`, `[ocr]`, etc.).
+
+---
+
+## Architecture
+
+```text
+main.py
+  → src/cli.py            controller + argument parser; loads plugins, routes commands
+    → src/config.py       language registry, netID lookup, optional-setting registry
+    → src/settings.py     layered settings (defaults → shared → preferences → plugin → flags)
+    → src/paths.py        resolves the `package`, `settings` and `data` locations
+    → src/first_run.py    what setup creates, and what it must never overwrite
+  → src/runtime/
+      plugin_loader.py    discovers plugins/*/plugin.py at startup
+      info_commands.py    built-in: --list-models, usage subcommands
+      sandbox_processor.py  shared service wiring used by plugins
+  → src/services/         shared plumbing every AI service builds on — BaseService
+                          (API client, retries, usage recording), error handling
+  → src/models/           model catalog, pricing, model-name resolution
+  → src/processors/       document ingestion (PDF, DOCX, TXT, MD, JSON, XLSX, image)
+  → src/tracking/         per-professor token accounting and budget reporting
+  → src/output/           text / Markdown / PDF / Word / Excel / JSON output
+  → plugins/              added capabilities that can come bundled or downloaded into this folder
+      prompt/             bundled plugin (ships with this repo)
+      translation/        bundled plugin — base English translation (ships with this repo)
+      transcription/      bundled plugin — base English OCR (ships with this repo)
+      webui/              bundled plugin — the browser interface (ships with this repo)
+```
+
+Currently, there are no additional plugins available, however East Asia-specific modules for the translation and transcription plugins are available via [Jeff Heller's GitHub profile](https://www.github.com/JHGFD82).
+
+Services can be built within a plugin to allow for additional processing capabilities (translation has `TranslationService` and `ImageProcessorService` built into it) and should not live within the code of this package.
+
+`src/cli.py` decides *what* to run. Plugins decide *how* to run it. Only the `usage` subcommand is built in.
+
+For deeper documentation, see the `docs/` folder:
+
+- [`docs/architecture.md`](docs/architecture.md) — request lifecycle, component descriptions, data-flow diagrams
+- [`docs/cli-reference.md`](docs/cli-reference.md) — full flag reference for all commands
+- [`docs/configuration.md`](docs/configuration.md) — where `settings` and `data` live, and the schema for `settings.toml`, `model_catalog.json` and `settings.default.toml`
+- [`docs/token-usage-guide.md`](docs/token-usage-guide.md) — token tracking, usage commands, budget settings, and troubleshooting
+- [`docs/plugin-authoring-guide.md`](docs/plugin-authoring-guide.md) — step-by-step guide to writing new plugins
 
 ---
 
