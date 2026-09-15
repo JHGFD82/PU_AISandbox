@@ -8,6 +8,8 @@ Tests for small utility modules:
 import logging
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 
 # ===========================================================================
 # src/console.py
@@ -72,6 +74,30 @@ class TestPrintPassResult:
 from src.services.parallel_utils import tqdm_logging, update_pbar_postfix
 
 
+@pytest.fixture(autouse=True)
+def no_logging_redirection_left_behind():
+    """Report a leaked logging redirection against the test that leaked it.
+
+    ``tqdm_logging()`` keeps its count of how many runs are relying on the
+    redirection in module-level state, so a test that leaves that count raised
+    makes the *next* test fail instead — which sends whoever is reading the
+    output looking in entirely the wrong place. Checking here names the
+    culprit, and clearing it keeps one failure from becoming several.
+    """
+    yield
+    import src.services.parallel_utils as pu
+
+    depth, undo = pu._swap_depth, pu._undo_swap
+    pu._swap_depth, pu._undo_swap = 0, None
+    if undo is not None:
+        undo()
+    assert depth == 0, (
+        f"this test left tqdm_logging()'s count at {depth} rather than 0, so the "
+        "redirection would never be undone — or never set up again — for the rest "
+        "of the process"
+    )
+
+
 class TestTqdmLogging:
     def test_context_manager_restores_handlers(self):
         root = logging.getLogger()
@@ -103,6 +129,133 @@ class TestTqdmLogging:
         with patch("src.services.parallel_utils.tqdm.write", side_effect=RuntimeError("boom")):
             handler.emit(record)
         assert handle_error_calls
+
+
+class TestTqdmLoggingWithMoreThanOneRun:
+    """Two runs sharing the redirection, which is what the web interface does.
+
+    Each test arranges one shape of sharing and checks the same thing
+    afterwards: logging is exactly as it was before, with no handler of ours
+    left attached and no logger left quietened. A leftover handler is not a
+    tidiness problem — it prints every later line in the program a second
+    time, for as long as the process lives.
+    """
+
+    @staticmethod
+    def _quiet_logger_levels():
+        from src.services.parallel_utils import _QUIET_LOGGERS
+        return {name: logging.getLogger(name).level for name in _QUIET_LOGGERS}
+
+    @staticmethod
+    def _tqdm_handlers_on_root():
+        from src.services.parallel_utils import _TqdmLoggingHandler
+        return [h for h in logging.getLogger().handlers
+                if isinstance(h, _TqdmLoggingHandler)]
+
+    def test_nested_use_restores_only_once(self):
+        root = logging.getLogger()
+        before_handlers = root.handlers[:]
+        before_levels = self._quiet_logger_levels()
+
+        with tqdm_logging():
+            with tqdm_logging():
+                assert self._tqdm_handlers_on_root()
+            # The inner block finishing must not put the original handlers
+            # back while the outer block is still drawing a progress bar.
+            assert self._tqdm_handlers_on_root()
+
+        assert root.handlers == before_handlers
+        assert self._quiet_logger_levels() == before_levels
+
+    def test_overlapping_runs_leave_no_handler_behind(self):
+        """The shape that used to break: in, in, out, out — not properly nested.
+
+        Two background jobs in different conversations start and finish
+        independently, so neither one's block contains the other's.
+        """
+        import threading
+
+        root = logging.getLogger()
+        before_handlers = root.handlers[:]
+        before_levels = self._quiet_logger_levels()
+
+        first_is_in = threading.Event()
+        second_is_in = threading.Event()
+        first_is_out = threading.Event()
+
+        def first():
+            with tqdm_logging():
+                first_is_in.set()
+                second_is_in.wait(timeout=5)
+            first_is_out.set()
+
+        def second():
+            first_is_in.wait(timeout=5)
+            with tqdm_logging():
+                second_is_in.set()
+                first_is_out.wait(timeout=5)
+
+        threads = [threading.Thread(target=first), threading.Thread(target=second)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=10)
+            assert not t.is_alive()
+
+        assert self._tqdm_handlers_on_root() == []
+        assert root.handlers == before_handlers
+        assert self._quiet_logger_levels() == before_levels
+
+    def test_a_run_that_raises_still_restores(self):
+        root = logging.getLogger()
+        before_handlers = root.handlers[:]
+        before_levels = self._quiet_logger_levels()
+
+        with pytest.raises(RuntimeError):
+            with tqdm_logging():
+                raise RuntimeError("the job failed")
+
+        assert root.handlers == before_handlers
+        assert self._quiet_logger_levels() == before_levels
+
+
+class TestTqdmLoggingWhenTheRedirectionCannotBeMade:
+    """A failure to set the redirection up must not disable it for good.
+
+    The count says how many runs are relying on the redirection. Raising it for
+    a run that never managed to make the change would leave every later run
+    reading that count as "somebody else has already done this" — so the
+    redirection would silently never happen again, and progress bars would be
+    broken up by log lines for the rest of the process's life.
+    """
+
+    def test_a_failed_setup_leaves_nothing_behind(self):
+        import src.services.parallel_utils as pu
+
+        with patch.object(pu, "_send_logging_through_tqdm",
+                          side_effect=RuntimeError("could not install")):
+            with pytest.raises(RuntimeError):
+                with tqdm_logging():
+                    pass
+
+        assert pu._swap_depth == 0
+        assert pu._undo_swap is None
+
+    def test_the_next_run_still_gets_its_redirection(self):
+        import src.services.parallel_utils as pu
+        from src.services.parallel_utils import _TqdmLoggingHandler
+
+        with patch.object(pu, "_send_logging_through_tqdm",
+                          side_effect=RuntimeError("could not install")):
+            with pytest.raises(RuntimeError):
+                with tqdm_logging():
+                    pass
+
+        root = logging.getLogger()
+        before = root.handlers[:]
+        with tqdm_logging():
+            assert any(isinstance(h, _TqdmLoggingHandler) for h in root.handlers)
+        assert root.handlers == before
 
 
 class TestUpdatePbarPostfix:

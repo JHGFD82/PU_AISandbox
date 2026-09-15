@@ -3,9 +3,10 @@
 import logging
 import os
 import re
+import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed as futures_as_completed
 from contextlib import contextmanager
-from typing import Any, Callable, Dict, Generator, List, Tuple
+from typing import Any, Callable, Dict, Generator, List, Optional, Tuple
 
 from tqdm import tqdm
 
@@ -164,6 +165,73 @@ _TQDM_LOG_FORMATTER = logging.Formatter(
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 
+# Loggers to quieten while a progress bar is on screen. Each says something
+# worth having in an ordinary run and nothing worth having here, where the bar
+# is already reporting progress a line at a time.
+_QUIET_LOGGERS = (
+    "httpx",                                      # "HTTP Request: POST … 200 OK"
+    "httpcore",                                   # lower-level httpx transport
+    "src.tracking.token_tracker",                 # "Using requested model … for pricing"
+    "openai._base_client",                        # "Retrying request to /chat/completions …"
+    "portkey_ai._vendor.openai._base_client",     # same, via portkey vendor copy
+)
+
+# Where logging is sent is a fact about the whole program, not about one run, so
+# two runs happening at once are both changing the same thing. These three let
+# them: the first run to start makes the change, the last to finish puts it
+# back, and the ones in between leave it alone.
+#
+# Counting is what makes that work, and leaving it out was a real fault rather
+# than an oversight about a case that never happens. Two runs that *overlap*
+# — the first starting, the second starting, the first finishing, the second
+# finishing — each took their own snapshot of where logging was going, and the
+# second one's snapshot was of the first one's arrangement rather than of the
+# original. Putting that back left the first run's handler attached with
+# nothing to remove it, so every later line in the program was printed twice;
+# after the next overlapping pair, three times. The quietened loggers above
+# stayed quiet for good, too, so the record of what was sent to the AI service
+# simply stopped.
+#
+# At the terminal only one run happens at a time, so none of this ever showed.
+# The web interface runs one job per conversation and nothing stops two of them
+# overlapping — and it is the long-running one, where a process stays up for
+# days and the doubling accumulates.
+_swap_lock = threading.Lock()
+_swap_depth = 0
+_undo_swap: Optional[Callable[[], None]] = None
+
+
+def _send_logging_through_tqdm() -> Callable[[], None]:
+    """Route the program's logging through ``tqdm.write()`` and quieten the chatty loggers.
+
+    Called once, by whichever run gets there first — see ``tqdm_logging()``,
+    which is what everything else uses.
+
+    Returns:
+        The function that puts everything back as it was. Call it once.
+    """
+    root_logger = logging.getLogger()
+    handler = _TqdmLoggingHandler()
+    handler.setFormatter(_TQDM_LOG_FORMATTER)
+    displaced_handlers = root_logger.handlers[:]
+    for h in displaced_handlers:
+        root_logger.removeHandler(h)
+    root_logger.addHandler(handler)
+
+    saved_levels = {name: logging.getLogger(name).level for name in _QUIET_LOGGERS}
+    for name in _QUIET_LOGGERS:
+        logging.getLogger(name).setLevel(logging.WARNING)
+
+    def undo() -> None:
+        """Put logging back where it was before the progress bar started."""
+        root_logger.removeHandler(handler)
+        for h in displaced_handlers:
+            root_logger.addHandler(h)
+        for name, level in saved_levels.items():
+            logging.getLogger(name).setLevel(level)
+
+    return undo
+
 
 @contextmanager
 def tqdm_logging() -> Generator[None, None, None]:
@@ -175,40 +243,31 @@ def tqdm_logging() -> Generator[None, None, None]:
     Also silences INFO-level chatter from third-party libraries (httpx HTTP
     request lines) and internal loggers (token_tracker model-substitution
     notes) that are redundant when tqdm already shows running totals.
+
+    Safe to be inside more than once at a time, whether one use is nested
+    within another or two separate runs merely overlap. The redirection is
+    made once, by whichever gets there first, and undone once, by whichever
+    finishes last — see the note above ``_swap_lock`` for what went wrong
+    when every run tried to undo it for itself.
     """
-    # Loggers to quieten to WARNING for the duration of the parallel run.
-    _QUIET_LOGGERS = (
-        "httpx",                                      # "HTTP Request: POST … 200 OK"
-        "httpcore",                                   # lower-level httpx transport
-        "src.tracking.token_tracker",                 # "Using requested model … for pricing"
-        "openai._base_client",                        # "Retrying request to /chat/completions …"
-        "portkey_ai._vendor.openai._base_client",     # same, via portkey vendor copy
-    )
+    global _swap_depth, _undo_swap
 
-    root_logger = logging.getLogger()
-    handler = _TqdmLoggingHandler()
-    handler.setFormatter(_TQDM_LOG_FORMATTER)
-    existing_handlers = root_logger.handlers[:]
-    for h in existing_handlers:
-        root_logger.removeHandler(h)
-    root_logger.addHandler(handler)
-
-    # Save and raise levels for chatty loggers.
-    _saved_levels: dict[str, int] = {}
-    for name in _QUIET_LOGGERS:
-        lg = logging.getLogger(name)
-        _saved_levels[name] = lg.level
-        lg.setLevel(logging.WARNING)
-
+    with _swap_lock:
+        # Counted only once the change has actually been made. Counting first
+        # and then failing to make it would leave the count raised with nothing
+        # to undo, and every run after this one would read that count as "someone
+        # else has already done it" and quietly skip the redirection for good.
+        if _swap_depth == 0:
+            _undo_swap = _send_logging_through_tqdm()
+        _swap_depth += 1
     try:
         yield
     finally:
-        root_logger.removeHandler(handler)
-        for h in existing_handlers:
-            root_logger.addHandler(h)
-        # Restore logger levels.
-        for name, level in _saved_levels.items():
-            logging.getLogger(name).setLevel(level)
+        with _swap_lock:
+            _swap_depth -= 1
+            if _swap_depth == 0 and _undo_swap is not None:
+                _undo_swap()
+                _undo_swap = None
 
 
 def update_pbar_postfix(
