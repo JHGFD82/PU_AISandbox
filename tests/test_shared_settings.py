@@ -181,7 +181,10 @@ class TestAwkwardInput:
         """A draft nobody understands is a draft nobody places."""
         plugins, defaults = world
         text = build_shared_settings(plugins, defaults)
-        assert "settings set shared_settings.path" in text
+        # Says how to point at it, in a way that can be followed. It named
+        # `settings set` for a long time, which has never been a command.
+        assert "shared_settings" in text
+        assert "webui serve" in text
         assert "Uncomment" in text
 
     def test_the_header_says_the_file_may_be_renamed(self, world):

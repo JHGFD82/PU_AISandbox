@@ -302,12 +302,29 @@ class TestGetApiKey:
 
     def test_unknown_netid_mentions_add_professor(self):
         self._setup_one_prof()
-        with pytest.raises(ValueError, match="env add-professor"):
+        with pytest.raises(ValueError, match="settings add-professor"):
             get_api_key("zz99")
 
     def test_nobody_configured_mentions_add_professor(self):
-        with pytest.raises(ValueError, match="env add-professor"):
+        with pytest.raises(ValueError, match="settings add-professor"):
             get_api_key("jh43")
+
+    def test_a_missing_key_does_not_send_them_to_add_professor(self):
+        """They are already added, which is why there is nothing to add.
+
+        That command refuses a netID it already knows, so it sent somebody whose
+        key was missing round a loop and left them with no way forward.
+        """
+        from src import settings_store
+
+        settings_store.add_professor("jh43", "Jeff Heller", "placeholder")
+        settings_store.unset_value("professors.jh43.key")
+        with pytest.raises(ValueError) as caught:
+            get_api_key("jh43")
+        assert "add-professor" not in str(caught.value)
+        # The two places that can actually set a key for somebody who exists.
+        assert "webui serve" in str(caught.value)
+        assert "settings.toml" in str(caught.value)
 
 
 # ---------------------------------------------------------------------------

@@ -1874,7 +1874,8 @@ class TestSharedSettingsDraftDownload:
     def test_it_returns_a_draft(self, unlocked_client):
         r = unlocked_client.get("/api/settings/shared-draft")
         assert r.status_code == 200
-        assert "settings set shared_settings.path" in r.text
+        assert "shared_settings" in r.text
+        assert "webui serve" in r.text
 
     def test_it_downloads_under_the_documented_name(self, unlocked_client):
         """Same name the CLI writes, so the docs describe one thing."""

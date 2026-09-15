@@ -51,14 +51,18 @@ _HEADER = """\
 #    tell everyone a new path later.
 # 3. Put it somewhere every member can read: a synced folder, a network share,
 #    anywhere they all have access to.
-# 4. Tell each member to point at it, once:
-#        python main.py settings set shared_settings.path <where you put it>
+# 4. Tell each member to point at it, once, in either of these ways:
+#      • the web interface: python main.py webui serve, then Settings
+#      • their own settings.toml, by hand:
+#            [shared_settings]
+#            path = "<where you put it>"
 #
 # Keeping it up to date
 # --------------------
 # Nothing edits this file, including the sandbox itself — several installations
 # writing to a synced folder is how conflicted copies happen. When a member
-# tells you a setting they need isn't in here, run the command above again: the
+# tells you a setting they need isn't in here, run settings export-shared again:
+# the
 # decisions already in this file are carried across untouched, and anything that
 # has appeared since is marked "{new}". Then replace the file in the shared
 # location.

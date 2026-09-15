@@ -92,7 +92,7 @@ from src.config import register_setting
 from src.errors import CLIError
 from src.settings import CHAT_ROLE, TITLE_ROLE  # noqa: E402
 
-# Lets `--show-config` and `python main.py env set/list` discover these two
+# Lets `--show-config` and `python main.py settings list` discover these two
 # optional values without needing to know anything about the webui plugin
 # specifically — see register_setting()'s docstring in src/config.py.
 register_setting(
