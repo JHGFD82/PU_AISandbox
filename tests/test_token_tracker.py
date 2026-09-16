@@ -21,6 +21,7 @@ No API calls, no cloud I/O; disk writes are directed to tmp_path.
 """
 
 import json
+import logging
 import os
 import threading
 from datetime import datetime
@@ -1839,3 +1840,67 @@ class TestCorrectionsWrittenFromSeveralThreads:
         assert len(used) == 1
         assert str(os.getpid()) in used[0]
         assert str(threading.get_ident()) in used[0]
+
+
+class TestGoingOverBudgetSaysNothingAtTheTime:
+    """Recording a call never mentions the budget, however far over it goes.
+
+    This is what docs/token-usage-guide.md tells professors — that nothing
+    interrupts them, and that `usage report` and the web interface's spending
+    sidebar are the only two places the figure appears, each of which has to be
+    asked. The guide was wrong about this for a while, promising warnings that
+    were never printed, so the claim is pinned here rather than left to be
+    checked by reading.
+
+    If a future change does start warning during a run, this test is meant to
+    fail: the guide and CLAUDE.md both describe the current behaviour and would
+    need changing with it.
+    """
+
+    @pytest.fixture
+    def nearly_spent(self, tmp_path):
+        """A month already at 99% of a $1 budget."""
+        data = {
+            "month": datetime.now().strftime("%Y-%m"),
+            "total_usage": {
+                "total_tokens": 10, "total_input_tokens": 10,
+                "total_output_tokens": 0, "total_cost": 0.99, "call_count": 1,
+            },
+            "model_usage": {}, "daily_usage": {}, "session_history": [],
+        }
+        data_file = tmp_path / "token_usage_overspender.json"
+        data_file.write_text(json.dumps(data))
+        return TokenTracker("overspender", data_file=str(data_file), monthly_limit=1.0)
+
+    def _record_a_costly_call(self, tracker):
+        with patch("src.tracking.token_tracker.get_pricing_unit", return_value=1_000), \
+             patch("src.tracking.token_tracker.get_model_pricing",
+                   return_value={"input": 10.0, "output": 40.0}):
+            tracker.record_usage("gpt-4o", 1_000, 1_000, 2_000)
+
+    def test_nothing_is_printed(self, nearly_spent, capsys):
+        self._record_a_costly_call(nearly_spent)
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert captured.err == ""
+
+    def test_nothing_is_logged_about_the_budget(self, nearly_spent, caplog):
+        with caplog.at_level(logging.DEBUG):
+            self._record_a_costly_call(nearly_spent)
+        said = caplog.text.lower()
+        for word in ("budget", "limit", "exceed", "approaching"):
+            assert word not in said, f"recording a call mentioned the {word!r}"
+
+    def test_the_month_really_did_go_over(self, nearly_spent):
+        """Otherwise the two tests above would pass for the wrong reason."""
+        self._record_a_costly_call(nearly_spent)
+        status = nearly_spent.get_monthly_budget_status()
+        assert status["is_exceeded"] is True
+        assert status["approaching_limit"] is True
+
+    def test_and_asking_does_say_so(self, nearly_spent, capsys):
+        """The figure is not lost — it is waiting to be asked for."""
+        self._record_a_costly_call(nearly_spent)
+        capsys.readouterr()
+        nearly_spent.print_usage_report()
+        assert "MONTHLY LIMIT EXCEEDED" in capsys.readouterr().out

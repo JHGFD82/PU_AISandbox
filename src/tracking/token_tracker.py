@@ -1563,8 +1563,14 @@ class TokenTracker:
             * ``is_exceeded`` — ``True`` once spending reaches the limit.
             * ``approaching_limit`` — ``True`` past the warning threshold.
 
-            Both flags are advisory. Nothing in the sandbox stops work when
-            a budget runs out; see the module docstring.
+            Both flags are advisory, and nothing acts on them on its own.
+            Nothing in the sandbox stops work when a budget runs out, and
+            nothing warns while a command is running: ``record_usage()`` never
+            asks this question. It is asked in two places, each of which had to
+            be asked first — ``print_usage_report()`` below, which the ``usage
+            report`` command runs, and the web interface's spending sidebar.
+            So a professor finds out where they stand by looking, and at no
+            other time. ``docs/token-usage-guide.md`` says the same to them.
         """
         measured = self.get_monthly_usage(month)
         adjustment = self.get_cost_adjustment(month)

@@ -40,4 +40,4 @@ max_parallel_workers = 50     # Hard cap on concurrent workers to avoid OS file-
 default_font_size = 9         # Default body font size (points) for PDF and Word output
 
 [budget]
-warning_threshold_pct = 80    # Warn when monthly spend exceeds this percentage of the limit
+warning_threshold_pct = 80    # Share of the limit at which `usage report` and the web sidebar start warning

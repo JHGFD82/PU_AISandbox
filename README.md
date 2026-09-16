@@ -309,7 +309,7 @@ This toolkit tracks usage one calendar month at a time for each professor that i
 - All-time totals (from the command line: `usage report --all-time`) are worked out on demand by adding up the active file and all archived months
 - The monthly limit lives in `model_catalog.json`; the warning threshold in `settings.default.toml`
 
-**The monthly limit is advisory.** Warnings are presented when going over the monthly budget but never stop a command from executing. See [`docs/token-usage-guide.md`](docs/token-usage-guide.md#what-the-budget-does-and-doesnt-do).
+**The monthly limit is advisory.** Going over it never stops a command, and nothing announces it at the time. The figures and the warnings are shown in `usage report` and in the web interface's spending sidebar — both of which you have to go and look at. See [`docs/token-usage-guide.md`](docs/token-usage-guide.md#what-the-budget-does-and-doesnt-do).
 
 ---
 
@@ -355,7 +355,7 @@ For any setting you wish to change:
 | `[processing]` | `default_page_size` | `2000` | Target characters per page when splitting DOCX/TXT |
 | `[processing]` | `max_parallel_workers` | `50` | Hard cap on concurrent workers |
 | `[output]` | `default_font_size` | `9` | Body font size (pt) for PDF/Word output |
-| `[budget]` | `warning_threshold_pct` | `80` | Warn when spend exceeds this % of monthly limit |
+| `[budget]` | `warning_threshold_pct` | `80` | Share of the monthly limit at which reports start warning |
 
 See [`docs/configuration.md`](docs/configuration.md) for plugin-level settings (`[translation]`, `[ocr]`, etc.).
 
