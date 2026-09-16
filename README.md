@@ -248,7 +248,7 @@ python main.py jh43 transcribe en -i scan.png -o result.txt             # single
 python main.py jh43 transcribe en -i scans/                             # folder of images
 ```
 
-To use an alternate AI endpoint (an HPC cluster, or a provider's own API), use colon syntax with the name of an `[endpoints.<name>]` table, defined in `settings.default.toml`, a shared file, or your `preferences.toml`, with its API key in `settings.toml`:
+To use an alternate AI endpoint (an HPC cluster, or a provider's own API), use colon syntax with the name of an `[endpoints.<name>]` table, defined in `settings.default.toml`, a shared file, or your `preferences.toml`. If the endpoint asks for an API key, that goes in `settings.toml`; a model running on a cluster or on your own computer usually needs none:
 
 ```bash
 python main.py jh43 translate jp-en -i paper.pdf -m my_cluster:llama-3-70b

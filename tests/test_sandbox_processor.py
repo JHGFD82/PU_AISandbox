@@ -350,7 +350,8 @@ class TestAnEndpointsOwnSettingsAreUsed:
 
         cfg = APIConfig(
             api_name="cluster", display_name="Cluster",
-            base_url="https://cluster.example.com/v1", api_key="key", **config,
+            base_url="https://cluster.example.com/v1",
+            api_key=config.pop("api_key", "key"), **config,
         )
         proc = SandboxProcessor.__new__(SandboxProcessor)
         object.__setattr__(proc, "_api_key", "k")
@@ -362,6 +363,24 @@ class TestAnEndpointsOwnSettingsAreUsed:
     def test_the_endpoints_address_is_the_one_used(self, monkeypatch):
         service = self._service(monkeypatch)
         assert "cluster.example.com" in str(service.client.base_url)
+
+    def test_an_endpoint_with_no_key_can_still_be_reached(self, monkeypatch):
+        """A model on a cluster or on this computer usually asks for no key,
+        and the OpenAI client refuses to be built with an empty one."""
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        service = self._service(monkeypatch, api_key="")
+        assert service.client.api_key
+
+    def test_no_key_never_borrows_one_from_the_environment(self, monkeypatch):
+        """Somebody's real OpenAI key must not be sent to a server that never
+        asked for one."""
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-somebodys-real-key")
+        service = self._service(monkeypatch, api_key="")
+        assert service.client.api_key != "sk-somebodys-real-key"
+
+    def test_a_key_that_is_set_is_the_one_sent(self, monkeypatch):
+        service = self._service(monkeypatch, api_key="the-clusters-key")
+        assert service.client.api_key == "the-clusters-key"
 
     def test_its_timeout_is_the_one_used(self, monkeypatch):
         service = self._service(monkeypatch, timeout=7)

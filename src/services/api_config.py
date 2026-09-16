@@ -26,8 +26,10 @@ names to a specific endpoint instead of the built-in Portkey service::
     openai_compatible = true
     default_model = "llama-3-70b-instruct"
 
-Then the credential. It can go beside the settings above, or on its own in
-settings.toml, which is this installation's alone and never shared:
+Then the credential, if the endpoint asks for one — a model running on a
+cluster or on this computer usually doesn't, and then there is nothing more to
+add. It can go beside the settings above, or on its own in settings.toml, which
+is this installation's alone and never shared:
 
     [endpoints.hpc_cluster]
     key = "sk-..."
@@ -116,7 +118,9 @@ class APIConfig:
         display_name:       Human-readable name shown in logs and --list-apis output.
         base_url:           The root URL for the API (e.g. ``https://example.com/v1``).
         api_key:            The resolved credential, from wherever it was put
-                            — see ``endpoint_credential()``.
+                            — see ``endpoint_credential()``. Empty for an
+                            endpoint that needs none, such as a model running
+                            on a cluster or on this computer.
         openai_compatible:  Whether this endpoint speaks the OpenAI API's
                             language, which nearly every self-hosted server and
                             provider does. True unless said otherwise, since it
@@ -150,11 +154,13 @@ def load_api_config(api_name: str) -> APIConfig:
 
     Combines the endpoint's definition (from the merged ``settings.*.toml``
     layers) with its credential (from either place it is allowed to be — see
-    ``endpoint_credential()``).
+    ``endpoint_credential()``). An endpoint with no credential anywhere is
+    loaded all the same, since a model running on a cluster or on this computer
+    usually needs none.
 
     Raises:
         ValueError: If the endpoint is missing from every settings layer, or
-                    if it has no credential in either place.
+                    has no ``base_url``.
     """
     endpoints: dict = settings.ENDPOINTS
 
@@ -182,20 +188,10 @@ def load_api_config(api_name: str) -> APIConfig:
 
     # Either of the two places it may have been put — see endpoint_credential(),
     # which is also what the settings page and `settings list` ask, so that what
-    # they report and what actually happens here cannot come apart.
+    # they report and what actually happens here cannot come apart. None at all
+    # is an ordinary answer: a model running on a cluster or on this computer
+    # usually asks for no key, and one that does says so when it is reached.
     api_key = endpoint_credential(api_name)
-    if not api_key:
-        raise ValueError(
-            f"No API key for the endpoint '{api_name}'.\n"
-            "Add it to settings.toml, in your own files folder:\n"
-            f"    [endpoints.{api_name}]\n"
-            '    key = "..."\n'
-            "That file belongs to this installation alone — it is never shared "
-            "and never syncs anywhere.\n"
-            "The key can go beside the rest of the endpoint's settings instead, "
-            "in preferences.toml or the shared settings file, but a key in a "
-            "shared file is a key given to everyone who can read it."
-        )
 
     known_keys = {"name", "base_url", "openai_compatible", "default_model",
                   "timeout", "verify_ssl", "key"}

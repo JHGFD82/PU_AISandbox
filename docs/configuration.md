@@ -456,7 +456,7 @@ The next request includes it once more. If the provider still turns it down, tha
 
 ## Alternate AI endpoints
 
-An `[endpoints.<name>]` table describes an AI endpoint other than the built-in service — a model running on an HPC cluster or other self-hosted inference server, or a provider's direct API (many expose an OpenAI-compatible interface reachable with just a URL and a key).
+An `[endpoints.<name>]` table describes an AI endpoint other than the built-in service — a model running on an HPC cluster or other self-hosted inference server, or a provider's direct API (many expose an OpenAI-compatible interface reachable with just a URL, and a key if they ask for one).
 
 Definitions merge through the same three layers as every other setting, and so does the credential, in `settings.toml`, because credentials are never meant to be shared or layered.
 
@@ -492,7 +492,9 @@ accident. An endpoint put there is lost on the next update, or published. Use
 `preferences.toml` in your settings location, or the shared settings file your
 group follows.
 
-### Its API key
+### Its API key, if it has one
+
+A model running on a cluster or on your own computer usually asks for no key at all, and if that is your situation there is nothing to add here: leave the key out and the endpoint works as it is. You only need a key when the endpoint turns requests away without one, which a provider's own API always will, and in that case the request fails with an authentication error.
 
 **Put it in `settings.toml`.** That file belongs to this installation alone: it
 is never shared, never layered, and never syncs anywhere. It is where the
