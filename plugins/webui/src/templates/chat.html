@@ -1352,7 +1352,16 @@ function renderModelList() {
     if (!groups.has(owner)) groups.set(owner, []);
     groups.get(owner).push(m.name);
   });
+  // Skip anything the catalog already has for real: once an endpoint model
+  // has actually been used, the server records it properly (see
+  // sync_endpoint_models) and it is already in the loop above, filed under
+  // the endpoint's display name. Without this check, a model reached that
+  // far showed up twice — once there, and once here under its raw endpoint
+  // key, which is a different-looking heading from the same server's
+  // display name.
+  const catalogNames = new Set((state.models || []).map(m => m.name));
   rememberedEndpointModels().forEach(full => {
+    if (catalogNames.has(full)) return;
     const endpoint = full.split(":")[0];
     if (!groups.has(endpoint)) groups.set(endpoint, []);
     groups.get(endpoint).push(full);
