@@ -529,6 +529,23 @@ without anyone having to arrange it.
 Either way the key is stored as text anyone with the file can read. None of
 these files is tracked by git.
 
+### If a model is available in more than one place
+
+A model name on its own, such as `-m gpt-oss-120b`, always runs on the built-in Princeton AI Sandbox. To run a model on one of your endpoints you always have to say so, by putting the endpoint's name and a colon in front of it: `-m my_cluster:gpt-oss-120b`. This ensures your work never goes somewhere you did not choose, which matters because the two are not the same: the Sandbox is billed to your budget, and your cluster is not.
+
+When the model you name is also available on one of your endpoints, the sandbox still runs it on the Sandbox, and tells you where else it could have gone:
+
+```
+'gpt-oss-120b' is available in more than one place: on the Princeton AI Sandbox, and on
+'my_cluster'. It will run on the Princeton AI Sandbox, since a model name on its own always
+does. To run it on my_cluster instead, put that name in front of it:
+    -m my_cluster:gpt-oss-120b
+```
+
+Ollama puts a colon in every model's name (`qwen3:8b`, `qwen3.8:27b-mlx`), so those always need the endpoint in front as well: `-m my_mac_studio:qwen3.8:27b-mlx`. If you leave it off, the sandbox reads `qwen3.8` as the name of an endpoint, and stops to tell you which of your endpoints actually runs that model.
+
+The web interface does not have this problem, because its list of models shows each endpoint's models under their full names.
+
 ### Its models are added to the catalog for you
 
 You do not need to add an endpoint's models to `model_catalog.json` yourself. The sandbox asks each endpoint which models it runs whenever you open the web interface's list of models or run `python main.py --list-models`, and writes each one into the catalog under the same name `-m` takes, such as `my_cluster:llama-3-70b`. This means a model you have just loaded on your cluster appears in the web interface's menu on its own, and choosing it there sends the work to your cluster. Nearly every OpenAI-compatible server (vLLM, Ollama, LM Studio and the like) answers this question; for one that does not, the endpoint's `default_model` is added regardless, and so is any model you name with `-m my_cluster:model-name`.

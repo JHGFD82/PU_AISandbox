@@ -464,7 +464,7 @@ python main.py jh43 translate jp-en -i paper.pdf -m my_cluster:llama-3-70b-instr
 
 The part before the colon names the endpoint; everything after is passed to it as the model name. Nothing is looked up or priced in the catalog, though the model is added to it so that it appears in lists from then on (see [Its models are added to the catalog for you](configuration.md#its-models-are-added-to-the-catalog-for-you)), and the endpoint's API key, if it has one, is read from `endpoints.<name>.key` in `settings.toml`. Token usage is still recorded.
 
-**Everything at once** — if `[config] default_endpoint` is set in any settings layer, every bare model name goes there rather than to the built-in service.
+A name with a colon of its own, as every Ollama model has, keeps it: `-m my_mac_studio:qwen3.8:27b-mlx` asks `my_mac_studio` for `qwen3.8:27b-mlx`. **A model name without an endpoint's name in front always runs on the built-in service**, even when one of your endpoints runs a model by the same name — see [If a model is available in more than one place](configuration.md#if-a-model-is-available-in-more-than-one-place).
 
 See [Configuration → Alternate AI endpoints](configuration.md#alternate-ai-endpoints) for how to define one.
 

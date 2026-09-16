@@ -77,6 +77,100 @@ def _discover_plugin_mixins() -> tuple[type, ...]:
     return tuple(mixins)
 
 
+# Said once per running process each, not on every request: the web interface
+# builds a processor for every chat turn.
+_already_said: set[str] = set()
+
+
+def _say_default_endpoint_is_not_used() -> None:
+    """Tell somebody who has set ``default_endpoint`` that nothing acts on it.
+
+    A model name without an endpoint's name in front always runs on the
+    built-in service, so the setting changes nothing. Saying so is better than
+    leaving it looking as though it took effect.
+    """
+    from .. import settings
+
+    if not settings.DEFAULT_ENDPOINT or "default_endpoint" in _already_said:
+        return
+    _already_said.add("default_endpoint")
+    logger.warning(
+        "Your settings name '%s' as default_endpoint, but that setting is not used. "
+        "A model name on its own always runs on the Princeton AI Sandbox. To run a "
+        "model on '%s', put that name and a colon in front of the model, as in "
+        "-m %s:the-model-name. You can take default_endpoint out of your settings.",
+        settings.DEFAULT_ENDPOINT, settings.DEFAULT_ENDPOINT, settings.DEFAULT_ENDPOINT,
+    )
+
+
+def _no_such_endpoint_message(model: str, error: ValueError) -> str:
+    """Explain a model name whose part before the colon is not a configured endpoint.
+
+    Ollama puts a colon in every model's name (``qwen3.8:27b-mlx``), so the
+    likeliest reason is a model named without the endpoint that runs it. When
+    the catalog knows which endpoints those are, that is the whole message:
+    saying the endpoint "qwen3.8" is not configured, and how to add one, would
+    send somebody off to do the wrong thing.
+
+    Args:
+        model: The model name as typed.
+        error: What ``load_api_config()`` said about the endpoint.
+
+    Returns:
+        The message to show.
+    """
+    from ..models import endpoints_running
+
+    places = endpoints_running(model)
+    if places:
+        how = "\n".join(f"    -m {place}:{model}" for place in places)
+        which = "that name" if len(places) == 1 else "the name of the one you want"
+        return (
+            f"'{model}' runs on {_names(places)}, not on the Princeton AI Sandbox. "
+            f"To use it, put {which} in front of it:\n{how}"
+        )
+    return (
+        f"API configuration error: {error}\n\n"
+        f"If '{model}' is the model's full name (Ollama's have a colon in them, such "
+        "as qwen3:8b), put the name of the endpoint that runs it in front: "
+        f"-m <endpoint>:{model}"
+    )
+
+
+def _warn_if_it_runs_elsewhere_too(model: str) -> None:
+    """Warn when a model about to run on the built-in service is also on an endpoint.
+
+    The name on its own decides it — the built-in service — but somebody who
+    meant their cluster's copy should find out now rather than from the bill.
+
+    Args:
+        model: The model name as typed, with no endpoint in front.
+    """
+    from ..models import endpoint_of, endpoints_running, get_available_models
+
+    try:
+        on_the_sandbox = model in get_available_models() and endpoint_of(model) is None
+    except (FileNotFoundError, ValueError):
+        return
+    places = endpoints_running(model) if on_the_sandbox else []
+    if not places or model in _already_said:
+        return
+    _already_said.add(model)
+    how = "\n".join(f"    -m {place}:{model}" for place in places)
+    logger.warning(
+        "'%s' is available in more than one place: on the Princeton AI Sandbox, and on "
+        "%s. It will run on the Princeton AI Sandbox, since a model name on its own "
+        "always does. To run it on %s instead, put that name in front of it:\n%s",
+        model, _names(places), "one of those" if len(places) > 1 else places[0], how,
+    )
+
+
+def _names(places: list[str]) -> str:
+    """Join endpoint names for a sentence: 'a', 'a and b', 'a, b and c'."""
+    quoted = [f"'{p}'" for p in places]
+    return quoted[0] if len(quoted) == 1 else ", ".join(quoted[:-1]) + " and " + quoted[-1]
+
+
 class SandboxProcessor(*_discover_plugin_mixins(), _FileTypeMixin, _CommandMixin):
     """Central coordinator that a plugin's run() method builds to carry out its command.
 
@@ -132,25 +226,23 @@ class SandboxProcessor(*_discover_plugin_mixins(), _FileTypeMixin, _CommandMixin
 
             logger.debug(f"Initializing processor for professor: {self.professor_display_name}")
 
+            _say_default_endpoint_is_not_used()
+
             # Parse colon syntax from model (e.g. "della:qwen-preview") when
-            # no explicit api_config has been supplied.
+            # no explicit api_config has been supplied. A name without one
+            # always runs on the built-in service; reaching an endpoint always
+            # means naming it.
             if api_config is None and model and ":" in model:
-                from ..services.api_config import parse_model_source, load_api_config, get_default_api_name
+                from ..services.api_config import parse_model_source, load_api_config
                 api_name, bare_model = parse_model_source(model)
                 if api_name:
                     try:
                         api_config = load_api_config(api_name)
                         model = bare_model
                     except ValueError as e:
-                        raise CLIError(f"API configuration error: {e}") from e
-            elif api_config is None:
-                from ..services.api_config import get_default_api_name, load_api_config
-                default = get_default_api_name()
-                if default:
-                    try:
-                        api_config = load_api_config(default)
-                    except ValueError:
-                        pass  # misconfigured default — fall through to sandbox
+                        raise CLIError(_no_such_endpoint_message(model, e)) from e
+            elif api_config is None and model:
+                _warn_if_it_runs_elsewhere_too(model)
 
             if api_config is not None:
                 # Recorded so the model is in the lists from now on, including

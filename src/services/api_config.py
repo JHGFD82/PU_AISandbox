@@ -13,13 +13,12 @@ endpoint's settings, or on its own in ``settings.toml`` (see
 belongs to this installation alone and is never shared or layered, so a
 credential there wins over one in a file a group follows.
 
-Set ``[config] default_endpoint`` in any settings layer to route bare model
-names to a specific endpoint instead of the built-in Portkey service::
+A model name with no endpoint's name in front of it always goes to the
+built-in Portkey service. Reaching an endpoint always means naming it, so that
+a model available in more than one place is never sent somewhere the person
+did not choose — see ``parse_model_source()``. An endpoint is defined like this::
 
     # preferences.toml
-    [config]
-    default_endpoint = "hpc_cluster"
-
     [endpoints.hpc_cluster]
     name = "HPC Cluster"
     base_url = "http://my-cluster.internal:8000/v1"
@@ -41,7 +40,9 @@ Colon syntax on the CLI::
 
     python main.py heller prompt -m hpc_cluster:llama-3-70b
     python main.py heller prompt -m cloud_provider:model-name
-    python main.py heller prompt -m llama-3-70b   # uses "default_endpoint" if set
+    python main.py heller prompt -m qwen3.8:27b-mlx          # an error: say which endpoint
+    python main.py heller prompt -m my_mac_studio:qwen3.8:27b-mlx
+    python main.py heller prompt -m gpt-4o        # the built-in service
 """
 
 from __future__ import annotations
@@ -268,22 +269,18 @@ def list_apis() -> list[str]:
     return list(settings.ENDPOINTS.keys())
 
 
-def get_default_api_name() -> str | None:
-    """Return the default endpoint name, or ``None``.
-
-    Reads ``[config] default_endpoint`` from the merged settings layers.
-    When set, bare model strings (no colon prefix) are routed to this
-    endpoint instead of the built-in Portkey service.
-    """
-    return settings.DEFAULT_ENDPOINT
-
-
 def parse_model_source(model: str) -> tuple[str | None, str]:
     """Split an optional ``api_name:model`` string into its parts.
 
     The colon separator mirrors URL syntax — the part before the first colon
-    is the endpoint name; everything after is the model name (which may itself
-    contain slashes for provider/model notation).
+    is the endpoint name; everything after is the model name, which may itself
+    contain slashes (``meta-llama/Llama-3-70B``) or further colons. Ollama names
+    every model with a colon of its own, so ``my_mac_studio:qwen3.8:27b-mlx``
+    asks ``my_mac_studio`` for ``qwen3.8:27b-mlx``.
+
+    A name with no colon is always for the built-in service, even when an
+    endpoint runs a model by the same name. Reaching an endpoint always means
+    naming it, so nothing is sent somewhere the person did not choose.
 
     Args:
         model: A model string such as ``"hpc_cluster:llama-3-70b"``,
@@ -299,6 +296,7 @@ def parse_model_source(model: str) -> tuple[str | None, str]:
         parse_model_source("cloud_provider:model-name")  -> ("cloud_provider", "model-name")
         parse_model_source("gpt-4o")                     -> (None, "gpt-4o")
         parse_model_source("gpt-4o-mini")                -> (None, "gpt-4o-mini")
+        parse_model_source("my_mac_studio:qwen3:8b")     -> ("my_mac_studio", "qwen3:8b")
     """
     if ":" in model:
         api_name, _, bare_model = model.partition(":")

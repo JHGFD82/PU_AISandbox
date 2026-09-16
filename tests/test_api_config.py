@@ -7,7 +7,6 @@ import pytest
 from src.services.api_config import (
     APIConfig,
     credential_path_for_endpoint,
-    get_default_api_name,
     list_apis,
     load_api_config,
     parse_model_source,
@@ -174,20 +173,6 @@ class TestListAPIs:
     def test_empty_when_no_endpoints(self):
         with _patch_endpoints(_ENDPOINTS_EMPTY):
             assert list_apis() == []
-
-
-# ---------------------------------------------------------------------------
-# get_default_api_name
-# ---------------------------------------------------------------------------
-
-class TestGetDefaultApiName:
-    def test_returns_default(self):
-        with patch("src.services.api_config.settings.DEFAULT_ENDPOINT", "hpc_cluster"):
-            assert get_default_api_name() == "hpc_cluster"
-
-    def test_returns_none_when_unset(self):
-        with patch("src.services.api_config.settings.DEFAULT_ENDPOINT", None):
-            assert get_default_api_name() is None
 
 
 # ---------------------------------------------------------------------------

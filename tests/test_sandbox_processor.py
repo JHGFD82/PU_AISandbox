@@ -120,12 +120,125 @@ class TestSandboxProcessorInit:
                             lambda name: ("fake-key", "Dr. Smith"))
         monkeypatch.setattr("src.runtime.sandbox_processor.TokenTracker",
                             MagicMock(return_value=MagicMock()))
-        import src.services.api_config as _cfg_mod
-        monkeypatch.setattr(_cfg_mod, "get_default_api_name", lambda: None)
 
         proc = SandboxProcessor("smith", model="gpt-4o")
         assert proc._api_config is None
         assert proc._svc_kwargs["model"] == "gpt-4o"
+
+
+class TestAModelNameOnItsOwnRunsOnTheSandbox:
+    """Reaching an endpoint always means naming it. A name on its own runs on
+    the built-in service, even when an endpoint runs a model by that name."""
+
+    @pytest.fixture
+    def setup(self, monkeypatch, tmp_path):
+        import json
+
+        import src.models.catalog as catalog_module
+        import src.runtime.sandbox_processor as sp
+        import src.settings as settings_mod
+        import src.settings_store as settings_store
+
+        path = tmp_path / "model_catalog.json"
+        path.write_text(json.dumps({
+            "config": {"pricing_unit": 1_000_000, "monthly_limit": 250.0},
+            "models": {
+                "gpt-oss-120b": {"input": 0.1, "output": 0.5},
+                "my_cluster:gpt-oss-120b": {"endpoint": "my_cluster", "model": "gpt-oss-120b"},
+                "my_mac_studio:gpt-oss-120b": {"endpoint": "my_mac_studio", "model": "gpt-oss-120b"},
+                "my_mac_studio:qwen3.8:27b-mlx": {
+                    "endpoint": "my_mac_studio", "model": "qwen3.8:27b-mlx",
+                },
+            },
+        }))
+        monkeypatch.setattr(catalog_module, "get_model_catalog_path", lambda: path)
+        monkeypatch.setattr(catalog_module, "_catalog_cache", None)
+        monkeypatch.setattr(settings_mod, "ENDPOINTS", {
+            "my_cluster": {"base_url": "http://cluster.internal:8000/v1"},
+            "my_mac_studio": {"base_url": "http://localhost:11434/v1"},
+        })
+        monkeypatch.setattr(settings_mod, "DEFAULT_ENDPOINT", None)
+        monkeypatch.setattr(settings_store, "get_value", lambda _p: None)
+        monkeypatch.setattr(sp, "_already_said", set())
+        monkeypatch.setattr("src.runtime.sandbox_processor.get_api_key",
+                            lambda name: ("fake-key", "Dr. Smith"))
+        monkeypatch.setattr("src.runtime.sandbox_processor.TokenTracker",
+                            MagicMock(return_value=MagicMock()))
+        monkeypatch.setattr("src.models.remember_endpoint_model", lambda *a: None)
+        return settings_mod
+
+    def test_a_name_on_its_own_runs_on_the_sandbox_even_if_an_endpoint_has_it(self, setup):
+        proc = SandboxProcessor("smith", model="gpt-oss-120b")
+        assert proc._api_config is None
+
+    def test_it_says_where_else_the_model_is_and_how_to_get_it(self, setup, caplog):
+        import logging
+
+        with caplog.at_level(logging.WARNING):
+            SandboxProcessor("smith", model="gpt-oss-120b")
+        said = caplog.text
+        assert "more than one place" in said
+        assert "-m my_cluster:gpt-oss-120b" in said
+        assert "-m my_mac_studio:gpt-oss-120b" in said
+
+    def test_it_says_so_once_not_on_every_chat_turn(self, setup, caplog):
+        import logging
+
+        with caplog.at_level(logging.WARNING):
+            SandboxProcessor("smith", model="gpt-oss-120b")
+            SandboxProcessor("smith", model="gpt-oss-120b")
+        assert caplog.text.count("more than one place") == 1
+
+    def test_no_warning_for_a_model_only_the_sandbox_has(self, setup, caplog):
+        import json
+        import logging
+
+        import src.models.catalog as catalog_module
+
+        path = catalog_module.get_model_catalog_path()
+        data = json.loads(path.read_text())
+        data["models"]["gpt-4o-mini"] = {"input": 0.15, "output": 0.6}
+        path.write_text(json.dumps(data))
+        with caplog.at_level(logging.WARNING):
+            SandboxProcessor("smith", model="gpt-4o-mini")
+        assert "more than one place" not in caplog.text
+
+    def test_naming_the_endpoint_reaches_it_with_the_ollama_name_whole(self, setup):
+        proc = SandboxProcessor("smith", model="my_mac_studio:qwen3.8:27b-mlx")
+        assert proc._api_config.api_name == "my_mac_studio"
+        assert proc._svc_kwargs["model"] == "qwen3.8:27b-mlx"
+
+    def test_an_ollama_name_on_its_own_says_which_endpoint_to_name(self, setup):
+        with pytest.raises(CLIError) as caught:
+            SandboxProcessor("smith", model="qwen3.8:27b-mlx")
+        assert "-m my_mac_studio:qwen3.8:27b-mlx" in str(caught.value)
+
+    def test_default_endpoint_is_not_acted_on_and_says_so(self, setup, caplog):
+        import logging
+
+        setup.DEFAULT_ENDPOINT = "my_mac_studio"
+        with caplog.at_level(logging.WARNING):
+            proc = SandboxProcessor("smith", model="gpt-4o-mini")
+        assert proc._api_config is None
+        assert "default_endpoint" in caplog.text
+        assert "not used" in caplog.text
+
+    def test_a_model_only_an_endpoint_has_says_how_to_reach_it(self, setup):
+        """The resolver's "not in the catalog" is true, and no help."""
+        from src.models import resolve_model
+
+        import json
+        import src.models.catalog as catalog_module
+
+        path = catalog_module.get_model_catalog_path()
+        data = json.loads(path.read_text())
+        data["models"]["my_mac_studio:llama-3-70b"] = {
+            "endpoint": "my_mac_studio", "model": "llama-3-70b",
+        }
+        path.write_text(json.dumps(data))
+        with pytest.raises(CLIError) as caught:
+            resolve_model("llama-3-70b")
+        assert "-m my_mac_studio:llama-3-70b" in str(caught.value)
 
 
 # ---------------------------------------------------------------------------
