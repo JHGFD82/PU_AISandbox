@@ -71,7 +71,7 @@ from src.models import (
     sync_endpoint_models,
 )
 from src.runtime.info_commands import list_optional_settings, setting_is_set
-from src.services.api_config import credential_path_for_endpoint
+from src.services.api_config import credential_path_for_endpoint, endpoint_address_problem
 from src.settings import (
     CHAT_ROLE,
     ENDPOINTS,
@@ -466,6 +466,9 @@ def _settings_snapshot() -> dict:
             "openai_compatible": bool(raw.get("openai_compatible", True)),
             "default_model": raw.get("default_model"),
             "timeout": raw.get("timeout", 30),
+            # What is wrong with its address, if it is a recognisable mistake,
+            # so the page says so before anyone tries it and gets only a 404.
+            "address_problem": endpoint_address_problem(api_name, raw.get("base_url", "")),
             "credential_path": cred_path,
             "key_set": field_status.get(cred_path, False),
         })

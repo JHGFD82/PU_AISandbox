@@ -92,6 +92,76 @@ def endpoint_name_from_credential_path(path: str) -> str | None:
     return None
 
 
+# Addresses of Ollama's own interface. Ollama also speaks the OpenAI API's
+# language, which is the only one the sandbox does, but at /v1 — and its
+# documentation mostly shows these, so they are what somebody copies.
+_OLLAMA_OWN_PATHS = ("/api/generate", "/api/chat", "/api/embed", "/api/embeddings", "/api/tags")
+
+# The port Ollama listens on unless told otherwise.
+_OLLAMA_PORT = 11434
+
+
+def endpoint_address_problem(api_name: str, base_url: str) -> str | None:
+    """Say what is wrong with an endpoint's address, if it is one of the recognisable mistakes.
+
+    The sandbox adds ``/chat/completions`` to the address to send a request,
+    the way every OpenAI-compatible server expects. Two mistakes turn that into
+    an address that does not exist, and the server's only reply is "404 page
+    not found", which says nothing about why:
+
+    - Ollama's own address (``http://localhost:11434/api/generate``), which is
+      what Ollama's documentation mostly shows, instead of the one it offers
+      for OpenAI-style requests (``http://localhost:11434/v1``).
+    - The full address of a request (``.../v1/chat/completions``) instead of
+      the part before it.
+
+    Args:
+        api_name: The endpoint's name, for the message.
+        base_url: Its ``base_url`` setting.
+
+    Returns:
+        A message saying what to change ``base_url`` to, or ``None`` if the
+        address looks right.
+    """
+    from urllib.parse import urlsplit, urlunsplit
+
+    parts = urlsplit(base_url.strip())
+    path = parts.path.rstrip("/")
+    fixed_path: str | None = None
+    why = ""
+
+    for own in _OLLAMA_OWN_PATHS:
+        if path.endswith(own):
+            fixed_path = path[: -len(own)] + "/v1"
+            why = (
+                "That is Ollama's own address, which the sandbox cannot talk to. Ollama "
+                "also answers the way OpenAI's servers do, which is the only way the "
+                "sandbox can, at an address ending in /v1."
+            )
+            break
+    else:
+        if path.endswith("/chat/completions"):
+            fixed_path = path[: -len("/chat/completions")]
+            why = (
+                "That is the address of a single request rather than of the endpoint. "
+                "The sandbox adds /chat/completions itself."
+            )
+        elif parts.port == _OLLAMA_PORT and path in ("", "/api"):
+            fixed_path = "/v1"
+            why = (
+                "That looks like Ollama, which answers the way OpenAI's servers do — the "
+                "only way the sandbox can talk — at an address ending in /v1."
+            )
+
+    if fixed_path is None:
+        return None
+    fixed = urlunsplit((parts.scheme, parts.netloc, fixed_path, "", ""))
+    return (
+        f"The address for the endpoint '{api_name}' is {base_url}. {why} Change "
+        f'base_url in its settings to:\n    base_url = "{fixed}"'
+    )
+
+
 def endpoint_credential(api_name: str) -> str:
     """Return one endpoint's credential, from whichever of the two places it was put.
 
@@ -171,8 +241,9 @@ def load_api_config(api_name: str) -> APIConfig:
     usually needs none.
 
     Raises:
-        ValueError: If the endpoint is missing from every settings layer, or
-                    has no ``base_url``.
+        ValueError: If the endpoint is missing from every settings layer, has
+                    no ``base_url``, or has one that cannot work — see
+                    ``endpoint_address_problem()``.
     """
     endpoints: dict = settings.ENDPOINTS
 
@@ -197,6 +268,11 @@ def load_api_config(api_name: str) -> APIConfig:
         raise ValueError(
             f"Endpoint '{api_name}' is missing required field 'base_url'."
         )
+    problem = endpoint_address_problem(api_name, base_url)
+    if problem:
+        # Refused here, before anything is sent: sent, it fails with a bare
+        # "404 page not found" that points nowhere near the setting.
+        raise ValueError(problem)
 
     # Either of the two places it may have been put — see endpoint_credential(),
     # which is also what the settings page and `settings list` ask, so that what

@@ -14,11 +14,12 @@ came from one. The entry says which endpoint it belongs to and carries no
 price, because calls to an endpoint are counted but never costed; with no price
 it is also never picked as "the cheapest model" for work meant for the sandbox.
 
-The endpoint's ``default_model`` is recorded whether or not the server lists
-it. So is a model somebody names with the colon syntax, which matters for a
-server that will not say what it runs; on one that does, a name it does not
-list is taken out again the next time it is asked, since sending work there
-would only fail.
+When an endpoint answers, its list is taken as the whole truth about what it
+runs. Only when it has never answered are its ``default_model``, and any model
+somebody names with the colon syntax, recorded on the settings' word — the one
+way a server that will not say what it runs gets anything into the lists. A
+``default_model`` the endpoint does not list is reported rather than added, so
+a model is never in the catalog twice under two spellings.
 """
 
 from __future__ import annotations
@@ -46,6 +47,15 @@ _ASK_AGAIN_AFTER = timedelta(hours=1)
 
 # When each endpoint was last asked, by name, in this process.
 _last_asked: Dict[str, datetime] = {}
+
+# What each endpoint said it runs the last time it answered, in this process.
+# Used between askings, so that a name the endpoint does not list is not added
+# back in the hour before it is asked again.
+_last_answer: Dict[str, list[str]] = {}
+
+# Endpoints whose default_model has already been reported as not among the
+# models they run, so the warning is given once rather than on every list.
+_default_reported: set[str] = set()
 
 # One update to the catalog at a time from this module, so two browser tabs
 # opening at once cannot each add the same models and write over each other.
@@ -113,6 +123,24 @@ def endpoints_running(model: str) -> list[str]:
     })
 
 
+def _is_listed(model: str, listed: list[str]) -> bool:
+    """Say whether an endpoint's list of models includes *model*.
+
+    Ollama lists a model under its full name, tag included, but answers to the
+    name without a tag when that tag is ``latest``: ``llama3`` and
+    ``llama3:latest`` are one model. Counting them as two is how one model came
+    to appear in the catalog twice.
+
+    Args:
+        model: A model name, as somebody wrote it.
+        listed: The names the endpoint gave.
+
+    Returns:
+        ``True`` if the endpoint listed that model, by either name.
+    """
+    return model in listed or f"{model}:latest" in listed
+
+
 def _new_entry(api_name: str, model: str) -> Dict[str, Any]:
     """Return the catalog entry recorded for a model found on an endpoint."""
     return {
@@ -152,7 +180,9 @@ def remember_endpoint_model(api_name: str, model: str) -> bool:
 
     Called whenever work is sent to an endpoint, so a model somebody names with
     the colon syntax is in the lists from then on, even on a server that will
-    not say which models it runs. Nothing is asked of the endpoint.
+    not say which models it runs. Nothing is asked of the endpoint, but when it
+    has already said what it runs, a name that is not on its list is not added:
+    it is either the listed model under another spelling, or not one it runs.
 
     Args:
         api_name: The endpoint's name (e.g. ``'my_cluster'``).
@@ -166,6 +196,12 @@ def remember_endpoint_model(api_name: str, model: str) -> bool:
         of those is a reason to stop the work itself, so nothing is raised.
     """
     name = endpoint_model_name(api_name, model)
+    answer = _last_answer.get(api_name)
+    if answer and model not in answer:
+        # Already in the lists under the endpoint's own name for it, or not a
+        # model the endpoint runs at all. Either way a second entry would only
+        # be a duplicate or a model that cannot be used.
+        return False
     with _lock:
         try:
             catalog = _catalog.load_model_catalog()
@@ -187,8 +223,9 @@ def sync_endpoint_models(force: bool = False) -> None:
     """Bring the catalog's list of endpoint models up to date with the endpoints themselves.
 
     For every endpoint defined in the settings, asks it which models it runs
-    and adds any the catalog does not have, along with its ``default_model``.
-    A model that belongs to an endpoint which is no longer defined is taken
+    and adds any the catalog does not have. An endpoint that has never
+    answered has its ``default_model`` added instead, since that is all there
+    is to go on. A model that belongs to an endpoint which is no longer defined is taken
     out, and so is one the endpoint has stopped listing, since picking either
     would only fail.
 
@@ -244,7 +281,6 @@ def _sync(endpoints: Dict[str, Any], load_api_config: Any, force: bool) -> None:
         if not config.openai_compatible:
             continue
 
-        wanted: set[str] = {config.default_model} if config.default_model else set()
         listed: Optional[list[str]] = None
         last = _last_asked.get(api_name)
         if force or last is None or now - last >= _ASK_AGAIN_AFTER:
@@ -258,8 +294,33 @@ def _sync(endpoints: Dict[str, Any], load_api_config: Any, force: bool) -> None:
                     "Could not ask the endpoint '%s' which models it runs, so its "
                     "models in the catalog were left as they were: %s", api_name, error,
                 )
-        if listed:
-            wanted.update(listed)
+            # An empty list is treated as no answer, since a server with
+            # nothing loaded at this moment is more likely between models than
+            # finished with them.
+            if listed:
+                _last_answer[api_name] = listed
+        known = listed or _last_answer.get(api_name)
+
+        if known:
+            # The endpoint's own list is the whole truth about what it runs.
+            # default_model is not added beside it: when it is on the list it is
+            # already there under the endpoint's name for it, and when it isn't,
+            # an entry for it would be a model that cannot be used.
+            wanted = set(known)
+            default = config.default_model
+            if default and not _is_listed(default, known) and api_name not in _default_reported:
+                _default_reported.add(api_name)
+                logging.warning(
+                    "The endpoint '%s' has default_model = \"%s\", but it does not run a "
+                    "model by that name. The models it runs are: %s. Change "
+                    "default_model to one of those.",
+                    api_name, default, ", ".join(known),
+                )
+        else:
+            # Nothing to go on but the settings, so the model they name is
+            # recorded — the only way a server that never lists its models
+            # gets one in the lists at all.
+            wanted = {config.default_model} if config.default_model else set()
 
         for model in sorted(wanted):
             name = endpoint_model_name(api_name, model)
@@ -268,9 +329,7 @@ def _sync(endpoints: Dict[str, Any], load_api_config: Any, force: bool) -> None:
                 changed = True
                 logging.info("Added '%s' to model_catalog.json.", name)
 
-        # Only an answer takes anything out. An empty list is treated as no
-        # answer, since a server with nothing loaded at this moment is more
-        # likely between models than finished with them.
+        # Only a fresh answer takes anything out.
         if listed:
             for name, entry in list(models.items()):
                 if (
@@ -281,7 +340,7 @@ def _sync(endpoints: Dict[str, Any], load_api_config: Any, force: bool) -> None:
                     del models[name]
                     changed = True
                     logging.info(
-                        "Took '%s' out of model_catalog.json: the endpoint no longer lists it.",
+                        "Took '%s' out of model_catalog.json: the endpoint does not list it.",
                         name,
                     )
 

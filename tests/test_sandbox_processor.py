@@ -213,6 +213,15 @@ class TestAModelNameOnItsOwnRunsOnTheSandbox:
             SandboxProcessor("smith", model="qwen3.8:27b-mlx")
         assert "-m my_mac_studio:qwen3.8:27b-mlx" in str(caught.value)
 
+    def test_a_wrong_address_is_not_mistaken_for_an_ollama_name(self, setup):
+        """The endpoint exists; its address is the problem, and only that is said."""
+        setup.ENDPOINTS["my_mac_studio"]["base_url"] = "http://localhost:11434/api/generate"
+        with pytest.raises(CLIError) as caught:
+            SandboxProcessor("smith", model="my_mac_studio:qwen3.8:27b-mlx")
+        said = str(caught.value)
+        assert 'base_url = "http://localhost:11434/v1"' in said
+        assert "full name" not in said
+
     def test_default_endpoint_is_not_acted_on_and_says_so(self, setup, caplog):
         import logging
 
