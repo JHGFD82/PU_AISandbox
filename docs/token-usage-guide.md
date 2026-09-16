@@ -10,11 +10,18 @@ Tokens are roughly words — a little smaller, so a page of English is usually 4
 
 ## What the budget does, and doesn't, do
 
-**The monthly limit is a number to watch, not a barrier.** Nothing in the sandbox stops working when you pass it. Reports print `⚠️ MONTHLY LIMIT EXCEEDED!`, warnings appear once you cross the warning threshold, and the web interface's spending sidebar shows the same — but every command still runs and still spends.
+**The monthly limit is a number to watch, not a barrier.** Nothing in the sandbox stops working when you pass it, and nothing interrupts you to tell you that you have.
 
-This is deliberate: a translation that stops halfway through a book because a number was crossed is worse than one that finishes and tells you. The only way to actually stop spending on a key is to have that key revoked, which happens outside this tool.
+Where you stand is shown in two places, and you have to go and look at both:
 
-So: check `usage report` when you want to know where you stand. Don't rely on the limit to hold you there.
+1. `usage report` at the terminal. It prints what is left, adds `⚠️  Approaching monthly limit!` once you are past the warning threshold, and `⚠️  MONTHLY LIMIT EXCEEDED!` once you are over the limit.
+2. The web interface's spending sidebar, which shows the same figures.
+
+Nothing is said while a command runs. A translation that carries you from half the budget to twice it will work through to the end without mentioning it, and nothing will mention it afterwards either, until you next ask. The same is true of the web interface: the sidebar is right, but only once you look at it.
+
+Not stopping is deliberate. A translation that halts halfway through a book because a number was crossed is worse than one that finishes and tells you what it cost. The only way to actually stop spending on a key is to have that key revoked, which happens outside this tool.
+
+So: run `usage report` when you want to know where you stand, and run it after a long job — it is the only thing that will tell you.
 
 ---
 
@@ -170,7 +177,7 @@ Prices are per 1,000,000 tokens by default. See [Configuration](configuration.md
 | Setting | Where | Default | Effect |
 |---------|-------|---------|--------|
 | `monthly_limit` | `model_catalog.json`, under `config` | `250.0` | The figure reports measure spending against |
-| `warning_threshold_pct` | `settings.default.toml`, under `[budget]` | `80` | Start warning at this share of the limit |
+| `warning_threshold_pct` | `settings.default.toml`, under `[budget]` | `80` | Share of the limit at which `usage report` and the web sidebar start warning |
 
 ---
 

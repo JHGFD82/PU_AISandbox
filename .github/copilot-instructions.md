@@ -9,7 +9,7 @@ Modular AI platform for Princeton University faculty. Provides per-person API ke
 Two behaviours worth knowing before changing anything near them:
 
 - If a person's configuration is missing or invalid (a blank key, a missing table), `get_api_key()` raises `ValueError`, which is caught and re-raised as `CLIError` with a message the user can act on. The process exits 1.
-- If someone exceeds their monthly budget, `TokenTracker` logs warnings at each threshold (80%, 100%) but does **not** halt processing. Every API call continues. The only way to stop spending is to have the API key revoked externally.
+- If someone exceeds their monthly budget, nothing halts and nothing warns at the time — `record_usage()` does not look at the limit at all. The thresholds are read only by `print_usage_report()` (the `usage report` command) and the web interface's spending sidebar, so a professor learns where they stand only by asking. Every API call continues. The only way to stop spending is to have the API key revoked externally.
 
 ## Architecture
 
@@ -134,9 +134,10 @@ def record_usage(self, model: str, tokens: int, professor: str) -> None:
     """
     Record that a professor used a certain number of tokens with a specific AI model.
 
-    Updates the professor's running usage total so that budget warnings can fire
-    and monthly reports stay accurate. The usage file is written to disk after
-    every call so that no data is lost if the program exits unexpectedly.
+    Updates the professor's running usage total so that monthly reports and the
+    web interface's spending sidebar stay accurate. The usage file is written to
+    disk after every call so that no data is lost if the program exits
+    unexpectedly.
 
     Args:
         model: The AI model that processed the request, as named in the model

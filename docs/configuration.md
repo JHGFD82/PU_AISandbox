@@ -309,7 +309,7 @@ warning_threshold_pct = 80
 
 | Key | Default | Effect |
 |-----|---------|--------|
-| `warning_threshold_pct` | `80` | Print a warning once spending passes this share of `monthly_limit` |
+| `warning_threshold_pct` | `80` | Share of `monthly_limit` at which `usage report` and the web sidebar start warning |
 
 Command-line flags (`-t`, `-T`, `-M`, `-w` and the rest) override all of these, for that one run.
 

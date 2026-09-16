@@ -52,7 +52,7 @@ How to write one, the `sys.modules` registration names, and how `DispatchPlugin`
 ### Token tracking
 In the `data/` folder of the settings location — active: `token_usage_{netid}.json` (current month only); archives: `archives/{netid}/{YYYY-MM}.json`, written automatically on month rollover.
 - `usage report --all-time` aggregates the active file + all archives on demand (not loaded eagerly).
-- Exceeding the monthly budget only logs warnings at thresholds (e.g. 80%, 100%) — it never halts processing; the only way to stop usage is revoking the professor's API key externally.
+- Exceeding the monthly budget never halts processing, and nothing warns while a command runs. The thresholds are read in exactly two places, both of which have to be asked: `print_usage_report()` (the `usage report` command) and the web interface's spending sidebar. `record_usage()` does not check them. The only way to stop usage is revoking the professor's API key externally.
 
 ### Model catalog & alternate endpoints
 - `model_catalog.json` (in the settings location; created by setup from `templates/model_catalog.template.json`) holds pricing/`supports_vision` per model, keyed by `[config.provider_map]` for provider slug quirks (e.g. `google` → `vertex-ai` for PortKey).
