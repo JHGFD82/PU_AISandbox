@@ -258,6 +258,10 @@ BUDGET_WARNING_THRESHOLD: int = _s["budget"]["warning_threshold_pct"]
 
 # ── Alternate AI API endpoints (definitions only — credentials live in settings.toml) ──
 ENDPOINTS: dict = _s.get("endpoints", {})
+# Not a setting the sandbox acts on: a model name without an endpoint's name in
+# front always runs on the built-in service. Read only so that somebody who has
+# set it is told so, rather than having it ignored in silence — see
+# SandboxProcessor.
 DEFAULT_ENDPOINT = _s.get("config", {}).get("default_endpoint") or None
 
 

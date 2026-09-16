@@ -37,6 +37,7 @@ from .catalog import (
 from .endpoint_models import (
     endpoint_model_name,
     endpoint_of,
+    endpoints_running,
     remember_endpoint_model,
     sync_endpoint_models,
 )
@@ -86,6 +87,7 @@ __all__ = [
     # endpoint models
     "endpoint_model_name",
     "endpoint_of",
+    "endpoints_running",
     "remember_endpoint_model",
     "sync_endpoint_models",
     # output options

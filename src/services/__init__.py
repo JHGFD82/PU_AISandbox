@@ -4,7 +4,6 @@ from .api_config import (
     APIConfig,
     load_api_config,
     list_apis,
-    get_default_api_name,
     parse_model_source,
 )
 
@@ -12,7 +11,6 @@ __all__ = [
     "APIConfig",
     "load_api_config",
     "list_apis",
-    "get_default_api_name",
     "parse_model_source",
 ]
 

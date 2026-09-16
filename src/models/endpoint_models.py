@@ -88,6 +88,31 @@ def endpoint_of(model: str) -> Optional[str]:
     return None
 
 
+def endpoints_running(model: str) -> list[str]:
+    """Return every endpoint whose models in the catalog include one with exactly this name.
+
+    Used to tell somebody where else a model they named is available, since a
+    name on its own always runs on the built-in service.
+
+    Args:
+        model: The model's name as an endpoint knows it, with no endpoint in
+               front (e.g. ``'qwen3.8:27b-mlx'``).
+
+    Returns:
+        The endpoints' names, alphabetically. Empty if none runs it, or if
+        there is no catalog yet.
+    """
+    try:
+        models = _catalog.load_model_catalog()["models"]
+    except (FileNotFoundError, ValueError):
+        return []
+    return sorted({
+        str(entry["endpoint"])
+        for entry in models.values()
+        if isinstance(entry, dict) and entry.get("endpoint") and entry.get("model") == model
+    })
+
+
 def _new_entry(api_name: str, model: str) -> Dict[str, Any]:
     """Return the catalog entry recorded for a model found on an endpoint."""
     return {

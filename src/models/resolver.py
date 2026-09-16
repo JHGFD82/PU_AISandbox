@@ -126,6 +126,18 @@ def resolve_model(
 
         # 1) requested_model (if provided and valid)
         if requested_model not in available_models:
+            places = _endpoints.endpoints_running(requested_model)
+            if places:
+                # A model name on its own always means the built-in service, so
+                # one that only an endpoint runs has to be asked for by naming
+                # that endpoint.
+                how = " or ".join(f"-m {place}:{requested_model}" for place in places)
+                raise CLIError(
+                    f"'{requested_model}' is not available on the Princeton AI Sandbox, "
+                    f"but it is on {', '.join(repr(p) for p in places)}. A model name on "
+                    "its own always runs on the Sandbox; to run it somewhere else, put "
+                    f"that name in front of it: {how}"
+                )
             raise CLIError(
                 f"Model '{requested_model}' is not in the catalog. "
                 "Edit model_catalog.json to add it, or use "

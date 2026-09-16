@@ -5,7 +5,7 @@
 # put in it, without touching this file. Default models are in
 # model_catalog.json, alongside preferences.toml, under [config.defaults].
 #
-# [endpoints.<name>] and [config].default_endpoint belong in preferences.toml,
+# [endpoints.<name>] tables belong in preferences.toml,
 # or in a shared settings file — not here. This file is inside the package: it
 # is tracked by git, replaced whenever the sandbox is updated, and committable
 # by accident, so an endpoint put here is lost on the next update or published
