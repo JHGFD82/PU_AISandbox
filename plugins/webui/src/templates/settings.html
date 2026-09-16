@@ -704,12 +704,12 @@ function renderShared(data) {
         <div class="name">${ep.display_name} <span class="sub">(${ep.name})</span></div>
         <div class="sub">${ep.base_url}${ep.openai_compatible ? "" : " · marked as not OpenAI-compatible, so the sandbox cannot use it"}${ep.default_model ? " · default: " + ep.default_model : ""}</div>
         <form class="inline" data-endpoint="${ep.credential_path}">
-          <div><label>API key</label><input type="password" placeholder="${ep.key_set ? '••••••••' : ''}"></div>
+          <div><label>API key, if it asks for one</label><input type="password" placeholder="${ep.key_set ? '••••••••' : ''}"></div>
           <button type="submit">Save</button>
           <button type="button" class="secondary" data-clear-endpoint="${ep.credential_path}">Clear</button>
         </form>
       </div>
-      <span class="badge ${ep.key_set ? 'set' : 'unset'}">${ep.key_set ? 'key set' : 'NO KEY'}</span>
+      <span class="badge ${ep.key_set ? 'set' : 'unset'}">${ep.key_set ? 'key set' : 'no key'}</span>
     `;
     list.appendChild(row);
   });

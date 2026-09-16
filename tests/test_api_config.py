@@ -141,18 +141,13 @@ class TestLoadAPIConfigErrors:
             with pytest.raises(ValueError, match="hpc_cluster"):
                 load_api_config("nonexistent")
 
-    def test_missing_key_raises(self):
-        """It has to say which endpoint, and where the key goes.
-
-        Not the exact wording: the message shows the table to write rather than
-        the dotted path it used to name, and either says the same thing.
-        """
+    def test_an_endpoint_with_no_key_still_loads(self):
+        """A model on a cluster or on this computer usually needs no key, so
+        having none is not a reason to refuse the endpoint."""
         with _patch_endpoints(_ENDPOINTS_WITH_ENDPOINTS), _patch_credentials({}):
-            with pytest.raises(ValueError) as caught:
-                load_api_config("hpc_cluster")
-        said = str(caught.value)
-        assert "hpc_cluster" in said
-        assert "settings.toml" in said
+            cfg = load_api_config("hpc_cluster")
+        assert cfg.api_key == ""
+        assert cfg.base_url == "https://cluster.example.com/v1"
 
     def test_missing_base_url_raises(self):
         data = {"bad": {"name": "Bad"}}
@@ -300,17 +295,6 @@ class TestWhereAnEndpointsKeyMayLive:
         self._configured(monkeypatch, dict(self.ENDPOINT), settings_toml_key="mine")
         assert load_api_config("my_cluster").api_key == "mine"
 
-    def test_with_no_key_anywhere_it_says_both_places(self, monkeypatch):
-        from src.services.api_config import load_api_config
-
-        self._configured(monkeypatch, dict(self.ENDPOINT))
-        with pytest.raises(ValueError) as caught:
-            load_api_config("my_cluster")
-        said = str(caught.value)
-        assert "preferences.toml" in said
-        assert "shared settings file" in said
-        assert "settings.toml" in said
-
     def test_nothing_points_at_the_package_any_more(self, monkeypatch):
         """An unknown endpoint used to be answered with "add it to
         settings.default.toml", which is the one place nobody should."""
@@ -322,21 +306,3 @@ class TestWhereAnEndpointsKeyMayLive:
             load_api_config("nowhere")
         assert "settings.default.toml" not in str(caught.value)
         assert "preferences.toml" in str(caught.value)
-
-    def test_the_missing_key_message_recommends_one_place(self, monkeypatch):
-        """One recommendation, then the alternative as an informed choice.
-
-        Saying "either of these two" leaves somebody to work out which, at the
-        moment they are least equipped to. settings.toml is the answer; the
-        other way is offered with what it costs attached.
-        """
-        from src.services.api_config import load_api_config
-
-        self._configured(monkeypatch, dict(self.ENDPOINT))
-        with pytest.raises(ValueError) as caught:
-            load_api_config("my_cluster")
-        said = str(caught.value)
-        # The recommendation comes first.
-        assert said.index("settings.toml") < said.index("preferences.toml")
-        # And the alternative says what it costs.
-        assert "everyone who can read it" in said

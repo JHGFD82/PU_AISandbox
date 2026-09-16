@@ -48,7 +48,7 @@ def list_optional_settings() -> list[SettingField]:
     for api_name in list_apis():
         fields.append(SettingField(
             key=credential_path_for_endpoint(api_name),
-            label=f"API key for the '{api_name}' endpoint (see settings.default.toml or preferences.toml)",
+            label=f"API key for the '{api_name}' endpoint, if it asks for one (see preferences.toml)",
             section="Alternate API endpoints",
             secret=True,
         ))

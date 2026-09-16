@@ -462,7 +462,7 @@ python main.py jh43 prompt -m my_cluster:llama-3-70b-instruct
 python main.py jh43 translate jp-en -i paper.pdf -m my_cluster:llama-3-70b-instruct
 ```
 
-The part before the colon names the endpoint; everything after is passed to it as the model name. The catalog is bypassed entirely, and the endpoint's API key is read from `endpoints.<name>.key` in `settings.toml`. Token usage is still recorded.
+The part before the colon names the endpoint; everything after is passed to it as the model name. The catalog is bypassed entirely, and the endpoint's API key, if it has one, is read from `endpoints.<name>.key` in `settings.toml`. Token usage is still recorded.
 
 **Everything at once** — if `[config] default_endpoint` is set in any settings layer, every bare model name goes there rather than to the built-in service.
 

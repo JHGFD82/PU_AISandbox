@@ -45,6 +45,14 @@ _REQUIRED_REQUEST_FIELDS = frozenset({"model", "messages", "stream"})
 # message into an unbounded run of API calls.
 _MAX_FIELD_REFUSALS = 3
 
+# Sent as the key to an endpoint that has none, such as a model running on a
+# cluster or on this computer. The OpenAI client refuses to be built with an
+# empty key, and leaving it out altogether makes the client pick up
+# OPENAI_API_KEY from the environment, which would send somebody's real key to
+# a server that never asked for it. A server that needs no key ignores this; one
+# that does need a key turns it away, which is the right thing to be told.
+_NO_KEY_NEEDED = "no-key-needed"
+
 
 def _client_with_a_time_limit(api_key: str) -> Portkey:
     """Build the gateway client, with a limit on how long it will wait.
@@ -268,7 +276,8 @@ class BaseService:
             client_options["http_client"] = httpx.Client(verify=False)
 
         self.client = OpenAI(
-            api_key=api_config.api_key,
+            # See _NO_KEY_NEEDED.
+            api_key=api_config.api_key or _NO_KEY_NEEDED,
             base_url=api_config.base_url,
             timeout=float(api_config.timeout),
             **client_options,
