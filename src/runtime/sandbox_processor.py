@@ -152,6 +152,15 @@ class SandboxProcessor(*_discover_plugin_mixins(), _FileTypeMixin, _CommandMixin
                     except ValueError:
                         pass  # misconfigured default — fall through to sandbox
 
+            if api_config is not None:
+                # Recorded so the model is in the lists from now on, including
+                # the browser's, without anybody adding it — see
+                # src/models/endpoint_models.py.
+                from ..models import remember_endpoint_model
+                endpoint_model = model or api_config.default_model
+                if endpoint_model:
+                    remember_endpoint_model(api_config.api_name, endpoint_model)
+
             self.token_tracker = TokenTracker(professor=professor_name)
             self._api_key = api_key
             self._api_config = api_config

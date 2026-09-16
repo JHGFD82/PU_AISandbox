@@ -104,10 +104,15 @@ class TestSandboxProcessorInit:
             return original_load(name)
 
         monkeypatch.setattr(_cfg_mod, "load_api_config", fake_load)
+        remembered = []
+        monkeypatch.setattr("src.models.remember_endpoint_model",
+                            lambda api_name, model: remembered.append((api_name, model)))
 
         proc = SandboxProcessor("smith", model="hpc_cluster:llama-3-70b")
         assert proc._api_config is fake_cfg
         assert proc._svc_kwargs["model"] == "llama-3-70b"
+        # Written into the catalog, so it is in the browser's list from now on.
+        assert remembered == [("hpc_cluster", "llama-3-70b")]
 
     def test_bare_model_leaves_api_config_none_when_no_default(self, monkeypatch):
         """Model without colon and no apis.default → _api_config stays None."""

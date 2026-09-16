@@ -46,9 +46,20 @@ Colon syntax on the CLI::
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 
+from openai import OpenAI
+
 from .. import settings, settings_store
+
+# Sent as the key to an endpoint that has none, such as a model running on a
+# cluster or on this computer. The OpenAI client refuses to be built with an
+# empty key, and leaving it out altogether makes the client pick up
+# OPENAI_API_KEY from the environment, which would send somebody's real key to
+# a server that never asked for it. A server that needs no key ignores this; one
+# that does need a key turns it away, which is the right thing to be told.
+_NO_KEY_NEEDED = "no-key-needed"
 
 
 def credential_path_for_endpoint(api_name: str) -> str:
@@ -207,6 +218,48 @@ def load_api_config(api_name: str) -> APIConfig:
         timeout=int(raw.get("timeout", 30)),
         verify_ssl=bool(raw.get("verify_ssl", True)),
         extra=extra,
+    )
+
+
+def endpoint_client(api_config: APIConfig, timeout: float | None = None) -> OpenAI:
+    """Build the connection used to talk to one endpoint, with its own settings applied.
+
+    Everything that reaches an endpoint comes through here: requests made
+    during a job, asking the endpoint which models it runs, and testing what a
+    model can do. Building the connection in one place means a setting such as
+    ``verify_ssl`` cannot be honoured by one of those and ignored by another.
+
+    Args:
+        api_config: The endpoint's definition and credential, from
+                    ``load_api_config()``.
+        timeout: How many seconds to wait before giving up, when something
+                 wants a shorter or longer wait than the endpoint's own
+                 ``timeout`` setting. ``None`` uses that setting.
+
+    Returns:
+        A client pointed at the endpoint's address, carrying its key if it has
+        one.
+    """
+    client_options: dict = {}
+    if not api_config.verify_ssl:
+        # Turning certificate checking off is occasionally the only way to
+        # reach a cluster with an internal certificate, so it is offered; it is
+        # worth saying out loud when it happens, because it is a real weakening.
+        import httpx
+
+        logging.warning(
+            "Certificate checking is turned off for the endpoint '%s'. Anything "
+            "between this computer and %s could read or alter what is sent.",
+            api_config.api_name, api_config.base_url,
+        )
+        client_options["http_client"] = httpx.Client(verify=False)
+
+    return OpenAI(
+        # See _NO_KEY_NEEDED.
+        api_key=api_config.api_key or _NO_KEY_NEEDED,
+        base_url=api_config.base_url,
+        timeout=float(timeout if timeout is not None else api_config.timeout),
+        **client_options,
     )
 
 

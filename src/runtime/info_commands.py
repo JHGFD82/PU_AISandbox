@@ -175,7 +175,14 @@ def _print_optional_settings() -> None:
 
 
 def list_available_models() -> None:
-    """List all available models and their capabilities."""
+    """List all available models and their capabilities.
+
+    Asks this installation's own endpoints which models they run first, so a
+    model newly loaded on a cluster is in the list without anyone adding it.
+    """
+    from ..models import sync_endpoint_models
+
+    sync_endpoint_models(force=True)
     config = load_model_catalog()
     models = config["models"]
     pricing_unit = get_pricing_unit()
@@ -189,8 +196,12 @@ def list_available_models() -> None:
         vision = "✓" if pricing.get("supports_vision", False) else "✗"
         print(f"{model_name}")
         print(f"  Vision Support: {vision}")
-        print(f"  Input:  ${pricing['input']:.3f}")
-        print(f"  Output: ${pricing['output']:.3f}")
+        if pricing.get("endpoint"):
+            # Counted but never costed — see docs/token-usage-guide.md.
+            print(f"  Runs on the endpoint '{pricing['endpoint']}', so it has no price")
+        else:
+            print(f"  Input:  ${pricing['input']:.3f}")
+            print(f"  Output: ${pricing['output']:.3f}")
         print()
     print("=" * len(bar) + "\n")
 
@@ -485,12 +496,24 @@ def _settings_test_model(args: argparse.Namespace) -> None:
         add_model_to_catalog, get_available_models, load_model_catalog,
         save_model_catalog,
     )
+    from ..models import endpoint_model_name, remember_endpoint_model
     from ..models.capabilities import (
-        apply_capability_report, client_for_testing, probe_model_capabilities,
+        apply_capability_report, probe_model_capabilities, testing_target,
     )
+    from ..services.api_config import list_apis, parse_model_source
 
     available = get_available_models()
     typed = args.model
+
+    # A model on one of this installation's own endpoints, named the way -m
+    # takes it. There is no price to look up, so adding it is only a matter of
+    # writing it down before it is tested like any other.
+    if typed is not None and typed not in available:
+        api_name, bare = parse_model_source(typed)
+        if api_name and api_name in list_apis():
+            remember_endpoint_model(api_name, bare)
+            typed = endpoint_model_name(api_name, bare)
+            available = get_available_models()
 
     # The catalog is keyed by the model alone — 'claude-sonnet-5'. Everywhere
     # else a model is named as its provider and then the model, which is what
@@ -498,7 +521,10 @@ def _settings_test_model(args: argparse.Namespace) -> None:
     # shows. Both are accepted here, because the alternative was telling
     # somebody that 'anthropic/claude-sonnet-5' is not in a catalog and then
     # listing claude-sonnet-5 among the models it knows about.
-    wanted = typed.split("/", 1)[1] if typed and "/" in typed else typed
+    # A model on an endpoint can have a slash in its own name
+    # ('my_cluster:meta-llama/Llama-3-70B'), so a name already in the catalog is
+    # taken exactly as typed.
+    wanted = typed.split("/", 1)[1] if typed and "/" in typed and typed not in available else typed
 
     if typed is not None and wanted not in available:
         if "/" not in typed:
@@ -534,8 +560,6 @@ def _settings_test_model(args: argparse.Namespace) -> None:
     api_key = _key_for_testing(getattr(args, 'professor', None))
     remove_missing = bool(getattr(args, 'remove_missing', False))
 
-    client = client_for_testing(api_key)
-
     print_banner("TESTING WHAT THESE MODELS CAN DO")
     print(
         f"Trying {len(targets)} model{'s' if len(targets) != 1 else ''} with a few very "
@@ -547,7 +571,12 @@ def _settings_test_model(args: argparse.Namespace) -> None:
     gone: list[str] = []
     for name in targets:
         print(f"{name}")
-        report = probe_model_capabilities(name, client)
+        try:
+            client, asked_as = testing_target(name, api_key)
+        except ValueError as e:
+            print(f"  could not be tested — nothing changed\n  {e}")
+            continue
+        report = probe_model_capabilities(asked_as, client)
         if report.missing:
             # Not a failure to test — there is nothing there to test. Named
             # separately because the answer is different: this entry is stale

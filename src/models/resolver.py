@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Optional
 
 from ..errors import CLIError
 from . import catalog as _catalog
+from . import endpoint_models as _endpoints
 from . import pricing as _pricing
 
 if TYPE_CHECKING:  # pragma: no cover - import only for type checking
@@ -173,9 +174,11 @@ def resolve_model(
         return cheapest
 
     # 4) anything at all that fits — reached only when no model in the catalog
-    #    carries a usable price, so the ranking above had nothing to sort.
+    #    carries a usable price, so the ranking above had nothing to sort. Not
+    #    a model on one of this installation's own endpoints: this is choosing
+    #    for work meant for the sandbox, which cannot send anything there.
     for model in available_models:
-        if model in preferred:
+        if model in preferred or _endpoints.endpoint_of(model):
             continue
         resolved = resolve_candidate(model)
         if resolved:

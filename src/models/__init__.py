@@ -34,6 +34,12 @@ from .catalog import (
     save_model_catalog,
     record_sampling_params_rejected,
 )
+from .endpoint_models import (
+    endpoint_model_name,
+    endpoint_of,
+    remember_endpoint_model,
+    sync_endpoint_models,
+)
 from .output_options import OutputOptions
 from .pricing import (
     PORTKEY_PRICING_API_BASE,
@@ -77,6 +83,11 @@ __all__ = [
     "maybe_sync_model_pricing",
     # resolver
     "resolve_model",
+    # endpoint models
+    "endpoint_model_name",
+    "endpoint_of",
+    "remember_endpoint_model",
+    "sync_endpoint_models",
     # output options
     "OutputOptions",
     # embedded media
