@@ -103,7 +103,7 @@ def _say_default_endpoint_is_not_used() -> None:
     )
 
 
-def _no_such_endpoint_message(model: str, error: ValueError) -> str:
+def _no_such_endpoint_message(api_name: str, model: str, error: ValueError) -> str:
     """Explain a model name whose part before the colon is not a configured endpoint.
 
     Ollama puts a colon in every model's name (``qwen3.8:27b-mlx``), so the
@@ -112,14 +112,23 @@ def _no_such_endpoint_message(model: str, error: ValueError) -> str:
     saying the endpoint "qwen3.8" is not configured, and how to add one, would
     send somebody off to do the wrong thing.
 
+    An endpoint that is configured but set up wrongly — an address that cannot
+    work, say — is a different problem, and gets ``load_api_config()``'s own
+    explanation alone.
+
     Args:
+        api_name: The part before the first colon, taken for an endpoint.
         model: The model name as typed.
         error: What ``load_api_config()`` said about the endpoint.
 
     Returns:
         The message to show.
     """
+    from .. import settings
     from ..models import endpoints_running
+
+    if api_name in settings.ENDPOINTS:
+        return f"API configuration error: {error}"
 
     places = endpoints_running(model)
     if places:
@@ -240,7 +249,7 @@ class SandboxProcessor(*_discover_plugin_mixins(), _FileTypeMixin, _CommandMixin
                         api_config = load_api_config(api_name)
                         model = bare_model
                     except ValueError as e:
-                        raise CLIError(_no_such_endpoint_message(model, e)) from e
+                        raise CLIError(_no_such_endpoint_message(api_name, model, e)) from e
             elif api_config is None and model:
                 _warn_if_it_runs_elsewhere_too(model)
 

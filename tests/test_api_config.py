@@ -291,3 +291,52 @@ class TestWhereAnEndpointsKeyMayLive:
             load_api_config("nowhere")
         assert "settings.default.toml" not in str(caught.value)
         assert "preferences.toml" in str(caught.value)
+
+
+# ---------------------------------------------------------------------------
+# endpoint_address_problem
+# ---------------------------------------------------------------------------
+
+class TestAnAddressThatCannotWork:
+    """The sandbox adds /chat/completions to base_url. Two recognisable mistakes
+    turn that into an address that does not exist, and the reply is only
+    "404 page not found"."""
+
+    @pytest.mark.parametrize("base_url, fixed", [
+        ("http://localhost:11434/api/generate", "http://localhost:11434/v1"),
+        ("http://localhost:11434/api/chat/", "http://localhost:11434/v1"),
+        ("http://localhost:11434", "http://localhost:11434/v1"),
+        ("http://localhost:11434/api", "http://localhost:11434/v1"),
+        ("http://my-mac.local:11434/api/generate", "http://my-mac.local:11434/v1"),
+        ("https://cluster.example.com/v1/chat/completions", "https://cluster.example.com/v1"),
+    ])
+    def test_it_says_what_to_change_it_to(self, base_url, fixed):
+        from src.services.api_config import endpoint_address_problem
+
+        said = endpoint_address_problem("my_mac", base_url)
+        assert said is not None
+        assert f'base_url = "{fixed}"' in said
+
+    @pytest.mark.parametrize("base_url", [
+        "http://localhost:11434/v1",
+        "https://cluster.example.com/v1",
+        "http://localhost:8000/v1/",
+        # Open WebUI's OpenAI-style address really does end in /api.
+        "http://localhost:3000/api",
+    ])
+    def test_an_address_that_can_work_is_left_alone(self, base_url):
+        from src.services.api_config import endpoint_address_problem
+
+        assert endpoint_address_problem("x", base_url) is None
+
+    def test_ollamas_own_address_is_named_as_such(self):
+        from src.services.api_config import endpoint_address_problem
+
+        said = endpoint_address_problem("my_mac", "http://localhost:11434/api/generate")
+        assert "Ollama" in said
+
+    def test_it_is_refused_before_anything_is_sent(self):
+        data = {"my_mac": {"base_url": "http://localhost:11434/api/generate"}}
+        with _patch_endpoints(data), _patch_credentials({}):
+            with pytest.raises(ValueError, match="/v1"):
+                load_api_config("my_mac")

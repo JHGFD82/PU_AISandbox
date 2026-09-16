@@ -1694,6 +1694,7 @@ class TestSettingsValues:
             # code that actually connects uses, so the page and the behaviour
             # cannot describe an endpoint differently.
             "openai_compatible": True, "default_model": None, "timeout": 30,
+            "address_problem": None,
             "credential_path": "endpoints.hpc_cluster.key", "key_set": False,
         }
 

@@ -486,6 +486,10 @@ verify_ssl = false
 | `timeout` | No | `30` | Request timeout in seconds |
 | `verify_ssl` | No | `true` | Set `false` for an internal cluster with a self-signed certificate |
 
+`base_url` is the address the sandbox adds `/chat/completions` to, so it usually ends in `/v1`. **For Ollama it is `http://localhost:11434/v1`**, not the `/api/generate` address most of Ollama's own documentation shows: that is Ollama's own way of being reached, and the sandbox can only talk the way OpenAI's servers do. If an endpoint's address is one of these recognisable mistakes, the sandbox refuses it before sending anything, says so on the Settings page, and tells you what to change it to.
+
+`default_model` has to be written exactly as the endpoint lists it, tag included — for Ollama, `gemma4:12b-mlx` rather than `gemma4`. If the endpoint does not run a model by that name, the sandbox leaves it out of the list of models and warns you with the names the endpoint does run.
+
 **Not in `settings.default.toml`.** That file is inside the package: it is
 tracked by git, replaced whenever the sandbox is updated, and committable by
 accident. An endpoint put there is lost on the next update, or published. Use

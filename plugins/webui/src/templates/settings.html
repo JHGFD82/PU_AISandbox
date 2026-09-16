@@ -11,6 +11,10 @@
 {% include "_combobox.html" %}
 {% include "_helpers.html" %}
 <style>
+  /* An endpoint address that cannot work, said before anyone tries it. Kept as
+     written, line breaks included, so the corrected base_url sits on its own
+     line ready to copy. */
+  .address-problem { color: var(--danger-text); white-space: pre-wrap; }
   /* Said explicitly, because the rule below sets display and would otherwise
      win against the browser's own meaning for the attribute — which is why
      hiding this bar in the modal had no effect at all. */
@@ -703,6 +707,7 @@ function renderShared(data) {
       <div class="main">
         <div class="name">${ep.display_name} <span class="sub">(${ep.name})</span></div>
         <div class="sub">${ep.base_url}${ep.openai_compatible ? "" : " · marked as not OpenAI-compatible, so the sandbox cannot use it"}${ep.default_model ? " · default: " + ep.default_model : ""}</div>
+        ${ep.address_problem ? `<div class="sub address-problem"></div>` : ""}
         <form class="inline" data-endpoint="${ep.credential_path}">
           <div><label>API key, if it asks for one</label><input type="password" placeholder="${ep.key_set ? '••••••••' : ''}"></div>
           <button type="submit">Save</button>
@@ -711,6 +716,10 @@ function renderShared(data) {
       </div>
       <span class="badge ${ep.key_set ? 'set' : 'unset'}">${ep.key_set ? 'key set' : 'no key'}</span>
     `;
+    // textContent, not the template above: the message quotes the address as
+    // it was typed, and nothing typed into a settings file belongs in markup.
+    const problem = row.querySelector(".address-problem");
+    if (problem) problem.textContent = ep.address_problem;
     list.appendChild(row);
   });
 

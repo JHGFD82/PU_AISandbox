@@ -33,6 +33,8 @@ def catalog_file(monkeypatch, tmp_path):
     monkeypatch.setattr(settings_mod, "ENDPOINTS", {"my_cluster": dict(CLUSTER)})
     monkeypatch.setattr(settings_store, "get_value", lambda _path: None)
     monkeypatch.setattr(endpoint_models, "_last_asked", {})
+    monkeypatch.setattr(endpoint_models, "_last_answer", {})
+    monkeypatch.setattr(endpoint_models, "_default_reported", set())
     return path
 
 
@@ -117,10 +119,47 @@ class TestTakingOutWhatCannotBeUsed:
         endpoint_models.sync_endpoint_models(force=True)
         assert "my_cluster:qwen-2.5-72b" in _models(catalog_file)
 
-    def test_the_default_model_stays_even_when_not_listed(self, catalog_file, monkeypatch):
+    def test_a_default_model_the_endpoint_does_not_list_is_not_added(self, catalog_file, monkeypatch, caplog):
+        """default_model = "gemma4" beside Ollama's gemma4:12b-mlx put the same
+        model in the catalog twice, and the untagged one could not be used."""
+        import logging
+
         _endpoint_answers(monkeypatch, "qwen-2.5-72b")
+        with caplog.at_level(logging.WARNING):
+            endpoint_models.sync_endpoint_models()
+            endpoint_models.sync_endpoint_models(force=True)
+        assert set(_models(catalog_file)) == {"gpt-4o-mini", "my_cluster:qwen-2.5-72b"}
+        # Said, with the models it does run, and said once.
+        assert caplog.text.count("does not run a model by that name") == 1
+        assert "qwen-2.5-72b" in caplog.text
+
+    def test_a_default_model_added_before_the_endpoint_answered_is_taken_out(
+        self, catalog_file, monkeypatch
+    ):
+        _endpoint_answers(monkeypatch, fails=True)
         endpoint_models.sync_endpoint_models()
         assert "my_cluster:llama-3-70b" in _models(catalog_file)
+        _endpoint_answers(monkeypatch, "llama-3-70b-instruct")
+        endpoint_models.sync_endpoint_models(force=True)
+        assert set(_models(catalog_file)) == {"gpt-4o-mini", "my_cluster:llama-3-70b-instruct"}
+
+    def test_ollamas_latest_tag_is_the_same_model(self, catalog_file, monkeypatch, caplog):
+        """Ollama answers to llama-3-70b for llama-3-70b:latest."""
+        import logging
+
+        _endpoint_answers(monkeypatch, "llama-3-70b:latest")
+        with caplog.at_level(logging.WARNING):
+            endpoint_models.sync_endpoint_models()
+        assert set(_models(catalog_file)) == {"gpt-4o-mini", "my_cluster:llama-3-70b:latest"}
+        assert "does not run a model by that name" not in caplog.text
+
+    def test_between_askings_the_last_answer_still_holds(self, catalog_file, monkeypatch):
+        """Asked at most hourly, so without this a stray default reappears for
+        the rest of the hour."""
+        _endpoint_answers(monkeypatch, "qwen-2.5-72b")
+        endpoint_models.sync_endpoint_models()
+        endpoint_models.sync_endpoint_models()  # not asked again
+        assert "my_cluster:llama-3-70b" not in _models(catalog_file)
 
     def test_models_of_an_endpoint_no_longer_defined_are_taken_out(self, catalog_file, monkeypatch):
         _endpoint_answers(monkeypatch, "qwen-2.5-72b")
@@ -186,6 +225,12 @@ class TestAskingTheEndpoint:
 
 
 class TestRememberingAModelThatWasUsed:
+    def test_a_name_the_endpoint_does_not_list_is_not_added(self, catalog_file, monkeypatch):
+        _endpoint_answers(monkeypatch, "gemma4:12b-mlx")
+        endpoint_models.sync_endpoint_models()
+        assert not endpoint_models.remember_endpoint_model("my_cluster", "gemma4")
+        assert "my_cluster:gemma4" not in _models(catalog_file)
+
     def test_a_model_named_with_the_colon_syntax_is_added(self, catalog_file):
         assert endpoint_models.remember_endpoint_model("my_cluster", "mistral-large")
         assert _models(catalog_file)["my_cluster:mistral-large"]["endpoint"] == "my_cluster"
