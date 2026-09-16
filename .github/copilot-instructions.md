@@ -98,7 +98,7 @@ python main.py jh43 prompt -s --dry-run       # preview, no API call
 - **Override**: `-m` / `--model`
 - **OpenAI and Google auto-registration**: `-m openai/model-name` or `-m google/model-name` fetches pricing from [PortKey](https://api.portkey.ai) and saves it on first use
 - **Other providers**: add the entry to `model_catalog.json` by hand. There are no CLI commands for managing the catalog.
-- **Alternate endpoints**: `-m my_cluster:model-name` routes to an `[endpoints.<name>]` table, bypassing the catalog entirely
+- **Alternate endpoints**: `-m my_cluster:model-name` routes to an `[endpoints.<name>]` table, bypassing the catalog's prices and model choice; the endpoint's models are still listed in the catalog as `name:model` (see `src/models/endpoint_models.py`)
 
 ## Error handling
 

@@ -494,7 +494,11 @@ class TestOneSlowModelCannotHoldUpTheRest:
         assert client.request_timeout >= 1000
 
     def test_every_route_builds_it_the_same_way(self):
-        """Three callers each built their own, and one forgetting is enough."""
+        """Three callers each built their own, and one forgetting is enough.
+
+        testing_target() counts: it hands back client_for_testing()'s client for
+        a sandbox model, and the endpoint's own for a model on one.
+        """
         from pathlib import Path
 
         root = Path(__file__).resolve().parents[1]
@@ -507,5 +511,7 @@ class TestOneSlowModelCannotHoldUpTheRest:
             body = path.read_text()
             if "probe_model_capabilities" not in body:
                 continue
-            assert "client_for_testing" in body, f"{path.name} builds its own client"
+            assert "client_for_testing" in body or "testing_target" in body, (
+                f"{path.name} builds its own client"
+            )
             assert "Portkey(api_key" not in body, f"{path.name} still builds a raw client"

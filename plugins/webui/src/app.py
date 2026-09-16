@@ -53,6 +53,7 @@ from fastapi.responses import (
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from starlette.background import BackgroundTask
+from starlette.concurrency import run_in_threadpool
 from starlette.middleware.sessions import SessionMiddleware
 
 from dataclasses import asdict
@@ -67,6 +68,7 @@ from src.models import (
     model_supports_vision,
     models_in_reading_order,
     resolve_model,
+    sync_endpoint_models,
 )
 from src.runtime.info_commands import list_optional_settings, setting_is_set
 from src.services.api_config import credential_path_for_endpoint
@@ -1074,6 +1076,9 @@ def create_app() -> FastAPI:
     async def api_settings_models(request: Request):
         """List every model in the catalog with what is known about each."""
         _require_unlocked(request)
+        # In a worker thread: it may ask an endpoint over the network, and
+        # waiting on the event loop would stall every other request meanwhile.
+        await run_in_threadpool(sync_endpoint_models)
         return {"models": _models_with_capabilities()}
 
     # Sync, like /api/pick-path above and for the same reason: testing a model
@@ -1195,7 +1200,9 @@ def create_app() -> FastAPI:
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
 
-    @app.post("/api/settings/models/{model_name}/test")
+    # ':path' because a model on an endpoint can have a slash in its own name
+    # (my_cluster:meta-llama/Llama-3-70B), which a plain parameter will not match.
+    @app.post("/api/settings/models/{model_name:path}/test")
     def api_test_model(request: Request, model_name: str, body: TestModelBody):
         """Try a model already in the catalog again and save what comes back.
 
@@ -1207,7 +1214,7 @@ def create_app() -> FastAPI:
         from src.config import get_api_key
         from src.models import load_model_catalog, save_model_catalog
         from src.models.capabilities import (
-            apply_capability_report, client_for_testing, probe_model_capabilities,
+            apply_capability_report, probe_model_capabilities, testing_target,
         )
 
         catalog = load_model_catalog()
@@ -1215,7 +1222,12 @@ def create_app() -> FastAPI:
             raise HTTPException(404, f"'{model_name}' isn't in the catalog.")
 
         api_key, _ = get_api_key(professor)
-        report = probe_model_capabilities(model_name, client_for_testing(api_key))
+        try:
+            client, asked_as = testing_target(model_name, api_key)
+        except ValueError as e:
+            # A model whose endpoint is no longer configured.
+            raise HTTPException(400, str(e)) from e
+        report = probe_model_capabilities(asked_as, client)
         if report.missing:
             # 410 rather than 502: there is nothing wrong with the request or
             # the connection, the model simply isn't there any more. The page
@@ -1243,7 +1255,7 @@ def create_app() -> FastAPI:
             "capabilities": _capability_summary(model_name),
         }
 
-    @app.delete("/api/settings/models/{model_name}")
+    @app.delete("/api/settings/models/{model_name:path}")
     async def api_remove_model(request: Request, model_name: str):
         """Take a model out of the catalog.
 
@@ -1262,6 +1274,10 @@ def create_app() -> FastAPI:
     async def api_models(request: Request, professor: str):
         _require_unlocked(request)
         _validated_professor(professor)
+        # The models on this installation's own endpoints, so one newly loaded
+        # on a cluster is in the menu without anyone adding it. In a worker
+        # thread for the same reason as the settings page's list.
+        await run_in_threadpool(sync_endpoint_models)
         names = models_in_reading_order()
         models = [
             {

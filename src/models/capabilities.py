@@ -448,6 +448,43 @@ def client_for_testing(api_key: str) -> Any:
     )
 
 
+def testing_target(model: str, api_key: str) -> tuple[Any, str]:
+    """Return what to test a catalog model through, and the name to ask for it by.
+
+    Most models are reached through PortKey with a professor's key, under the
+    name the catalog holds. A model on one of this installation's own endpoints
+    is reached through that endpoint instead, under the name the endpoint knows
+    it by — asking PortKey about ``my_cluster:llama-3-70b`` would only be told
+    there is no such model, and the entry would look out of date when it isn't.
+
+    Args:
+        model: The model's name as the catalog holds it.
+        api_key: The professor's API key, used when the model is reached
+                 through PortKey.
+
+    Returns:
+        A ``(client, name)`` pair to pass to ``probe_model_capabilities()``.
+
+    Raises:
+        ValueError: If the model belongs to an endpoint that is no longer
+                    configured, with a message saying so.
+    """
+    from .catalog import load_model_catalog
+
+    entry = load_model_catalog()["models"].get(model)
+    api_name = entry.get("endpoint") if isinstance(entry, dict) else None
+    if not api_name:
+        return client_for_testing(api_key), model
+
+    from ..services.api_config import endpoint_client, load_api_config
+
+    config = load_api_config(str(api_name))
+    return (
+        endpoint_client(config, timeout=_TESTING_TIMEOUT_SECONDS),
+        str(entry.get("model") or model.partition(":")[2]),
+    )
+
+
 def probe_model_capabilities(
     model_name: str, client: Any, on_progress: Optional[Callable[[str], None]] = None
 ) -> CapabilityReport:

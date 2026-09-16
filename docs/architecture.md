@@ -95,7 +95,7 @@ Several optional members (`requires_professor`, `handles`, `ui_action`, `run_ui_
 - Holds the document processors and the file output handler
 - **Lazily** loads plugin-owned services through `__getattr__`
 - **Composes plugin-owned command mixins** as base classes at class-definition time
-- **Routes to alternate endpoints**: if `model` contains colon syntax (e.g. `"my_cluster:llama-3-70b"`), loads the matching `[endpoints.<name>]` definition from the merged settings layers plus its credential from `settings.toml`, points the OpenAI-compatible client at that `base_url`, and bypasses the model catalog
+- **Routes to alternate endpoints**: if `model` contains colon syntax (e.g. `"my_cluster:llama-3-70b"`), loads the matching `[endpoints.<name>]` definition from the merged settings layers plus its credential from `settings.toml`, points the OpenAI-compatible client at that `base_url`, and uses the model as given rather than choosing or pricing one from the catalog. The model is still recorded in the catalog as `name:model`, so it appears in the lists — see `src/models/endpoint_models.py`
 
 The lazy loader follows a naming convention: attribute `translation_service` maps to `sys.modules["src.services.translation_service"].TranslationService`. Plugins inject their service files into `sys.modules` at import time; the processor instantiates them on first access.
 

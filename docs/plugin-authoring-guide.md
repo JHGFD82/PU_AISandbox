@@ -229,7 +229,7 @@ def run(self, args, professor, model, temperature, top_p, max_tokens):
 
 > **Import `SandboxProcessor` inside `run()`, never at module scope.** `SandboxProcessor`'s class statement discovers plugin-registered `Mixin` classes at the moment it is first imported. Importing it at the top of a plugin file would run that discovery while plugins are still loading, and any plugin that hadn't loaded yet would lose its orchestration methods. Nothing in `src/` imports it at module scope either, for the same reason.
 
-If `model` contains a colon (e.g. `"my_cluster:llama-3-70b"`), `SandboxProcessor` loads the matching `[endpoints.<name>]` definition plus its credential from `settings.toml`, points the client at that `base_url`, and bypasses the model catalog. You get alternate-endpoint routing without writing anything for it.
+If `model` contains a colon (e.g. `"my_cluster:llama-3-70b"`), `SandboxProcessor` loads the matching `[endpoints.<name>]` definition plus its credential from `settings.toml`, points the client at that `base_url`, and uses the model as given rather than choosing one from the catalog. You get alternate-endpoint routing without writing anything for it.
 
 ---
 

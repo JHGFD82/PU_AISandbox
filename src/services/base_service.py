@@ -13,7 +13,6 @@ import re
 import time
 from typing import TYPE_CHECKING, Any, Callable, Optional
 
-from openai import OpenAI
 from portkey_ai import Portkey
 from collections.abc import Iterator as ABCIterator
 
@@ -24,6 +23,7 @@ from ..models import (
     resolve_model, maybe_sync_model_pricing, get_model_max_completion_tokens,
 )
 from ..tracking.token_tracker import TokenTracker, TokenUsage
+from .api_config import endpoint_client
 from .api_errors import (
     APISignal, classify_api_error, is_transient_error, rejected_request_field,
 )
@@ -44,14 +44,6 @@ _REQUIRED_REQUEST_FIELDS = frozenset({"model", "messages", "stream"})
 # time; capped so a provider that objects to everything can't turn a single
 # message into an unbounded run of API calls.
 _MAX_FIELD_REFUSALS = 3
-
-# Sent as the key to an endpoint that has none, such as a model running on a
-# cluster or on this computer. The OpenAI client refuses to be built with an
-# empty key, and leaving it out altogether makes the client pick up
-# OPENAI_API_KEY from the environment, which would send somebody's real key to
-# a server that never asked for it. A server that needs no key ignores this; one
-# that does need a key turns it away, which is the right thing to be told.
-_NO_KEY_NEEDED = "no-key-needed"
 
 
 def _client_with_a_time_limit(api_key: str) -> Portkey:
@@ -259,29 +251,7 @@ class BaseService:
                 "talk to. Add 'openai_compatible = true' to its settings if it does "
                 "speak that way; if it doesn't, it cannot be used from here."
             )
-        # Built once, with the endpoint's own settings applied — including
-        # verify_ssl, which was being read and then thrown away. Turning
-        # certificate checking off is occasionally the only way to reach a
-        # cluster with an internal certificate, so it is offered; it is worth
-        # saying out loud when it happens, because it is a real weakening.
-        client_options: dict[str, Any] = {}
-        if not api_config.verify_ssl:
-            import httpx
-
-            logging.warning(
-                "Certificate checking is turned off for the endpoint '%s'. Anything "
-                "between this computer and %s could read or alter what is sent.",
-                api_config.api_name, api_config.base_url,
-            )
-            client_options["http_client"] = httpx.Client(verify=False)
-
-        self.client = OpenAI(
-            # See _NO_KEY_NEEDED.
-            api_key=api_config.api_key or _NO_KEY_NEEDED,
-            base_url=api_config.base_url,
-            timeout=float(api_config.timeout),
-            **client_options,
-        )
+        self.client = endpoint_client(api_config)
         self._endpoint = api_config
         self.endpoint_name = api_config.api_name
 

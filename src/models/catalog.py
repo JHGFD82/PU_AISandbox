@@ -282,6 +282,10 @@ def model_owner(model: str) -> str:
     otherwise be filed under the shop rather than the maker. For those, and for
     a model with no route recorded at all, the name is read instead.
 
+    A model on one of this installation's own endpoints is grouped under that
+    endpoint's name instead, since what somebody choosing it needs to know is
+    that it runs there.
+
     Args:
         model: The model's catalog key (e.g. ``'claude-haiku-4-5'``).
 
@@ -289,6 +293,11 @@ def model_owner(model: str) -> str:
         A name to group under. ``'Other'`` only when nothing at all is known.
     """
     entry = load_model_catalog()["models"].get(model)
+    if isinstance(entry, dict) and entry.get("endpoint"):
+        from .. import settings
+
+        api_name = str(entry["endpoint"])
+        return str((settings.ENDPOINTS.get(api_name) or {}).get("name") or api_name)
     route = ""
     if isinstance(entry, dict):
         route = str(entry.get("portkey_id", "")).split("/")[0].strip().lower()

@@ -529,6 +529,24 @@ without anyone having to arrange it.
 Either way the key is stored as text anyone with the file can read. None of
 these files is tracked by git.
 
+### Its models are added to the catalog for you
+
+You do not need to add an endpoint's models to `model_catalog.json` yourself. The sandbox asks each endpoint which models it runs whenever you open the web interface's list of models or run `python main.py --list-models`, and writes each one into the catalog under the same name `-m` takes, such as `my_cluster:llama-3-70b`. This means a model you have just loaded on your cluster appears in the web interface's menu on its own, and choosing it there sends the work to your cluster. Nearly every OpenAI-compatible server (vLLM, Ollama, LM Studio and the like) answers this question; for one that does not, the endpoint's `default_model` is added regardless, and so is any model you name with `-m my_cluster:model-name`.
+
+```json
+"my_cluster:llama-3-70b": {
+  "endpoint": "my_cluster",
+  "model": "llama-3-70b",
+  "added": "2026-09-16T14:11:43"
+}
+```
+
+These entries carry no price, because calls to an endpoint are counted but never costed, and for the same reason one is never chosen as the cheapest model for work meant for the built-in service. The web interface asks each endpoint at most once an hour, so opening the menu repeatedly does not keep asking your cluster.
+
+A model the endpoint stops listing is taken out of the catalog the next time it is asked, and so is every model of an endpoint you remove from your settings, since choosing either would only fail. **An endpoint that is switched off or does not answer keeps every model it had**: a cluster that is down for the afternoon has not stopped running them.
+
+A newly added model is treated as unable to read images until you find out otherwise. To test it, run `python main.py settings test-model my_cluster:llama-3-70b`, or press the test button beside it on the web interface's Settings page; the test is sent to your endpoint, not to the built-in service. You can also set `"supports_vision": true` on its entry by hand, and that stays for as long as the model does.
+
 ## Somebody's folder somewhere else
 
 One person's work is normally kept in this installation's settings location.
