@@ -15,7 +15,7 @@
 <style>
   /* Shared by every element whose color comes from a theme variable, so
      switching data-theme fades smoothly instead of snapping instantly. */
-  body, #sidebar, #spend, #topbar, #conv-bar, #composer, .msg.assistant, .conv-item,
+  body, #sidebar, #spend, #topbar, #conv-bar, #conv-bar-title, #composer, .msg.assistant, .conv-item,
   .combobox-list, .model-add-popover, .conv-menu, button.secondary,
   input, select, textarea {
     transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease;
@@ -438,10 +438,22 @@
   }
   #conv-bar[hidden] { display: none; }
   /* The title takes what is left and gives it back when the figures beside it
-     need room, ending in an ellipsis rather than pushing the buttons off. */
+     need room, ending in an ellipsis rather than pushing the buttons off.
+     Clicking it renames the conversation, so it carries the hand cursor and
+     lights up under the pointer — the same invitation the conversation list
+     gives its rows. The negative margin cancels the padding the highlight
+     needs, so the words stay level with the message box below them. */
   #conv-bar-title {
     flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    font-weight: 600; color: var(--text);
+    font-weight: 600; color: var(--text); cursor: pointer;
+    padding: 0.15rem 0.3rem; margin-left: -0.3rem; border-radius: var(--radius-sm);
+  }
+  #conv-bar-title:hover { background: var(--hover-bg); }
+  /* Being typed into, it is a box rather than a label: the whole name shows
+     instead of ending in an ellipsis, and the cursor says text. */
+  #conv-bar-title[contenteditable="true"] {
+    outline: 1px solid var(--orange); white-space: normal; cursor: text;
+    background: var(--input-bg);
   }
   #conv-bar-spend {
     flex: none; color: var(--text-muted); font-variant-numeric: tabular-nums;
@@ -927,7 +939,7 @@
          finished conversation. Sits against the message box rather than in the
          top bar because it is about this conversation, not about the sandbox. -->
     <div id="conv-bar" hidden>
-      <div id="conv-bar-title"></div>
+      <div id="conv-bar-title" role="button" tabindex="0"></div>
       <div id="conv-bar-spend" title="What this conversation has cost so far"></div>
       <button type="button" class="icon-btn neutral" id="conv-bar-folder" hidden
               title="Open this conversation's folder" aria-label="Open this conversation's folder">
@@ -1845,10 +1857,17 @@ function updateConversationBar(conv) {
   bar.hidden = false;
 
   const titleEl = document.getElementById("conv-bar-title");
-  titleEl.textContent = conv.title || "";
-  // The whole title is here for anyone whose window is too narrow for it,
-  // the same way the sidebar offers it.
-  titleEl.title = conv.title || "";
+  // Left alone while it is being typed into: a reply arriving, or the first
+  // reply's automatic title, redraws the transcript and would otherwise wipe
+  // out a rename half-written.
+  if (!titleEl.isContentEditable) {
+    titleEl.textContent = conv.title || "";
+    // The whole title is here for anyone whose window is too narrow for it,
+    // the same way the sidebar offers it, followed by what clicking it does.
+    titleEl.title = conv.title
+      ? `${conv.title} — click to rename this conversation`
+      : "Click to rename this conversation";
+  }
 
   const totals = conversationTotals(conv);
   const spend = document.getElementById("conv-bar-spend");
@@ -1894,6 +1913,30 @@ document.getElementById("conv-bar-download-btn").addEventListener("click", (e) =
 });
 document.getElementById("conv-bar-folder").addEventListener("click", () => {
   if (state.conversationId) revealConversationFolder(state.conversationId);
+});
+
+// Renaming from the bar: the name of the open conversation is the obvious
+// place to reach for, so clicking it turns it into a box to type in — the same
+// editing the sidebar's "Rename" opens, on the other copy of the same name.
+function renameFromConversationBar() {
+  const titleEl = document.getElementById("conv-bar-title");
+  // Already being typed into: a click is placing the cursor, not starting over.
+  if (titleEl.isContentEditable || !state.conversationId) return;
+  // For as long as it is a box, it is announced as one rather than as a button.
+  titleEl.setAttribute("role", "textbox");
+  startRenaming(titleEl, state.conversationId, titleEl.textContent.trim(), () => {
+    titleEl.setAttribute("role", "button");
+  });
+}
+
+document.getElementById("conv-bar-title").addEventListener("click", renameFromConversationBar);
+document.getElementById("conv-bar-title").addEventListener("keydown", (e) => {
+  if (e.key !== "Enter" && e.key !== " ") return;
+  // Once it is a box, both keys belong to the typing: Enter saves the new name
+  // (startRenaming listens for it) and Space is a space.
+  if (e.currentTarget.isContentEditable) return;
+  e.preventDefault();   // Space would otherwise scroll the transcript.
+  renameFromConversationBar();
 });
 
 // The formats a conversation can be saved as, in the order they are offered.
@@ -2906,7 +2949,11 @@ function selectAllText(el) {
   sel.addRange(range);
 }
 
-function startRenaming(titleSpan, id, currentTitle) {
+// Turns one copy of a conversation's name into a box to type in — the sidebar
+// row's title, or the same name in the bar above the message box. `onFinish`,
+// if given, is called once the editing is over however it ended, for whatever
+// the caller has to put back.
+function startRenaming(titleSpan, id, currentTitle, onFinish) {
   titleSpan.contentEditable = "true";
   titleSpan.textContent = currentTitle;
   titleSpan.focus();
@@ -2932,10 +2979,17 @@ function startRenaming(titleSpan, id, currentTitle) {
       if (id === state.conversationId) {
         const titleEl = document.getElementById("conv-bar-title");
         titleEl.textContent = newTitle;
-        titleEl.title = newTitle;
+        titleEl.title = `${newTitle} — click to rename this conversation`;
       }
+    } else {
+      // Nothing was renamed — whatever was typed before pressing Escape, or
+      // the name emptied altogether, is put back. The sidebar is redrawn below
+      // and would recover either way; the bar is not, and would be left
+      // naming the conversation something it is not called.
+      titleSpan.textContent = currentTitle;
     }
     await loadConversations();
+    if (onFinish) onFinish();
   };
   const onKeydown = (e) => {
     if (e.key === "Enter") { e.preventDefault(); finish(true); }

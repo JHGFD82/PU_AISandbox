@@ -6735,6 +6735,52 @@ class TestTheBarAboveTheMessageBox:
         # Cut on screen, still readable on hover — the sidebar's own convention.
         assert 'titleEl.title = conv.title' in page
 
+    def test_the_name_is_renamed_by_clicking_it(self):
+        """The name of the open conversation is the obvious thing to reach for;
+        before this the only way to rename one was the hover menu on its
+        sidebar row, which is a different copy of the same name."""
+        page = self._chat()
+        assert 'document.getElementById("conv-bar-title").addEventListener("click", renameFromConversationBar)' in page
+        # The sidebar's editing, not a second implementation of it.
+        body = page.split("function renameFromConversationBar() {")[1].split("\n}")[0]
+        assert "startRenaming(titleEl, state.conversationId" in body
+
+    def test_the_pointer_says_the_name_can_be_clicked(self):
+        """Nothing else in the bar is clickable text, so without the hand
+        cursor there is nothing to suggest this is."""
+        rule = self._chat().split("#conv-bar-title {")[1].split("}")[0]
+        assert "cursor: pointer" in rule
+        assert "#conv-bar-title:hover {" in self._chat()
+
+    def test_being_typed_into_it_is_a_box_and_not_a_label(self):
+        page = self._chat()
+        rule = page.split('#conv-bar-title[contenteditable="true"] {')[1].split("}")[0]
+        # A name being edited has to be readable whole, and the pointer that
+        # invited the click would now be wrong.
+        assert "white-space: normal" in rule
+        assert "cursor: text" in rule
+
+    def test_the_keyboard_reaches_it_too(self):
+        page = self._chat()
+        assert '<div id="conv-bar-title" role="button" tabindex="0">' in page
+        handler = page.split('document.getElementById("conv-bar-title").addEventListener("keydown"')[1][:500]
+        assert 'e.key !== "Enter" && e.key !== " "' in handler
+        # Once it is a box those keys belong to the typing.
+        assert "isContentEditable" in handler
+
+    def test_a_half_written_rename_survives_a_redraw(self):
+        """A reply arriving, or the first reply's automatic title, calls
+        renderMessages — which would otherwise overwrite what is being typed."""
+        body = self._chat().split("function updateConversationBar(conv) {")[1][:900]
+        assert "if (!titleEl.isContentEditable) {" in body
+
+    def test_an_abandoned_rename_puts_the_name_back(self):
+        """Escape, or emptying the box, commits nothing — and the bar is not
+        redrawn afterwards the way the sidebar list is, so it would be left
+        naming the conversation something it is not called."""
+        finish = self._chat().split("const finish = async (commit) => {")[1].split("\n  };")[0]
+        assert "titleSpan.textContent = currentTitle;" in finish.split("} else {")[1]
+
     def test_the_spend_is_summed_from_the_messages_in_hand(self):
         """There is no per-conversation total on the server to ask for; usage
         is kept per person and per month."""
