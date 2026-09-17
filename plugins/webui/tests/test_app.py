@@ -6928,12 +6928,25 @@ class TestAReplyNobodyCouldPrice:
         figure = chat.split('<h2>This month</h2>')[1].split("</div>")[0]
         assert 'id="spend-uncounted-btn"' in figure
         assert 'aria-controls="spend-uncounted"' in figure
-        warning = chat.split('<div class="spend-warning" id="spend-uncounted"')[1].split(">")[0]
+        warning = chat.split('<p class="spend-warning" id="spend-uncounted"')[1].split(">")[0]
         assert "hidden" in warning
         # And it opens and shuts, rather than only opening.
         toggle = chat.split('document.getElementById("spend-uncounted-btn").addEventListener')[1][:400]
         assert "warning.hidden = !opening" in toggle
         assert "aria-expanded" in toggle
+
+    def test_the_words_sit_evenly_inside_the_box_and_clear_of_the_figure(self):
+        """A wrapper paragraph inside the box added its own margins to the
+        box's padding, so the words sat further from the top and bottom edges
+        than from the sides. The space that belongs outside the box is given
+        outside it, at the step the other things under a figure use."""
+        chat = self._chat()
+        # One element, written into directly — the same shape as the warning
+        # above the figures.
+        assert "spend-uncounted-text" not in chat
+        rule = chat.split(".spend-warning {")[1].split("}")[0]
+        assert "padding: var(--space-2);" in rule
+        assert "#spend-uncounted { margin: var(--space-2) 0; }" in chat
 
     def test_the_mark_is_there_only_where_there_is_something_to_say(self):
         chat = self._chat()
@@ -6959,7 +6972,7 @@ class TestAReplyNobodyCouldPrice:
         A month can disagree with the bill for reasons the sandbox never sees.
         """
         chat = self._chat()
-        warning = chat.split('id="spend-uncounted"')[1].split("</div>")[0]
+        warning = chat.split('id="spend-uncounted"')[1].split("</p>")[0]
         assert "spend-adjust-btn" not in warning, "the control is inside the warning again"
         # Sitting with the figure it corrects, and not hidden.
         after_month = chat.split('id="spend-month"')[1].split("<h2>")[0]

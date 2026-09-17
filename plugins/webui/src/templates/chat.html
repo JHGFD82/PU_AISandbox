@@ -491,11 +491,15 @@
      just not all of them. */
   .spend-warning {
     font-size: var(--text-xs); line-height: 1.4; margin: 0 0 var(--space-4);
-    padding: var(--space-2) var(--space-3);
+    padding: var(--space-2);
     background: var(--orange-tint); border: 1px solid var(--orange);
     border-radius: var(--radius-md); word-break: break-word;
   }
   .spend-warning[hidden] { display: none; }
+  /* This one hangs off the figure above it rather than sitting at the top of
+     the panel, so the space around it is given here: the same step the other
+     things under a figure stand off by, above and below alike. */
+  #spend-uncounted { margin: var(--space-2) 0; }
   /* A reply whose cost nobody knows. Marked in the warning colour rather than
      the muted grey the ordinary figures use, because the absence is the point:
      grey would read as one more quiet statistic. */
@@ -1010,9 +1014,7 @@
         aria-expanded="false" aria-controls="spend-uncounted"
         title="Why this month's figure may be low"
         aria-label="Why this month's figure may be low">*</button></div>
-    <div class="spend-warning" id="spend-uncounted" hidden>
-      <p id="spend-uncounted-text"></p>
-    </div>
+    <p class="spend-warning" id="spend-uncounted" hidden></p>
     <!-- Only where the bill and the measurements have been reconciled: both
          figures, so the total above is never mistaken for a measured one. -->
     <div class="spend-label" id="spend-adjusted" hidden></div>
@@ -3234,7 +3236,7 @@ async function loadUsage() {
   uncountedMark.hidden = state.usageMonth.unreported === 0;
   if (state.usageMonth.unreported) {
     const n = state.usageMonth.unreported;
-    document.getElementById("spend-uncounted-text").textContent =
+    uncounted.textContent =
       `${n} ${n === 1 ? "reply" : "replies"} this month could not be priced — the AI `
       + "service did not report what they used. Those tokens were still spent and "
       + "still billed, so this month's figure is lower than the billed one by "
