@@ -510,6 +510,16 @@
     font-size: var(--text-xs); font-family: inherit; cursor: pointer; text-align: left;
   }
   .spend-link:hover { text-decoration: underline; }
+  /* The mark on a figure that needs a footnote. Coloured like an unpriced
+     reply rather than like the figure, so it reads as the same subject, and
+     smaller than the figure it hangs off. A real button underneath, so it is
+     reachable by keyboard and named to a screen reader. */
+  .spend-asterisk {
+    background: none; border: none; padding: 0 0 0 0.15rem; cursor: pointer;
+    color: var(--badge-can-text); font-family: inherit; font-size: var(--text-xl);
+    line-height: 1;
+  }
+  .spend-asterisk[hidden] { display: none; }
   .spend-figure { font-size: var(--text-xxl); font-weight: 600; }
   .spend-label { font-size: var(--text-xs); color: var(--text-muted); }
   .spend-row { display: flex; justify-content: space-between; font-size: var(--text-md); padding: 0.2rem 0; }
@@ -988,18 +998,26 @@
          folder that cannot be read contributes nothing, and nothing looks
          exactly like a month with no spending in it. -->
     <p class="spend-warning" id="spend-unreadable" hidden></p>
-    <!-- Shown only where calls went unpriced. Above the figures for the same
-         reason as the one above it: it is about whether to believe them. -->
+    <h2>This month</h2>
+    <!-- A footnote mark on the figure, shown only where something about it has
+         to be said. The whole warning sat open above the figures instead, on
+         every conversation for the rest of the month: true, unmissable, and
+         nothing anybody could do anything about after reading it once. The mark
+         keeps the caveat attached to the number it is about and says it when
+         asked. -->
+    <div class="spend-figure"><span id="spend-month">$0.00</span><button
+        type="button" class="spend-asterisk" id="spend-uncounted-btn" hidden
+        aria-expanded="false" aria-controls="spend-uncounted"
+        title="Why this month's figure may be low"
+        aria-label="Why this month's figure may be low">*</button></div>
     <div class="spend-warning" id="spend-uncounted" hidden>
       <p id="spend-uncounted-text"></p>
     </div>
-    <h2>This month</h2>
-    <div class="spend-figure" id="spend-month">$0.00</div>
     <!-- Only where the bill and the measurements have been reconciled: both
          figures, so the total above is never mistaken for a measured one. -->
     <div class="spend-label" id="spend-adjusted" hidden></div>
     <div class="spend-label" id="spend-budget"></div>
-    <button type="button" class="spend-link" id="spend-adjust-btn">Compare with the bill…</button>
+    <button type="button" class="spend-link" id="spend-adjust-btn">Adjust total</button>
     <h2>All time</h2>
     <div class="spend-figure" id="spend-alltime">$0.00</div>
     <h2>By model (this month)</h2>
@@ -3207,8 +3225,13 @@ async function loadUsage() {
       + `${state.usageMonth.adjustment >= 0 ? "+" : "−"}`
       + `${fmtMoney(Math.abs(state.usageMonth.adjustment)).slice(1)} from the bill`;
   }
+  // The mark, and behind it the reason. The mark appears only where there is
+  // something to say; the reason stays however the person last left it, because
+  // this panel is redrawn after every reply and a warning that closed itself
+  // mid-sentence would be its own kind of annoyance.
   const uncounted = document.getElementById("spend-uncounted");
-  uncounted.hidden = state.usageMonth.unreported === 0;
+  const uncountedMark = document.getElementById("spend-uncounted-btn");
+  uncountedMark.hidden = state.usageMonth.unreported === 0;
   if (state.usageMonth.unreported) {
     const n = state.usageMonth.unreported;
     document.getElementById("spend-uncounted-text").textContent =
@@ -3216,6 +3239,11 @@ async function loadUsage() {
       + "service did not report what they used. Those tokens were still spent and "
       + "still billed, so this month's figure is lower than the billed one by "
       + "however much they came to. Ask OIT for the figure on the bill.";
+    uncounted.hidden = uncountedMark.getAttribute("aria-expanded") !== "true";
+  } else {
+    // Nothing to footnote any more, so nothing left open either.
+    uncounted.hidden = true;
+    uncountedMark.setAttribute("aria-expanded", "false");
   }
 
   const byModel = document.getElementById("spend-by-model");
@@ -3748,6 +3776,15 @@ async function saveAdjustment() {
 }
 
 document.getElementById("spend-adjust-btn").addEventListener("click", openAdjustModal);
+
+// The footnote on this month's figure: open on the first click, shut on the
+// next, so it can be read once and put away for the rest of the month.
+document.getElementById("spend-uncounted-btn").addEventListener("click", (e) => {
+  const warning = document.getElementById("spend-uncounted");
+  const opening = warning.hidden;
+  warning.hidden = !opening;
+  e.currentTarget.setAttribute("aria-expanded", opening ? "true" : "false");
+});
 document.getElementById("adjust-modal-close").addEventListener("click", closeAdjustModal);
 document.getElementById("adjust-cancel").addEventListener("click", closeAdjustModal);
 document.getElementById("adjust-save").addEventListener("click", saveAdjustment);

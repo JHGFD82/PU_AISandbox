@@ -6918,6 +6918,40 @@ class TestAReplyNobodyCouldPrice:
         assert "Ask OIT" in chat
         assert 'id="spend-adjust-btn"' in chat
 
+    def test_the_month_is_footnoted_rather_than_warned_about(self):
+        """The warning sat open above the figures on every conversation for the
+        rest of the month. Once read there is nothing to do about it until the
+        bill arrives, so it is a footnote on the figure it is about: a mark that
+        says it when asked."""
+        chat = self._chat()
+        # The mark hangs off the month's figure, and the words wait behind it.
+        figure = chat.split('<h2>This month</h2>')[1].split("</div>")[0]
+        assert 'id="spend-uncounted-btn"' in figure
+        assert 'aria-controls="spend-uncounted"' in figure
+        warning = chat.split('<div class="spend-warning" id="spend-uncounted"')[1].split(">")[0]
+        assert "hidden" in warning
+        # And it opens and shuts, rather than only opening.
+        toggle = chat.split('document.getElementById("spend-uncounted-btn").addEventListener')[1][:400]
+        assert "warning.hidden = !opening" in toggle
+        assert "aria-expanded" in toggle
+
+    def test_the_mark_is_there_only_where_there_is_something_to_say(self):
+        chat = self._chat()
+        assert "uncountedMark.hidden = state.usageMonth.unreported === 0" in chat
+
+    def test_an_opened_footnote_stays_open_while_being_read(self):
+        """The panel is redrawn after every reply, and a warning that shut
+        itself mid-sentence would be its own annoyance."""
+        chat = self._chat()
+        assert 'uncounted.hidden = uncountedMark.getAttribute("aria-expanded") !== "true"' in chat
+
+    def test_the_correction_is_named_for_what_it_does(self):
+        """"Compare with the bill" described the errand rather than the
+        control, and read as homework."""
+        chat = self._chat()
+        control = chat.split('id="spend-adjust-btn"')[1].split("</button>")[0]
+        assert "Adjust total" in control
+
     def test_the_correction_can_be_reached_without_anything_going_wrong(self):
         """It lived inside the warning about unpriced replies, so it existed
         only while that warning did — which is almost never, and never at all
