@@ -164,12 +164,13 @@ class ChatService(BaseService):
         prompt_tokens: Optional[int] = None
         completion_tokens: Optional[int] = None
         total_tokens: Optional[int] = None
-        # Why the model stopped. A stream that runs to the end says so —
+        # Why the model stopped. A stream whose closing part arrives says so —
         # "end_turn" when the model finished, "max_tokens" when it hit the
-        # length cap. A stream that is cut off partway says nothing at all,
-        # and simply stops arriving: no error is raised, because nothing went
-        # wrong as far as this end is concerned. That silence is the only
-        # thing separating a cut-off answer from a complete one.
+        # length cap. When that closing part never comes the stream simply
+        # stops arriving: no error is raised, because nothing went wrong as far
+        # as this end is concerned, and nothing is said about the reply either.
+        # A reply short of its last words and a finished one look the same from
+        # here, so this silence is a reason to wonder and not a finding.
         finish_reason: Optional[str] = None
 
         try:
@@ -212,7 +213,11 @@ class ChatService(BaseService):
             handle_api_errors(e, model)
             raise
 
-        incomplete = finish_reason is None
+        # The provider never said why it stopped. That is all this means: a
+        # stream whose closing part never arrived says nothing, and a reply
+        # missing its last words looks exactly like a finished one from here.
+        # So the reply *may* be short of its end — it is not known to be.
+        unfinished = finish_reason is None
 
         cost: Optional[float] = None
         if prompt_tokens is not None and completion_tokens is not None and total_tokens is not None:
@@ -222,17 +227,27 @@ class ChatService(BaseService):
                 completion_tokens=completion_tokens,
                 total_tokens=total_tokens,
                 requested_model=model,
+                # Which service answered, so a reply from somebody's own
+                # cluster is recorded with its tokens and no money rather than
+                # priced at whatever the catalog happens to hold. Left out
+                # here, a local model was billed at an unrelated model's rates.
+                endpoint=self.endpoint_name,
             )
             cost = usage_record.total_cost
-        else:
+        elif not self.endpoint_name:
             # The provider read the question and wrote as much of the answer as
             # arrived, and bills for both, so this is money spent that nothing
             # has counted. Noted against the month rather than passed over, so
             # a report can say how much of itself it could not measure.
+            #
+            # The sandbox only. An alternate endpoint has no prices here on
+            # purpose (see ``BaseService._record_response_usage()``), so noting
+            # one would tell a professor the university's bill is understated
+            # by a call the university never saw.
             self.token_tracker.record_unreported_call(
                 response_model,
-                note=("the reply was cut off before the provider said it had finished"
-                      if incomplete else "the provider reported no usage for this call"),
+                note=("the provider sent no usage and never said it had finished"
+                      if unfinished else "the provider reported no usage for this call"),
             )
 
         yield {
@@ -242,10 +257,10 @@ class ChatService(BaseService):
             "prompt_tokens": prompt_tokens,
             "completion_tokens": completion_tokens,
             "cost": cost,
-            # Whether the answer arrived in full. A cut-off reply reads as a
-            # finished one otherwise: the words simply stop, and nothing says
-            # that more was coming.
-            "incomplete": incomplete,
+            # Whether the provider ever said it had finished. It usually
+            # does, and when it doesn't the reply may be short of its end —
+            # the words simply stop, and nothing says more was coming.
+            "incomplete": unfinished,
             "finish_reason": finish_reason,
         }
 

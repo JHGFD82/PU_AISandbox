@@ -3421,8 +3421,12 @@ function renderMessages(conv) {
       // nothing, and this one cost whatever the tokens cost.
       const meta = document.createElement("div");
       meta.className = "meta meta-unpriced";
+      // Said as what is known, not as what it looks like: a reply whose
+      // closing word never arrived may be whole or may be short of its end,
+      // and one that plainly reads to the end was called cut off for a month.
       meta.textContent = m.incomplete
-        ? "This reply was cut off before the service finished sending it, so its cost was never reported."
+        ? "The service never said what this reply used or that it had finished, "
+          + "so it has no cost here and may be missing its end."
         : "The service did not report this reply's cost.";
       div.appendChild(meta);
     }

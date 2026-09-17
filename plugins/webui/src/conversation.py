@@ -258,11 +258,13 @@ class Message:
     progress_done: Optional[int] = None
     progress_total: Optional[int] = None
     page_number: Optional[int] = None
-    # Whether the reply stopped before the provider said it had finished.
-    # A cut-off answer reads exactly like a complete one otherwise — the
-    # words simply stop — and its cost goes unreported, so the turn is
-    # money spent that nothing counted. False for everything else,
-    # including every message written before this was recorded.
+    # Whether the reply ended without the provider ever saying it had
+    # finished. That is all it records: a reply short of its last words reads
+    # exactly like a complete one, so this says the closing word never came,
+    # not that anything is missing. It comes with no cost — the same silence
+    # carries the tokens — so the turn is money spent that nothing counted.
+    # False for everything else, including every message written before this
+    # was recorded.
     incomplete: bool = False
 
     def to_dict(self) -> dict[str, Any]:

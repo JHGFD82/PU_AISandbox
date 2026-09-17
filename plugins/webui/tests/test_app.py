@@ -6843,24 +6843,59 @@ class TestTheBarAboveTheMessageBox:
 
 
 class TestAReplyNobodyCouldPrice:
-    """A cut-off reply reads exactly like a finished one, and costs nothing.
+    """A reply whose closing part never arrived costs nothing, and says nothing.
 
-    The stream simply stops arriving; no error is raised, because as far as
-    this end is concerned nothing went wrong. The words end mid-sentence, the
-    usage never comes, and the turn is saved looking complete and free — while
-    the provider bills for every token it read and wrote.
+    The stream simply stops; no error is raised, because as far as this end is
+    concerned nothing went wrong. The usage never comes, and the turn is saved
+    looking free — while the provider bills for every token it read and wrote.
+    Whether the words are all there is not knowable from here.
     """
 
     def _chat(self) -> str:
         return _rendered_chat()
 
-    def test_a_stream_that_never_says_it_finished_is_marked_incomplete(self):
+    def test_a_stream_that_never_says_it_finished_is_marked_as_such(self):
         chat_service = sys.modules["src.services.chat_service"]
         import inspect
 
         source = inspect.getsource(chat_service.ChatService.stream_message)
         assert "finish_reason" in source
-        assert "incomplete = finish_reason is None" in source
+        assert "unfinished = finish_reason is None" in source
+
+    def test_a_reply_is_not_called_cut_off_on_that_evidence_alone(self):
+        """A stream that stops without its closing part is the only thing the
+        sandbox sees, and a whole reply looks the same as a truncated one. Said
+        as a finding, it told a professor their reply had been cut off for a
+        month when it plainly ran to its end."""
+        chat = self._chat()
+        shown = chat.split('meta.className = "meta meta-unpriced"')[1]
+        unpriced = shown.split("meta.textContent =")[1].split(";")[0]
+        assert "cut off" not in unpriced, unpriced
+        assert "may be missing its end" in unpriced
+        # The money is still stated plainly: no cost recorded here.
+        assert "no cost" in unpriced
+
+    def test_a_reply_from_somebody_elses_service_is_not_called_uncounted(self):
+        """An alternate endpoint has no prices in the sandbox on purpose, so a
+        reply from one is recorded with tokens and no money — not as spending
+        the university's bill is missing. BaseService has always known this;
+        the streaming path did not, and sent professors to OIT to ask about a
+        call OIT never saw."""
+        chat_service = sys.modules["src.services.chat_service"]
+        import inspect
+
+        source = inspect.getsource(chat_service.ChatService.stream_message)
+        assert "elif not self.endpoint_name:" in source
+
+    def test_a_streamed_reply_is_priced_by_the_service_that_answered(self):
+        """Without the endpoint, a model on somebody's own cluster was priced
+        at whatever the catalog held for a name like it."""
+        chat_service = sys.modules["src.services.chat_service"]
+        import inspect
+
+        source = inspect.getsource(chat_service.ChatService.stream_message)
+        recording = source.split("record_usage(")[1].split(")")[0]
+        assert "endpoint=self.endpoint_name" in recording
 
     def test_an_unpriced_turn_is_noted_against_the_month(self):
         """Not silently passed over: the month has to be able to say how much
@@ -6874,7 +6909,7 @@ class TestAReplyNobodyCouldPrice:
     def test_the_transcript_says_why_a_reply_has_no_cost(self):
         """Blank reads as free."""
         chat = self._chat()
-        assert "cut off before the service finished sending it" in chat
+        assert "never said what this reply used" in chat
         assert "did not report this reply's cost" in chat
 
     def test_the_spend_panel_offers_the_correction(self):
@@ -7014,7 +7049,7 @@ class TestACutOffStreamEndToEnd:
                 # stopped before the provider said it had finished.
                 yield {"type": "delta", "text": "Half a sen"}
                 self.token_tracker.record_unreported_call(
-                    "gpt-4o", note="the reply was cut off before the provider said it had finished")
+                    "gpt-4o", note="the provider sent no usage and never said it had finished")
                 yield {
                     "type": "done", "content": "Half a sen", "model": "gpt-4o",
                     "prompt_tokens": None, "completion_tokens": None, "cost": None,
@@ -7044,4 +7079,4 @@ class TestACutOffStreamEndToEnd:
         assert saved["incomplete"] is True
         # And it was counted as spending nobody could measure.
         assert noted["model"] == "gpt-4o"
-        assert "cut off" in noted["note"]
+        assert "no usage" in noted["note"]
