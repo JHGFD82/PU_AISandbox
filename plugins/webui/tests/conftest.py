@@ -12,6 +12,8 @@ import importlib.util
 import sys
 from pathlib import Path
 
+import pytest
+
 _PLUGIN_DIR = Path(__file__).parent.parent
 
 
@@ -42,9 +44,34 @@ _register("_pu_webui_attachments", "src/attachments.py")
 _register("_pu_webui_export", "src/export.py")
 _register("_pu_webui_jobs", "src/jobs.py")
 _register("src.services.chat_service", "src/services/chat_service.py")
+_register("_pu_webui_git_tool", "src/git_tool.py")
+_register("_pu_webui_plugin_install", "src/plugin_install.py")
+_register("_pu_webui_upgrade", "src/upgrade.py")
 _register("_pu_webui_branding", "src/branding.py")
 _register("_pu_webui_setup_web", "src/setup_web.py")
 _register("_pu_webui_app", "src/app.py")
+
+@pytest.fixture(autouse=True)
+def _do_not_look_for_updates_while_testing():
+    """Stop every create_app() in the suite reaching out to GitHub.
+
+    Starting the server begins looking for a newer version on a background
+    thread. That is right in a running sandbox and wrong in a test run: it
+    would be a real `git fetch` against the real repository, once per test
+    that builds an app, and the answers would depend on what had been pushed
+    that morning.
+
+    Only the looking-at-startup is stopped. upgrade.check_for_updates itself is
+    left alone, because test_upgrade.py runs the real thing against
+    repositories it makes for itself, and the update routes' own tests put
+    their own answer in place.
+    """
+    app_module = sys.modules["_pu_webui_app"]
+    before = app_module._look_for_an_update_in_the_background
+    app_module._look_for_an_update_in_the_background = lambda: None
+    yield
+    app_module._look_for_an_update_in_the_background = before
+
 
 # Also import the real plugin.py module (not just the src/*.py files above,
 # which conftest registers directly to avoid needing the full plugin loader).

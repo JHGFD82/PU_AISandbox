@@ -203,6 +203,18 @@ The package holds the code and is what gets replaced on upgrade. Everything belo
 | Your settings location | `settings.toml` (API keys, endpoint credentials, web UI secrets, external usage sources), `model_catalog.json`, `preferences.toml`, `data/` |
 | The package | `settings.default.toml`, `plugins/*/settings.toml`, `templates/`, `.installation` (the marker naming your settings location) |
 
+### Replacing the package
+
+The package is a git clone, so an upgrade is `git fetch` and `git merge --ff-only`. `plugins/webui/src/upgrade.py` does that from the browser, and `plugins/webui/src/git_tool.py` is where both it and the plugin installer get a git that cannot stop and wait for a password.
+
+Three things about it are worth knowing before changing it:
+
+- **`git merge --ff-only`, never `git pull`.** A pull that cannot fast-forward leaves a half-merged working tree, which nobody is recovering from in a browser. It refuses instead, and a preflight rules out the cases worth explaining first — no `.git`, an *enclosing* repository rather than this one, a detached HEAD, no upstream, a dirty tree, or local commits.
+- **The restart skips `start.py`.** `_restart_into_the_new_code()` execs `main.py`, so nothing re-reads `requirements.txt`. The update installs changed dependencies itself, and writes `.venv/.requirements-stamp` only on success — a stale stamp is what makes the next `python3 start.py` notice and repair a half-installed environment.
+- **`start.py` owns the fingerprint.** It cannot import from `src/` (it runs on whatever Python the computer has, before `.venv` exists), so `upgrade.py` loads it by path and asks it for `requirements_fingerprint()`, `STAMP` and `venv_python()` rather than keeping a second copy.
+
+Because every installed copy fast-forwards, **`main` must never be rebased or force-pushed** once this has shipped: every copy would become non-fast-forwardable at once, and each would report it as "this copy has changes of its own".
+
 ### Configuration layers
 
 | Source | Controls |

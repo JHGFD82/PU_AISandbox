@@ -69,8 +69,10 @@ def _register(module_name: str, rel_path: str) -> None:
 # (app.py needs all four; none of them depend on each other), then jobs
 # (depends on conversation, registered just above it), then the AI service (a normal
 # src.services.* registration, needed by app.py's chat route via
-# SandboxProcessor rather than imported directly), then app.py itself last
-# since it's the only file that needs everything else already in place.
+# SandboxProcessor rather than imported directly), then the git helper before
+# the two files that run git (fetching a plugin, and updating the sandbox),
+# then app.py itself last since it's the only file that needs everything else
+# already in place.
 _register("pu_plugin.webui.settings", "src/settings.py")
 _register("_pu_webui_file_picker", "src/file_picker.py")
 _register("_pu_webui_auth", "src/auth.py")
@@ -79,7 +81,9 @@ _register("_pu_webui_attachments", "src/attachments.py")
 _register("_pu_webui_export", "src/export.py")
 _register("_pu_webui_jobs", "src/jobs.py")
 _register("src.services.chat_service", "src/services/chat_service.py")
+_register("_pu_webui_git_tool", "src/git_tool.py")
 _register("_pu_webui_plugin_install", "src/plugin_install.py")
+_register("_pu_webui_upgrade", "src/upgrade.py")
 _register("_pu_webui_branding", "src/branding.py")
 _register("_pu_webui_setup_web", "src/setup_web.py")
 _register("_pu_webui_app", "src/app.py")

@@ -156,7 +156,27 @@ pip install -r requirements-dev.txt
 
 Your `settings` and `data` live **outside** the `package` location, in the folder you chose during setup, which by default is `PU_AISandbox_data` in your home folder. This ensures that upgrading this package (or even deleting it outright) is painless as your files are unaffected by this process.
 
-To upgrade this package, the tidiest way is the following commands if you installed with `git clone`:
+### From the web interface
+
+The sandbox looks for a newer version each time it starts, so most of the time it will tell you before you go looking. When one is waiting, an arrow appears at the bottom of the conversation list and a line appears above the conversation itself.
+
+1. Open **Settings**, then the **System** tab, and find **Updates**. It names the version you have and whether anything newer has been published. **Check for updates** looks again without restarting.
+2. Press **Update now**. It shows what it is doing as it goes: getting the new files, and installing any new software the new version needs.
+3. The sandbox restarts itself and the page reloads. Everyone is signed out, so if you have set a passphrase you will be asked for it again.
+
+Updating only works in a browser on the same computer the sandbox is running on. An update replaces the sandbox's own program code, and knowing the passphrase is not the same permission as that — if you reach the sandbox from another machine, the Updates card is not shown there at all.
+
+It will also decline to update, and say why, when:
+
+- **This copy was downloaded as a ZIP file.** There is nothing to update from. Follow the steps under "Starting fresh" below.
+- **Files inside the `package` location have been edited.** Updating would either undo those edits or stop halfway. Almost always this is a settings file changed where it sits; those belong in `preferences.toml` in your `settings` location, which an update never touches. Move them there and check again.
+- **git is not installed, or cannot run.** On a Mac, `xcode-select --install` is usually enough.
+
+If installing the new software fails partway — a dropped connection is the usual cause — the sandbox does not restart and carries on working as it was. You are offered **Try again**, which is worth doing first, and **Put it back**.
+
+### From the terminal
+
+If you installed with `git clone`:
 
 ```bash
 cd PU_AISandbox
@@ -165,6 +185,8 @@ python3 start.py
 ```
 
 `start.py` notices if anything new is needed and installs it. If nothing has changed, it goes straight to the web interface.
+
+### Starting fresh
 
 If you downloaded a ZIP rather than cloning, or if you want to start fresh, that is a safe way to do that:
 

@@ -246,6 +246,8 @@ python main.py --list-models
 
 Tracked by git and shipped with the package. It holds the defaults for everyone; to change any of them for yourself, copy the lines you want into `preferences.toml` in your settings location.
 
+Editing it in place has a second cost beyond being overwritten: this file and every `plugins/*/settings.toml` are tracked by git, so an edited copy of one stops the sandbox being able to update itself, and says so rather than undoing your change. `preferences.toml` sits outside the package and is never touched by an upgrade, which is why it is the place for anything you set yourself.
+
 ```toml
 [prompt]
 temperature = 0.7

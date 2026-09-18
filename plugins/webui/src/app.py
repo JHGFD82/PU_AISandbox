@@ -90,6 +90,7 @@ attachments = sys.modules["_pu_webui_attachments"]
 jobs = sys.modules["_pu_webui_jobs"]
 export = sys.modules["_pu_webui_export"]
 branding = sys.modules["_pu_webui_branding"]
+upgrade = sys.modules["_pu_webui_upgrade"]
 
 _TEMPLATES_DIR = Path(__file__).parent / "templates"
 templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
@@ -106,6 +107,50 @@ _attempt_limiter = auth.AttemptLimiter()
 # _auth_backend above — see jobs.py's module docstring for why this is
 # deliberately in-memory only.
 _job_store = jobs.JobStore()
+
+# What the last look for a newer version found, and the lock to read and write
+# it through. Looked for once when the server starts (see the end of
+# create_app) and again whenever somebody presses Check, so that drawing the
+# page costs nothing and nobody waits on the network to be told there is
+# nothing to tell them.
+_update_check = None
+_update_check_lock = threading.Lock()
+
+
+def _remember_what_was_found(found) -> None:
+    """Keep what a look for a newer version found, for the page to ask about."""
+    global _update_check
+    with _update_check_lock:
+        _update_check = found
+
+
+def _what_was_last_found():
+    """Return what the last look found, or None if nothing has looked yet."""
+    with _update_check_lock:
+        return _update_check
+
+
+def _look_for_an_update_in_the_background() -> None:
+    """Start finding out whether a newer version has been published.
+
+    On its own thread, because it reaches the network and the sandbox has to
+    finish starting whether or not there is one. Nothing here can stop the
+    server coming up: anything that goes wrong is written to the log, and the
+    page simply has nothing to say about updates.
+
+    Looked for once per start rather than on a timer. Restarting is how a
+    newer version is arrived at in the first place, so every start is the
+    natural moment to look again — including the restart at the end of an
+    update, which is what confirms the update worked.
+    """
+    def look() -> None:
+        try:
+            _remember_what_was_found(upgrade.check_for_updates())
+        except Exception as e:
+            logging.warning("Could not look for a newer version: %s", e)
+
+    threading.Thread(target=look, daemon=True,
+                     name="look-for-a-newer-version").start()
 
 # Plugins are loaded once, lazily, on first use rather than at import time —
 # this module is itself registered by plugins/webui/plugin.py *during* the
@@ -141,11 +186,15 @@ def _get_plugins() -> dict:
 # Models sits next to endpoints in both, since the two are the same question —
 # what this sandbox can send work to. It is late on a first run because adding
 # one needs a professor's key, which on a first run doesn't exist yet.
+#
+# Updates sits last on a first run — a copy that was downloaded minutes ago has
+# nothing to update — and near the front afterwards, because a waiting update
+# is one of the few things that brings somebody to this page on purpose.
 _SETTINGS_ORDER_FIRST_RUN = [
-    "professors", "webui", "shared", "endpoints", "models", "folder",
+    "professors", "webui", "shared", "endpoints", "models", "folder", "update",
 ]
 _SETTINGS_ORDER_REPEAT = [
-    "folder", "shared", "endpoints", "models", "professors", "webui",
+    "update", "folder", "shared", "endpoints", "models", "professors", "webui",
 ]
 
 
@@ -271,6 +320,14 @@ def _move_their_work(netid: str, was) -> dict:
 class InstallPluginBody(BaseModel):
     repository: str
     folder: str
+
+
+class UndoUpdateBody(BaseModel):
+    # The version to go back to, as the update that stopped partway reported
+    # it. Taken from the page rather than remembered here so that a browser
+    # left open across a restart cannot undo something it no longer knows
+    # anything about.
+    was: str
 
 
 class SourceBody(BaseModel):
@@ -509,7 +566,24 @@ def _settings_snapshot() -> dict:
             "endpoints": endpoints,
         },
         "source_id": settings_store.get_source_id(),
+        # Which version this copy is. None when it cannot be told — a copy
+        # downloaded as a ZIP file rather than fetched with git, or a computer
+        # without a usable git — and the update card reads that as "there is
+        # nothing to say here" rather than as an error. package_version()
+        # never raises, for that reason.
+        "version": _version_of_this_copy(),
     }
+
+
+def _version_of_this_copy() -> Optional[dict]:
+    """Return which version this copy of the sandbox is, ready to send.
+
+    Returns:
+        The version as plain values the page can read, or None if this copy
+        cannot say which version it is.
+    """
+    found = upgrade.package_version()
+    return asdict(found) if found is not None else None
 
 
 def _validated_professor(netid: str | None) -> str:
@@ -534,6 +608,14 @@ def _require_unlocked(request: Request) -> None:
 
 # Addresses that mean the browser asking is on this same computer.
 _SAME_COMPUTER = frozenset({"127.0.0.1", "::1", "localhost"})
+
+# How long to wait before replacing this process, in each of the two places
+# that do it. Long enough for the answer already sent to reach the browser, so
+# it knows to start waiting for the sandbox to come back. The update's wait is
+# the longer of the two because its answer is a stream, which has to arrive
+# and then be seen to have ended.
+_RESTART_AFTER_AN_INSTALL_SECONDS = 0.5
+_RESTART_AFTER_AN_UPDATE_SECONDS = 1.0
 
 
 def _require_same_computer(request: Request) -> None:
@@ -580,6 +662,30 @@ def _require_installing_from_this_computer(request: Request) -> None:
             "as the sandbox. Installing one puts new program code on that "
             "computer and runs it with your API keys, which is not something "
             "this interface will do on behalf of another machine.",
+        )
+
+
+def _require_updating_from_this_computer(request: Request) -> None:
+    """Raise a 403 error unless the browser asking is on this computer.
+
+    The third of these, and here for the same reason as the one above it:
+    updating replaces the sandbox's own program code and then runs it, with
+    the API keys. A passphrase says somebody may use this sandbox; it does not
+    say they may replace what it is.
+
+    It guards looking as well as updating, not only the update itself. Showing
+    somebody a newer version they are not allowed to install would be telling
+    them about a button that is not there.
+    """
+    client = request.client.host if request.client else None
+    if client not in _SAME_COMPUTER:
+        raise HTTPException(
+            403,
+            "The sandbox can only be updated from a browser on the same "
+            "computer it is running on. An update replaces the sandbox's own "
+            "program code, which is not something this interface will do on "
+            "behalf of another machine. From a terminal on that computer, "
+            "`git pull` does the same thing.",
         )
 
 
@@ -822,7 +928,14 @@ def create_app() -> FastAPI:
     @app.get("/api/settings")
     async def api_settings(request: Request):
         _require_unlocked(request)
-        return _settings_snapshot()
+        settings = _settings_snapshot()
+        # Worked out here rather than inside _settings_snapshot(), which has no
+        # request to look at. The update card draws itself only when this is
+        # true, the same way the Browse buttons appear only on a computer with
+        # a file chooser the sandbox can open.
+        client = request.client.host if request.client else None
+        settings["same_computer"] = client in _SAME_COMPUTER
+        return settings
 
     # Deliberately not `async`: opening the chooser waits for a person to
     # finish looking through their files, and FastAPI gives an ordinary
@@ -1595,12 +1708,144 @@ def create_app() -> FastAPI:
         # After the answer has gone, so the browser is told where to look
         # before there is nothing listening. It then waits for the sandbox to
         # answer again, the same way the last page of setup does.
-        threading.Timer(0.5, _restart_into_the_new_plugin).start()
+        threading.Timer(_RESTART_AFTER_AN_INSTALL_SECONDS,
+                        _restart_into_the_new_code).start()
         return {
             "installed": installed.name,
             "commands": installed.commands,
             "restarting": True,
         }
+
+    # ── Keeping the sandbox up to date ──────────────────────────────────
+    # The same family as installing a plugin above, and guarded the same way:
+    # these change the program code on this computer. See upgrade.py for what
+    # an update actually does and what it refuses to do.
+
+    @app.get("/api/updates")
+    async def api_updates(request: Request):
+        """Say what the last look for a newer version found."""
+        _require_unlocked(request)
+        _require_updating_from_this_computer(request)
+        found = _what_was_last_found()
+        # checked_at of None is the page's signal that looking is still going
+        # on, which is different from having looked and found nothing.
+        return asdict(found) if found is not None else {"checked_at": None}
+
+    # Deliberately not `async`, and deliberately a POST: this reaches the
+    # network and writes git's own note of what has been published, so it is
+    # neither quick nor free of effect. Written as an ordinary function,
+    # FastAPI gives it its own thread instead of holding up every other
+    # request — the same reasoning as api_pick_path above.
+    @app.post("/api/updates/check")
+    def api_check_for_updates(request: Request):
+        """Look again, now, for a newer version of the sandbox."""
+        _require_unlocked(request)
+        _require_updating_from_this_computer(request)
+        found = upgrade.check_for_updates()
+        _remember_what_was_found(found)
+        return asdict(found)
+
+    @app.post("/api/updates/apply")
+    def api_apply_update(request: Request):
+        """Move this copy onto the newer version, saying what is happening.
+
+        Streamed rather than answered at the end, because this takes long
+        enough that a page with nothing on it looks broken — the same shape as
+        adding a model above, and the same reasons for every part of it.
+        """
+        _require_unlocked(request)
+        _require_updating_from_this_computer(request)
+
+        busy = _job_store.running()
+        if busy:
+            raise HTTPException(409, (
+                "Something is still being worked on. Updating restarts the "
+                "sandbox, which would throw that away — it is kept in memory "
+                "only and cannot be picked up again. Wait for it to finish."
+            ))
+        # Asked before anything is streamed so the answer can be a plain
+        # refusal. It is not what makes two updates impossible — apply_update
+        # takes the lock itself, which closes the gap between asking and
+        # starting — it is what makes the refusal readable.
+        if upgrade.an_update_is_running():
+            raise HTTPException(409, (
+                "An update is already running. It may be going on in another "
+                "window."
+            ))
+
+        def event_stream():
+            told: "queue.Queue[Optional[tuple]]" = queue.Queue()
+            outcome: dict = {}
+
+            def work():
+                try:
+                    outcome["applied"] = upgrade.apply_update(
+                        lambda step, label: told.put((step, label)))
+                except upgrade.StoppedPartway as e:
+                    outcome["error"] = str(e)
+                    outcome["was"] = e.was
+                except Exception as e:
+                    outcome["error"] = str(e)
+                finally:
+                    told.put(None)
+
+            threading.Thread(target=work, daemon=True).start()
+
+            while True:
+                item = told.get()
+                if item is None:
+                    break
+                step, label = item
+                yield _sse({"type": "progress", "step": step,
+                            "total": upgrade.TOTAL_STEPS, "label": label})
+
+            if "error" in outcome:
+                # "was" is only set when the new files are on disk and the
+                # software they need is not: the one failure that leaves
+                # anything behind, and so the only one with a choice to offer.
+                stopped_partway = "was" in outcome
+                yield _sse({
+                    "type": "error",
+                    "message": outcome["error"],
+                    "can_retry": stopped_partway,
+                    "can_undo": stopped_partway,
+                    "was": outcome.get("was"),
+                })
+                return
+
+            applied = outcome["applied"]
+            yield _sse({
+                "type": "done",
+                "was": applied.was,
+                "now": applied.now,
+                "installed_dependencies": applied.installed_dependencies,
+                "restarting": True,
+            })
+            # After the last event has gone, not before: the browser has to be
+            # told where to look while there is still something listening to
+            # tell it. Longer than the plugin install's wait because this
+            # answer is a stream, which has to arrive *and* be seen to end.
+            threading.Timer(_RESTART_AFTER_AN_UPDATE_SECONDS,
+                            _restart_into_the_new_code).start()
+
+        return StreamingResponse(
+            event_stream(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
+
+    @app.post("/api/updates/undo")
+    def api_undo_update(request: Request, body: UndoUpdateBody):
+        """Put the files back to the version they were at before an update."""
+        _require_unlocked(request)
+        _require_updating_from_this_computer(request)
+        try:
+            back_at = upgrade.put_the_files_back(body.was)
+        except upgrade.UpgradeError as e:
+            logging.warning("Could not put the files back to %r: %s", body.was, e)
+            raise HTTPException(400, str(e)) from e
+        _remember_what_was_found(upgrade.check_for_updates())
+        return {"back_at": back_at}
 
     @app.get("/api/languages")
     async def api_languages(request: Request):
@@ -2000,6 +2245,9 @@ def create_app() -> FastAPI:
         lambda professor: conversation.ConversationStore(professor),
     )
 
+    # Last, and on its own thread, so nothing above waits on the network.
+    _look_for_an_update_in_the_background()
+
     return app
 
 
@@ -2057,8 +2305,12 @@ def start_logging_to_a_file() -> Optional[Path]:
         return None
 
 
-def _restart_into_the_new_plugin() -> None:
+def _restart_into_the_new_code() -> None:
     """Replace this process with a fresh one, running the same command.
+
+    Used after installing a plugin and after updating the sandbox. Both put
+    new program code on disk that this process cannot start using, for the
+    same underlying reason: Python has already read what it is running.
 
     The same argv, under the same interpreter, so whatever was typed —
     a port, an address — is what comes back. main.py's handover to the
@@ -2067,8 +2319,8 @@ def _restart_into_the_new_plugin() -> None:
     second one.
 
     Nothing is returned because nothing comes back: on success this call does
-    not return at all. If it fails, the server carries on running the plugins
-    it already had, which is the safe way to fail — the plugin is on disk
+    not return at all. If it fails, the server carries on running the code it
+    already had, which is the safe way to fail — the new code is on disk
     either way and the next ordinary start will find it.
     """
     sandbox = str(Path(__file__).resolve().parents[3] / "main.py")
@@ -2076,8 +2328,9 @@ def _restart_into_the_new_plugin() -> None:
         os.execv(sys.executable, [sys.executable, sandbox] + sys.argv[1:])
     except OSError as e:
         logging.error(
-            "Installed the plugin but could not restart into it (%s). "
-            "It will be there the next time the sandbox starts.", e)
+            "The new code is in place but this process could not restart "
+            "into it (%s). It will be used the next time the sandbox "
+            "starts.", e)
 
 
 def run_server(host: str, port: int) -> None:

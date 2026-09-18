@@ -24,4 +24,53 @@ function readableError(err) {
   } catch (e) { /* not JSON: show it as it is */ }
   return raw;
 }
+
+// How long to keep asking before saying something has gone wrong.
+const RESTART_PATIENCE_MS = 60000;
+
+// Wait for the sandbox to finish restarting, then show the page again.
+//
+// Two things restart it: installing a plugin, and updating the sandbox. Either
+// way this page outlives the server that sent it, and how long the new one
+// takes to answer depends on the computer — so this asks until it does rather
+// than guessing a number and reloading onto nothing. The same wait the last
+// page of setup does.
+//
+// It asks for "/", which answers whoever is asking. The first version asked
+// for /api/plugin-actions — the very thing it was waiting to see change — and
+// that endpoint requires an unlocked session. Restarting mints a new session
+// secret unless one is configured, so every session from before the restart is
+// void: the poll got 401 once a second, forever, and the page never reloaded.
+//
+// `say` is passed in rather than an element named here. This used to name
+// #install-busy, which is the install dialog's own status line and does not
+// exist on the settings page — the second caller would have got a null and
+// nothing would have been said at all.
+function waitForTheSandboxToComeBack(say) {
+  const gaveUpAt = Date.now() + RESTART_PATIENCE_MS;
+  setTimeout(function () {
+    (function ask() {
+      fetch("/", { method: "HEAD", cache: "no-store" })
+        // window.top, not window: the settings page is also shown inside the
+        // chat page's settings panel, and reloading only that frame would
+        // leave a fresh settings page sitting inside a chat page still talking
+        // to a server that no longer exists. Standing on its own, window.top
+        // is this window, so this is right either way.
+        .then(function () { window.top.location.reload(); })
+        .catch(function () {
+          // Only a failure to connect reaches here, which is what a server
+          // that is still starting looks like. Any answer at all, including
+          // one asking to unlock again, means it is back.
+          if (Date.now() > gaveUpAt) {
+            say("The sandbox is taking longer than expected to restart. "
+                + "Reload this page in a moment. If it does not come back, "
+                + "close the window and run `python3 start.py` again — the "
+                + "terminal will say what went wrong.");
+            return;
+          }
+          setTimeout(ask, 500);
+        });
+    })();
+  }, 1200);
+}
 </script>
