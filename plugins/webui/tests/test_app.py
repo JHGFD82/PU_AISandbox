@@ -7494,8 +7494,9 @@ class TestTheConversationListCanBeFiltered:
         page = self._chat()
         cross = page[page.index('id="conv-filter-clear"'):]
         assert "hidden" in cross[:cross.index(">")]
-        # .icon-btn sets a display of its own, which would override [hidden].
-        assert "#conv-filter-clear[hidden] { display: none; }" in page
+        # .icon-btn sets a display of its own, which would override [hidden];
+        # TestHiddenMeansHidden checks that every icon button says otherwise.
+        assert 'class="icon-btn neutral"' in cross[:cross.index(">")]
         update = self._function("updateFilterButton")
         assert 'getElementById("conv-filter-clear").hidden = !active' in update
         clear = self._function("clearFilter")
@@ -7577,3 +7578,88 @@ class TestAModelNameInTheSidebarFiltersTheList:
         script = self._chat().split("function filterByModel(model) {")[1].split("\n}\n")[0]
         assert "const filter = defaultFilter();" in script
         assert "state.filter = filter;" in script
+
+
+class TestHiddenMeansHidden:
+    """An element's own ``display`` beats the ``hidden`` attribute.
+
+    So a rule that gives something ``display: flex`` quietly keeps it on
+    screen however often the script hides it. That is how the update notice
+    came to sit above every conversation, with nothing in it and a "Not now"
+    that did nothing: the words are only written in when there is an update,
+    and hiding it had no effect. The Updates button and the conversation
+    folder button were stuck showing for the same reason.
+
+    Checked across every page, for everything that starts hidden or is hidden
+    by id from a script: if a rule of its own gives it a display, a
+    ``[hidden]`` rule of its own has to take that back.
+    """
+
+    PAGES = ("chat.html", "settings.html", "setup.html", "unlock.html",
+             "shared_settings.html")
+
+    @staticmethod
+    def _rules(page: str) -> list[tuple[list[str], str, bool]]:
+        """Every one-part selector's #id/.class names, its display, and
+        whether it is a [hidden] rule. A selector with a descendant or a
+        pseudo-class is left out: it applies only somewhere in particular."""
+        import re
+
+        css = "\n".join(re.findall(r"<style[^>]*>(.*?)</style>", page, re.S))
+        css = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+        rules = []
+        for selectors, body in re.findall(r"([^{}]+)\{([^{}]*)\}", css):
+            shown = re.search(r"display:\s*([a-z-]+)", body)
+            for selector in selectors.split(","):
+                selector = selector.strip()
+                if not selector or " " in selector or ">" in selector or ":" in selector:
+                    continue
+                names = re.findall(r"[#.][\w-]+", selector)
+                if names:
+                    rules.append((names, shown.group(1) if shown else "",
+                                  "[hidden]" in selector))
+        return rules
+
+    @staticmethod
+    def _hideable(page: str) -> list[tuple[str, set[str]]]:
+        """Each element that starts hidden or is hidden by id, as a
+        description and the #id/.class names it answers to."""
+        import re
+
+        by_script = set(re.findall(r'getElementById\("([\w-]+)"\)\.hidden\s*=', page))
+        found = []
+        for m in re.finditer(r"<([a-z][\w-]*)(\s[^>]*)?>", page):
+            attrs = m.group(2) or ""
+            ident = re.search(r'\bid="([^"]+)"', attrs)
+            classes = re.search(r'\bclass="([^"]+)"', attrs)
+            starts_hidden = re.search(r"\shidden(?=[\s>=/]|$)", attrs) is not None
+            if not starts_hidden and not (ident and ident.group(1) in by_script):
+                continue
+            names = {"." + c for c in (classes.group(1).split() if classes else [])}
+            if ident:
+                names.add("#" + ident.group(1))
+            found.append((m.group(0)[:80], names))
+        return found
+
+    @pytest.mark.parametrize("name", PAGES)
+    def test_nothing_hidden_is_kept_on_screen_by_its_own_display(self, name):
+        page = _rendered_template(name)
+        rules = self._rules(page)
+        stuck = []
+        for element, names in self._hideable(page):
+            mine = [r for r in rules if all(n in names for n in r[0])]
+            shows = any(d and d != "none" and not hidden for _, d, hidden in mine)
+            takes_back = any(hidden and d == "none" for _, d, hidden in mine)
+            if shows and not takes_back:
+                stuck.append(element)
+        assert not stuck, f"hidden has no effect on: {stuck}"
+
+    def test_it_would_catch_the_update_notice(self):
+        """The check itself, against the rule that went wrong."""
+        page = ('<style>#update-notice { display: flex; }</style>'
+                '<div id="update-notice" hidden></div>')
+        rules = self._rules(page)
+        ((_, names),) = self._hideable(page)
+        mine = [r for r in rules if all(n in names for n in r[0])]
+        assert any(d == "flex" for _, d, _h in mine)
+        assert not any(h for _n, _d, h in mine)

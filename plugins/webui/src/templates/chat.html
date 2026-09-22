@@ -134,7 +134,6 @@
   #conv-filter svg { width: 17px; height: 17px; }
   #conv-filter-clear svg { width: 14px; height: 14px; }
   #conv-filter[aria-pressed="true"] { color: var(--orange); }
-  #conv-filter-clear[hidden] { display: none; }
   .conv-empty { font-size: var(--text-sm); color: var(--text-muted); padding: 0.5rem; line-height: 1.4; }
   /* Square, because the drawing is a wide row of dots that gets turned upright:
      the old 3x13 box was shaped for a drawing that was already vertical, and
@@ -194,6 +193,10 @@
   }
   .icon-btn:hover { background: var(--hover-bg); }
   .icon-btn.neutral { color: var(--text-muted); }
+  /* An element's own display beats the hidden attribute, so anything that
+     sets one has to say again that hidden means hidden. Once here for every
+     icon button, rather than once for each of the ones that come and go. */
+  .icon-btn[hidden] { display: none; }
   .icon-btn svg { width: 18px; height: 18px; display: block; }
   /* The three dots are drawn in a row; the button wants them in a column. */
   .icon-upright { transform: rotate(90deg); }
@@ -216,6 +219,7 @@
     color: var(--text-muted); border-bottom: 1px solid var(--border);
     background: var(--orange-tint);
   }
+  #update-notice[hidden] { display: none; }
   .link-btn {
     background: none; border: none; padding: 0; color: var(--link);
     font-size: inherit; text-decoration: underline; width: auto; height: auto;
