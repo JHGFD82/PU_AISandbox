@@ -115,6 +115,9 @@ _job_store = jobs.JobStore()
 # nothing to tell them.
 _update_check = None
 _update_check_lock = threading.Lock()
+# Whether a look started by _look_for_an_update_in_the_background() is still
+# going, so that asking again while one is under way does not start a second.
+_update_look_under_way = False
 
 
 def _remember_what_was_found(found) -> None:
@@ -143,14 +146,39 @@ def _look_for_an_update_in_the_background() -> None:
     natural moment to look again — including the restart at the end of an
     update, which is what confirms the update worked.
     """
+    global _update_look_under_way
+    with _update_check_lock:
+        if _update_look_under_way:
+            return
+        _update_look_under_way = True
+
     def look() -> None:
+        global _update_look_under_way
         try:
             _remember_what_was_found(upgrade.check_for_updates())
         except Exception as e:
             logging.warning("Could not look for a newer version: %s", e)
+        finally:
+            with _update_check_lock:
+                _update_look_under_way = False
 
     threading.Thread(target=look, daemon=True,
                      name="look-for-a-newer-version").start()
+
+
+def _it_was_about_somewhere_else(found) -> bool:
+    """Return whether *found* describes a branch or version this copy has left.
+
+    Somebody who switches branch, or pulls in a terminal, while the sandbox is
+    running would otherwise go on being told what was true when it started —
+    an update offered on a branch that is not main, or one already arrived.
+    Only a difference that can actually be seen counts: when either position
+    is unknown, the answer is left to stand.
+    """
+    if found is None or found.position is None:
+        return False
+    now = upgrade.where_this_copy_is()
+    return now is not None and now != found.position
 
 # Plugins are loaded once, lazily, on first use rather than at import time —
 # this module is itself registered by plugins/webui/plugin.py *during* the
@@ -1721,12 +1749,21 @@ def create_app() -> FastAPI:
     # these change the program code on this computer. See upgrade.py for what
     # an update actually does and what it refuses to do.
 
+    # Not `async`: asking git where this copy is now runs a program, and an
+    # ordinary function gets a thread of its own rather than holding up every
+    # other request while it does.
     @app.get("/api/updates")
-    async def api_updates(request: Request):
+    def api_updates(request: Request):
         """Say what the last look for a newer version found."""
         _require_unlocked(request)
         _require_updating_from_this_computer(request)
         found = _what_was_last_found()
+        if _it_was_about_somewhere_else(found):
+            # Forgotten rather than shown, and looked for again for whoever
+            # asks next.
+            _remember_what_was_found(None)
+            _look_for_an_update_in_the_background()
+            found = None
         # checked_at of None is the page's signal that looking is still going
         # on, which is different from having looked and found nothing.
         return asdict(found) if found is not None else {"checked_at": None}

@@ -38,7 +38,7 @@ import os
 import subprocess
 import sys
 import threading
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Optional
@@ -54,6 +54,12 @@ logger = logging.getLogger(__name__)
 # Completes the sentence git_tool.usable_git() builds when git is missing or
 # is the stand-in a Mac has before the developer tools are installed.
 _WHAT_GIT_IS_FOR = "the sandbox cannot update itself"
+
+# The one line of development updates are published on, and so the only one a
+# copy can be moved forward along. A copy on any other branch is somebody's
+# work in progress: whatever its own branch has online is not an update to
+# the sandbox, and moving it onto that from a browser would be wrong.
+_THE_PUBLISHED_BRANCH = "main"
 
 # How long each part is given. Looking at files on this computer is instant, so
 # a long wait there means something is wrong rather than something is slow.
@@ -166,6 +172,11 @@ class Available:
                            default settings.
         checked_at: When this was found out, or None if nothing has been
                     looked at yet.
+        position: Which branch and version this copy was on when it was
+                  looked at, as ``where_this_copy_is()`` gives it, or None if
+                  that could not be told. Switching branch or pulling in a
+                  terminal changes it, and an answer about somewhere this copy
+                  no longer is should not be shown as though it still held.
     """
 
     current: Optional[Version] = None
@@ -177,6 +188,7 @@ class Available:
     requirements_changing: bool = False
     defaults_changing: bool = False
     checked_at: Optional[str] = None
+    position: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -220,6 +232,19 @@ _NOT_ON_A_BRANCH = (
     "main line of development, so there is nothing for it to move forward "
     "onto.\n\n"
     "In a terminal, `git switch main` puts it back."
+)
+
+_ON_ANOTHER_BRANCH = (
+    "This copy is on the branch {branch} rather than on main, which is where "
+    "updates are published, so it is not offered them.\n\n"
+    "In a terminal, `git switch main` puts it back."
+)
+
+_FOLLOWING_SOMETHING_ELSE = (
+    "This copy's main branch is following {upstream} rather than the "
+    "published main, so what it would move forward onto is not an update to "
+    "the sandbox.\n\n"
+    "Updating this copy is a job for a terminal."
 )
 
 _NOTHING_TO_FOLLOW = (
@@ -303,6 +328,28 @@ def package_version() -> Optional[Version]:
     return Version(sha=parts[0], date=parts[1], subject=parts[2])
 
 
+def where_this_copy_is() -> Optional[str]:
+    """Return which branch this copy is on and which version, in one string.
+
+    Asks nothing of the network, so it is quick enough to ask each time the
+    page wants to know about updates. The string is only for comparing with
+    an earlier one: if the two differ, somebody has switched branch or moved
+    the code on from a terminal since the last look.
+
+    Returns:
+        Something like ``refs/heads/main 3f9c…``, or None if git is not usable
+        or this copy was not fetched with git.
+    """
+    try:
+        done = _run("rev-parse", "--symbolic-full-name", "HEAD", "HEAD",
+                    timeout=_LOOKING_TIMEOUT_SECONDS)
+    except (git_tool.GitUnusable, UpgradeError, OSError):
+        return None
+    if done.returncode != 0:
+        return None
+    return " ".join(done.stdout.split()) or None
+
+
 def why_this_copy_cannot_be_updated() -> Optional[str]:
     """Return why this copy cannot update itself, or None if it can.
 
@@ -356,11 +403,23 @@ def _first_reason() -> Optional[str]:
         return _NOT_ON_A_BRANCH
     branch = done.stdout.strip()
 
+    # And that branch is main, the only one updates are published on.
+    if branch != _THE_PUBLISHED_BRANCH:
+        return _ON_ANOTHER_BRANCH.format(branch=branch)
+
     # And that line has somewhere online it is following.
     done = _run("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}",
                 timeout=_LOOKING_TIMEOUT_SECONDS)
     if done.returncode != 0:
         return _NOTHING_TO_FOLLOW.format(branch=branch)
+    upstream = done.stdout.strip()
+
+    # And what it follows online is main too. Set up by hand to follow some
+    # other branch, main would be offered that branch's work as an update.
+    done = _run("config", "--get", f"branch.{branch}.merge",
+                timeout=_LOOKING_TIMEOUT_SECONDS)
+    if done.stdout.strip() != f"refs/heads/{_THE_PUBLISHED_BRANCH}":
+        return _FOLLOWING_SOMETHING_ELSE.format(upstream=upstream)
 
     # Nothing changed here that moving forward would undo.
     #
@@ -420,6 +479,13 @@ def check_for_updates() -> Available:
         reached comes back with *offline* filled in, which is worth trying
         again later.
     """
+    position = where_this_copy_is()
+    return replace(_check(), position=position)
+
+
+def _check() -> Available:
+    """The body of check_for_updates(), before the answer is marked with where
+    this copy was when it was asked."""
     current = package_version()
     blocked = why_this_copy_cannot_be_updated()
     if blocked is not None:

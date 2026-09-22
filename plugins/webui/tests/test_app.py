@@ -5993,6 +5993,33 @@ class TestUpdatingTheSandboxOverTheWeb:
                             lambda: pytest.fail("it looked a second time"))
         assert unlocked_client.get("/api/updates").json()["behind"] == 2
 
+    def test_an_answer_about_somewhere_this_copy_has_left_is_not_shown(
+            self, unlocked_client, upgrade, monkeypatch):
+        """Switching branch, or pulling in a terminal, while the sandbox runs
+        must not leave the page repeating what was true when it started."""
+        app_module = sys.modules["_pu_webui_app"]
+        monkeypatch.setattr(app_module, "_update_check", upgrade.Available(
+            behind=3, checked_at="then", position="refs/heads/main aaa"))
+        monkeypatch.setattr(upgrade, "where_this_copy_is",
+                            lambda: "refs/heads/something-else bbb")
+        looked = []
+        monkeypatch.setattr(app_module, "_look_for_an_update_in_the_background",
+                            lambda: looked.append(True))
+
+        assert unlocked_client.get("/api/updates").json() == {"checked_at": None}
+        assert looked, "it did not look again"
+
+    def test_an_answer_about_where_this_copy_still_is_stands(
+            self, unlocked_client, upgrade, monkeypatch):
+        app_module = sys.modules["_pu_webui_app"]
+        monkeypatch.setattr(app_module, "_update_check", upgrade.Available(
+            behind=3, checked_at="then", position="refs/heads/main aaa"))
+        monkeypatch.setattr(upgrade, "where_this_copy_is", lambda: "refs/heads/main aaa")
+        monkeypatch.setattr(app_module, "_look_for_an_update_in_the_background",
+                            lambda: pytest.fail("it looked again for no reason"))
+
+        assert unlocked_client.get("/api/updates").json()["behind"] == 3
+
     def test_it_will_not_start_while_something_is_being_worked_on(
             self, unlocked_client, upgrade, monkeypatch):
         """Restarting does not pause a translation. It destroys it — jobs are

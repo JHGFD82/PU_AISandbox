@@ -156,6 +156,50 @@ class TestWhatItRefusesToDo:
         assert "something-of-my-own" in said
 
     @needs_git
+    def test_a_branch_that_is_not_main(self, sandbox):
+        """Somebody's work in progress, following its own branch online. What
+        that branch has gained is not an update to the sandbox, so none is
+        offered, however far behind its own branch it has fallen."""
+        published, copy = sandbox
+        _git(published, "switch", "-q", "-c", "work-in-progress")
+        _publish(published, "started")
+        _git(copy, "fetch", "-q")
+        _git(copy, "switch", "-q", "work-in-progress")
+        _publish(published, "carried on")
+
+        found = upgrade.check_for_updates()
+        assert found.blocked is not None
+        assert "work-in-progress" in found.blocked, "it does not say which branch"
+        assert "git switch main" in found.blocked, "it does not say how to get back"
+        assert found.behind == 0
+
+    @needs_git
+    def test_a_branch_that_is_not_main_but_follows_it(self, sandbox):
+        """A branch made from main can be set up to follow it online. Its
+        distance from main is still not an update to this branch."""
+        published, copy = sandbox
+        _git(copy, "switch", "-q", "-c", "mine", "--track", "origin/main")
+        _publish(published, "on main")
+
+        found = upgrade.check_for_updates()
+        assert found.blocked is not None
+        assert "mine" in found.blocked
+        assert found.behind == 0
+
+    @needs_git
+    def test_main_following_some_other_branch(self, sandbox):
+        published, copy = sandbox
+        _git(published, "switch", "-q", "-c", "elsewhere")
+        _publish(published, "elsewhere")
+        _git(copy, "fetch", "-q")
+        _git(copy, "branch", "-q", "--set-upstream-to=origin/elsewhere", "main")
+
+        found = upgrade.check_for_updates()
+        assert found.blocked is not None
+        assert "origin/elsewhere" in found.blocked
+        assert found.behind == 0
+
+    @needs_git
     def test_a_copy_parked_on_one_version(self, sandbox):
         _published, copy = sandbox
         _git(copy, "checkout", "-q", "--detach", "HEAD")
@@ -254,6 +298,16 @@ class TestMovingForward:
         assert found.changes == ["feat: the second thing", "fix: the first thing"]
         assert found.current is not None and found.latest is not None
         assert found.current.sha != found.latest.sha
+
+    def test_the_answer_says_where_this_copy_was(self, sandbox):
+        """So that one given before switching branch is not shown after it."""
+        _published, copy = sandbox
+        found = upgrade.check_for_updates()
+        assert found.position == upgrade.where_this_copy_is()
+        assert found.position.startswith("refs/heads/main ")
+
+        _git(copy, "switch", "-q", "-c", "elsewhere")
+        assert upgrade.where_this_copy_is() != found.position
 
     def test_a_copy_with_nothing_waiting_says_so(self, sandbox):
         found = upgrade.check_for_updates()
