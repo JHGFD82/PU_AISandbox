@@ -464,6 +464,61 @@ class Conversation:
         return out
 
 
+def conversation_summary(data: dict[str, Any], folder_name: str) -> dict[str, Any]:
+    """Describe one saved conversation in the few facts the sidebar list needs.
+
+    The list shows each conversation by title and age, and its filter narrows
+    it by model, cost, tokens (roughly, words sent and received) and whether a
+    document was translated or transcribed in it. Everything here is worked
+    out from the saved file, so nothing extra has to be kept up to date as a
+    conversation grows.
+
+    Args:
+        data: The contents of one ``conversation.json``, as read from disk.
+        folder_name: The conversation's folder name, used as its id if the
+            file somehow lacks one.
+
+    Returns:
+        A dict with ``id``, ``title``, ``updated_at`` and ``model`` (the model
+        the conversation was set to), plus:
+
+        - ``models``: every model name the conversation involved, sorted —
+          the one it was set to and each name a reply came back under. The
+          two can differ (``gpt-4o`` asked for, ``gpt-4o-2024-08-06``
+          answering), and the spending sidebar lists the second kind, so a
+          filter started there needs both to find its conversations.
+        - ``cost`` and ``tokens``: the totals across every reply that
+          reported them, counted the way the bar above an open conversation
+          counts them. A reply with no cost recorded is left out of both.
+        - ``has_job``: whether a document job ran in this conversation.
+    """
+    messages = data.get("messages") or []
+    model = data.get("model", "")
+    models = {model} if model else set()
+    cost = 0.0
+    tokens = 0
+    has_job = False
+    for m in messages:
+        if m.get("model"):
+            models.add(m["model"])
+        if str(m.get("kind", "message")).startswith("job_"):
+            has_job = True
+        if m.get("cost") is None:
+            continue
+        cost += m["cost"]
+        tokens += (m.get("prompt_tokens") or 0) + (m.get("completion_tokens") or 0)
+    return {
+        "id": data.get("id", folder_name),
+        "title": data.get("title", "Untitled conversation"),
+        "updated_at": data.get("updated_at", ""),
+        "model": model,
+        "models": sorted(models),
+        "cost": cost,
+        "tokens": tokens,
+        "has_job": has_job,
+    }
+
+
 class ConversationStore:
     """Reads and writes one professor's conversations under data/conversations/{professor}/."""
 
@@ -573,9 +628,9 @@ class ConversationStore:
         """Return a short summary of every saved conversation, newest first.
 
         Returns:
-            A list of ``{'id', 'title', 'updated_at', 'model'}`` dicts, sorted
-            by ``updated_at`` descending. Files that can't be read (e.g.
-            corrupted JSON) are skipped rather than raising.
+            A list of summaries as ``conversation_summary()`` describes them,
+            sorted by ``updated_at`` descending. Files that can't be read
+            (e.g. corrupted JSON) are skipped rather than raising.
         """
         summaries = []
         for f in self._dir.glob("c_*/conversation.json"):
@@ -583,12 +638,7 @@ class ConversationStore:
                 data = json.loads(f.read_text())
             except (json.JSONDecodeError, OSError):
                 continue
-            summaries.append({
-                "id": data.get("id", f.parent.name),
-                "title": data.get("title", "Untitled conversation"),
-                "updated_at": data.get("updated_at", ""),
-                "model": data.get("model", ""),
-            })
+            summaries.append(conversation_summary(data, f.parent.name))
         summaries.sort(key=lambda s: s["updated_at"], reverse=True)
         return summaries
 

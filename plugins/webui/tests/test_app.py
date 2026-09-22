@@ -237,6 +237,17 @@ class TestConversations:
         assert resp.status_code == 200
         assert unlocked_client.get(f"/api/conversations/{conv_id}", params={"professor": "heller"}).status_code == 404
 
+    def test_the_list_carries_what_the_filter_narrows_by(self, unlocked_client):
+        """The filter works in the browser, over the list it already has, so
+        each entry has to arrive with everything it can be filtered on."""
+        unlocked_client.post("/api/conversations", json={"professor": "heller", "model": "gpt-4o"})
+        (listed,) = unlocked_client.get(
+            "/api/conversations", params={"professor": "heller"}).json()["conversations"]
+        assert listed["models"] == ["gpt-4o"]
+        assert listed["cost"] == 0
+        assert listed["tokens"] == 0
+        assert listed["has_job"] is False
+
     def test_conversations_isolated_per_professor(self, unlocked_client):
         unlocked_client.post("/api/conversations", json={"professor": "heller", "model": "gpt-4o"})
         smith_list = unlocked_client.get("/api/conversations", params={"professor": "smith"})
@@ -2804,9 +2815,12 @@ class TestConversationsAreGroupedByAge:
             assert f'"{group}"' in page
 
     def test_a_heading_goes_in_only_where_the_group_changes(self):
-        """Otherwise every conversation gets one."""
+        """Otherwise every conversation gets one — and only while the list is
+        in an order by age, since sorted by cost the groups would be split up
+        into dozens of one-line pieces."""
         page = self._page()
-        assert "if (group !== currentGroup) {" in page
+        assert "if (dated && group !== currentGroup) {" in page
+        assert 'const dated = state.sort === "newest" || state.sort === "oldest";' in page
 
     def test_the_headings_stay_in_view_while_scrolling(self):
         page = self._page()
@@ -2833,10 +2847,14 @@ class TestConversationsAreGroupedByAge:
         )
 
     def test_the_server_still_decides_the_order(self, unlocked_client):
-        """Grouping is a heading over an order it does not change."""
+        """Grouping is a heading over an order it does not change, and newest
+        first — what the list shows until someone picks another order — is
+        the server's own, passed through untouched."""
         page = self._page()
-        assert "data.conversations.forEach" in page
+        assert "state.conversations = data.conversations;" in page
         assert "conversations.sort" not in page
+        sorter = page.split("function sortedConversations(list) {")[1].split("\n}\n")[0]
+        assert "default: return list;" in sorter
 
 
 class TestTheModelSaysWhatItCanDo:
@@ -3088,9 +3106,10 @@ class TestTheSuppliedButtonIcons:
         # toggle" was a second copy of the padlock, so that button — which only
         # appears on a narrow screen — is still on a plain one. Nothing was
         # supplied for a folder or a download either, so those two are drawn,
-        # in the same stroked style as the download arrow on a single message.
+        # in the same stroked style as the download arrow on a single message,
+        # and nor for the funnel that filters the conversation list.
         awaiting_artwork = {"sidebar-toggle-btn", "conv-bar-folder",
-                            "conv-bar-download-btn"}
+                            "conv-bar-download-btn", "conv-filter"}
         for m in re.finditer(r'<button\b[^>]*id="([^"]+)"[^>]*>(.*?)</button>', page, re.S):
             block = m.group(2)
             if "<svg" not in block or m.group(1) in awaiting_artwork:
@@ -6390,7 +6409,7 @@ class TestAModalDoesNotCloseOnADragThatLeavesIt:
         assert helper.index("startedOnTheBackdrop = false;") < helper.index("if (both)")
 
     def test_every_modal_uses_it(self):
-        """Three modals, one rule. A fourth written by hand would be a fourth
+        """Four modals, one rule. A fifth written by hand would be a fifth
         chance to lose what somebody had typed."""
         import re
 
@@ -6400,7 +6419,7 @@ class TestAModalDoesNotCloseOnADragThatLeavesIt:
         used = set(re.findall(
             r'closeWhenTheBackdropItselfIsClicked\("([a-z-]+)"', script))
         assert used == {"install-plugin-backdrop", "job-modal-backdrop",
-                        "settings-modal-backdrop"}, used
+                        "settings-modal-backdrop", "filter-modal-backdrop"}, used
 
 
 class TestAJobGetsAConversationToItself:
@@ -7443,3 +7462,118 @@ class TestACutOffStreamEndToEnd:
         # And it was counted as spending nobody could measure.
         assert noted["model"] == "gpt-4o"
         assert "no usage" in noted["note"]
+
+
+class TestTheConversationListCanBeFiltered:
+    """A long list narrowed to what someone is looking for, by a button that
+    says when it is doing so and a cross that stops it."""
+
+    def _chat(self) -> str:
+        return _rendered_chat()
+
+    def _script(self) -> str:
+        import re
+
+        return "\n".join(re.findall(r"<script>(.*?)</script>", self._chat(), re.S))
+
+    def _function(self, name: str) -> str:
+        return self._script().split(f"function {name}(")[1].split("\n}\n")[0]
+
+    def test_the_button_sits_beside_the_plus_and_says_whether_it_is_on(self):
+        page = self._chat()
+        header = page[page.index("<h2>Conversations</h2>"):page.index('id="conv-list"')]
+        assert 'id="conv-filter"' in header and 'id="new-conv"' in header
+        button = header[header.index('id="conv-filter"'):]
+        assert 'aria-pressed="false"' in button[:button.index(">")]
+
+    def test_it_turns_orange_while_on(self):
+        rule = self._chat().split('#conv-filter[aria-pressed="true"] {')[1].split("}")[0]
+        assert "color: var(--orange)" in rule
+
+    def test_the_cross_appears_only_while_on_and_puts_everything_back(self):
+        page = self._chat()
+        cross = page[page.index('id="conv-filter-clear"'):]
+        assert "hidden" in cross[:cross.index(">")]
+        # .icon-btn sets a display of its own, which would override [hidden].
+        assert "#conv-filter-clear[hidden] { display: none; }" in page
+        update = self._function("updateFilterButton")
+        assert 'getElementById("conv-filter-clear").hidden = !active' in update
+        clear = self._function("clearFilter")
+        assert "state.filter = defaultFilter();" in clear
+        assert 'state.sort = "newest";' in clear
+
+    def test_a_different_order_counts_as_on(self):
+        """It changes what is at the top as surely as a filter does."""
+        assert 'state.sort !== "newest"' in self._function("filterIsActive")
+
+    def test_the_list_is_filtered_before_any_heading_goes_in(self):
+        render = self._function("renderConversationList")
+        assert render.index("state.conversations.filter(conversationMatches)") \
+            < render.index("conversationAgeGroup(")
+
+    def test_a_list_filtered_to_nothing_says_so(self):
+        render = self._function("renderConversationList")
+        assert "No conversation matches this filter." in render
+        assert 'addEventListener("click", clearFilter)' in render
+
+    def test_the_modal_offers_every_kind_of_filter_and_the_order(self):
+        page = self._chat()
+        modal = page[page.index('id="filter-modal-backdrop"'):page.index('id="adjust-modal-backdrop"')]
+        for field in ("filter-text", "filter-models", "filter-ages", 'name="filter-kind"',
+                      "filter-cost-min", "filter-cost-max",
+                      "filter-tokens-min", "filter-tokens-max", "filter-sort"):
+            assert field in modal, field
+        for sort in ("newest", "oldest", "cost", "tokens", "title"):
+            assert f'<option value="{sort}">' in modal
+
+    def test_a_model_ticked_elsewhere_stays_ticked_in_the_modal(self):
+        """One chosen from the sidebar may belong to no conversation here."""
+        assert "const names = new Set(filter.models);" in self._function("fillFilterModal")
+
+    def test_nothing_changes_until_the_filter_is_applied(self):
+        """Cancel, Escape and the cross close without touching the list."""
+        script = self._script()
+        assert "state.filter" not in self._function("closeFilterModal")
+        assert "state.filter" not in self._function("openFilterModal").replace(
+            "fillFilterModal(state.filter, state.sort)", "")
+        assert 'getElementById("filter-modal-backdrop").hidden) {\n    closeFilterModal();' in script
+
+    def test_switching_professor_starts_with_the_whole_list(self):
+        choose = self._script().split("async function chooseProfessor(")[1].split("\n}\n")[0]
+        assert "state.filter = defaultFilter();" in choose
+
+
+class TestAModelNameInTheSidebarFiltersTheList:
+    """A small extra: clicking a model's name in the spending sidebar lists
+    only the conversations that used it."""
+
+    def _chat(self) -> str:
+        return _rendered_chat()
+
+    def _usage(self) -> str:
+        return self._chat().split("async function loadUsage() {")[1].split("\n}\n")[0]
+
+    def test_the_name_is_a_real_button_underneath(self):
+        usage = self._usage()
+        assert 'nameEl.className = "spend-model-filter";' in usage
+        assert 'nameEl.setAttribute("role", "button");' in usage
+        assert "nameEl.tabIndex = 0;" in usage
+        assert "filterByModel(model)" in usage
+        # Still text, not markup: a model name never becomes HTML.
+        assert "nameEl.textContent = model;" in usage
+
+    def test_its_tooltip_says_it_filters(self):
+        assert "nameEl.title = `Click to list only the conversations that used ${model}`;" in self._usage()
+
+    def test_it_looks_like_plain_text_until_reached(self):
+        page = self._chat()
+        rule = page.split(".spend-model-filter {")[1].split("}")[0]
+        for look in ("color", "text-decoration", "background", "font-weight"):
+            assert look not in rule, look
+        hover = page.split(".spend-model-filter:hover, .spend-model-filter:focus-visible {")[1].split("}")[0]
+        assert "var(--hover-bg)" in hover
+
+    def test_a_click_replaces_the_filter_rather_than_adding_to_it(self):
+        script = self._chat().split("function filterByModel(model) {")[1].split("\n}\n")[0]
+        assert "const filter = defaultFilter();" in script
+        assert "state.filter = filter;" in script

@@ -296,6 +296,7 @@ Your web browser should automatically open and navigate to **http://127.0.0.1:80
 ### Features
 
 - **Chat** with any model in your catalog, switch models, adjust compatible settings, and adjust the system prompt per conversation. Conversations are saved in the left sidebar.
+- **Find a conversation** with the funnel beside the conversation list, which narrows it by model, date, cost, tokens, title, or whether a document job was run, and puts it in another order. The funnel turns orange while it is on, and the cross beside it shows the whole list again. Clicking a model's name in the spending panel lists only the conversations that used that model.
 - **Run capabilities from plugins** on a whole document or a folder. Depending on the options you specify, you may see per-page progress, but in all cases a download link will appear when the process completes. You can keep chatting in another conversation while it works.
 - **Watch the spending** — this month's and all-time cost, broken down by model, updating as you go.
 - **Change settings** — add professors, set API keys, configure shared usage folders — from a settings page.

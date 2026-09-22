@@ -124,6 +124,18 @@
   .conv-item:hover .conv-menu-btn, .conv-item:focus-within .conv-menu-btn,
   .conv-menu-btn:focus-visible, .conv-menu-btn.menu-open { opacity: 1; }
   .conv-menu-btn:hover { background: var(--border); }
+  /* The filter sits beside the plus rather than in a bar of its own: it is
+     used now and then, and the list is what the column is for. Grey while it
+     does nothing and orange while it narrows or reorders the list, so a list
+     that looks short says why. The cross beside it appears only then, and
+     puts the whole list back in one click. */
+  .section-actions { display: flex; align-items: center; gap: 0.2rem; }
+  #conv-filter, #conv-filter-clear { width: 28px; height: 28px; }
+  #conv-filter svg { width: 17px; height: 17px; }
+  #conv-filter-clear svg { width: 14px; height: 14px; }
+  #conv-filter[aria-pressed="true"] { color: var(--orange); }
+  #conv-filter-clear[hidden] { display: none; }
+  .conv-empty { font-size: var(--text-sm); color: var(--text-muted); padding: 0.5rem; line-height: 1.4; }
   /* Square, because the drawing is a wide row of dots that gets turned upright:
      the old 3x13 box was shaped for a drawing that was already vertical, and
      would shrink this one to almost nothing before rotating it. */
@@ -548,6 +560,17 @@
   .spend-figure { font-size: var(--text-xxl); font-weight: 600; }
   .spend-label { font-size: var(--text-xs); color: var(--text-muted); }
   .spend-row { display: flex; justify-content: space-between; font-size: var(--text-md); padding: 0.2rem 0; }
+  /* A model's name here also filters the conversation list to that model. It
+     is a small extra, not what anyone opens this panel for, so it reads as
+     plain text until the pointer or the keyboard reaches it — then it lights
+     up the way the conversation title above the message box does, and its
+     tooltip says what a click will do. The negative margin cancels the
+     padding the highlight needs, so the name stays level with the column. */
+  .spend-model-filter {
+    min-width: 0; overflow-wrap: anywhere; cursor: pointer;
+    padding: 0 0.3rem; margin-left: -0.3rem; border-radius: var(--radius-sm);
+  }
+  .spend-model-filter:hover, .spend-model-filter:focus-visible { background: var(--hover-bg); }
   /* Instructions run long — a sentence at least, sometimes a paragraph — so
      the box grows to fit what is in it and can be dragged taller still. The
      three settings above it are numbers and stay single-line. */
@@ -635,6 +658,17 @@
     padding: 0.7rem 1rem; border-top: 1px solid var(--border);
   }
   #adjust-measured { color: var(--text-muted); }
+  /* Each kind of filter is a group of choices under one heading, so a screen
+     reader announces the heading with each choice. Stripped of the frame a
+     fieldset draws by default, and headed like any other field here. */
+  .filter-group { border: none; padding: 0; margin: var(--space-3) 0 0; min-width: 0; }
+  .filter-group legend { padding: 0; font-size: var(--text-sm); font-weight: 600; margin-bottom: 0.35rem; }
+  .filter-options { display: flex; flex-wrap: wrap; gap: 0.3rem 1rem; }
+  .filter-range { display: flex; align-items: center; gap: var(--space-2); }
+  .filter-range input[type=text] { flex: 1; min-width: 0; }
+  #filter-models-none { margin: 0; }
+  #filter-error[hidden], #filter-models-none[hidden] { display: none; }
+  .filter-clear-all { margin-right: auto; }
   #adjust-error[hidden], #adjust-preview:empty { display: none; }
   #settings-iframe { flex: 1; border: none; width: 100%; background: var(--panel-bg); }
 
@@ -874,9 +908,19 @@
 
     <div class="section-header">
       <h2>Conversations</h2>
-      <button id="new-conv" class="plus-btn" title="New conversation" aria-label="New conversation">
-        <svg viewBox="0 0 23.3203 22.959"><path d="M3.79883 22.959L19.1504 22.959C21.6797 22.959 22.959 21.6797 22.959 19.1992L22.959 3.76953C22.959 1.2793 21.6797 0 19.1504 0L3.79883 0C1.2793 0 0 1.26953 0 3.76953L0 19.1992C0 21.6992 1.2793 22.959 3.79883 22.959Z" fill="none" class="plus-plate"/><path d="M12.4121 16.4258L12.4121 6.49414C12.4121 5.92773 12.0312 5.53711 11.4648 5.53711C10.9375 5.53711 10.5566 5.9375 10.5566 6.49414L10.5566 16.4258C10.5566 16.9727 10.9375 17.373 11.4648 17.373C12.0312 17.373 12.4121 16.9824 12.4121 16.4258ZM6.52344 12.3828L16.4648 12.3828C17.002 12.3828 17.4023 12.0117 17.4023 11.4746C17.4023 10.9082 17.0117 10.5273 16.4648 10.5273L6.52344 10.5273C5.95703 10.5273 5.56641 10.9082 5.56641 11.4746C5.56641 12.0117 5.9668 12.3828 6.52344 12.3828Z" fill="currentColor"/></svg>
-      </button>
+      <div class="section-actions">
+        <button type="button" id="conv-filter-clear" class="icon-btn neutral"
+                title="Clear the filter" aria-label="Clear the filter" hidden>
+          {{ icons.plus("icon-as-cross") }}
+        </button>
+        <button type="button" id="conv-filter" class="icon-btn neutral" aria-pressed="false"
+                title="Filter conversations" aria-label="Filter conversations">
+          <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.6 3.4h12.8l-4.9 5.9v4.6l-3 1.7V9.3z"/></svg>
+        </button>
+        <button id="new-conv" class="plus-btn" title="New conversation" aria-label="New conversation">
+          <svg viewBox="0 0 23.3203 22.959"><path d="M3.79883 22.959L19.1504 22.959C21.6797 22.959 22.959 21.6797 22.959 19.1992L22.959 3.76953C22.959 1.2793 21.6797 0 19.1504 0L3.79883 0C1.2793 0 0 1.26953 0 3.76953L0 19.1992C0 21.6992 1.2793 22.959 3.79883 22.959Z" fill="none" class="plus-plate"/><path d="M12.4121 16.4258L12.4121 6.49414C12.4121 5.92773 12.0312 5.53711 11.4648 5.53711C10.9375 5.53711 10.5566 5.9375 10.5566 6.49414L10.5566 16.4258C10.5566 16.9727 10.9375 17.373 11.4648 17.373C12.0312 17.373 12.4121 16.9824 12.4121 16.4258ZM6.52344 12.3828L16.4648 12.3828C17.002 12.3828 17.4023 12.0117 17.4023 11.4746C17.4023 10.9082 17.0117 10.5273 16.4648 10.5273L6.52344 10.5273C5.95703 10.5273 5.56641 10.9082 5.56641 11.4746C5.56641 12.0117 5.9668 12.3828 6.52344 12.3828Z" fill="currentColor"/></svg>
+        </button>
+      </div>
     </div>
     <div id="conv-list"></div>
 
@@ -1122,6 +1166,87 @@
        This is --dry-run made
        interactive: the right side re-renders after every change to a field
        on the left, without ever making a real API call. -->
+  <!-- Narrowing and ordering the conversation list. Every choice here is
+       combined with the others: a conversation is shown only if it matches
+       all of them, and a choice left empty narrows nothing. -->
+  <div id="filter-modal-backdrop" class="modal-backdrop" hidden>
+    <div class="modal-panel compact">
+      <div class="modal-header">
+        <h2 style="margin:0; text-transform:none; font-size:var(--text-lg); letter-spacing:normal;">
+          Filter conversations
+        </h2>
+        <button type="button" class="icon-btn" id="filter-modal-close" title="Close" aria-label="Close">
+          {{ icons.plus("icon-as-cross") }}
+        </button>
+      </div>
+      <div class="modal-body" id="filter-modal-body">
+        <p class="spend-label" style="margin-top:0;">
+          Only conversations that match everything chosen here are listed. Anything
+          left empty leaves the list alone. Cost and tokens count the replies whose
+          cost the AI service reported.
+        </p>
+        <div class="job-field">
+          <label for="filter-text">Title contains</label>
+          <input type="text" id="filter-text" autocomplete="off" placeholder="letter">
+        </div>
+        <fieldset class="filter-group">
+          <legend>Models</legend>
+          <div class="filter-options" id="filter-models"></div>
+          <p class="spend-label" id="filter-models-none">No conversation has used a model yet.</p>
+        </fieldset>
+        <fieldset class="filter-group">
+          <legend>Last used</legend>
+          <div class="filter-options" id="filter-ages">
+            <div class="job-field-checkbox"><input type="checkbox" id="filter-age-today" value="Today"><label for="filter-age-today">Today</label></div>
+            <div class="job-field-checkbox"><input type="checkbox" id="filter-age-week" value="This week"><label for="filter-age-week">This week</label></div>
+            <div class="job-field-checkbox"><input type="checkbox" id="filter-age-month" value="This month"><label for="filter-age-month">This month</label></div>
+            <div class="job-field-checkbox"><input type="checkbox" id="filter-age-older" value="Older"><label for="filter-age-older">Older</label></div>
+          </div>
+        </fieldset>
+        <fieldset class="filter-group">
+          <legend>Kind</legend>
+          <div class="filter-options">
+            <div class="job-field-checkbox"><input type="radio" name="filter-kind" id="filter-kind-all" value="all"><label for="filter-kind-all">All</label></div>
+            <div class="job-field-checkbox"><input type="radio" name="filter-kind" id="filter-kind-chat" value="chat"><label for="filter-kind-chat">Chats only</label></div>
+            <div class="job-field-checkbox"><input type="radio" name="filter-kind" id="filter-kind-job" value="job"><label for="filter-kind-job">With a document job</label></div>
+          </div>
+        </fieldset>
+        <fieldset class="filter-group">
+          <legend>Cost (dollars)</legend>
+          <div class="filter-range">
+            <input type="text" id="filter-cost-min" inputmode="decimal" placeholder="From" autocomplete="off" aria-label="Lowest cost, in dollars">
+            <span aria-hidden="true">&ndash;</span>
+            <input type="text" id="filter-cost-max" inputmode="decimal" placeholder="To" autocomplete="off" aria-label="Highest cost, in dollars">
+          </div>
+        </fieldset>
+        <fieldset class="filter-group">
+          <legend>Tokens</legend>
+          <div class="filter-range">
+            <input type="text" id="filter-tokens-min" inputmode="numeric" placeholder="From" autocomplete="off" aria-label="Fewest tokens">
+            <span aria-hidden="true">&ndash;</span>
+            <input type="text" id="filter-tokens-max" inputmode="numeric" placeholder="To" autocomplete="off" aria-label="Most tokens">
+          </div>
+        </fieldset>
+        <div class="job-field">
+          <label for="filter-sort">Sort by</label>
+          <select id="filter-sort">
+            <option value="newest">Newest first</option>
+            <option value="oldest">Oldest first</option>
+            <option value="cost">Most expensive first</option>
+            <option value="tokens">Most tokens first</option>
+            <option value="title">Title, A to Z</option>
+          </select>
+        </div>
+        <p class="spend-warning" id="filter-error" hidden></p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="secondary filter-clear-all" id="filter-clear-all">Clear all</button>
+        <button type="button" class="secondary" id="filter-cancel">Cancel</button>
+        <button type="button" id="filter-apply">Show these</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Correcting a month to match the bill. Asks for the total rather than the
        difference, because the total is the number on the bill and the
        difference is arithmetic nobody should have to do. -->
@@ -1220,6 +1345,10 @@
 <script>
 const state = {
   professor: null, conversationId: null, conversationModel: null, conversationHasMessages: false,
+  // The list as the server last sent it, newest first, and what the filter
+  // button has narrowed and reordered it to. Kept apart so a change to the
+  // filter redraws the list without asking the server again.
+  conversations: [], filter: defaultFilter(), sort: "newest",
   models: [], defaultModel: null,
   pluginActions: [], languages: null, jobPollTimer: null, jobLocked: false, activeAction: null,
   // The job modal's full field list for whichever action is open right now
@@ -1332,6 +1461,11 @@ async function chooseProfessor(netid, name) {
   state.professor = netid;
   await api("/api/active-professor", { method: "POST", body: JSON.stringify({ professor: netid }) });
   state.conversationId = null;
+  // Another person's list: a filter chosen for the last one would only hide
+  // things from them.
+  state.filter = defaultFilter();
+  state.sort = "newest";
+  updateFilterButton();
   await Promise.all([loadConversations(), loadUsage(), loadModels()]);
   renderMessages(null);
 }
@@ -2860,6 +2994,10 @@ document.addEventListener("keydown", (e) => {
   }
   if (e.key === "Escape" && !document.getElementById("job-modal-backdrop").hidden) {
     closeJobModal();
+    return;
+  }
+  if (e.key === "Escape" && !document.getElementById("filter-modal-backdrop").hidden) {
+    closeFilterModal();
   }
 });
 closeWhenTheBackdropItselfIsClicked("job-modal-backdrop", closeJobModal);
@@ -3057,17 +3195,153 @@ function conversationAgeGroup(updatedAt) {
   return "Older";
 }
 
+// ── Filtering and sorting the conversation list ───────────────────────────
+// None of this is remembered past a reload. A filter left on and forgotten
+// would make conversations look lost, and a fresh page is the surest way back.
+
+// The filter that narrows nothing. Every empty choice here means "any".
+function defaultFilter() {
+  return {
+    models: new Set(), ages: new Set(), kind: "all", text: "",
+    costMin: null, costMax: null, tokensMin: null, tokensMax: null,
+  };
+}
+
+const SORT_LABELS = {
+  newest: "newest first", oldest: "oldest first", cost: "most expensive first",
+  tokens: "most tokens first", title: "title, A to Z",
+};
+
+// Whether the list is showing anything other than everything, newest first.
+// A different order counts: it changes what is at the top as surely as a
+// filter does, so it turns the button orange and the cross undoes it too.
+function filterIsActive() {
+  const f = state.filter;
+  return f.models.size > 0 || f.ages.size > 0 || f.kind !== "all" || f.text !== ""
+    || [f.costMin, f.costMax, f.tokensMin, f.tokensMax].some(v => v !== null)
+    || state.sort !== "newest";
+}
+
+function withinRange(value, min, max) {
+  return (min === null || value >= min) && (max === null || value <= max);
+}
+
+function describeRange(min, max, format) {
+  if (min !== null && max !== null) return `${format(min)}–${format(max)}`;
+  return min !== null ? `at least ${format(min)}` : `at most ${format(max)}`;
+}
+
+// The filter in a few words, for the button's tooltip, so what is hidden can
+// be read without opening anything.
+function describeFilter() {
+  const f = state.filter;
+  const parts = [];
+  if (f.models.size) parts.push(f.models.size <= 2 ? [...f.models].join(", ") : `${f.models.size} models`);
+  if (f.ages.size) parts.push([...f.ages].join(", "));
+  if (f.kind === "chat") parts.push("chats only");
+  if (f.kind === "job") parts.push("with a document job");
+  if (f.text) parts.push(`title contains “${f.text}”`);
+  if (f.costMin !== null || f.costMax !== null) parts.push(describeRange(f.costMin, f.costMax, fmtMoney));
+  if (f.tokensMin !== null || f.tokensMax !== null) {
+    parts.push(describeRange(f.tokensMin, f.tokensMax, n => n.toLocaleString()) + " tokens");
+  }
+  if (state.sort !== "newest") parts.push(SORT_LABELS[state.sort]);
+  return parts.join(" · ");
+}
+
+function conversationMatches(c) {
+  const f = state.filter;
+  // Any of the ticked models, not all of them: ticking two means "either".
+  if (f.models.size && !(c.models || []).some(m => f.models.has(m))) return false;
+  if (f.ages.size && !f.ages.has(conversationAgeGroup(c.updated_at))) return false;
+  if (f.kind === "chat" && c.has_job) return false;
+  if (f.kind === "job" && !c.has_job) return false;
+  if (f.text && !(c.title || "").toLowerCase().includes(f.text.toLowerCase())) return false;
+  return withinRange(c.cost || 0, f.costMin, f.costMax)
+    && withinRange(c.tokens || 0, f.tokensMin, f.tokensMax);
+}
+
+// Newest first is the server's own order and is left exactly as it came.
+// The others work on a copy; sorting is stable, so conversations that tie
+// stay newest first among themselves.
+function sortedConversations(list) {
+  const byTitle = (a, b) => (a.title || "").localeCompare(b.title || "", undefined, { sensitivity: "base" });
+  switch (state.sort) {
+    case "oldest": return list.slice().reverse();
+    case "cost": return list.slice().sort((a, b) => (b.cost || 0) - (a.cost || 0));
+    case "tokens": return list.slice().sort((a, b) => (b.tokens || 0) - (a.tokens || 0));
+    case "title": return list.slice().sort(byTitle);
+    default: return list;
+  }
+}
+
+function updateFilterButton() {
+  const button = document.getElementById("conv-filter");
+  const active = filterIsActive();
+  const label = active ? `Filtering: ${describeFilter()} — click to change` : "Filter conversations";
+  button.setAttribute("aria-pressed", active ? "true" : "false");
+  button.title = label;
+  button.setAttribute("aria-label", label);
+  document.getElementById("conv-filter-clear").hidden = !active;
+}
+
+function applyFilter() {
+  updateFilterButton();
+  renderConversationList();
+}
+
+function clearFilter() {
+  state.filter = defaultFilter();
+  state.sort = "newest";
+  applyFilter();
+}
+
+// The shortcut from the spending sidebar. It replaces whatever filter was on
+// rather than adding to it: a click on one name means "show me this model",
+// and a list still narrowed by something chosen earlier would hide some of
+// what was asked for. The order is left as it was, since it hides nothing.
+function filterByModel(model) {
+  const filter = defaultFilter();
+  filter.models.add(model);
+  state.filter = filter;
+  applyFilter();
+}
+
 async function loadConversations() {
   const data = await api("/api/conversations?professor=" + encodeURIComponent(state.professor));
+  state.conversations = data.conversations;
+  renderConversationList();
+}
+
+function renderConversationList() {
   const list = document.getElementById("conv-list");
   list.innerHTML = "";
   openConvMenu = null;
-  // The server hands these back newest first, so each group is reached once and
-  // a heading goes in wherever the group changes.
+  // Filtered and ordered before any heading goes in, so no heading is left
+  // with nothing under it.
+  const shown = sortedConversations(state.conversations.filter(conversationMatches));
+  if (state.conversations.length && !shown.length) {
+    const empty = document.createElement("p");
+    empty.className = "conv-empty";
+    empty.textContent = "No conversation matches this filter. ";
+    const clear = document.createElement("button");
+    clear.type = "button";
+    clear.className = "link-btn";
+    clear.textContent = "Show them all";
+    clear.addEventListener("click", clearFilter);
+    empty.appendChild(clear);
+    list.appendChild(empty);
+    return;
+  }
+  // The age headings belong to an order by age. Sorted by cost or by title,
+  // they would break the list into dozens of one-line groups.
+  const dated = state.sort === "newest" || state.sort === "oldest";
+  // In either order by age each group is reached once, so a heading goes in
+  // wherever the group changes.
   let currentGroup = null;
-  data.conversations.forEach(c => {
+  shown.forEach(c => {
     const group = conversationAgeGroup(c.updated_at);
-    if (group !== currentGroup) {
+    if (dated && group !== currentGroup) {
       currentGroup = group;
       const heading = document.createElement("div");
       heading.className = "conv-group";
@@ -3262,6 +3536,16 @@ async function loadUsage() {
     // and it costs nothing to close.
     const nameEl = document.createElement("span");
     nameEl.textContent = model;
+    nameEl.className = "spend-model-filter";
+    nameEl.setAttribute("role", "button");
+    nameEl.tabIndex = 0;
+    nameEl.title = `Click to list only the conversations that used ${model}`;
+    nameEl.addEventListener("click", () => filterByModel(model));
+    nameEl.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter" && e.key !== " ") return;
+      e.preventDefault();   // Space would otherwise scroll the panel.
+      filterByModel(model);
+    });
     const costEl = document.createElement("span");
     costEl.textContent = fmtMoney(stats.total_cost);
     row.append(nameEl, costEl);
@@ -3791,6 +4075,118 @@ document.getElementById("spend-uncounted-btn").addEventListener("click", (e) => 
 });
 document.getElementById("adjust-modal-close").addEventListener("click", closeAdjustModal);
 document.getElementById("adjust-cancel").addEventListener("click", closeAdjustModal);
+
+// ── The filter modal ──────────────────────────────────────────────────────
+// What it shows is filled in from the filter each time it opens, and nothing
+// changes until "Show these" — so Cancel, Escape or the cross leave the list
+// exactly as it was.
+function fillFilterModal(filter, sort) {
+  document.getElementById("filter-text").value = filter.text;
+  const models = document.getElementById("filter-models");
+  models.innerHTML = "";
+  // Every model any conversation used, plus any already ticked — one chosen
+  // from the spending sidebar may belong to no conversation here, and should
+  // still be seen ticked so it can be unticked.
+  const names = new Set(filter.models);
+  state.conversations.forEach(c => (c.models || []).forEach(m => names.add(m)));
+  [...names].sort().forEach((name, i) => {
+    const row = document.createElement("div");
+    row.className = "job-field-checkbox";
+    const box = document.createElement("input");
+    box.type = "checkbox";
+    box.id = `filter-model-${i}`;
+    box.value = name;
+    box.checked = filter.models.has(name);
+    const label = document.createElement("label");
+    label.htmlFor = box.id;
+    label.textContent = name;
+    row.append(box, label);
+    models.appendChild(row);
+  });
+  document.getElementById("filter-models-none").hidden = names.size > 0;
+  document.querySelectorAll("#filter-ages input").forEach(box => { box.checked = filter.ages.has(box.value); });
+  document.querySelectorAll('input[name="filter-kind"]').forEach(r => { r.checked = r.value === filter.kind; });
+  const show = (id, value) => { document.getElementById(id).value = value === null ? "" : String(value); };
+  show("filter-cost-min", filter.costMin);
+  show("filter-cost-max", filter.costMax);
+  show("filter-tokens-min", filter.tokensMin);
+  show("filter-tokens-max", filter.tokensMax);
+  document.getElementById("filter-sort").value = sort;
+  document.getElementById("filter-error").hidden = true;
+}
+
+function openFilterModal() {
+  fillFilterModal(state.filter, state.sort);
+  const backdrop = document.getElementById("filter-modal-backdrop");
+  backdrop.hidden = false;
+  requestAnimationFrame(() => backdrop.classList.add("open"));
+  document.getElementById("filter-text").focus();
+}
+
+function closeFilterModal() {
+  const backdrop = document.getElementById("filter-modal-backdrop");
+  backdrop.classList.remove("open");
+  setTimeout(() => { backdrop.hidden = true; }, 200);
+}
+
+// One end of a range as typed: null when left empty, NaN when it is not a
+// number that can be a cost or a count. A dollar sign and thousands commas
+// are allowed, since that is how both are usually written.
+function readFilterBound(id) {
+  const typed = document.getElementById(id).value.replace(/[$,\s]/g, "");
+  if (typed === "") return null;
+  const value = Number(typed);
+  return isFinite(value) && value >= 0 ? value : NaN;
+}
+
+function applyFilterModal() {
+  const error = document.getElementById("filter-error");
+  const bounds = {
+    costMin: readFilterBound("filter-cost-min"), costMax: readFilterBound("filter-cost-max"),
+    tokensMin: readFilterBound("filter-tokens-min"), tokensMax: readFilterBound("filter-tokens-max"),
+  };
+  if (Object.values(bounds).some(v => Number.isNaN(v))) {
+    error.textContent = "Cost and tokens take plain numbers, for example 0.50 or 20000. Leave a box empty for no limit.";
+    error.hidden = false;
+    return;
+  }
+  const backwards = (min, max) => min !== null && max !== null && min > max;
+  if (backwards(bounds.costMin, bounds.costMax) || backwards(bounds.tokensMin, bounds.tokensMax)) {
+    error.textContent = "The “From” figure is larger than the “To” figure, so nothing could match. Swap them round.";
+    error.hidden = false;
+    return;
+  }
+  const ticked = selector => new Set([...document.querySelectorAll(selector)].map(box => box.value));
+  const kind = document.querySelector('input[name="filter-kind"]:checked');
+  state.filter = {
+    models: ticked("#filter-models input:checked"),
+    ages: ticked("#filter-ages input:checked"),
+    kind: kind ? kind.value : "all",
+    text: document.getElementById("filter-text").value.trim(),
+    ...bounds,
+  };
+  state.sort = document.getElementById("filter-sort").value;
+  closeFilterModal();
+  applyFilter();
+}
+
+document.getElementById("conv-filter").addEventListener("click", openFilterModal);
+document.getElementById("conv-filter-clear").addEventListener("click", clearFilter);
+document.getElementById("filter-modal-close").addEventListener("click", closeFilterModal);
+document.getElementById("filter-cancel").addEventListener("click", closeFilterModal);
+document.getElementById("filter-apply").addEventListener("click", applyFilterModal);
+// Puts the boxes back to "everything, newest first" without closing, so it
+// can be the start of a new filter; nothing changes until "Show these".
+document.getElementById("filter-clear-all").addEventListener("click", () => {
+  fillFilterModal(defaultFilter(), "newest");
+});
+document.getElementById("filter-modal-body").addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && e.target.matches('input[type="text"]')) {
+    e.preventDefault();
+    applyFilterModal();
+  }
+});
+closeWhenTheBackdropItselfIsClicked("filter-modal-backdrop", closeFilterModal);
 document.getElementById("adjust-save").addEventListener("click", saveAdjustment);
 document.getElementById("adjust-total").addEventListener("input", previewAdjustment);
 document.getElementById("adjust-total").addEventListener("keydown", (e) => {

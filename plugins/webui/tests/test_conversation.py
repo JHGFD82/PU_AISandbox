@@ -340,6 +340,58 @@ class TestConversationStore:
         listed = store.list_conversations()
         assert [c["title"] for c in listed] == ["Second", "First"]
 
+    def test_listing_names_every_model_a_conversation_involved(self, store):
+        # The spending sidebar lists the name a reply came back under, which
+        # can carry a date the requested name lacks; a filter started there
+        # has to find the conversation by either.
+        conv = store.create(model="gpt-4o", title="Mixed")
+        conv.messages += [
+            Message(role="user", content="q", timestamp="t"),
+            Message(role="assistant", content="a", timestamp="t", model="gpt-4o-2024-08-06"),
+            Message(role="assistant", content="b", timestamp="t", model="gpt-4o-2024-08-06"),
+            Message(role="assistant", content="c", timestamp="t", model="gpt-4o"),
+        ]
+        store.save(conv)
+        (listed,) = store.list_conversations()
+        assert listed["models"] == ["gpt-4o", "gpt-4o-2024-08-06"]
+
+    def test_listing_totals_cost_and_tokens_of_priced_replies_only(self, store):
+        conv = store.create(model="gpt-4o")
+        conv.messages += [
+            Message(role="assistant", content="a", timestamp="t",
+                    prompt_tokens=10, completion_tokens=5, cost=0.25),
+            Message(role="assistant", content="b", timestamp="t",
+                    prompt_tokens=3, completion_tokens=2, cost=0.5),
+            # No cost recorded: counted in neither total, as in the bar above
+            # an open conversation.
+            Message(role="assistant", content="c", timestamp="t",
+                    prompt_tokens=1000, completion_tokens=1000),
+        ]
+        store.save(conv)
+        (listed,) = store.list_conversations()
+        assert listed["cost"] == 0.75
+        assert listed["tokens"] == 20
+
+    def test_listing_says_whether_a_document_job_ran(self, store):
+        chat = store.create(model="gpt-4o", title="Chat")
+        chat.messages.append(Message(role="user", content="hi", timestamp="t"))
+        store.save(chat)
+        job = store.create(model="gpt-4o", title="Job")
+        job.messages.append(Message(role="assistant", content="done", timestamp="t",
+                                    kind="job_result"))
+        store.save(job)
+        by_title = {c["title"]: c for c in store.list_conversations()}
+        assert by_title["Chat"]["has_job"] is False
+        assert by_title["Job"]["has_job"] is True
+
+    def test_listing_of_an_empty_conversation(self, store):
+        store.create(model="", title="Blank")
+        (listed,) = store.list_conversations()
+        assert listed["models"] == []
+        assert listed["cost"] == 0
+        assert listed["tokens"] == 0
+        assert listed["has_job"] is False
+
     def test_delete_existing_returns_true(self, store):
         conv = store.create(model="gpt-4o")
         assert store.delete(conv.id) is True
