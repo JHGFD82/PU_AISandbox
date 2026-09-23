@@ -7,6 +7,7 @@ the ``Mixin`` class below and adds it as one of its base classes.
 
 import logging
 import os
+import tempfile
 from typing import Optional
 
 from ..console import print_section
@@ -16,6 +17,12 @@ from ..services.parallel_utils import cap_worker_count, collect_image_files, run
 from ..settings import MAX_PARALLEL_WORKERS
 
 logger = logging.getLogger(__name__)
+
+# How finely a PDF's pages are redrawn as pictures before being read. 300 dots
+# per inch is what a flatbed scanner is normally set to for text, and what the
+# translation plugin renders a scanned PDF at, so a page arrives at the model
+# looking the way a scan of the same page would.
+PDF_RENDER_DPI = 300
 
 
 class Mixin:
@@ -57,6 +64,17 @@ class Mixin:
                     improve accuracy by letting the model cross-check its own
                     output. Defaults to ``1``.
         """
+        # A PDF holds pages, not a picture, and sending the file itself gets it
+        # refused by the model as something it cannot look at. Every route into
+        # this method passes through here, so this is the one place that has to
+        # know a PDF is read page by page.
+        if os.path.splitext(file_path)[1].lower() == ".pdf":
+            self.process_scanned_pdf(
+                file_path, target_language, output_file,
+                vertical=vertical, spread=spread, passes=passes,
+            )
+            return
+
         logger.info(f"Starting OCR processing: {os.path.basename(file_path)} → {target_language}")
 
         try:
@@ -77,6 +95,89 @@ class Mixin:
         except Exception as e:
             logger.error(f"Error processing image: {e}", exc_info=True)
             raise CLIError(f"Error processing image: {e}") from e
+
+    def process_scanned_pdf(
+        self,
+        file_path: str,
+        target_language: str,
+        output_file: Optional[str] = None,
+        vertical: bool = False,
+        spread: bool = False,
+        passes: int = 1,
+        workers: int = 1,
+        on_progress: Optional[ProgressCallback] = None,
+        on_page_text: Optional[PageTextCallback] = None,
+    ) -> None:
+        """Read the text off every page of a PDF of scans.
+
+        A scanned PDF is a stack of photographs of pages, and the model can
+        only look at one picture at a time, so each page is redrawn as an image
+        first and then read exactly as a folder of scans would be — in page
+        order, with the same passes, the same handling of a page that fails,
+        and the same combined result at the end.
+
+        Nothing is left behind: the page images are written to a temporary
+        folder that is thrown away once the transcription is finished, whether
+        it succeeded or not.
+
+        Args:
+            file_path: Path to the PDF.
+            target_language: Full name of the language on the pages, used to
+                             guide the AI (e.g. ``'Japanese'``).
+            output_file: Path to save the combined transcription. ``None``
+                         means print to the terminal only.
+            vertical: When ``True``, tells the AI the text is arranged in
+                      vertical columns (common in classical East Asian texts).
+            spread: When ``True``, treats each page as a double-page spread.
+            passes: Number of reading passes per page. More than one lets the
+                    model check its own work. Defaults to ``1``.
+            workers: How many pages to read at the same time. Defaults to
+                     ``1`` (one after another).
+            on_progress: Called with ``(pages_finished, total_pages)`` as the
+                         work goes on. ``None`` means no progress reporting —
+                         only the browser's background job runner passes one.
+            on_page_text: Called with ``(page_number, transcribed_text)`` as
+                          each page finishes. Honored only when reading pages
+                          one after another — see ``process_image_folder()``,
+                          which this hands the rendered pages to.
+
+        Raises:
+            CLIError: If PyMuPDF is not installed, if the file cannot be
+                      opened as a PDF, or if it has no pages.
+        """
+        try:
+            import pymupdf
+        except ImportError as exc:
+            raise CLIError(
+                "Reading a PDF needs PyMuPDF, which doesn't appear to be installed. "
+                "Install it with: pip install pymupdf"
+            ) from exc
+
+        name = os.path.basename(file_path)
+        try:
+            document = pymupdf.open(file_path)
+        except Exception as e:
+            raise CLIError(f"Could not open '{name}' as a PDF: {e}") from e
+
+        with tempfile.TemporaryDirectory() as page_folder:
+            try:
+                page_count = document.page_count
+                if page_count == 0:
+                    raise CLIError(f"'{name}' has no pages to transcribe.")
+                logger.info(f"Rendering {page_count} page(s) of '{name}' for transcription.")
+                print(f"Reading '{name}' — redrawing {page_count} page(s) as images.\n")
+                for number, page in enumerate(document, start=1):
+                    page.get_pixmap(dpi=PDF_RENDER_DPI).save(
+                        os.path.join(page_folder, f"page_{number:04d}.png")
+                    )
+            finally:
+                document.close()
+
+            self.process_image_folder(
+                page_folder, target_language, output_file,
+                vertical=vertical, spread=spread, passes=passes,
+                workers=workers, on_progress=on_progress, on_page_text=on_page_text,
+            )
 
     def process_image_folder(
         self,

@@ -346,7 +346,7 @@ python main.py jh43 translate jp-en -c                          # paste the text
 
 ## `transcribe` — reading text off images
 
-Read the text in an image, or in a folder of images. Provided by the `transcription` plugin; `transcription-ea` adds the flags marked below for East Asian languages.
+Read the text in an image, in a PDF of scanned pages, or in a folder of images. Provided by the `transcription` plugin; `transcription-ea` adds the flags marked below for East Asian languages.
 
 ```bash
 python main.py jh43 transcribe <language> [options]
@@ -356,7 +356,7 @@ python main.py jh43 transcribe <language> [options]
 
 | Flag | Description |
 |------|-------------|
-| `-i <path>`, `--input <path>` | An image file, or a folder of images processed in order |
+| `-i <path>`, `--input <path>` | An image file, a PDF of scans, or a folder of images processed in order |
 | `-o <path>`, `--output <path>` | Where to write the result |
 | `--spread` | The input is a two-page spread *(needs `transcription-ea`)* |
 | `-P <int>`, `--passes <int>` | How many reading passes; more than one refines the result over several rounds *(needs `transcription-ea`)* |
@@ -375,6 +375,7 @@ The same three choices are in the browser: type the note in the job form's
 ```bash
 python main.py jh43 transcribe en -i scan.png -o transcription.txt
 python main.py jh43 transcribe en -i scans/        # a whole folder
+python main.py jh43 transcribe en -i book.pdf     # every page of a scanned PDF
 python main.py jh43 transcribe en -i scan.png --dry-run
 ```
 
