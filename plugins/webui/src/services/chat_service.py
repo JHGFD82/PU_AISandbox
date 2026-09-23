@@ -69,7 +69,7 @@ class ChatService(BaseService):
 
         api_messages: list[dict[str, Any]] = []
         if system_prompt:
-            api_messages.append({"role": get_model_system_role(model), "content": system_prompt})
+            api_messages.append({"role": get_model_system_role(self._catalog_model_name(model)), "content": system_prompt})
         api_messages.extend(messages)
 
         def _attempt(_attempt_num: int) -> Optional[tuple[Any, str]]:
@@ -156,7 +156,7 @@ class ChatService(BaseService):
 
         api_messages: list[dict[str, Any]] = []
         if system_prompt:
-            api_messages.append({"role": get_model_system_role(model), "content": system_prompt})
+            api_messages.append({"role": get_model_system_role(self._catalog_model_name(model)), "content": system_prompt})
         api_messages.extend(messages)
 
         content_parts: list[str] = []

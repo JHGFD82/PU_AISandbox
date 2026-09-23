@@ -19,8 +19,9 @@ from collections.abc import Iterator as ABCIterator
 from ..errors import CLIError
 
 from ..models import (
-    model_max_tokens_field, model_rejected_fields, record_rejected_field,
-    resolve_model, maybe_sync_model_pricing, get_model_max_completion_tokens,
+    endpoint_model_name, model_max_tokens_field, model_rejected_fields,
+    record_rejected_field, resolve_model, maybe_sync_model_pricing,
+    get_model_max_completion_tokens,
 )
 from ..tracking.token_tracker import TokenTracker, TokenUsage
 from .api_config import endpoint_client
@@ -220,7 +221,7 @@ class BaseService:
         """
         temperature = self.custom_temperature if self.custom_temperature is not None else default_temperature
         top_p = self.custom_top_p if self.custom_top_p is not None else default_top_p
-        max_tokens = self.custom_max_tokens if self.custom_max_tokens is not None else get_model_max_completion_tokens(model, default_max_tokens)
+        max_tokens = self.custom_max_tokens if self.custom_max_tokens is not None else get_model_max_completion_tokens(self._catalog_model_name(model), default_max_tokens)
         if self.custom_temperature is not None or self.custom_top_p is not None:
             logging.debug(f"Sampling params: temperature={temperature}, top_p={top_p}")
         return temperature, top_p, max_tokens
@@ -290,6 +291,32 @@ class BaseService:
             requested_model=self.custom_model, role=self.model_role, api_key=self._api_key
         )
         maybe_sync_model_pricing(model)
+        return model
+
+    def _catalog_model_name(self, model: str) -> str:
+        """Return the name the catalog holds this model under.
+
+        A model is known by two names, and they are not the same one. What a
+        request has to send is the name the service answering knows it by
+        (``qwen3.8:27b-mlx``); what ``model_catalog.json`` records against it —
+        whether it can read images, what it refuses, how long a reply it can be
+        asked for — is filed under the name ``-m`` takes, which for one of this
+        installation's own endpoints puts the endpoint in front
+        (``my_mac_studio:qwen3.8:27b-mlx``). Asking the catalog about the first
+        name finds nothing, and finding nothing reads exactly like an answer of
+        "no": that is how a model that can read images came to be refused an
+        image. Every question put to the catalog goes through here.
+
+        Args:
+            model: The model name as ``_get_model()`` returns it — what the
+                   request will send.
+
+        Returns:
+            The catalog's name for it. The same name, for a model on the
+            Princeton sandbox, where there is no endpoint to name.
+        """
+        if self._endpoint is not None:
+            return endpoint_model_name(self._endpoint.api_name, model)
         return model
 
     def _extract_response_content(self, response: Any) -> Optional[str]:
@@ -403,14 +430,14 @@ class BaseService:
             kwargs["top_p"] = top_p
 
         # Whichever name this model wants for the response-length cap.
-        kwargs[model_max_tokens_field(model)] = max_tokens
+        kwargs[model_max_tokens_field(self._catalog_model_name(model))] = max_tokens
 
         # Everything this model is known to refuse comes out here, in one pass:
         # sampling parameters a reasoning model won't take, request fields a
         # provider route rejects, anything learned from a refusal (see
         # model_rejected_fields()). One list rather than a flag per quirk, so
         # the next awkwardness needs a catalog entry and no new code.
-        for field in model_rejected_fields(model):
+        for field in model_rejected_fields(self._catalog_model_name(model)):
             if field in _REQUIRED_REQUEST_FIELDS:
                 continue
             kwargs.pop(field, None)
@@ -461,7 +488,7 @@ class BaseService:
                 # untouched while looking like it had been handled.
                 if field is None or field not in kwargs or field in _REQUIRED_REQUEST_FIELDS:
                     raise
-                record_rejected_field(model, field, str(error)[:200])
+                record_rejected_field(self._catalog_model_name(model), field, str(error)[:200])
                 kwargs.pop(field, None)
         return self.client.chat.completions.create(**kwargs)  # type: ignore[misc]
 

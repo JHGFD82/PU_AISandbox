@@ -5,7 +5,7 @@ import os
 from typing import Optional, Any
 
 from ..models import (
-    model_supports_vision, get_vision_capable_models, get_model_system_role,
+    model_supports_vision, cannot_read_images_message, get_model_system_role,
     get_model_max_completion_tokens,
 )
 from .base_service import BaseService
@@ -186,13 +186,10 @@ class ImageProcessorService(BaseService):
         to the model for review and correction.
         """
         model = self._get_model()
+        catalog_model = self._catalog_model_name(model)
 
-        if not model_supports_vision(model):
-            vision_models = get_vision_capable_models()
-            raise ValueError(
-                f"Model '{model}' does not support image processing. "
-                f"Please use one of the following vision-capable models: {vision_models}"
-            )
+        if not model_supports_vision(catalog_model):
+            raise ValueError(cannot_read_images_message(catalog_model))
 
         system_prompt, user_prompt = self._create_ocr_prompt(
             target_language,
@@ -212,8 +209,8 @@ class ImageProcessorService(BaseService):
             logging.error(f"Failed to process image {os.path.basename(file_path)}: {e}")
             raise
 
-        system_role = get_model_system_role(model)
-        max_tokens = get_model_max_completion_tokens(model, OCR_MAX_TOKENS)
+        system_role = get_model_system_role(catalog_model)
+        max_tokens = get_model_max_completion_tokens(catalog_model, OCR_MAX_TOKENS)
 
         def body(attempt: int) -> Any:
             logging.debug("Making OCR API call")

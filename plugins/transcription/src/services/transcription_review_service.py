@@ -136,7 +136,7 @@ class TranscriptionReviewService(BaseService):
         user_prompt = spec.user_prompt(text)
 
         model = self._get_model()
-        system_role = get_model_system_role(model)
+        system_role = get_model_system_role(self._catalog_model_name(model))
 
         def body(_attempt: int) -> Optional[str]:
             response = self._call_api(model, system_role, system_prompt, user_prompt)

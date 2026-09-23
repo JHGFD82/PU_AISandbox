@@ -905,9 +905,11 @@ class TestProcessImageTranslation:
         monkeypatch.setattr("src.services.base_service.resolve_model", lambda **_: "text-only-model")
         monkeypatch.setattr("src.services.base_service.maybe_sync_model_pricing", lambda m: None)
         monkeypatch.setattr(its_mod, "model_supports_vision", lambda m: False)
-        monkeypatch.setattr(its_mod, "get_vision_capable_models", lambda: ["gpt-4o"])
+        monkeypatch.setattr(
+            its_mod, "cannot_read_images_message", lambda m: f"'{m}' cannot read images."
+        )
         svc = ImageTranslationService("fake-key")
-        with pytest.raises(ValueError, match="does not support image processing"):
+        with pytest.raises(ValueError, match="cannot read images"):
             svc.process_image_translation("dummy.jpg", "Japanese", "English")
 
     def test_raises_when_image_file_unreadable(self, monkeypatch):

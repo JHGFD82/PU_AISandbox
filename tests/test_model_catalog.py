@@ -21,6 +21,7 @@ from src.models import (
     get_monthly_limit,
     get_pricing_unit,
     get_vision_capable_models,
+    cannot_read_images_message,
     is_sampling_param_deprecated_error,
     load_model_catalog,
     model_accepts_sampling_params,
@@ -73,6 +74,11 @@ SAMPLE_CATALOG = {
             "input": 0.10,
             "output": 0.30,
             "supports_vision": False,
+            "last_tested": "2026-08-03T18:19:02",
+        },
+        "my_cluster:llama-3-70b": {
+            "endpoint": "my_cluster",
+            "model": "llama-3-70b",
         },
     },
 }
@@ -206,7 +212,9 @@ class TestGetAvailableModels:
 
     def test_returns_all_model_keys(self, mock_catalog):
         models = get_available_models()
-        assert set(models) == {"gpt-5", "gpt-4o", "gpt-4o-mini", "text-only-model"}
+        assert set(models) == {
+            "gpt-5", "gpt-4o", "gpt-4o-mini", "text-only-model", "my_cluster:llama-3-70b",
+        }
 
     def test_returns_list(self, mock_catalog):
         assert isinstance(get_available_models(), list)
@@ -286,6 +294,46 @@ class TestGetVisionCapableModels:
 
     def test_returns_list(self, mock_catalog):
         assert isinstance(get_vision_capable_models(), list)
+
+
+# ---------------------------------------------------------------------------
+# cannot_read_images_message
+# ---------------------------------------------------------------------------
+
+class TestCannotReadImagesMessage:
+    """Why an image was refused, which is not one reason but three.
+
+    A model nobody has tested and a model tested and found unable look the
+    same in the catalog, and the person reading has to do different things
+    about them.
+    """
+
+    def test_an_untested_model_is_not_called_incapable(self, mock_catalog):
+        message = cannot_read_images_message("my_cluster:llama-3-70b")
+        assert "Nobody has found out yet" in message
+        # The way to find out, under the name that will actually resolve.
+        assert "settings test-model my_cluster:llama-3-70b" in message
+
+    def test_a_tested_model_says_when_it_was_tested(self, mock_catalog):
+        message = cannot_read_images_message("text-only-model")
+        assert "was tested on 2026-08-03" in message
+        assert "Nobody has found out yet" not in message
+
+    def test_a_model_not_in_the_catalog_says_so(self, mock_catalog):
+        message = cannot_read_images_message("ghost-model")
+        assert "is not in the model catalog" in message
+
+    def test_it_names_what_to_use_instead_in_reading_order(self, mock_catalog):
+        message = cannot_read_images_message("text-only-model")
+        assert "gpt-4o, gpt-4o-mini, gpt-5" in message
+
+    def test_with_no_vision_model_at_all_it_does_not_offer_an_empty_list(self, monkeypatch):
+        monkeypatch.setattr(
+            catalog_module, "load_model_catalog",
+            lambda: {"config": {}, "models": {"text-only-model": {"supports_vision": False}}},
+        )
+        message = cannot_read_images_message("text-only-model")
+        assert "No model in the catalog can read images yet." in message
 
 
 # ---------------------------------------------------------------------------
