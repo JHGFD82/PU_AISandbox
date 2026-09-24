@@ -682,14 +682,21 @@
     border: 1px solid var(--border); border-radius: var(--radius-md);
     background: var(--input-bg); padding: var(--space-2);
   }
-  /* A company, then its models indented under it, so the eye can skip a
+  /* Where the models ran, then whose they are, then the models, each level
+     indented under the one before, so the eye can skip a whole service or a
      whole company at a time. */
-  .filter-owner + .filter-owner { margin-top: var(--space-2); }
+  .filter-service + .filter-service {
+    margin-top: var(--space-3); padding-top: var(--space-3);
+    border-top: 1px solid var(--border);
+  }
+  .filter-service-companies { margin-left: 1.4rem; }
+  .filter-company { margin-top: var(--space-2); }
   /* Named through the row as well, because .job-field-checkbox label sets
      the weight back to normal further down this file and would otherwise
      win the tie by being later. */
-  .job-field-checkbox .filter-owner-box + label { font-weight: 600; }
-  .filter-owner-models {
+  .job-field-checkbox .filter-service-box + label { font-weight: 600; font-size: var(--text-md); }
+  .job-field-checkbox .filter-company-box + label { font-weight: 600; }
+  .filter-company-models {
     display: flex; flex-wrap: wrap; gap: 0.3rem 1rem; margin-left: 1.4rem;
   }
   #filter-models-none { margin: 0.4rem 0 0; }
@@ -1383,9 +1390,9 @@ const state = {
   // button has narrowed and reordered it to. Kept apart so a change to the
   // filter redraws the list without asking the server again.
   conversations: [], filter: defaultFilter(), sort: "newest",
-  // Whose model each name in that list is, as the server works it out, for
-  // grouping the filter's models by company.
-  modelOwners: {},
+  // Where each model in that list ran and who made it, as the server works
+  // it out, for grouping the filter's models by service and then company.
+  modelGroups: {},
   models: [], defaultModel: null,
   pluginActions: [], languages: null, jobPollTimer: null, jobLocked: false, activeAction: null,
   // The job modal's full field list for whichever action is open right now
@@ -3347,7 +3354,7 @@ function filterByModel(model) {
 async function loadConversations() {
   const data = await api("/api/conversations?professor=" + encodeURIComponent(state.professor));
   state.conversations = data.conversations;
-  state.modelOwners = data.model_owners || {};
+  state.modelGroups = data.model_groups || {};
   renderConversationList();
 }
 
@@ -4134,38 +4141,55 @@ function tickBox(id, value, labelText, className) {
   return { row, box };
 }
 
-// The models, by whose they are, in the same groups and the same order the
-// model picker uses — a catalog of twenty-eight models is a lot to read
-// through when you already know whose you want. A name the server could not
-// place goes under "Other".
-function groupModelsByOwner(names) {
-  const groups = new Map();
+// The name the filter gives the sandbox's own models, set apart from the
+// services somebody has added of their own.
+const SANDBOX_SERVICE = "Princeton University AI Sandbox";
+
+// The models, by where they ran and then by whose they are — a catalog of
+// thirty models is a lot to read through when you already know which you
+// want. The sandbox comes first and the other services after it, companies
+// alphabetically with "Other" last, and a model the server could not place
+// goes under "Other" too.
+function groupModelsByService(names) {
+  const services = new Map();
   names.forEach(name => {
-    const owner = state.modelOwners[name] || "Other";
-    if (!groups.has(owner)) groups.set(owner, []);
-    groups.get(owner).push(name);
+    const where = state.modelGroups[name] || {};
+    const service = where.service || SANDBOX_SERVICE;
+    const company = where.company || "Other";
+    if (!services.has(service)) services.set(service, new Map());
+    const companies = services.get(service);
+    if (!companies.has(company)) companies.set(company, []);
+    companies.get(company).push(name);
   });
-  return [...groups.entries()]
-    .sort((a, b) => a[0].toLowerCase().localeCompare(b[0].toLowerCase()))
-    .map(([owner, mine]) => [owner, mine.sort()]);
+  const inOrder = (first, last) => (a, b) =>
+    (a === first ? -1 : b === first ? 1 : 0) || (a === last ? 1 : b === last ? -1 : 0)
+    || a.toLowerCase().localeCompare(b.toLowerCase());
+  return [...services.entries()]
+    .sort((a, b) => inOrder(SANDBOX_SERVICE, null)(a[0], b[0]))
+    .map(([service, companies]) => [service, [...companies.entries()]
+      .sort((a, b) => inOrder(null, "Other")(a[0], b[0]))
+      .map(([company, mine]) => [company, mine.sort()])]);
 }
 
-// The company's box ticks and unticks all of its models at once, and follows
-// them the rest of the time: on when every one of them is on, half-ticked
-// while only some are. Half-ticked is a look, not a value — it is never read
-// back, because what the filter is made of is the models themselves.
-function tieToTheCompany(ownerBox, boxes) {
-  const followTheModels = () => {
-    const ticked = boxes.filter(box => box.checked).length;
-    ownerBox.checked = ticked === boxes.length;
-    ownerBox.indeterminate = ticked > 0 && ticked < boxes.length;
-  };
-  ownerBox.addEventListener("change", () => {
-    boxes.forEach(box => { box.checked = ownerBox.checked; });
-    followTheModels();   // Which also puts the half-ticked look away.
+// A service's box and a company's box each tick and untick every model under
+// them, and follow those models the rest of the time: on when every one is
+// on, half-ticked while only some are. Half-ticked is a look, not a value —
+// it is never read back, because what the filter is made of is the models
+// themselves. One listener on the whole list, because ticking a company
+// changes what its service's box should show, and a model box set from code
+// announces nothing.
+function tieGroupsToTheirModels(container, groups) {
+  const follow = () => groups.forEach(({ box, models }) => {
+    const ticked = models.filter(m => m.checked).length;
+    box.checked = ticked === models.length;
+    box.indeterminate = ticked > 0 && ticked < models.length;
   });
-  boxes.forEach(box => box.addEventListener("change", followTheModels));
-  followTheModels();
+  container.onchange = event => {
+    const group = groups.find(g => g.box === event.target);
+    if (group) group.models.forEach(m => { m.checked = group.box.checked; });
+    follow();   // Which also puts the half-ticked look away.
+  };
+  follow();
 }
 
 function fillFilterModal(filter, sort) {
@@ -4178,25 +4202,41 @@ function fillFilterModal(filter, sort) {
   const names = new Set(filter.models);
   state.conversations.forEach(c => (c.models || []).forEach(m => names.add(m)));
   let counter = 0;
-  groupModelsByOwner([...names]).forEach(([owner, mine]) => {
-    const group = document.createElement("div");
-    group.className = "filter-owner";
-    const ownerRow = tickBox(`filter-owner-${counter++}`, owner, owner,
-                             "filter-owner-box");
-    group.appendChild(ownerRow.row);
-    const list = document.createElement("div");
-    list.className = "filter-owner-models";
-    const boxes = mine.map(name => {
-      const model = tickBox(`filter-model-${counter++}`, name, name, "filter-model-box");
-      model.box.checked = filter.models.has(name);
-      list.appendChild(model.row);
-      return model.box;
+  const groups = [];
+  const indented = (className, rows) => {
+    const holder = document.createElement("div");
+    holder.className = className;
+    holder.append(...rows);
+    return holder;
+  };
+  groupModelsByService([...names]).forEach(([service, companies]) => {
+    const serviceRow = tickBox(`filter-service-${counter++}`, service, service,
+                               "filter-service-box");
+    const serviceModels = [];
+    const companyRows = companies.map(([company, mine]) => {
+      const companyRow = tickBox(`filter-company-${counter++}`, company, company,
+                                 "filter-company-box");
+      const modelRows = mine.map(name => {
+        const model = tickBox(`filter-model-${counter++}`, name, name, "filter-model-box");
+        model.box.checked = filter.models.has(name);
+        serviceModels.push(model.box);
+        return model;
+      });
+      groups.push({ box: companyRow.box, models: modelRows.map(m => m.box) });
+      return indented("filter-company", [
+        companyRow.row,
+        indented("filter-company-models", modelRows.map(m => m.row)),
+      ]);
     });
-    group.appendChild(list);
-    models.appendChild(group);
-    // Last, so the company's own box starts out saying what its models say.
-    tieToTheCompany(ownerRow.box, boxes);
+    groups.push({ box: serviceRow.box, models: serviceModels });
+    models.appendChild(indented("filter-service", [
+      serviceRow.row,
+      indented("filter-service-companies", companyRows),
+    ]));
   });
+  // Last, so each service's and company's box starts out saying what its
+  // models say.
+  tieGroupsToTheirModels(models, groups);
   document.getElementById("filter-models-none").hidden = names.size > 0;
   document.querySelectorAll("#filter-ages input").forEach(box => { box.checked = filter.ages.has(box.value); });
   document.querySelectorAll('input[name="filter-kind"]').forEach(r => { r.checked = r.value === filter.kind; });

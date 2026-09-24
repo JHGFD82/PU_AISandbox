@@ -274,13 +274,20 @@ class TestConversations:
         assert settle("someone/their-model") == "someone/their-model"
         assert settle("della:alibaba/qwen35") == "della:alibaba/qwen35"
 
-    def test_the_list_says_whose_each_model_is(self, unlocked_client):
+    def test_the_list_says_where_each_model_ran_and_whose_it_is(
+            self, unlocked_client, monkeypatch):
         """Worked out here: the name a reply came back under is often not in
         the catalog, and only the server can read whose it is."""
+        from src import settings
+
+        monkeypatch.setattr(settings, "ENDPOINTS", {"my_mac": {"name": "My Mac"}})
         unlocked_client.post("/api/conversations", json={"professor": "heller", "model": "gpt-4o"})
-        listed = unlocked_client.get(
-            "/api/conversations", params={"professor": "heller"}).json()
-        assert listed["model_owners"]["gpt-4o"] == "OpenAI"
+        unlocked_client.post("/api/conversations",
+                             json={"professor": "heller", "model": "my_mac:qwen3.8:27b-mlx"})
+        groups = unlocked_client.get(
+            "/api/conversations", params={"professor": "heller"}).json()["model_groups"]
+        assert groups["gpt-4o"] == {"service": None, "company": "OpenAI"}
+        assert groups["my_mac:qwen3.8:27b-mlx"] == {"service": "My Mac", "company": "Qwen"}
 
     def test_the_list_carries_what_the_filter_narrows_by(self, unlocked_client):
         """The filter works in the browser, over the list it already has, so
@@ -7598,20 +7605,31 @@ class TestTheConversationListCanBeFiltered:
         for sort in ("newest", "oldest", "cost", "tokens", "title"):
             assert f'<option value="{sort}">' in modal
 
-    def test_the_models_are_grouped_by_company(self):
-        """The same grouping the model picker uses. A flat run of every model
-        in the catalog is a lot to read when you know whose you want."""
-        grouping = self._function("groupModelsByOwner")
-        assert "state.modelOwners[name]" in grouping
-        assert '"Other"' in grouping, "a model nobody could place needs a group too"
-        assert "localeCompare" in grouping
+    def test_the_models_are_grouped_by_service_then_company(self):
+        """The sandbox's own models first, then each service somebody added,
+        and the companies inside each. A flat run of every model in the
+        catalog is a lot to read when you know which you want."""
+        grouping = self._function("groupModelsByService")
+        assert "state.modelGroups[name]" in grouping
+        assert "where.service || SANDBOX_SERVICE" in grouping
+        assert 'where.company || "Other"' in grouping, "a model nobody could place needs a group too"
+        assert 'inOrder(SANDBOX_SERVICE, null)' in grouping, "the sandbox is not listed first"
+        assert 'inOrder(null, "Other")' in grouping, "Other is not listed last"
 
-    def test_a_company_ticks_and_unticks_all_of_its_models(self):
-        tie = self._function("tieToTheCompany")
-        assert "boxes.forEach(box => { box.checked = ownerBox.checked; });" in tie
+    def test_a_service_or_company_ticks_and_unticks_all_of_its_models(self):
+        tie = self._function("tieGroupsToTheirModels")
+        assert "group.models.forEach(m => { m.checked = group.box.checked; });" in tie
         # Half-ticked while only some of them are, so the box never claims
         # more than is true.
-        assert "ownerBox.indeterminate = ticked > 0 && ticked < boxes.length;" in tie
+        assert "box.indeterminate = ticked > 0 && ticked < models.length;" in tie
+        # Every box is brought up to date after any change: ticking a company
+        # changes what its service's box should show.
+        assert "container.onchange" in tie
+
+    def test_a_service_holds_every_model_of_every_company_in_it(self):
+        fill = self._function("fillFilterModal")
+        assert "serviceModels.push(model.box);" in fill
+        assert "groups.push({ box: serviceRow.box, models: serviceModels });" in fill
 
     def test_only_the_models_themselves_are_read_back(self):
         """The company boxes are a way of ticking; what the filter is made of
@@ -7627,11 +7645,13 @@ class TestTheConversationListCanBeFiltered:
         assert "overflow-y: auto" in rule
         assert "max-height" in rule
 
-    def test_a_company_reads_as_the_heading_of_its_models(self):
-        """And keeps doing so: .job-field-checkbox label sets the weight back
+    def test_a_service_and_a_company_read_as_headings(self):
+        """And keep doing so: .job-field-checkbox label sets the weight back
         to normal further down the file, and would win a tie by being later."""
-        rule = self._chat().split(".job-field-checkbox .filter-owner-box + label {")[1]
-        assert "font-weight: 600" in rule.split("}")[0]
+        page = self._chat()
+        for box in ("filter-service-box", "filter-company-box"):
+            rule = page.split(f".job-field-checkbox .{box} + label {{")[1]
+            assert "font-weight: 600" in rule.split("}")[0], box
 
     def test_it_is_laid_out_the_way_a_settings_card_is(self):
         """One interface, not two. The sections are headed and spaced like a

@@ -63,6 +63,8 @@ from src.config import load_professor_config
 from src.errors import CLIError
 from src.models import (
     get_model_max_completion_tokens,
+    model_company,
+    model_endpoint,
     model_owner,
     model_accepts_sampling_params,
     model_supports_vision,
@@ -1597,16 +1599,24 @@ def create_app() -> FastAPI:
         _validated_professor(professor)
         store = conversation.ConversationStore(professor)
         conversations = store.list_conversations()
-        # Whose model each one is, so the filter can offer them by company
-        # rather than as one long alphabetical run. Worked out here because
-        # model_owner() knows the catalog and the endpoints, and because the
-        # name a reply came back under is often not in the catalog at all —
-        # it is read from the name in that case, which the browser cannot do.
         for c in conversations:
             c["models"] = sorted({_as_the_catalog_knows_it(name) for name in c["models"]})
-        owners = {name: model_owner(name)
-                  for c in conversations for name in c["models"]}
-        return {"conversations": conversations, "model_owners": owners}
+        # Where each model ran and who made it, so the filter can offer them
+        # by service and then by company rather than as one long alphabetical
+        # run. Worked out here because the catalog and the endpoints are here,
+        # and because the name a reply came back under is often not in the
+        # catalog at all. In a worker thread because the list of who makes
+        # which model may be out of date and asked for again.
+        await run_in_threadpool(refresh_model_makers)
+        groups = {
+            name: {
+                # None for the sandbox itself: the browser names it.
+                "service": model_endpoint(name),
+                "company": model_company(name),
+            }
+            for c in conversations for name in c["models"]
+        }
+        return {"conversations": conversations, "model_groups": groups}
 
     @app.post("/api/conversations")
     async def api_create_conversation(request: Request, body: NewConversationBody):

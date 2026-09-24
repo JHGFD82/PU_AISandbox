@@ -1459,13 +1459,22 @@ class TestAModelOnAnEndpoint:
         assert model_endpoint("my_mac:qwen3.8:27b-mlx") == "My Mac"
         assert model_company("my_mac:qwen3.8:27b-mlx") == "Qwen"
 
+    def test_one_whose_endpoint_is_gone_from_the_settings_still_ran_there(self, monkeypatch):
+        """Nothing else says where it ran; the built-in service never names a
+        model with a colon."""
+        self._catalog(monkeypatch, {}, {})
+        from src.models.catalog import model_company, model_endpoint
+
+        assert model_endpoint("my_mac_studio:qwen3.8:27b-mlx") == "my_mac_studio"
+        assert model_company("my_mac_studio:qwen3.8:27b-mlx") == "Qwen"
+
     def test_a_sandbox_model_runs_on_no_endpoint(self, monkeypatch):
-        """Nor does a colon in a name make one: qwen3.8 is not an endpoint."""
-        self._catalog(monkeypatch, {"gpt-4o": {}}, {"my_mac": {}})
+        self._catalog(monkeypatch, {"gpt-4o": {}, "odd:name": {}}, {"my_mac": {}})
         from src.models.catalog import model_endpoint
 
         assert model_endpoint("gpt-4o") is None
-        assert model_endpoint("qwen3.8:27b-mlx") is None
+        assert model_endpoint("gpt-4o-2024-08-06") is None, "not in the catalog, but no colon"
+        assert model_endpoint("odd:name") is None, "the catalog says it is the sandbox's"
 
 
 class TestAModelThatCannotReadImagesSaysSo:
