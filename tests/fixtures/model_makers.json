@@ -1,0 +1,33 @@
+{
+ "families": {
+  "claude": "anthropic",
+  "command": "cohere",
+  "deepseek": "deepseek",
+  "gemini": "google",
+  "gemma": "google",
+  "gpt": "openai",
+  "kimi": "moonshotai",
+  "llama": "meta-llama",
+  "mistral": "mistralai",
+  "o": "openai",
+  "phi": "microsoft",
+  "qwen": "qwen"
+ },
+ "makers": {
+  "anthropic": "Anthropic",
+  "cohere": "Cohere",
+  "deepseek": "DeepSeek",
+  "google": "Google",
+  "meta-llama": "Meta",
+  "microsoft": "Microsoft",
+  "mistralai": "Mistral",
+  "moonshotai": "MoonshotAI",
+  "openai": "OpenAI",
+  "qwen": "Qwen"
+ },
+ "models": {
+  "claude-haiku-4.5": "anthropic",
+  "gpt-4o": "openai",
+  "gpt-4o-mini": "openai"
+ }
+}

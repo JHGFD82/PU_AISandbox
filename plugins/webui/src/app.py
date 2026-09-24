@@ -67,6 +67,7 @@ from src.models import (
     model_accepts_sampling_params,
     model_supports_vision,
     models_in_reading_order,
+    refresh_model_makers,
     resolve_model,
     sync_endpoint_models,
 )
@@ -483,6 +484,19 @@ def _capability_summary(model: str) -> dict:
         "tested": bool(isinstance(entry, dict) and entry.get("last_tested")),
         "last_tested": entry.get("last_tested") if isinstance(entry, dict) else None,
     }
+
+
+def _bring_model_lists_up_to_date() -> None:
+    """Ask what a list of models needs asking before it is drawn.
+
+    Which models this installation's own endpoints run, so one newly loaded on
+    a cluster is listed without anyone adding it; and, at most once a month,
+    OpenRouter's list of who makes which models, so each one is grouped under
+    its company (see ``src/models/makers.py``). Both may go over the network,
+    so this belongs in a worker thread.
+    """
+    sync_endpoint_models()
+    refresh_model_makers()
 
 
 def _models_with_capabilities() -> list[dict]:
@@ -1222,7 +1236,7 @@ def create_app() -> FastAPI:
         _require_unlocked(request)
         # In a worker thread: it may ask an endpoint over the network, and
         # waiting on the event loop would stall every other request meanwhile.
-        await run_in_threadpool(sync_endpoint_models)
+        await run_in_threadpool(_bring_model_lists_up_to_date)
         return {"models": _models_with_capabilities()}
 
     # Sync, like /api/pick-path above and for the same reason: testing a model
@@ -1421,7 +1435,7 @@ def create_app() -> FastAPI:
         # The models on this installation's own endpoints, so one newly loaded
         # on a cluster is in the menu without anyone adding it. In a worker
         # thread for the same reason as the settings page's list.
-        await run_in_threadpool(sync_endpoint_models)
+        await run_in_threadpool(_bring_model_lists_up_to_date)
         names = models_in_reading_order()
         models = [
             {

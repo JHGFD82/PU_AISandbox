@@ -1333,7 +1333,11 @@ class TestForgettingWhatAModelRefuses:
 
 
 class TestWhoseModelIsIt:
-    """Grouping a menu by the company, not by the shop it was bought from."""
+    """Grouping a menu by the company, not by the shop it was bought from.
+
+    The companies come from OpenRouter's list; the tests' own stand-in for it
+    is tests/fixtures/model_makers.json, put in place by the root conftest.
+    """
 
     def _catalog(self, monkeypatch, models):
         from src.models import catalog as catalog_mod
@@ -1341,19 +1345,18 @@ class TestWhoseModelIsIt:
         monkeypatch.setattr(catalog_mod, "load_model_catalog",
                             lambda: {"models": models, "config": {}})
 
-    def test_the_route_is_the_company_for_almost_everything(self, monkeypatch):
+    def test_the_company_comes_from_the_list_of_makers(self, monkeypatch):
         self._catalog(monkeypatch, {"gpt-4o": {"portkey_id": "openai/gpt-4o"}})
         from src.models.catalog import model_owner
 
         assert model_owner("gpt-4o") == "OpenAI"
 
-    def test_a_company_nobody_has_heard_of_yet_names_itself(self, monkeypatch):
-        """The point of reading the route first: a provider added later appears
-        under its own name without anyone editing this."""
-        self._catalog(monkeypatch, {"kimi-k2": {"portkey_id": "moonshot/kimi-k2"}})
-        from src.models.catalog import model_owner
+    def test_a_model_the_list_does_not_name_is_placed_by_its_family(self, monkeypatch):
+        """A newer model than the saved list knows about, from a known family."""
+        self._catalog(monkeypatch, {"qwen9-max": {}})
+        from src.models.catalog import model_company
 
-        assert model_owner("kimi-k2") == "moonshot"
+        assert model_company("qwen9-max") == "Qwen"
 
     def test_a_reselling_route_does_not_claim_the_model(self, monkeypatch):
         """Vertex and Azure carry other companies' models. Read literally, the
@@ -1369,11 +1372,21 @@ class TestWhoseModelIsIt:
         assert model_owner("gpt-35-turbo") == "OpenAI"
         assert model_owner("Llama-3.3-70B-Instruct") == "Meta"
 
-    def test_a_model_with_no_route_recorded_is_read_by_name(self, monkeypatch):
-        self._catalog(monkeypatch, {"mistral-small-2503": {"input": 1.0}})
+    def test_a_company_the_list_does_not_know_names_itself_by_its_route(self, monkeypatch):
+        """A provider added later appears under its own name without anyone
+        editing this."""
+        self._catalog(monkeypatch, {"zeta-1": {"portkey_id": "zetaco/zeta-1"}})
         from src.models.catalog import model_owner
 
-        assert model_owner("mistral-small-2503") == "Mistral"
+        assert model_owner("zeta-1") == "zetaco"
+
+    def test_an_owner_written_by_hand_always_wins(self, monkeypatch):
+        """For a model the list gets wrong."""
+        self._catalog(monkeypatch, {"gpt-4o": {"portkey_id": "openai/gpt-4o",
+                                               "owner": "Somebody Else"}})
+        from src.models.catalog import model_owner
+
+        assert model_owner("gpt-4o") == "Somebody Else"
 
     def test_something_wholly_unknown_still_gets_a_place(self, monkeypatch):
         """It must appear somewhere; a model that groups nowhere is a model
@@ -1382,6 +1395,18 @@ class TestWhoseModelIsIt:
         from src.models.catalog import model_owner
 
         assert model_owner("strange-thing") == "Other"
+
+    def test_with_no_saved_list_the_route_still_places_the_model(self, monkeypatch):
+        """Offline on first use: no list, and nothing breaks."""
+        from src.models import makers
+
+        makers.makers_path().unlink()
+        self._catalog(monkeypatch, {"gpt-4o": {"portkey_id": "openai/gpt-4o"},
+                                    "claude-haiku-4-5": {"portkey_id": "vertex-ai/claude-haiku-4-5"}})
+        from src.models.catalog import model_owner
+
+        assert model_owner("gpt-4o") == "openai"
+        assert model_owner("claude-haiku-4-5") == "Other"
 
     def test_every_model_in_this_catalog_is_placed(self, monkeypatch):
         from src.models.catalog import model_owner
@@ -1395,6 +1420,52 @@ class TestWhoseModelIsIt:
         owners = {model_owner(m) for m in
                   ("gpt-4o", "claude-haiku-4-5", "gemma-3-4b-it", "mistral-small-2503")}
         assert "Other" not in owners, owners
+
+
+class TestAModelOnAnEndpoint:
+    """Where it runs and who made it are two questions with two answers."""
+
+    def _catalog(self, monkeypatch, models, endpoints):
+        from src import settings
+        from src.models import catalog as catalog_mod
+
+        monkeypatch.setattr(catalog_mod, "load_model_catalog",
+                            lambda: {"models": models, "config": {}})
+        monkeypatch.setattr(settings, "ENDPOINTS", endpoints)
+
+    def test_it_is_grouped_under_its_endpoint(self, monkeypatch):
+        self._catalog(monkeypatch,
+                      {"my_mac:qwen3.8:27b-mlx": {"endpoint": "my_mac", "model": "qwen3.8:27b-mlx"}},
+                      {"my_mac": {"name": "My Mac"}})
+        from src.models.catalog import model_endpoint, model_owner
+
+        assert model_endpoint("my_mac:qwen3.8:27b-mlx") == "My Mac"
+        assert model_owner("my_mac:qwen3.8:27b-mlx") == "My Mac"
+
+    def test_its_company_is_read_from_its_name_there(self, monkeypatch):
+        """A local model's name is its family's, with a size after it."""
+        self._catalog(monkeypatch,
+                      {"my_mac:gemma4:12b-mlx": {"endpoint": "my_mac", "model": "gemma4:12b-mlx"}},
+                      {"my_mac": {}})
+        from src.models.catalog import model_company
+
+        assert model_company("my_mac:gemma4:12b-mlx") == "Google"
+
+    def test_one_the_endpoint_no_longer_lists_still_ran_there(self, monkeypatch):
+        """Gone from the catalog, but a conversation still names it."""
+        self._catalog(monkeypatch, {}, {"my_mac": {"name": "My Mac"}})
+        from src.models.catalog import model_company, model_endpoint
+
+        assert model_endpoint("my_mac:qwen3.8:27b-mlx") == "My Mac"
+        assert model_company("my_mac:qwen3.8:27b-mlx") == "Qwen"
+
+    def test_a_sandbox_model_runs_on_no_endpoint(self, monkeypatch):
+        """Nor does a colon in a name make one: qwen3.8 is not an endpoint."""
+        self._catalog(monkeypatch, {"gpt-4o": {}}, {"my_mac": {}})
+        from src.models.catalog import model_endpoint
+
+        assert model_endpoint("gpt-4o") is None
+        assert model_endpoint("qwen3.8:27b-mlx") is None
 
 
 class TestAModelThatCannotReadImagesSaysSo:
