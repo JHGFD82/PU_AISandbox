@@ -662,15 +662,44 @@
     padding: 0.7rem 1rem; border-top: 1px solid var(--border);
   }
   #adjust-measured { color: var(--text-muted); }
-  /* Each kind of filter is a group of choices under one heading, so a screen
-     reader announces the heading with each choice. Stripped of the frame a
-     fieldset draws by default, and headed like any other field here. */
-  .filter-group { border: none; padding: 0; margin: var(--space-3) 0 0; min-width: 0; }
-  .filter-group legend { padding: 0; font-size: var(--text-sm); font-weight: 600; margin-bottom: 0.35rem; }
+  /* Each kind of filter is a section, headed and spaced like a section of a
+     settings card, so the two read as one interface. The ones made of
+     choices are fieldsets, so a screen reader announces the heading with
+     each choice; the frame a fieldset draws by default is taken off, and the
+     legend is dressed as the heading beside it. */
+  .filter-section { border: none; padding: 0; margin: 0; min-width: 0; }
+  .filter-section + .filter-section { margin-top: var(--space-6); }
+  .filter-section > legend, .filter-section > h3 {
+    padding: 0; margin: 0 0 0.25rem; font-size: var(--text-md); font-weight: 600;
+  }
+  .filter-section > .hint { margin-bottom: 0.4rem; }
   .filter-options { display: flex; flex-wrap: wrap; gap: 0.3rem 1rem; }
-  .filter-range { display: flex; align-items: center; gap: var(--space-2); }
-  .filter-range input[type=text] { flex: 1; min-width: 0; }
-  #filter-models-none { margin: 0; }
+  /* The models are the one part that grows without limit as a catalog does,
+     so they scroll inside the box instead of pushing everything below them
+     out of reach. Framed like a field, because that is what it is. */
+  .filter-scroll {
+    max-height: 11rem; overflow-y: auto;
+    border: 1px solid var(--border); border-radius: var(--radius-md);
+    background: var(--input-bg); padding: var(--space-2);
+  }
+  /* Where the models ran, then whose they are, then the models, each level
+     indented under the one before, so the eye can skip a whole service or a
+     whole company at a time. */
+  .filter-service + .filter-service {
+    margin-top: var(--space-3); padding-top: var(--space-3);
+    border-top: 1px solid var(--border);
+  }
+  .filter-service-companies { margin-left: 1.4rem; }
+  .filter-company { margin-top: var(--space-2); }
+  /* Named through the row as well, because .job-field-checkbox label sets
+     the weight back to normal further down this file and would otherwise
+     win the tie by being later. */
+  .job-field-checkbox .filter-service-box + label { font-weight: 600; font-size: var(--text-md); }
+  .job-field-checkbox .filter-company-box + label { font-weight: 600; }
+  .filter-company-models {
+    display: flex; flex-wrap: wrap; gap: 0.3rem 1rem; margin-left: 1.4rem;
+  }
+  #filter-models-none { margin: 0.4rem 0 0; }
   #filter-error[hidden], #filter-models-none[hidden] { display: none; }
   .filter-clear-all { margin-right: auto; }
   #adjust-error[hidden], #adjust-preview:empty { display: none; }
@@ -1184,21 +1213,19 @@
         </button>
       </div>
       <div class="modal-body" id="filter-modal-body">
-        <p class="spend-label" style="margin-top:0;">
-          Only conversations that match everything chosen here are listed. Anything
-          left empty leaves the list alone. Cost and tokens count the replies whose
-          cost the AI service reported.
-        </p>
-        <div class="job-field">
-          <label for="filter-text">Title contains</label>
+        <div class="filter-section">
+          <h3>Title</h3>
+          <label for="filter-text">Contains these letters</label>
           <input type="text" id="filter-text" autocomplete="off" placeholder="letter">
         </div>
-        <fieldset class="filter-group">
+
+        <fieldset class="filter-section">
           <legend>Models</legend>
-          <div class="filter-options" id="filter-models"></div>
-          <p class="spend-label" id="filter-models-none">No conversation has used a model yet.</p>
+          <div class="filter-scroll" id="filter-models"></div>
+          <p class="hint" id="filter-models-none">No conversation has used a model yet.</p>
         </fieldset>
-        <fieldset class="filter-group">
+
+        <fieldset class="filter-section">
           <legend>Last used</legend>
           <div class="filter-options" id="filter-ages">
             <div class="job-field-checkbox"><input type="checkbox" id="filter-age-today" value="Today"><label for="filter-age-today">Today</label></div>
@@ -1207,7 +1234,8 @@
             <div class="job-field-checkbox"><input type="checkbox" id="filter-age-older" value="Older"><label for="filter-age-older">Older</label></div>
           </div>
         </fieldset>
-        <fieldset class="filter-group">
+
+        <fieldset class="filter-section">
           <legend>Kind</legend>
           <div class="filter-options">
             <div class="job-field-checkbox"><input type="radio" name="filter-kind" id="filter-kind-all" value="all"><label for="filter-kind-all">All</label></div>
@@ -1215,24 +1243,32 @@
             <div class="job-field-checkbox"><input type="radio" name="filter-kind" id="filter-kind-job" value="job"><label for="filter-kind-job">With a document job</label></div>
           </div>
         </fieldset>
-        <fieldset class="filter-group">
-          <legend>Cost (dollars)</legend>
-          <div class="filter-range">
-            <input type="text" id="filter-cost-min" inputmode="decimal" placeholder="From" autocomplete="off" aria-label="Lowest cost, in dollars">
-            <span aria-hidden="true">&ndash;</span>
-            <input type="text" id="filter-cost-max" inputmode="decimal" placeholder="To" autocomplete="off" aria-label="Highest cost, in dollars">
+
+        <div class="filter-section">
+          <h3>What it cost</h3>
+          <div class="inline-fields">
+            <div>
+              <label for="filter-cost-min">Dollars from</label>
+              <input type="text" id="filter-cost-min" inputmode="decimal" placeholder="0.00" autocomplete="off">
+            </div>
+            <div>
+              <label for="filter-cost-max">up to</label>
+              <input type="text" id="filter-cost-max" inputmode="decimal" placeholder="no limit" autocomplete="off">
+            </div>
+            <div>
+              <label for="filter-tokens-min">Tokens from</label>
+              <input type="text" id="filter-tokens-min" inputmode="numeric" placeholder="0" autocomplete="off">
+            </div>
+            <div>
+              <label for="filter-tokens-max">up to</label>
+              <input type="text" id="filter-tokens-max" inputmode="numeric" placeholder="no limit" autocomplete="off">
+            </div>
           </div>
-        </fieldset>
-        <fieldset class="filter-group">
-          <legend>Tokens</legend>
-          <div class="filter-range">
-            <input type="text" id="filter-tokens-min" inputmode="numeric" placeholder="From" autocomplete="off" aria-label="Fewest tokens">
-            <span aria-hidden="true">&ndash;</span>
-            <input type="text" id="filter-tokens-max" inputmode="numeric" placeholder="To" autocomplete="off" aria-label="Most tokens">
-          </div>
-        </fieldset>
-        <div class="job-field">
-          <label for="filter-sort">Sort by</label>
+        </div>
+
+        <div class="filter-section">
+          <h3>Order</h3>
+          <label for="filter-sort">Sort the list by</label>
           <select id="filter-sort">
             <option value="newest">Newest first</option>
             <option value="oldest">Oldest first</option>
@@ -1241,6 +1277,7 @@
             <option value="title">Title, A to Z</option>
           </select>
         </div>
+
         <p class="spend-warning" id="filter-error" hidden></p>
       </div>
       <div class="modal-footer">
@@ -1353,6 +1390,9 @@ const state = {
   // button has narrowed and reordered it to. Kept apart so a change to the
   // filter redraws the list without asking the server again.
   conversations: [], filter: defaultFilter(), sort: "newest",
+  // Where each model in that list ran and who made it, as the server works
+  // it out, for grouping the filter's models by service and then company.
+  modelGroups: {},
   models: [], defaultModel: null,
   pluginActions: [], languages: null, jobPollTimer: null, jobLocked: false, activeAction: null,
   // The job modal's full field list for whichever action is open right now
@@ -3314,6 +3354,7 @@ function filterByModel(model) {
 async function loadConversations() {
   const data = await api("/api/conversations?professor=" + encodeURIComponent(state.professor));
   state.conversations = data.conversations;
+  state.modelGroups = data.model_groups || {};
   renderConversationList();
 }
 
@@ -4084,6 +4125,73 @@ document.getElementById("adjust-cancel").addEventListener("click", closeAdjustMo
 // What it shows is filled in from the filter each time it opens, and nothing
 // changes until "Show these" — so Cancel, Escape or the cross leave the list
 // exactly as it was.
+// A checkbox and its label, as every list in this modal draws one.
+function tickBox(id, value, labelText, className) {
+  const row = document.createElement("div");
+  row.className = "job-field-checkbox";
+  const box = document.createElement("input");
+  box.type = "checkbox";
+  box.id = id;
+  box.value = value;
+  box.className = className;
+  const label = document.createElement("label");
+  label.htmlFor = id;
+  label.textContent = labelText;
+  row.append(box, label);
+  return { row, box };
+}
+
+// The name the filter gives the sandbox's own models, set apart from the
+// services somebody has added of their own.
+const SANDBOX_SERVICE = "Princeton University AI Sandbox";
+
+// The models, by where they ran and then by whose they are — a catalog of
+// thirty models is a lot to read through when you already know which you
+// want. The sandbox comes first and the other services after it, companies
+// alphabetically with "Other" last, and a model the server could not place
+// goes under "Other" too.
+function groupModelsByService(names) {
+  const services = new Map();
+  names.forEach(name => {
+    const where = state.modelGroups[name] || {};
+    const service = where.service || SANDBOX_SERVICE;
+    const company = where.company || "Other";
+    if (!services.has(service)) services.set(service, new Map());
+    const companies = services.get(service);
+    if (!companies.has(company)) companies.set(company, []);
+    companies.get(company).push(name);
+  });
+  const inOrder = (first, last) => (a, b) =>
+    (a === first ? -1 : b === first ? 1 : 0) || (a === last ? 1 : b === last ? -1 : 0)
+    || a.toLowerCase().localeCompare(b.toLowerCase());
+  return [...services.entries()]
+    .sort((a, b) => inOrder(SANDBOX_SERVICE, null)(a[0], b[0]))
+    .map(([service, companies]) => [service, [...companies.entries()]
+      .sort((a, b) => inOrder(null, "Other")(a[0], b[0]))
+      .map(([company, mine]) => [company, mine.sort()])]);
+}
+
+// A service's box and a company's box each tick and untick every model under
+// them, and follow those models the rest of the time: on when every one is
+// on, half-ticked while only some are. Half-ticked is a look, not a value —
+// it is never read back, because what the filter is made of is the models
+// themselves. One listener on the whole list, because ticking a company
+// changes what its service's box should show, and a model box set from code
+// announces nothing.
+function tieGroupsToTheirModels(container, groups) {
+  const follow = () => groups.forEach(({ box, models }) => {
+    const ticked = models.filter(m => m.checked).length;
+    box.checked = ticked === models.length;
+    box.indeterminate = ticked > 0 && ticked < models.length;
+  });
+  container.onchange = event => {
+    const group = groups.find(g => g.box === event.target);
+    if (group) group.models.forEach(m => { m.checked = group.box.checked; });
+    follow();   // Which also puts the half-ticked look away.
+  };
+  follow();
+}
+
 function fillFilterModal(filter, sort) {
   document.getElementById("filter-text").value = filter.text;
   const models = document.getElementById("filter-models");
@@ -4093,20 +4201,42 @@ function fillFilterModal(filter, sort) {
   // still be seen ticked so it can be unticked.
   const names = new Set(filter.models);
   state.conversations.forEach(c => (c.models || []).forEach(m => names.add(m)));
-  [...names].sort().forEach((name, i) => {
-    const row = document.createElement("div");
-    row.className = "job-field-checkbox";
-    const box = document.createElement("input");
-    box.type = "checkbox";
-    box.id = `filter-model-${i}`;
-    box.value = name;
-    box.checked = filter.models.has(name);
-    const label = document.createElement("label");
-    label.htmlFor = box.id;
-    label.textContent = name;
-    row.append(box, label);
-    models.appendChild(row);
+  let counter = 0;
+  const groups = [];
+  const indented = (className, rows) => {
+    const holder = document.createElement("div");
+    holder.className = className;
+    holder.append(...rows);
+    return holder;
+  };
+  groupModelsByService([...names]).forEach(([service, companies]) => {
+    const serviceRow = tickBox(`filter-service-${counter++}`, service, service,
+                               "filter-service-box");
+    const serviceModels = [];
+    const companyRows = companies.map(([company, mine]) => {
+      const companyRow = tickBox(`filter-company-${counter++}`, company, company,
+                                 "filter-company-box");
+      const modelRows = mine.map(name => {
+        const model = tickBox(`filter-model-${counter++}`, name, name, "filter-model-box");
+        model.box.checked = filter.models.has(name);
+        serviceModels.push(model.box);
+        return model;
+      });
+      groups.push({ box: companyRow.box, models: modelRows.map(m => m.box) });
+      return indented("filter-company", [
+        companyRow.row,
+        indented("filter-company-models", modelRows.map(m => m.row)),
+      ]);
+    });
+    groups.push({ box: serviceRow.box, models: serviceModels });
+    models.appendChild(indented("filter-service", [
+      serviceRow.row,
+      indented("filter-service-companies", companyRows),
+    ]));
   });
+  // Last, so each service's and company's box starts out saying what its
+  // models say.
+  tieGroupsToTheirModels(models, groups);
   document.getElementById("filter-models-none").hidden = names.size > 0;
   document.querySelectorAll("#filter-ages input").forEach(box => { box.checked = filter.ages.has(box.value); });
   document.querySelectorAll('input[name="filter-kind"]').forEach(r => { r.checked = r.value === filter.kind; });
@@ -4163,7 +4293,7 @@ function applyFilterModal() {
   const ticked = selector => new Set([...document.querySelectorAll(selector)].map(box => box.value));
   const kind = document.querySelector('input[name="filter-kind"]:checked');
   state.filter = {
-    models: ticked("#filter-models input:checked"),
+    models: ticked("#filter-models .filter-model-box:checked"),
     ages: ticked("#filter-ages input:checked"),
     kind: kind ? kind.value : "all",
     text: document.getElementById("filter-text").value.trim(),

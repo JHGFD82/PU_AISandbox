@@ -63,6 +63,8 @@ from src.config import load_professor_config
 from src.errors import CLIError
 from src.models import (
     get_model_max_completion_tokens,
+    model_company,
+    model_endpoint,
     model_owner,
     model_accepts_sampling_params,
     model_supports_vision,
@@ -431,6 +433,32 @@ def _sse(event: dict) -> str:
         browser one event has finished and the next has not started.
     """
     return f"data: {json.dumps(event)}\n\n"
+
+
+def _as_the_catalog_knows_it(model: str) -> str:
+    """Return a model's name as the catalog files it, given any way of writing it.
+
+    A model can be named to the sandbox as its provider and then the model —
+    ``anthropic/claude-fable-5`` — which is how one is added, and which goes
+    on working in the model box afterwards. The catalog files it under the
+    second half alone, and every reply comes back under that half too, so a
+    conversation started under the longer name looks like a different model
+    from every other conversation with the same one.
+
+    Args:
+        model: The name as it was given, in any of these forms.
+
+    Returns:
+        The catalog's own name for it. A name with no provider in front is
+        returned unchanged, and so is one this catalog does not hold — that
+        is somebody's own spelling and not ours to rewrite. A model on one of
+        this installation's own endpoints (``della:alibaba/qwen35``) is left
+        alone as well: the whole string is its name there.
+    """
+    if "/" not in model or ":" in model:
+        return model
+    without_provider = model.split("/", 1)[1]
+    return without_provider if without_provider in _catalog_model_names() else model
 
 
 def _catalog_model_names() -> set:
@@ -1570,14 +1598,33 @@ def create_app() -> FastAPI:
         _require_unlocked(request)
         _validated_professor(professor)
         store = conversation.ConversationStore(professor)
-        return {"conversations": store.list_conversations()}
+        conversations = store.list_conversations()
+        for c in conversations:
+            c["models"] = sorted({_as_the_catalog_knows_it(name) for name in c["models"]})
+        # Where each model ran and who made it, so the filter can offer them
+        # by service and then by company rather than as one long alphabetical
+        # run. Worked out here because the catalog and the endpoints are here,
+        # and because the name a reply came back under is often not in the
+        # catalog at all. In a worker thread because the list of who makes
+        # which model may be out of date and asked for again.
+        await run_in_threadpool(refresh_model_makers)
+        groups = {
+            name: {
+                # None for the sandbox itself: the browser names it.
+                "service": model_endpoint(name),
+                "company": model_company(name),
+            }
+            for c in conversations for name in c["models"]
+        }
+        return {"conversations": conversations, "model_groups": groups}
 
     @app.post("/api/conversations")
     async def api_create_conversation(request: Request, body: NewConversationBody):
         _require_unlocked(request)
         professor = _validated_professor(body.professor)
         store = conversation.ConversationStore(professor)
-        model = body.model or resolve_model(role=CHAT_ROLE)
+        model = _as_the_catalog_knows_it(body.model) if body.model \
+            else resolve_model(role=CHAT_ROLE)
         conv = store.create(model=model)
         return conv.to_dict()
 
@@ -2137,7 +2184,7 @@ def create_app() -> FastAPI:
                 "conversation if you'd like to keep chatting while it finishes.",
             )
         if body.model:
-            conv.model = body.model
+            conv.model = _as_the_catalog_knows_it(body.model)
         # Unlike `model` above, these three are applied unconditionally,
         # not gated on truthiness — the options popover always sends the
         # sampling values it currently shows (any of which may legitimately

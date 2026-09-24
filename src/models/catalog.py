@@ -259,19 +259,19 @@ def _endpoint_and_name(model: str) -> tuple:
     Returns:
         ``(endpoint, name)``. ``endpoint`` is ``None`` for a sandbox model, and
         ``name`` is then the model's name unchanged. Worked out from the
-        catalog entry where there is one, and otherwise from whether the part
-        before the first colon names one of this installation's endpoints — a
-        model an endpoint has stopped listing still ran there.
+        catalog entry where there is one. Otherwise a name with a colon in it
+        is taken to be an endpoint's, named by the part before the colon: the
+        built-in service names none of its models that way, and a model an
+        endpoint has stopped listing — or an endpoint since taken out of the
+        settings — still ran there.
     """
-    entry = load_model_catalog()["models"].get(model)
+    models = load_model_catalog()["models"]
+    entry = models.get(model)
     if isinstance(entry, dict) and entry.get("endpoint"):
         return str(entry["endpoint"]), str(entry.get("model") or model.split(":", 1)[-1])
-    if ":" in model:
-        from .. import settings
-
+    if ":" in model and entry is None:
         in_front, _, rest = model.partition(":")
-        if in_front in settings.ENDPOINTS:
-            return in_front, rest
+        return in_front, rest
     return None, model
 
 

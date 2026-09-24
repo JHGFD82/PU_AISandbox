@@ -237,6 +237,58 @@ class TestConversations:
         assert resp.status_code == 200
         assert unlocked_client.get(f"/api/conversations/{conv_id}", params={"professor": "heller"}).status_code == 404
 
+    def test_a_model_named_with_its_provider_is_the_same_model(self, unlocked_client):
+        """A model can be named anthropic/claude-fable-5 — that is how one is
+        added, and the model box goes on accepting it — while the catalog
+        files it as claude-fable-5 and every reply comes back under that. Two
+        entries for one model in the filter is the visible half of that."""
+        created = unlocked_client.post(
+            "/api/conversations",
+            json={"professor": "heller", "model": "openai/gpt-4o"}).json()
+        assert created["model"] == "gpt-4o"
+        (listed,) = unlocked_client.get(
+            "/api/conversations", params={"professor": "heller"}).json()["conversations"]
+        assert listed["models"] == ["gpt-4o"]
+
+    def test_a_name_the_catalog_does_not_hold_is_left_as_it_was_written(
+            self, unlocked_client):
+        """Somebody's own spelling, and not ours to rewrite."""
+        created = unlocked_client.post(
+            "/api/conversations",
+            json={"professor": "heller", "model": "someone/their-model"}).json()
+        assert created["model"] == "someone/their-model"
+
+    def test_a_model_on_your_own_endpoint_keeps_its_whole_name(self, unlocked_client):
+        """There the endpoint and the model together are the name."""
+        created = unlocked_client.post(
+            "/api/conversations",
+            json={"professor": "heller", "model": "della:alibaba/qwen35"}).json()
+        assert created["model"] == "della:alibaba/qwen35"
+
+    def test_the_name_is_settled_the_same_way_wherever_it_arrives(self, settings_env):
+        """A conversation's model is also set by sending a message with a
+        different one chosen, which is a whole chat turn away from here."""
+        settle = sys.modules["_pu_webui_app"]._as_the_catalog_knows_it
+        assert settle("openai/gpt-4o") == "gpt-4o"
+        assert settle("gpt-4o") == "gpt-4o"
+        assert settle("someone/their-model") == "someone/their-model"
+        assert settle("della:alibaba/qwen35") == "della:alibaba/qwen35"
+
+    def test_the_list_says_where_each_model_ran_and_whose_it_is(
+            self, unlocked_client, monkeypatch):
+        """Worked out here: the name a reply came back under is often not in
+        the catalog, and only the server can read whose it is."""
+        from src import settings
+
+        monkeypatch.setattr(settings, "ENDPOINTS", {"my_mac": {"name": "My Mac"}})
+        unlocked_client.post("/api/conversations", json={"professor": "heller", "model": "gpt-4o"})
+        unlocked_client.post("/api/conversations",
+                             json={"professor": "heller", "model": "my_mac:qwen3.8:27b-mlx"})
+        groups = unlocked_client.get(
+            "/api/conversations", params={"professor": "heller"}).json()["model_groups"]
+        assert groups["gpt-4o"] == {"service": None, "company": "OpenAI"}
+        assert groups["my_mac:qwen3.8:27b-mlx"] == {"service": "My Mac", "company": "Qwen"}
+
     def test_the_list_carries_what_the_filter_narrows_by(self, unlocked_client):
         """The filter works in the browser, over the list it already has, so
         each entry has to arrive with everything it can be filtered on."""
@@ -7552,6 +7604,76 @@ class TestTheConversationListCanBeFiltered:
             assert field in modal, field
         for sort in ("newest", "oldest", "cost", "tokens", "title"):
             assert f'<option value="{sort}">' in modal
+
+    def test_the_models_are_grouped_by_service_then_company(self):
+        """The sandbox's own models first, then each service somebody added,
+        and the companies inside each. A flat run of every model in the
+        catalog is a lot to read when you know which you want."""
+        grouping = self._function("groupModelsByService")
+        assert "state.modelGroups[name]" in grouping
+        assert "where.service || SANDBOX_SERVICE" in grouping
+        assert 'where.company || "Other"' in grouping, "a model nobody could place needs a group too"
+        assert 'inOrder(SANDBOX_SERVICE, null)' in grouping, "the sandbox is not listed first"
+        assert 'inOrder(null, "Other")' in grouping, "Other is not listed last"
+
+    def test_a_service_or_company_ticks_and_unticks_all_of_its_models(self):
+        tie = self._function("tieGroupsToTheirModels")
+        assert "group.models.forEach(m => { m.checked = group.box.checked; });" in tie
+        # Half-ticked while only some of them are, so the box never claims
+        # more than is true.
+        assert "box.indeterminate = ticked > 0 && ticked < models.length;" in tie
+        # Every box is brought up to date after any change: ticking a company
+        # changes what its service's box should show.
+        assert "container.onchange" in tie
+
+    def test_a_service_holds_every_model_of_every_company_in_it(self):
+        fill = self._function("fillFilterModal")
+        assert "serviceModels.push(model.box);" in fill
+        assert "groups.push({ box: serviceRow.box, models: serviceModels });" in fill
+
+    def test_only_the_models_themselves_are_read_back(self):
+        """The company boxes are a way of ticking; what the filter is made of
+        is the models."""
+        apply = self._function("applyFilterModal")
+        assert 'ticked("#filter-models .filter-model-box:checked")' in apply
+
+    def test_the_models_scroll_instead_of_pushing_the_rest_away(self):
+        """The one part that grows as a catalog does."""
+        page = self._chat()
+        assert 'class="filter-scroll" id="filter-models"' in page
+        rule = page.split(".filter-scroll {")[1].split("}")[0]
+        assert "overflow-y: auto" in rule
+        assert "max-height" in rule
+
+    def test_a_service_and_a_company_read_as_headings(self):
+        """And keep doing so: .job-field-checkbox label sets the weight back
+        to normal further down the file, and would win a tie by being later."""
+        page = self._chat()
+        for box in ("filter-service-box", "filter-company-box"):
+            rule = page.split(f".job-field-checkbox .{box} + label {{")[1]
+            assert "font-weight: 600" in rule.split("}")[0], box
+
+    def test_it_is_laid_out_the_way_a_settings_card_is(self):
+        """One interface, not two. The sections are headed and spaced like a
+        card's, the explanations are .hint, and the figures sit on one line
+        of labelled fields the way the settings page lays fields out."""
+        page = self._chat()
+        modal = page[page.index('id="filter-modal-backdrop"'):page.index('id="adjust-modal-backdrop"')]
+        assert modal.count('class="filter-section"') >= 5
+        assert 'class="hint"' in modal
+        assert '<div class="inline-fields">' in modal
+        assert modal.count("<label for=\"filter-") >= 6, "a field without a label of its own"
+        headings = page.split(".filter-section > legend, .filter-section > h3 {")[1].split("}")[0]
+        assert "font-size: var(--text-md)" in headings, "not the size a card's heading is"
+
+    def test_the_shared_layout_lives_in_the_shared_partial(self):
+        """.inline-fields is used by the settings page and by this modal, so
+        it belongs where both of them read it from."""
+        from pathlib import Path
+
+        templates = Path(__file__).resolve().parents[1] / "src" / "templates"
+        assert ".inline-fields {" in (templates / "_forms.html").read_text()
+        assert ".inline-fields {" not in (templates / "settings.html").read_text()
 
     def test_a_model_ticked_elsewhere_stays_ticked_in_the_modal(self):
         """One chosen from the sidebar may belong to no conversation here."""
