@@ -95,6 +95,15 @@
      loudest thing on a page otherwise made of one orange and greys. */
   a { color: var(--link); }
   a:hover { text-decoration: underline; }
+  /* Fields side by side on one line, each with its own label above it, and
+     wrapping onto the next line rather than shrinking past reading. Here
+     rather than on the settings page because the chat page's filter lays its
+     figures out the same way. */
+  .inline-fields { display: flex; gap: 0.5rem; align-items: flex-end; flex-wrap: wrap; margin-top: 0.75rem; }
+  .inline-fields > div { flex: 1; min-width: 140px; }
+  /* A path is far longer than anything it shares a line with. */
+  .inline-fields > .wide { flex: 2.5; }
+
   /* ── Cards and the rows inside them ───────────────────────────────────── */
   .card {
     background: var(--panel-bg); border: 1px solid var(--border);
