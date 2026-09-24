@@ -6,10 +6,14 @@ Re-exports every symbol from the three submodules so callers can use either
 
 from .doc_block import ParagraphBlock, TableBlock
 from .embedded_media import EmbeddedMedia
+from .makers import refresh_model_makers
 from .catalog import (
     MODEL_CATALOG_FILE,
     clear_rejected_fields,
     get_available_models,
+    endpoint_label,
+    model_company,
+    model_endpoint,
     model_owner,
     models_in_reading_order,
     models_with_rejected_fields,
@@ -57,6 +61,10 @@ __all__ = [
     "save_model_catalog",
     "clear_rejected_fields",
     "get_available_models",
+    "endpoint_label",
+    "refresh_model_makers",
+    "model_company",
+    "model_endpoint",
     "model_owner",
     "models_in_reading_order",
     "models_with_rejected_fields",
