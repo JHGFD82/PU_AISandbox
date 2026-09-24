@@ -24,8 +24,12 @@ def start():
     spec = importlib.util.spec_from_file_location("_start_under_test", _START)
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
+    # Registered, as a script is under __main__: the launcher is handed this
+    # module through sys.modules.
+    sys.modules[spec.name] = module
     spec.loader.exec_module(module)
-    return module
+    yield module
+    sys.modules.pop(spec.name, None)
 
 
 class TestRunsOnAnOldPython:
@@ -397,17 +401,21 @@ class TestSayingWhereTheSoftwareGoes:
         assert "Software installed into %s." in source
 
 
-class _PretendLoadingPage:
-    """Stands in for the loading page, so no test takes the real port."""
+class _PretendLauncher:
+    """Stands in for the web interface's launcher, so no test takes a real port."""
 
-    def __init__(self, token, log=""):
-        self.token = token
+    def __init__(self, answers=None):
+        self.opened = []
+        self.asked = []
+        self.answers = answers or {}
 
-    def start(self):
-        return True
+    def open_from_a_terminal(self):
+        self.opened.append(True)
+        return 0
 
-    def hand_over(self, patience=15):
-        pass
+    def entry(self, arguments):
+        self.asked.append(arguments)
+        return self.answers.get(tuple(arguments))
 
 
 class TestACopyWithNoWebInterface:
@@ -425,13 +433,9 @@ class TestACopyWithNoWebInterface:
         monkeypatch.setattr(start, "environment_is_ready", lambda: True)
         monkeypatch.setattr(start, "has_the_web_interface", lambda sandbox: has_web)
         monkeypatch.setattr(start, "is_set_up", lambda sandbox: set_up)
-        opened = []
-        monkeypatch.setattr(start, "open_in_browser", opened.append)
-        monkeypatch.setattr(start, "ask_the_running_copy_to_stop",
-                            lambda: start.NOTHING_RUNNING)
-        monkeypatch.setattr(start, "new_stop_token", lambda: "token")
-        monkeypatch.setattr(start, "LoadingPage", _PretendLoadingPage)
-        monkeypatch.setattr(start, "make_shortcut_if_missing", lambda: None)
+        launcher = _PretendLauncher()
+        monkeypatch.setattr(start, "the_web_interfaces_launcher", lambda: launcher)
+        opened = launcher.opened
         ran = []
 
         def fake_call(args, **kwargs):
@@ -478,12 +482,29 @@ class TestACopyWithNoWebInterface:
             start, monkeypatch, has_web=False, set_up=True)
         assert "plugins/webui" in said
 
-    def test_with_the_plugin_there_nothing_changes(self, start, monkeypatch):
-        _code, said, opened, ran = self._run_main(
+    def test_with_the_plugin_there_it_hands_over_to_it(self, start, monkeypatch):
+        _code, said, opened, _ran = self._run_main(
             start, monkeypatch, has_web=True, set_up=True)
-        assert opened, "the browser should still be opened"
+        assert opened == [True], "the web interface's launcher should take over"
         assert "web interface is not installed" not in said
-        assert any("webui" in args for args in ran)
+
+    def test_a_plugin_without_its_launcher_is_treated_as_absent(self, start, monkeypatch):
+        """Better the terminal than a browser nothing will answer."""
+        said = []
+        monkeypatch.setattr(start, "say", said.append)
+        monkeypatch.setattr(start, "find_python", lambda: "/usr/bin/python3")
+        monkeypatch.setattr(start, "environment_is_ready", lambda: True)
+        monkeypatch.setattr(start, "has_the_web_interface", lambda sandbox: True)
+        monkeypatch.setattr(start, "is_set_up", lambda sandbox: True)
+        monkeypatch.setattr(start, "LAUNCHER", "/nowhere/launcher.py")
+        monkeypatch.setattr(start.subprocess, "call", lambda *a, **k: 0)
+        assert start.main() == 0
+        assert "web interface is not installed" in "\n".join(said)
+
+    def test_the_launcher_is_loaded_with_this_file_handed_to_it(self, start):
+        launcher = start.the_web_interfaces_launcher()
+        assert launcher is not None
+        assert launcher.START is start
 
     def test_the_question_is_asked_of_the_sandbox_not_of_a_folder(self, start):
         """A plugin that is there but cannot load is the same problem as one
@@ -496,318 +517,33 @@ class TestACopyWithNoWebInterface:
         assert "isdir" not in block and "exists" not in block
 
 
-# ── Starting from the icon ────────────────────────────────────────────────
-
-
-def _free_port():
-    import socket
-
-    with socket.socket() as probe:
-        probe.bind(("127.0.0.1", 0))
-        return probe.getsockname()[1]
-
-
-@pytest.fixture
-def own_port(start, monkeypatch, tmp_path):
-    """Point start.py at a port of the test's own, and its token file at tmp_path.
-
-    Never 8000: a real sandbox may be running there, and these tests stop things.
-    """
-    port = _free_port()
-    monkeypatch.setattr(start, "PORT", port)
-    monkeypatch.setattr(start, "URL", "http://127.0.0.1:%d" % port)
-    monkeypatch.setattr(start, "TOKEN_FILE", str(tmp_path / ".stop-token"))
-    monkeypatch.setattr(start, "VENV_DIR", str(tmp_path))
-    return port
-
-
-@pytest.fixture
-def web_server(own_port):
-    """Something answering POST /__stop on the test's port, with a status of the test's choosing."""
-    import threading
-    from http.server import BaseHTTPRequestHandler, HTTPServer
-
-    heard = {"status": 200, "tokens": []}
-
-    class Handler(BaseHTTPRequestHandler):
-        def log_message(self, *args):
-            pass
-
-        def do_POST(self):
-            heard["tokens"].append(self.headers.get("X-Sandbox-Stop-Token"))
-            self.send_response(heard["status"])
-            self.send_header("Content-Length", "0")
-            self.end_headers()
-
-    server = HTTPServer(("127.0.0.1", own_port), Handler)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    yield heard
-    server.shutdown()
-    server.server_close()
-
-
-class TestStoppingTheCopyAlreadyRunning:
-    """Every start is a fresh start, because starting is when the sandbox
-    looks for a newer version. But only this sandbox is ever stopped, and
-    only by asking."""
-
-    def test_nothing_there_is_nothing_to_stop(self, start, own_port):
-        assert start.ask_the_running_copy_to_stop() == start.NOTHING_RUNNING
-
-    def test_it_presents_the_token_the_last_start_left(self, start, web_server, monkeypatch):
-        start.new_stop_token()
-        left = start.read_stop_token()
-        monkeypatch.setattr(start, "port_is_taken", lambda: False)
-        assert start.ask_the_running_copy_to_stop() == start.STOPPED
-        assert web_server["tokens"] == [left]
-
-    def test_a_copy_in_the_middle_of_something_is_left_running(self, start, web_server):
-        web_server["status"] = 409
-        assert start.ask_the_running_copy_to_stop() == start.BUSY
-
-    @pytest.mark.parametrize("status", [403, 404, 405, 500])
-    def test_anything_that_does_not_agree_is_somebody_elses(self, start, web_server, status):
-        web_server["status"] = status
-        assert start.ask_the_running_copy_to_stop() == start.SOMEONE_ELSE
-
-    def test_a_copy_that_agrees_but_never_lets_go_is_not_waited_on_forever(
-            self, start, web_server, monkeypatch):
-        monkeypatch.setattr(start, "STOP_PATIENCE_SECONDS", 0.5)
-        monkeypatch.setattr(start, "port_is_taken", lambda: True)
-        assert start.ask_the_running_copy_to_stop() == start.SOMEONE_ELSE
-
-    def test_something_that_is_not_a_web_server_is_somebody_elses(
-            self, start, own_port, monkeypatch):
-        """It holds the port and never answers in the language of the web."""
-        import socket
-        import urllib.error
-
-        class Silent:
-            def open(self, *args, **kwargs):
-                raise urllib.error.URLError("no answer")
-
-        monkeypatch.setattr(start, "_local_opener", Silent)
-        listener = socket.socket()
-        listener.bind(("127.0.0.1", own_port))
-        listener.listen(1)
-        try:
-            assert start.ask_the_running_copy_to_stop() == start.SOMEONE_ELSE
-        finally:
-            listener.close()
-
-    @pytest.mark.skipif(sys.platform == "win32", reason="POSIX permissions")
-    def test_the_token_is_readable_by_this_person_only(self, start, own_port):
-        import os
-        import stat
-
-        start.new_stop_token()
-        mode = stat.S_IMODE(os.stat(start.TOKEN_FILE).st_mode)
-        assert mode == 0o600
-
-    def test_each_start_makes_a_new_token(self, start, own_port):
-        assert start.new_stop_token() != start.new_stop_token()
-
-
-class TestTheLoadingPage:
-    """What the browser shows while the sandbox starts."""
-
-    @pytest.fixture
-    def page(self, start, own_port):
-        page = start.LoadingPage("right", log="/somewhere/launcher.log")
-        page.ended = []
-        page.end_this_process = lambda: page.ended.append(True)
-        assert page.start()
-        yield page
-        page.stop()
-
-    def _get(self, start, path):
-
-        return start._local_opener().open(start.URL + path, timeout=5)
-
-    def _post_stop(self, start, token):
-        import urllib.error
-        import urllib.request
-
-        request = urllib.request.Request(start.URL + "/__stop", data=b"",
-                                         headers={"X-Sandbox-Stop-Token": token})
-        try:
-            return start._local_opener().open(request, timeout=5).status
-        except urllib.error.HTTPError as e:
-            return e.code
-
-    def test_it_shows_the_logo_and_what_is_happening(self, start, page):
-        body = self._get(start, "/").read().decode("utf-8")
-        assert "Starting the sandbox" in body
-        assert 'fill="#f58025"' in body
-        assert page.seen.is_set(), "the browser has now fetched it"
-
-    def test_it_says_how_things_are_going_when_asked(self, start, page):
-        import json
-
-        page.show("installing", "Installing updated software…", "A few minutes.")
-        answer = json.loads(self._get(start, "/__loading").read().decode("utf-8"))
-        assert answer == {"loading": True, "phase": "installing",
-                          "headline": "Installing updated software…",
-                          "detail": "A few minutes."}
-
-    def test_the_launcher_can_stop_it_with_the_right_token(self, start, page):
-        assert self._post_stop(start, "right") == 200
-        assert page.ended == [True]
-
-    def test_not_with_any_other(self, start, page):
-        assert self._post_stop(start, "wrong") == 403
-        assert self._post_stop(start, "") == 403
-        assert page.ended == []
-
-    def test_not_halfway_through_installing(self, start, page):
-        page.show("installing", "Installing updated software…")
-        assert self._post_stop(start, "right") == 409
-        assert page.ended == []
-
-    def test_a_second_one_cannot_take_the_same_port(self, start, page):
-        assert start.LoadingPage("other").start() is False
-
-    def test_the_words_are_written_as_words(self, start):
-        """A folder or an error message could contain anything."""
-        body = start.render_loading_page("<b>bold</b>", "a & b", watch=True,
-                                         log="</script><script>alert(1)")
-        text = body.decode("utf-8")
-        assert "<b>bold</b>" not in text and "&lt;b&gt;" in text
-        assert "a &amp; b" in text
-        assert "</script><script>alert(1)" not in text
-
-    def test_the_page_opened_from_disk_does_not_watch(self, start):
-        text = start.render_loading_page("The sandbox wasn't started.", "",
-                                         watch=False).decode("utf-8")
-        assert '"watch": false' in text
-
-    def test_the_page_moves_itself_to_the_sandbox(self):
-        """The whole point: nobody reloads it by hand."""
-        page = (_ROOT / "plugins" / "webui" / "launcher" / "loading.html").read_text()
-        assert 'fetch("/__loading"' in page
-        assert "window.location.reload()" in page
-
-
-class TestTheLaunchLog:
-    def test_a_mac_keeps_it_with_its_other_logs(self, start, monkeypatch):
-        monkeypatch.setattr(start.sys, "platform", "darwin")
-        assert start.launch_log_path().endswith(
-            "Library/Logs/PU_AISandbox-launcher.log")
-
-    def test_linux_keeps_it_in_the_state_folder(self, start, monkeypatch):
-        monkeypatch.setattr(start.sys, "platform", "linux")
-        monkeypatch.setenv("XDG_STATE_HOME", "/state")
-        assert start.launch_log_path() == "/state/PU_AISandbox/launcher.log"
-
-    def test_never_inside_the_sandbox_itself(self, start):
-        assert not start.launch_log_path().startswith(start.HERE)
-
-
-class TestTheIcon:
-    """Made here, on this computer, so it needs no signing and holds the right paths."""
-
-    def test_a_mac_application_that_runs_the_launcher(self, start, tmp_path, monkeypatch):
-        import os
-        import plistlib
-
-        monkeypatch.setattr(start.sys, "executable", "/Python Folder/python3")
-        app = tmp_path / "PU AI Sandbox.app"
-        start.make_mac_app(str(app))
-        info = plistlib.loads((app / "Contents" / "Info.plist").read_bytes())
-        assert info["CFBundleExecutable"] == "launch"
-        assert info["CFBundleIdentifier"] == start.MAC_BUNDLE_ID
-        assert info["LSUIElement"] is True, "no Dock icon for something over in a second"
-        script = app / "Contents" / "MacOS" / "launch"
-        text = script.read_text()
-        assert "exec '/Python Folder/python3' " in text, "a space in a path must not split it"
-        assert text.rstrip().endswith("--launch")
-        assert os.access(str(script), os.X_OK)
-        assert (app / "Contents" / "Resources" / "sandbox.icns").exists()
-
-    def test_making_it_again_replaces_ours(self, start, tmp_path):
-        app = tmp_path / "PU AI Sandbox.app"
-        start.make_mac_app(str(app))
-        (app / "Contents" / "stale").write_text("x")
-        start.make_mac_app(str(app))
-        assert not (app / "Contents" / "stale").exists()
-
-    def test_but_never_someone_elses(self, start, tmp_path):
-        app = tmp_path / "PU AI Sandbox.app"
-        (app / "Contents").mkdir(parents=True)
-        (app / "Contents" / "theirs").write_text("keep me")
-        with pytest.raises(OSError):
-            start.make_mac_app(str(app))
-        assert (app / "Contents" / "theirs").read_text() == "keep me"
-
-    def test_a_linux_desktop_entry(self, start, tmp_path, monkeypatch):
-        import os
-
-        monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "share"))
-        desktop = tmp_path / "Desktop"
-        desktop.mkdir()
-        made = start.make_linux_launcher(str(desktop / "pu-ai-sandbox.desktop"))
-        entry = (desktop / "pu-ai-sandbox.desktop").read_text()
-        assert made == str(desktop / "pu-ai-sandbox.desktop")
-        assert "Terminal=false" in entry
-        assert '--launch' in entry
-        assert (tmp_path / "share" / "applications" / "pu-ai-sandbox.desktop").exists()
-        assert os.access(made, os.X_OK)
-
-    @pytest.mark.parametrize("path, quoted", [
-        ("/plain/path", '"/plain/path"'),
-        ("/with space/x", '"/with space/x"'),
-        ('/a"quote', '"/a\\\\"quote"'),
-        ("/a$dollar", '"/a\\\\$dollar"'),
-        ("/100%", '"/100%%"'),
-    ])
-    def test_desktop_entry_quoting(self, start, path, quoted):
-        assert start.desktop_entry_argument(path) == quoted
-
-    def test_an_icon_already_there_is_left_alone(self, start, tmp_path, monkeypatch):
-        existing = tmp_path / "PU AI Sandbox.app"
-        existing.mkdir()
-        monkeypatch.setattr(start, "shortcut_path", lambda: str(existing))
-        made = []
-        monkeypatch.setattr(start, "make_shortcut", lambda: made.append(1))
-        start.make_shortcut_if_missing()
-        assert made == []
-
-    def test_a_first_terminal_run_makes_one(self, start, tmp_path, monkeypatch):
-        said = []
-        monkeypatch.setattr(start, "say", said.append)
-        monkeypatch.setattr(start, "shortcut_path", lambda: str(tmp_path / "missing"))
-        monkeypatch.setattr(start, "make_shortcut", lambda: "/Desktop/PU AI Sandbox.app")
-        start.make_shortcut_if_missing()
-        assert any("/Desktop/PU AI Sandbox.app" in line for line in said)
-
-    def test_the_icons_it_needs_are_in_the_web_interface(self, start):
-        """They are the web interface's, so they go if it is removed."""
-        for name in ("sandbox.icns", "sandbox.ico", "sandbox.png", "loading.html"):
-            assert (_ROOT / "plugins" / "webui" / "launcher" / name).exists(), name
-
-
 class TestTheWordsAfterStartPy:
     def test_no_icon_for_a_copy_without_the_web_interface(self, start, monkeypatch):
         monkeypatch.setattr(start, "say", lambda line: None)
         monkeypatch.setattr(start, "has_the_web_interface", lambda sandbox: False)
-        made = []
-        monkeypatch.setattr(start, "make_shortcut", lambda: made.append(1))
+        launcher = _PretendLauncher()
+        monkeypatch.setattr(start, "the_web_interfaces_launcher", lambda: launcher)
         assert start.entry(["--make-shortcut"]) == 1
-        assert made == []
+        assert launcher.asked == []
 
     def test_nothing_is_the_ordinary_start(self, start, monkeypatch):
         monkeypatch.setattr(start, "main", lambda: "main")
         assert start.entry([]) == "main"
 
-    @pytest.mark.parametrize("flag, name", [("--launch", "launch"),
-                                            ("--run-hidden", "run_hidden")])
-    def test_the_icons_own_ways_in(self, start, monkeypatch, flag, name):
-        monkeypatch.setattr(start, name, lambda: name)
-        assert start.entry([flag]) == name
+    @pytest.mark.parametrize("flag", ["--launch", "--run-hidden"])
+    def test_the_icons_own_ways_in_go_to_the_launcher(self, start, monkeypatch, flag):
+        launcher = _PretendLauncher({(flag,): 0})
+        monkeypatch.setattr(start, "the_web_interfaces_launcher", lambda: launcher)
+        assert start.entry([flag]) == 0
+        assert launcher.asked == [[flag]]
 
     def test_something_unknown_is_answered_with_how_to_use_it(self, start, monkeypatch):
         said = []
         monkeypatch.setattr(start, "say", said.append)
+        monkeypatch.setattr(start, "the_web_interfaces_launcher", lambda: _PretendLauncher())
         assert start.entry(["--nonsense"]) == 2
         assert "--make-shortcut" in said[0]
+
+    def test_help_is_not_a_mistake(self, start, monkeypatch):
+        monkeypatch.setattr(start, "say", lambda line: None)
+        assert start.entry(["--help"]) == 0

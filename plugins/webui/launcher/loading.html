@@ -2,20 +2,27 @@
 <!--
   The page someone sees while the sandbox starts: the first thing in the
   browser after a double-click on its icon, before the sandbox itself is
-  ready. start.py fills in the three {{…}} markers and serves it on the
+  ready. launcher.py fills in the three {{…}} markers and serves it on the
   sandbox's own address, so that when the sandbox takes over that address,
   reloading this page is all it takes to arrive there.
 
-  It asks /__loading every half a second. An answer from start.py updates
-  the words; no answer at all is the moment between start.py letting go of
+  It asks /__loading every half a second. An answer from launcher.py updates
+  the words; no answer at all is the moment between launcher.py letting go of
   the address and the sandbox picking it up, so it keeps asking; any other
   answer means the sandbox is there, and the page reloads onto it — which is
-  the passphrase screen, or first-time setup.
+  the passphrase screen, or first-time setup. An answer naming a different
+  address means the sandbox's port turned out to be another one, and the
+  page goes there.
 
-  The same page, with watching turned off, is what start.py opens straight
-  from disk to say why the sandbox could not be started.
+  The same page, filled in with watching turned off, is what launcher.py
+  opens straight from disk to say why the sandbox could not be started.
 
-  It stands on its own: start.py serves it with nothing else, so the colours
+  And opened from disk without being filled in at all, it explains that no
+  Python could be found. Only open-sandbox.sh does that, and only when there
+  is no Python to run launcher.py with — so the words for it are here, in
+  the one file that needs nothing to show them.
+
+  It stands on its own: launcher.py serves it with nothing else, so the colours
   are written out here rather than taken from the web interface's design
   system. They are that system's values.
 -->
@@ -63,6 +70,7 @@
   p:empty { display: none; }
   .problem h1 { color: var(--danger-text); }
   .log { font-size: 0.875rem; }
+  a { color: var(--orange); }
   .spinner {
     width: 28px; height: 28px; margin: 1.5rem auto 0;
     border: 3px solid var(--track);
@@ -87,8 +95,30 @@
   <p id="log" class="log"></p>
   <div class="spinner" aria-hidden="true"></div>
 </main>
+<script type="application/json" id="state">{{STATE}}</script>
 <script>
-const STATE = {{STATE}};
+// Filled in by launcher.py. Left as it was written, it can't be read, which
+// means the page was opened straight from disk by open-sandbox.sh because no
+// Python could be found to run anything else.
+let STATE = null;
+try { STATE = JSON.parse(document.getElementById("state").textContent); }
+catch (e) { STATE = null; }
+if (!STATE) {
+  STATE = { watch: false, log: "" };
+  document.title = "Python is needed — Princeton University AI Sandbox";
+  document.getElementById("headline").textContent =
+    "The sandbox needs Python, and couldn't find it.";
+  const detail = document.getElementById("detail");
+  const link = document.createElement("a");
+  link.href = "https://www.python.org/downloads/";
+  link.textContent = "python.org/downloads";
+  detail.replaceChildren(
+    "Python is the free software the sandbox is written in, and it seems to "
+    + "have been removed from this computer, or moved. Download and install "
+    + "the latest version from ", link, ", then double-click the sandbox's "
+    + "icon again. Nothing of yours has been lost: your settings and history "
+    + "are kept separately.");
+}
 // How long before saying where to look, if nothing has happened. A first
 // start installs nothing (the terminal did that), but a start after an update
 // can, and that is several minutes of the words changing — so this counts
@@ -133,6 +163,12 @@ function ask() {
     .then(function (answer) {
       if (answer && answer.loading) {
         lastHeard = Date.now();
+        if (answer.address && answer.address !== window.location.origin) {
+          // The sandbox's port turned out to be another one. A loading page
+          // is already waiting there.
+          window.location.replace(answer.address);
+          return;
+        }
         show(answer);
         if (answer.phase !== "problem") setTimeout(ask, 500);
         return;

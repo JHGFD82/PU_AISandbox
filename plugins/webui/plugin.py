@@ -139,13 +139,13 @@ class WebUiPlugin:
 
         serve = webui_sub.add_parser("serve", help="Start the web server")
         serve.add_argument("--host", default=None, help="Address to listen on (default: 127.0.0.1)")
-        serve.add_argument("--port", type=int, default=None, help="Port to listen on (default: 8000)")
+        serve.add_argument("--port", type=int, default=None, help="Port to listen on (default: the port under [webui] in settings)")
 
         setup = webui_sub.add_parser(
             "setup",
             help="Do first-time setup in a browser instead of at the command line",
         )
-        setup.add_argument("--port", type=int, default=None, help="Port to listen on (default: 8000)")
+        setup.add_argument("--port", type=int, default=None, help="Port to listen on (default: the port under [webui] in settings)")
 
         webui_sub.add_parser(
             "set-passphrase",
@@ -248,7 +248,11 @@ def _serve_setup(args: argparse.Namespace) -> None:
         print("This copy of the sandbox is already set up.")
         return
 
-    port = getattr(args, "port", None) or 8000
+    from src.settings import WEBUI_PORT
+
+    # The same setting the sandbox itself uses, so setup and the sandbox that
+    # follows it are on one address.
+    port = getattr(args, "port", None) or WEBUI_PORT
     setup_web = sys.modules["_pu_webui_setup_web"]
 
     finished = threading.Event()
