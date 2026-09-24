@@ -464,6 +464,50 @@ class Conversation:
         return out
 
 
+def reply_model_name(conversation_model: str, answered_as: str) -> str:
+    """Name the model behind a reply the way the conversation names its models.
+
+    A model on one of this installation's own endpoints is chosen as the
+    endpoint, a colon, and the model — ``my_mac_studio:qwen3.8:27b-mlx`` — but
+    the endpoint answers under the model's name alone, which on its own reads
+    as a model on the built-in service. Saved that way, one model looks like
+    two in the conversation list's filter, and the second is filed under
+    whichever company its name suggests rather than under the endpoint it ran
+    on.
+
+    Args:
+        conversation_model: The model the conversation was set to when the
+            reply was asked for.
+        answered_as: The name the reply came back under.
+
+    Returns:
+        ``answered_as`` with the endpoint in front, when the conversation was
+        on one of this installation's endpoints and the name doesn't already
+        carry it; ``answered_as`` unchanged otherwise.
+    """
+    from src import settings
+
+    endpoint, colon, _ = conversation_model.partition(":")
+    if colon and endpoint in settings.ENDPOINTS and not answered_as.startswith(endpoint + ":"):
+        return f"{endpoint}:{answered_as}"
+    return answered_as
+
+
+def _as_saved_before_replies_carried_their_endpoint(conversation_model: str,
+                                                    answered_as: str) -> str:
+    """Read an older reply's model name as ``reply_model_name()`` would have saved it.
+
+    Replies saved before that function existed carry the endpoint's own name
+    for the model and nothing else. Only the one case that is certain is put
+    right: the reply's name is exactly the model part of what the conversation
+    is set to. That holds even when the endpoint has since been taken out of
+    the settings, which is when it matters most, because nothing else then
+    says where the model ran.
+    """
+    _, colon, on_endpoint = conversation_model.partition(":")
+    return conversation_model if colon and answered_as == on_endpoint else answered_as
+
+
 def conversation_summary(data: dict[str, Any], folder_name: str) -> dict[str, Any]:
     """Describe one saved conversation in the few facts the sidebar list needs.
 
@@ -500,7 +544,7 @@ def conversation_summary(data: dict[str, Any], folder_name: str) -> dict[str, An
     has_job = False
     for m in messages:
         if m.get("model"):
-            models.add(m["model"])
+            models.add(_as_saved_before_replies_carried_their_endpoint(model, m["model"]))
         if str(m.get("kind", "message")).startswith("job_"):
             has_job = True
         if m.get("cost") is None:
