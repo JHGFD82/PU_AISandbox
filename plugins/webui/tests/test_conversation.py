@@ -17,7 +17,9 @@ from plugins.webui.src.conversation import (  # noqa: E402
     Conversation,
     ConversationStore,
     Message,
+    conversation_summary,
     new_conversation_id,
+    reply_model_name,
 )
 
 
@@ -1064,3 +1066,52 @@ class TestACopyASyncServiceSetAside:
         with pytest.raises(OSError):
             store.load(cid)
         assert copy.exists(), "the only copy of those messages was removed"
+
+
+class TestARepliesModelOnAnEndpoint:
+    """One model, one name, whichever end of the conversation names it."""
+
+    @pytest.fixture(autouse=True)
+    def _an_endpoint(self, monkeypatch):
+        from src import settings
+
+        monkeypatch.setattr(settings, "ENDPOINTS", {"my_mac": {}})
+
+    def test_the_endpoint_is_put_in_front(self):
+        assert reply_model_name("my_mac:qwen3.8:27b-mlx", "qwen3.8:27b-mlx") == \
+            "my_mac:qwen3.8:27b-mlx"
+
+    def test_whatever_name_the_endpoint_answers_under(self):
+        """It may answer under a fuller name than the one asked for."""
+        assert reply_model_name("my_mac:qwen3.8", "qwen3.8:27b-mlx") == "my_mac:qwen3.8:27b-mlx"
+
+    def test_not_twice(self):
+        assert reply_model_name("my_mac:m", "my_mac:m") == "my_mac:m"
+
+    def test_a_sandbox_model_is_left_alone(self):
+        assert reply_model_name("gpt-4o", "gpt-4o-2024-08-06") == "gpt-4o-2024-08-06"
+
+    def test_a_colon_is_not_an_endpoint_unless_one_is_set_up(self):
+        """Ollama's own names have colons in them."""
+        assert reply_model_name("qwen3.8:27b", "qwen3.8:27b") == "qwen3.8:27b"
+
+
+class TestRepliesSavedBeforeTheyCarriedTheirEndpoint:
+    """Conversations already on disk, read the way new ones are written."""
+
+    def _models(self, conversation_model, *replies):
+        data = {"model": conversation_model,
+                "messages": [{"role": "assistant", "model": r} for r in replies]}
+        return conversation_summary(data, "c_0")["models"]
+
+    def test_a_reply_named_as_the_model_part_is_the_same_model(self):
+        """Even with the endpoint gone from the settings: nothing else then
+        says where the model ran."""
+        assert self._models("my_mac_studio:qwen3.8:27b-mlx", "qwen3.8:27b-mlx") == \
+            ["my_mac_studio:qwen3.8:27b-mlx"]
+
+    def test_anything_less_certain_is_left_as_it_was_saved(self):
+        """An earlier reply may have come from a model the conversation was
+        on before it moved to the endpoint."""
+        assert self._models("my_mac:qwen3.8:27b-mlx", "gpt-4o-2024-08-06") == \
+            ["gpt-4o-2024-08-06", "my_mac:qwen3.8:27b-mlx"]

@@ -496,6 +496,32 @@ class TestChat:
         assert conv["messages"][-1]["cost"] == 0.001
         assert conv["title"] == "Hi there"
 
+    def test_a_reply_from_an_endpoint_is_saved_under_the_endpoints_name_for_it(
+            self, unlocked_client, monkeypatch):
+        """The endpoint answers as qwen3.8:27b-mlx alone, which on its own reads
+        as a second, different model, and one on the built-in service."""
+        from src import settings
+
+        monkeypatch.setattr(settings, "ENDPOINTS", {"my_mac": {"name": "My Mac"}})
+        conv_id = unlocked_client.post("/api/conversations", json={
+            "professor": "heller", "model": "my_mac:qwen3.8:27b-mlx"}).json()["id"]
+        fake_sandbox = MagicMock()
+        fake_sandbox.chat_service.stream_message.return_value = iter([
+            {"type": "done", "content": "ok", "model": "qwen3.8:27b-mlx",
+             "prompt_tokens": 1, "completion_tokens": 1, "cost": 0.0},
+        ])
+        fake_sandbox.chat_service.generate_title.return_value = None
+        monkeypatch.setattr("src.runtime.sandbox_processor.SandboxProcessor",
+                            lambda *a, **kw: fake_sandbox)
+
+        resp = unlocked_client.post("/api/chat", json={
+            "professor": "heller", "conversation_id": conv_id, "message": "Hi"})
+        (done,) = [e for e in _parse_sse(resp.text) if e["type"] == "done"]
+        assert done["conversation"]["messages"][-1]["model"] == "my_mac:qwen3.8:27b-mlx"
+        (listed,) = unlocked_client.get(
+            "/api/conversations", params={"professor": "heller"}).json()["conversations"]
+        assert listed["models"] == ["my_mac:qwen3.8:27b-mlx"]
+
     def test_sampling_overrides_persist_and_are_passed_to_sandbox(self, unlocked_client, monkeypatch):
         create = unlocked_client.post("/api/conversations", json={"professor": "heller", "model": "gpt-4o"})
         conv_id = create.json()["id"]

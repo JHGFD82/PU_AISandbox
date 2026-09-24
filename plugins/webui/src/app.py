@@ -2292,7 +2292,7 @@ def create_app() -> FastAPI:
                 role="assistant",
                 content=final["content"],
                 timestamp=datetime.now().isoformat(),
-                model=final["model"],
+                model=conversation.reply_model_name(conv.model, final["model"]),
                 prompt_tokens=final["prompt_tokens"],
                 completion_tokens=final["completion_tokens"],
                 cost=final["cost"],
