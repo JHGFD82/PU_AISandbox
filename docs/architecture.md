@@ -215,6 +215,24 @@ Three things about it are worth knowing before changing it:
 
 Because every installed copy fast-forwards, **`main` must never be rebased or force-pushed** once this has shipped: every copy would become non-fast-forwardable at once, and each would report it as "this copy has changes of its own".
 
+### Starting and stopping
+
+`start.py` is the way in for people, and it has three ways of being run:
+
+| | |
+|---|---|
+| `python3 start.py` | From a terminal. Installs what is missing (after asking), runs first-time setup if needed, puts an icon on the Desktop the first time, then runs `webui serve` in that window. |
+| `start.py --launch` | What the icon runs. Stops a copy already running, starts `--run-hidden` on its own with no window and its output going to a log file, opens the browser once the loading page answers, and exits. |
+| `start.py --run-hidden` | The long-running part of an icon start: the same steps as a terminal run, with progress shown on the loading page rather than printed. |
+
+Four things about it are worth knowing before changing it:
+
+- **The loading page holds the port until the sandbox takes it.** `start.py`'s `LoadingPage` is a small server, built from what comes with Python, that answers on 127.0.0.1:8000 with `plugins/webui/launcher/loading.html`. The page asks `/__loading` every half second; when anything other than the loading page answers, it reloads onto the sandbox. `hand_over()` lets go of the port only after the browser has fetched the page once, so a browser slow to open never lands on nothing.
+- **Every start is a fresh start, and only this copy is ever stopped.** Each start writes a random stop token to `.venv/.stop-token` (readable by its owner only) and passes it to the server in `PU_SANDBOX_STOP_TOKEN`, which `os.execv` in `_restart_into_the_new_code()` carries across a restart. The next start presents it to `POST /__stop`, added to both the setup app and the sandbox by `plugins/webui/src/stopping.py`. 200 means it is stopping; 409 means it is busy (a job or an update running), and the launcher opens it instead; anything else means the port belongs to something else, which is reported and never touched.
+- **Quit replaced Lock.** `POST /quit` needs the passphrase, refuses with 409 under the same conditions as `/__stop`, and stops the server through `stopping.stop_soon()`. Both routes find the server at `app.state.server`, which `run_server()` and `webui setup` put there; `run_server()` gives open requests five seconds to finish (`timeout_graceful_shutdown`), because a browser tab can hold one open indefinitely and the launcher is waiting for the port.
+- **The icon is made on the computer, not shipped.** `make_shortcut()` writes a small `.app` on a Mac (a shell script, an `Info.plist` with `LSUIElement`, and `plugins/webui/launcher/sandbox.icns`), a `.lnk` on Windows through PowerShell, and a `.desktop` entry on Linux. Each holds this computer's full paths, and none is subject to download checks, since nothing about it was downloaded, so none needs signing.
+- **The page and icons are the web interface's, read by path.** They live in `plugins/webui/launcher/` because a copy with the web interface removed has no use for them — `start.py` already falls back to setting up in the terminal when `has_the_web_interface()` says no, and `--make-shortcut` refuses. `start.py` reads them as plain files and never imports anything from the plugin, since it runs before the plugin's software is installed.
+
 ### Configuration layers
 
 | Source | Controls |

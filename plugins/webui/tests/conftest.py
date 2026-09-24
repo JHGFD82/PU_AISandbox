@@ -48,6 +48,7 @@ _register("_pu_webui_git_tool", "src/git_tool.py")
 _register("_pu_webui_plugin_install", "src/plugin_install.py")
 _register("_pu_webui_upgrade", "src/upgrade.py")
 _register("_pu_webui_branding", "src/branding.py")
+_register("_pu_webui_stopping", "src/stopping.py")
 _register("_pu_webui_setup_web", "src/setup_web.py")
 _register("_pu_webui_app", "src/app.py")
 

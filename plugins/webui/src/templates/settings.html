@@ -93,7 +93,7 @@
   <div id="topbar" hidden>
     <h1>Settings</h1>
     <a href="#" id="back-link" style="display:none">&larr; Back to chat</a>
-    <button class="secondary" id="lock-btn">Lock</button>
+    <button class="secondary" id="quit-btn">Quit</button>
   </div>
 
   <!-- Seven cards in one column was a page you scrolled to find things in.
@@ -430,7 +430,7 @@
 // professors are configured yet, or a bookmarked /settings URL).
 const embeddedInModal = window.self !== window.top;
 // Opened from the chat page, the modal around this already carries the word
-// "Settings" and a way out, so a second heading, a second close and a Lock
+// "Settings" and a way out, so a second heading, a second close and a Quit
 // button underneath them are three ways of saying what is already said.
 // Opened on its own, the bar is the only one of those there is.
 document.getElementById("topbar").hidden = embeddedInModal;
@@ -1420,12 +1420,7 @@ document.getElementById("back-link").addEventListener("click", (ev) => {
   ev.preventDefault();
   window.top.location.href = "/";
 });
-document.getElementById("lock-btn").addEventListener("click", async () => {
-  await fetch("/lock", { method: "POST" });
-  // window.top, not window — this needs to break out of the modal iframe
-  // and lock/redirect the whole app, not just the embedded settings page.
-  window.top.location.href = "/";
-});
+document.getElementById("quit-btn").addEventListener("click", quitTheSandbox);
 
 loadSettings().catch(e => alert("Error loading settings: " + readableError(e)));
 </script>

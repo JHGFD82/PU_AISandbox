@@ -94,6 +94,7 @@ jobs = sys.modules["_pu_webui_jobs"]
 export = sys.modules["_pu_webui_export"]
 branding = sys.modules["_pu_webui_branding"]
 upgrade = sys.modules["_pu_webui_upgrade"]
+stopping = sys.modules["_pu_webui_stopping"]
 
 _TEMPLATES_DIR = Path(__file__).parent / "templates"
 templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
@@ -670,6 +671,22 @@ def _validated_professor(netid: str | None) -> str:
     return netid
 
 
+def _reason_not_to_stop() -> Optional[str]:
+    """Say why stopping the sandbox right now would lose something, or None if it wouldn't.
+
+    Asked by the Quit button and by the launcher alike. A translation or
+    transcription in progress is kept in memory only, and so is an update
+    half-applied, so stopping during either throws the work away.
+    """
+    if _job_store.running():
+        return ("Something is still being worked on. Quitting now would throw "
+                "it away — it is kept in memory only and cannot be picked up "
+                "again. Wait for it to finish, then quit.")
+    if upgrade.an_update_is_running():
+        return "An update is running. Wait for it to finish, then quit."
+    return None
+
+
 def _require_unlocked(request: Request) -> None:
     """Raise a 401 error unless this browser session has already unlocked the app."""
     if not request.session.get("unlocked"):
@@ -883,6 +900,7 @@ def create_app() -> FastAPI:
     )
 
     branding.add_favicon_route(app)
+    stopping.add_stop_route(app, _reason_not_to_stop)
 
     @app.get("/", response_class=HTMLResponse)
     async def index(request: Request):
@@ -961,9 +979,21 @@ def create_app() -> FastAPI:
             status_code=401,
         )
 
-    @app.post("/lock")
-    async def lock(request: Request):
+    @app.post("/quit")
+    async def quit_sandbox(request: Request):
+        """Stop the sandbox, from the Quit button.
+
+        The sandbox usually runs with no window of its own — started from its
+        icon — so this button is the way to stop it. The session is cleared as
+        well, so a browser tab left open can't carry on where it was if the
+        sandbox is started again with the same session secret.
+        """
+        _require_unlocked(request)
+        reason = _reason_not_to_stop()
+        if reason:
+            raise HTTPException(409, reason)
         request.session.clear()
+        stopping.stop_soon(app)
         return JSONResponse({"ok": True})
 
     @app.get("/api/professors")
@@ -2432,7 +2462,10 @@ def _restart_into_the_new_code() -> None:
 
 
 def run_server(host: str, port: int) -> None:
-    """Start the local web interface and block until interrupted (Ctrl-C).
+    """Start the local web interface and keep it running until it is told to stop.
+
+    It stops on Ctrl-C in the window it was started from, on the Quit button,
+    or when the launcher asks it to (see ``stopping.py``).
 
     Args:
         host: The network address to listen on. ``127.0.0.1`` (the default)
@@ -2444,4 +2477,12 @@ def run_server(host: str, port: int) -> None:
     written_to = start_logging_to_a_file()
     if written_to is not None:
         print(f"Keeping a log at {written_to}")
-    uvicorn.run(create_app(), host=host, port=port)
+    app = create_app()
+    # A few seconds for requests still being answered to finish, then stop
+    # anyway: a browser tab can hold a request open for as long as it likes,
+    # and the launcher is waiting for the port to be free.
+    server = uvicorn.Server(uvicorn.Config(app, host=host, port=port,
+                                           timeout_graceful_shutdown=5))
+    # Where the Quit button and the launcher find it — see stopping.stop_soon().
+    app.state.server = server
+    server.run()

@@ -85,6 +85,7 @@ _register("_pu_webui_git_tool", "src/git_tool.py")
 _register("_pu_webui_plugin_install", "src/plugin_install.py")
 _register("_pu_webui_upgrade", "src/upgrade.py")
 _register("_pu_webui_branding", "src/branding.py")
+_register("_pu_webui_stopping", "src/stopping.py")
 _register("_pu_webui_setup_web", "src/setup_web.py")
 _register("_pu_webui_app", "src/app.py")
 
@@ -260,6 +261,8 @@ def _serve_setup(args: argparse.Namespace) -> None:
     app = setup_web.create_setup_app(on_complete)
     config = uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning")
     server = uvicorn.Server(config)
+    # Where POST /__stop finds it — see stopping.py.
+    app.state.server = server
 
     def stop_when_finished():
         finished.wait()

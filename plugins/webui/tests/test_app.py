@@ -181,11 +181,92 @@ class TestUnlock:
         resp = client.get("/api/professors")
         assert resp.status_code == 401
 
-    def test_lock_clears_session(self, unlocked_client):
-        resp = unlocked_client.post("/lock")
+    def test_quit_clears_session(self, unlocked_client):
+        resp = unlocked_client.post("/quit")
         assert resp.status_code == 200
         resp2 = unlocked_client.get("/api/professors")
         assert resp2.status_code == 401
+
+
+class TestStopping:
+    """Quit, from the page, and /__stop, from the launcher.
+
+    The sandbox usually runs with no window of its own, so these are the only
+    two ways it stops. Both leave a server they were given standing when
+    stopping would throw work away.
+    """
+
+    @pytest.fixture
+    def server(self, client):
+        from types import SimpleNamespace
+
+        stand_in = SimpleNamespace(should_exit=False)
+        client.app.state.server = stand_in
+        return stand_in
+
+    @pytest.fixture
+    def busy(self, monkeypatch):
+        app_module = sys.modules["_pu_webui_app"]
+        monkeypatch.setattr(app_module._job_store, "running", lambda: 1)
+
+    def test_quit_needs_the_passphrase_like_everything_else(self, client, server):
+        assert client.post("/quit").status_code == 401
+        assert server.should_exit is False
+
+    def test_quit_stops_the_server(self, unlocked_client, server):
+        assert unlocked_client.post("/quit").status_code == 200
+        assert server.should_exit is True
+
+    def test_quit_refuses_while_something_is_being_worked_on(self, unlocked_client, server, busy):
+        resp = unlocked_client.post("/quit")
+        assert resp.status_code == 409
+        assert "still being worked on" in resp.json()["detail"]
+        assert server.should_exit is False
+
+    def test_quit_refuses_during_an_update(self, unlocked_client, server, monkeypatch):
+        upgrade = sys.modules["_pu_webui_upgrade"]
+        monkeypatch.setattr(upgrade, "an_update_is_running", lambda: True)
+        assert unlocked_client.post("/quit").status_code == 409
+        assert server.should_exit is False
+
+    def test_stop_is_not_there_when_no_token_was_given(self, client, server, monkeypatch):
+        """Started some other way than start.py — nothing can prove it is the launcher."""
+        monkeypatch.delenv("PU_SANDBOX_STOP_TOKEN", raising=False)
+        resp = client.post("/__stop", headers={"X-Sandbox-Stop-Token": ""})
+        assert resp.status_code == 404
+        assert server.should_exit is False
+
+    def test_stop_refuses_the_wrong_token(self, client, server, monkeypatch):
+        monkeypatch.setenv("PU_SANDBOX_STOP_TOKEN", "right")
+        resp = client.post("/__stop", headers={"X-Sandbox-Stop-Token": "wrong"})
+        assert resp.status_code == 403
+        assert server.should_exit is False
+
+    def test_stop_refuses_a_request_with_no_token(self, client, server, monkeypatch):
+        """What a web page elsewhere sending a request here looks like."""
+        monkeypatch.setenv("PU_SANDBOX_STOP_TOKEN", "right")
+        assert client.post("/__stop").status_code == 403
+        assert server.should_exit is False
+
+    def test_stop_with_the_right_token_needs_no_passphrase(self, client, server, monkeypatch):
+        monkeypatch.setenv("PU_SANDBOX_STOP_TOKEN", "right")
+        resp = client.post("/__stop", headers={"X-Sandbox-Stop-Token": "right"})
+        assert resp.status_code == 200
+        assert server.should_exit is True
+
+    def test_stop_waits_for_work_in_progress(self, client, server, monkeypatch, busy):
+        """The launcher opens the running copy instead, and the work carries on."""
+        monkeypatch.setenv("PU_SANDBOX_STOP_TOKEN", "right")
+        resp = client.post("/__stop", headers={"X-Sandbox-Stop-Token": "right"})
+        assert resp.status_code == 409
+        assert server.should_exit is False
+
+    def test_every_page_offers_quit_and_none_offers_lock(self):
+        for name in ("chat.html", "settings.html", "shared_settings.html"):
+            page = _rendered_template(name)
+            assert 'id="quit-btn"' in page, name
+            assert "quitTheSandbox" in page, name
+            assert '"/lock"' not in page, name
 
 
 class TestProfessors:
@@ -3145,7 +3226,7 @@ class TestTheSuppliedButtonIcons:
     def test_every_icon_takes_its_colour_from_the_button(self):
         """They were supplied painted white, which is invisible on a light page."""
 
-        for button_id in ("theme-toggle-btn", "lock-btn", "sampling-options-btn",
+        for button_id in ("theme-toggle-btn", "quit-btn", "sampling-options-btn",
                           "plugin-action-btn", "settings-btn", "spend-toggle-btn",
                           "model-toggle-btn", "model-add-btn", "job-modal-reset",
                           "settings-modal-close", "job-modal-close"):
@@ -3167,7 +3248,7 @@ class TestTheSuppliedButtonIcons:
         import re
         import xml.etree.ElementTree as ET
 
-        expected = {"lock-btn": 1, "sampling-options-btn": 1, "plugin-action-btn": 1}
+        expected = {"quit-btn": 1, "sampling-options-btn": 1, "plugin-action-btn": 1}
         for button_id, paths in expected.items():
             root = ET.fromstring(re.search(r"<svg\b.*?</svg>", self._button(button_id), re.S).group(0))
             assert len(root) == paths, button_id
@@ -3257,7 +3338,7 @@ class TestTheSuppliedButtonIcons:
 
     def test_no_drawing_carries_a_hidden_backing_rectangle(self):
         """Each was supplied with a fully transparent rect the size of itself."""
-        for button_id in ("theme-toggle-btn", "lock-btn", "sampling-options-btn",
+        for button_id in ("theme-toggle-btn", "quit-btn", "sampling-options-btn",
                           "plugin-action-btn", "settings-btn", "spend-toggle-btn",
                           "new-conv", "model-toggle-btn", "model-add-btn",
                           "job-modal-reset", "settings-modal-close", "job-modal-close"):
@@ -3780,7 +3861,7 @@ class TestTheSettingsPageSaysThingsOnce:
 
     def test_the_page_carries_no_second_heading_inside_the_modal(self):
         """The modal already says "Settings" and already has a way out; a
-        heading, a close and a Lock button under them are three ways of saying
+        heading, a close and a Quit button under them are three ways of saying
         what has been said."""
         source = self._source()
         assert 'document.getElementById("topbar").hidden = embeddedInModal;' in source
@@ -3788,7 +3869,7 @@ class TestTheSettingsPageSaysThingsOnce:
     def test_but_keeps_it_when_opened_on_its_own(self):
         """Then the bar is the only heading, and the only way to lock."""
         source = self._source()
-        assert 'id="lock-btn"' in source
+        assert 'id="quit-btn"' in source
         assert "hidden = embeddedInModal" in source
         # The bar specifically. Other things on this page are hidden and shown
         # by their own logic — an empty-catalog note, for one — and reading

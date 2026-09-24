@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!--
+    The sandbox's icon: the mark from the unlock page, on the rounded square
+    a Mac draws its applications on. start.py puts it on the shortcut it
+    makes. sandbox.png, sandbox.ico and sandbox.icns beside this file are
+    drawn from it. To redraw them after changing it: render this at 1024
+    pixels on a transparent background (headless Chrome's screenshot option
+    does this), then resize with Pillow. sandbox.icns keeps the margin a Mac
+    expects and is made from an iconset folder by iconutil. sandbox.png (512
+    pixels) and sandbox.ico (16, 32, 48 and 256) are cropped to the rounded
+    square first, because Windows and Linux draw icons edge to edge. (Two hyphens in a row can't appear in an SVG
+    comment, which is why the command-line options aren't spelled out.)
+  -->
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="#ffffff"/>
+  <rect x="100.5" y="100.5" width="823" height="823" rx="184.5" fill="none" stroke="#d2d2d7"/>
+  <g transform="translate(222 222) scale(4.36)">
+    <path fill="#f58025" d="M83.45,0h0s-8.01,22.44-8.01,22.44h0s-12.39,9.79-27.75,3.46c-2.54-1.04-5.15-2.53-7.81-4.56-2.01-7.47-4.42-14.58-7.18-21.34h50.75Z"/>
+    <path fill="#f58025" d="M107.6,50.88c9.25,1.17,14.35,19.41,18.36,35.04,5.02,19.6,7,39.85,7,39.85V4.19s-43.38,0-43.38,0l-8.01,22.44s1.91,15.67,17.27,22c2.53,1.04,5.44,1.83,8.76,2.25"/>
+    <path fill="#f58025" d="M43.24,112.27c7.52-2.11,14.12-4.89,19.9-8.07,0,0-9.95-22.98-9.95-22.98l-23.07,9.25h0c1.8,5.33,4.22,10.85,7.42,16.48C26.31,109.9,13.44,112.46,0,114.66h0V5.2h27.46c2.76,6.76,5.17,13.86,7.18,21.34,0,0-5.18,8.57-7.67,22.41-1.28,7.11-1.85,15.6-.65,25.04l35.65-14.06h0s15.23,34.58,15.23,34.58h0c6.12-5.23,10.82-10.79,14.4-15.98,7.97-11.58,10.33-21.31,10.33-21.31,9.25,1.17,14.35,19.41,18.36,35.04,5.02,19.6,7,39.85,7,39.85H5.69v-12.14h0c13.44-2.2,26.31-4.75,37.55-7.7"/>
+  </g>
+</svg>
