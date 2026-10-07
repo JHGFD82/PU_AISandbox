@@ -548,3 +548,132 @@ class TestTheWordsAfterStartPy:
     def test_help_is_not_a_mistake(self, start, monkeypatch):
         monkeypatch.setattr(start, "say", lambda line: None)
         assert start.entry(["--help"]) == 0
+
+
+class TestBuildingTheEnvironment:
+    """Making .venv and installing into it, with every command recorded rather than run."""
+
+    @pytest.fixture
+    def env(self, start, monkeypatch, tmp_path):
+        monkeypatch.setattr(start, "VENV_DIR", str(tmp_path / ".venv"))
+        monkeypatch.setattr(start, "STAMP", str(tmp_path / ".venv" / ".requirements-stamp"))
+        said = []
+        monkeypatch.setattr(start, "say", said.append)
+        ran = []
+
+        def check_call(command, **kwargs):
+            ran.append(command)
+            if command[1:3] == ["-m", "venv"]:
+                (tmp_path / ".venv" / "bin").mkdir(parents=True)
+                (tmp_path / ".venv" / "bin" / "python").write_text("")
+            return 0
+
+        monkeypatch.setattr(start.subprocess, "check_call", check_call)
+        return start, ran, said, tmp_path
+
+    def test_it_makes_the_space_installs_and_remembers_what_it_installed(self, env):
+        start, ran, _said, _ = env
+        assert start.build_environment("/usr/bin/python3.12") is True
+        assert ran[0] == ["/usr/bin/python3.12", "-m", "venv", start.VENV_DIR]
+        assert ran[-1] == [start.venv_python(), "-m", "pip", "install", "-r", start.REQUIREMENTS]
+        assert start.environment_is_ready() is True
+
+    def test_an_existing_space_is_reused(self, env):
+        start, ran, _said, tmp_path = env
+        (tmp_path / ".venv" / "bin").mkdir(parents=True)
+        (tmp_path / ".venv" / "bin" / "python").write_text("")
+        start.build_environment("/usr/bin/python3.12")
+        assert not any(command[1:3] == ["-m", "venv"] for command in ran)
+
+    def test_a_folder_it_cannot_write_to_is_named(self, env, monkeypatch):
+        start, _ran, said, _ = env
+
+        def refuse(command, **kwargs):
+            raise OSError("Permission denied")
+
+        monkeypatch.setattr(start.subprocess, "check_call", refuse)
+        assert start.build_environment("/usr/bin/python3.12") is False
+        assert start.VENV_DIR in "\n".join(said)
+        assert "Check you can write to that folder" in "\n".join(said)
+
+    def test_a_failed_download_blames_the_network_and_says_it_will_resume(self, env, monkeypatch):
+        start, _ran, said, tmp_path = env
+        (tmp_path / ".venv" / "bin").mkdir(parents=True)
+        (tmp_path / ".venv" / "bin" / "python").write_text("")
+
+        def no_network(command, **kwargs):
+            raise subprocess.CalledProcessError(1, command)
+
+        monkeypatch.setattr(start.subprocess, "check_call", no_network)
+        assert start.build_environment("/usr/bin/python3.12") is False
+        text = "\n".join(said)
+        assert "almost always the network" in text and "pick up where it left off" in text
+        assert start.environment_is_ready() is False
+
+
+class TestAskingAPythonItsVersion:
+    def test_the_version_is_read_from_what_it_prints(self, start, monkeypatch):
+        monkeypatch.setattr(start.subprocess, "check_output", lambda *a, **k: b"3 12\n")
+        assert start.version_of("/usr/bin/python3") == (3, 12)
+
+    def test_one_that_will_not_run_has_no_version(self, start, monkeypatch):
+        def broken(*a, **k):
+            raise OSError("no such file")
+        monkeypatch.setattr(start.subprocess, "check_output", broken)
+        assert start.version_of("/nowhere/python") is None
+
+    def test_one_that_prints_something_else_has_no_version(self, start, monkeypatch):
+        monkeypatch.setattr(start.subprocess, "check_output", lambda *a, **k: b"Python is great\n")
+        assert start.version_of("/usr/bin/python3") is None
+
+
+class TestAskingWhetherTheWebInterfaceIsThere:
+    def test_the_sandbox_is_asked_rather_than_the_folder_looked_at(self, start, monkeypatch):
+        asked = []
+        monkeypatch.setattr(start.subprocess, "call", lambda command, **k: asked.append(command) or 0)
+        assert start.has_the_web_interface("/sandbox/main.py") is True
+        assert asked[0][1:] == ["/sandbox/main.py", "webui", "--help"]
+
+    def test_a_sandbox_that_cannot_answer_has_none(self, start, monkeypatch):
+        def broken(command, **k):
+            raise OSError("cannot run")
+        monkeypatch.setattr(start.subprocess, "call", broken)
+        assert start.has_the_web_interface("/sandbox/main.py") is False
+
+    def test_a_command_it_does_not_have_means_none(self, start, monkeypatch):
+        monkeypatch.setattr(start.subprocess, "call", lambda command, **k: 2)
+        assert start.has_the_web_interface("/sandbox/main.py") is False
+
+
+class TestMainStoppingEarly:
+    @pytest.fixture
+    def said(self, start, monkeypatch):
+        lines = []
+        monkeypatch.setattr(start, "say", lines.append)
+        return lines
+
+    def test_with_no_suitable_python_it_explains_and_stops(self, start, monkeypatch, said):
+        explained = []
+        monkeypatch.setattr(start, "find_python", lambda: None)
+        monkeypatch.setattr(start, "explain_missing_python", lambda: explained.append(True))
+        assert start.main() == 1
+        assert explained == [True]
+
+    def test_a_failed_install_stops_with_an_error(self, start, monkeypatch, said):
+        monkeypatch.setattr(start, "find_python", lambda: "/usr/bin/python3.12")
+        monkeypatch.setattr(start, "environment_is_ready", lambda: False)
+        monkeypatch.setattr(start, "explain_where_the_software_goes", lambda: None)
+        monkeypatch.setattr(start, "wait_for_go_ahead", lambda: True)
+        monkeypatch.setattr(start, "build_environment", lambda python: False)
+        assert start.main() == 1
+
+    def test_a_finished_install_says_where_it_went_and_carries_on(self, start, monkeypatch, said):
+        monkeypatch.setattr(start, "find_python", lambda: "/usr/bin/python3.12")
+        monkeypatch.setattr(start, "environment_is_ready", lambda: False)
+        monkeypatch.setattr(start, "explain_where_the_software_goes", lambda: None)
+        monkeypatch.setattr(start, "wait_for_go_ahead", lambda: True)
+        monkeypatch.setattr(start, "build_environment", lambda python: True)
+        monkeypatch.setattr(start, "has_the_web_interface", lambda sandbox: False)
+        monkeypatch.setattr(start, "finish_without_the_web_interface", lambda sandbox: 0)
+        assert start.main() == 0
+        assert "Software installed into %s." % start.VENV_DIR in said
