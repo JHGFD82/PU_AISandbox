@@ -13,7 +13,7 @@ does, after load_plugins() has completed.
 
 from .dispatch_plugin import DispatchPlugin
 from .info_commands import handle_info_commands
-from .plugin import ModePlugin
+from .plugin import ModePlugin, register_plugin_module
 from .plugin_loader import load_plugins
 from .ui_action import ProgressCallback, UiAction, UiField, UiJobResult, UiPromptPreview
 
@@ -22,6 +22,7 @@ __all__ = [
     "handle_info_commands",
     "load_plugins",
     "ModePlugin",
+    "register_plugin_module",
     "ProgressCallback",
     "UiAction",
     "UiField",

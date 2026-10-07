@@ -65,9 +65,8 @@
 from __future__ import annotations
 
 import argparse
-import importlib.util
+import functools
 import logging
-import sys
 from pathlib import Path
 from typing import Optional
 
@@ -107,39 +106,14 @@ _PLUGIN_DIR = Path(__file__).parent
 #  inside `run()`. Core inspects what's been registered while it is being
 #  imported, and anything registered later is missed.
 
-def _register(module_name: str, rel_path: str, override: bool = False) -> None:
-    """Make one of this plugin's files importable under the name core expects.
+# `register_plugin_module()` does the work and is shared by every plugin; binding
+# it to this folder once is all a plugin needs. A name another plugin has
+# already registered is left alone; pass `override=True` only when your plugin
+# deliberately *replaces* another's module (an extension supplying its own
+# prompts, for instance). The function's docstring has the details.
+from src.runtime.plugin import register_plugin_module  # noqa: E402
 
-    Args:
-        module_name: The name to register under (e.g.
-                     ``'src.services.myplugin_service'``).
-        rel_path: Where the file really is, relative to this plugin's own
-                  directory (e.g. ``'src/services/myplugin_service.py'``).
-        override: Normally ``False``: if another plugin already registered
-                  this name, leave theirs alone. Pass ``True`` only if your
-                  plugin is deliberately *replacing* another's module — an
-                  extension language pack that must supply its own prompts,
-                  for instance. Two plugins that both register the same name
-                  without expecting to will silently get whichever loaded
-                  first, so prefer a name that includes your plugin's name.
-    """
-    if module_name in sys.modules and not override:
-        return
-    path = _PLUGIN_DIR / rel_path
-    if not path.exists():
-        return
-    spec = importlib.util.spec_from_file_location(module_name, path)
-    if spec and spec.loader:
-        mod = importlib.util.module_from_spec(spec)
-        sys.modules[module_name] = mod
-        spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    # Also hang the module off its parent package, so that attribute-style
-    # access (and pytest's monkeypatch) resolves it correctly.
-    parts = module_name.rsplit(".", 1)
-    if len(parts) == 2:
-        parent = sys.modules.get(parts[0])
-        if parent is not None:
-            setattr(parent, parts[1], sys.modules[module_name])
+_register = functools.partial(register_plugin_module, _PLUGIN_DIR)
 
 
 # Register your own modules here, at import time:

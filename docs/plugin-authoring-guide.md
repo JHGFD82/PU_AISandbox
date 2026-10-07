@@ -147,47 +147,20 @@ That is the whole wiring. `BaseService._get_model()` honours a model named on th
 
 ## Making your own files findable: `_register()`
 
-Your plugin lives in `plugins/myplugin/`, but core looks for the pieces it wires up under fixed import paths in `src.*`. `_register()` loads one of your files from disk and files it under the name core expects — which is what lets `SandboxProcessor` find your code without core containing a single line about your plugin.
+Your plugin lives in `plugins/myplugin/`, but core looks for the pieces it wires up under fixed import paths in `src.*`. `register_plugin_module()`, in `src/runtime/plugin.py`, loads one of your files from disk and files it under the name core expects — which is what lets `SandboxProcessor` find your code without core containing a single line about your plugin.
 
-Copy this verbatim from `templates/plugin.py.template`:
+Bind it to your plugin's folder once, at the top of `plugin.py`, and call the result `_register`:
 
 ```python
-import importlib.util, sys
+import functools
 from pathlib import Path
 
-_PLUGIN_DIR = Path(__file__).parent
+from src.runtime.plugin import register_plugin_module
 
-
-def _register(module_name: str, rel_path: str, override: bool = False) -> None:
-    """Make one of this plugin's files importable under the name core expects.
-
-    Args:
-        module_name: The name to register under (e.g.
-                     ``'src.services.myplugin_service'``).
-        rel_path: Where the file really is, relative to this plugin's own
-                  directory.
-        override: Normally ``False``: if another plugin already registered
-                  this name, leave theirs alone. Pass ``True`` only if your
-                  plugin is deliberately replacing another's module.
-    """
-    if module_name in sys.modules and not override:
-        return
-    path = _PLUGIN_DIR / rel_path
-    if not path.exists():
-        return
-    spec = importlib.util.spec_from_file_location(module_name, path)
-    if spec and spec.loader:
-        mod = importlib.util.module_from_spec(spec)
-        sys.modules[module_name] = mod
-        spec.loader.exec_module(mod)
-    # Hang the module off its parent package too, so attribute-style access
-    # (and pytest's monkeypatch) resolves it correctly.
-    parts = module_name.rsplit(".", 1)
-    if len(parts) == 2:
-        parent = sys.modules.get(parts[0])
-        if parent is not None:
-            setattr(parent, parts[1], sys.modules[module_name])
+_register = functools.partial(register_plugin_module, Path(__file__).parent)
 ```
+
+A name another plugin has already registered is left alone. Pass `override=True` only if your plugin is deliberately replacing another's module — an extension supplying its own prompts, for instance. The function's docstring has the details.
 
 **Call `_register()` at import time**, at the top of `plugin.py` before any import that needs the module — never inside `run()`. Core inspects what has been registered while it is being imported, and anything registered later is missed.
 

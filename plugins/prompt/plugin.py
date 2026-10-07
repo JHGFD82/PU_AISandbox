@@ -39,61 +39,24 @@ Plugin contract (three required members)
 from __future__ import annotations
 
 import argparse
-import importlib.util
+import functools
 import logging
 import os
-import sys
 from pathlib import Path
 from typing import Optional
 
 # ── Plugin directory ──────────────────────────────────────────────────────────
+
+from src.runtime.plugin import register_plugin_module
 
 _PLUGIN_DIR = Path(__file__).parent
 
 
 # ── Module registration ────────────────────────────────────────────────────────
 
-def _register(module_name: str, rel_path: str) -> None:
-    """Make one of this plugin's own files importable as if it lived in the main repo's ``src/`` tree.
-
-    Plugins live in their own directory (``plugins/prompt/``) but their
-    service files need to be reachable under a ``src.*`` import path — for
-    example, ``src.services.prompt_service`` — so that ``SandboxProcessor``
-    can find and load them the same way it loads the main repo's own
-    services. This function loads the file directly from disk and inserts
-    it into Python's registry of already-imported modules
-    (``sys.modules``) under that name, so any later ``import
-    src.services.prompt_service`` statement — from this plugin or from the
-    main repo — resolves to this same file without needing it to actually
-    exist at ``src/services/prompt_service.py``.
-
-    Every plugin should call this once per service module it owns, at
-    import time (see the call directly below this function), before any
-    command runs.
-
-    Args:
-        module_name: The dotted import path to register the module under
-                     (e.g. ``'src.services.prompt_service'``).
-        rel_path: The module's real file path, relative to this plugin's own
-                  directory (e.g. ``'src/services/prompt_service.py'``).
-    """
-    if module_name in sys.modules:
-        return
-    path = _PLUGIN_DIR / rel_path
-    if not path.exists():
-        return
-    spec = importlib.util.spec_from_file_location(module_name, path)
-    if spec and spec.loader:
-        mod = importlib.util.module_from_spec(spec)
-        sys.modules[module_name] = mod
-        spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    # Expose the module as an attribute on its parent package so attribute-path
-    # lookups (e.g. pytest monkeypatch) work correctly.
-    parts = module_name.rsplit(".", 1)
-    if len(parts) == 2:
-        parent = sys.modules.get(parts[0])
-        if parent is not None:
-            setattr(parent, parts[1], sys.modules[module_name])
+# Each of this plugin's own files, filed under the name core looks for it by.
+# See register_plugin_module() in src/runtime/plugin.py.
+_register = functools.partial(register_plugin_module, _PLUGIN_DIR)
 
 
 # Registered first, so the service module below can import PROMPT_ROLE from it

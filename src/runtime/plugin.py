@@ -7,6 +7,10 @@ example to copy from.
 """
 
 import argparse
+import importlib
+import importlib.util
+import sys
+from pathlib import Path
 from typing import Optional, Protocol, runtime_checkable
 
 
@@ -139,3 +143,66 @@ class ModePlugin(Protocol):
             associated with a ``TokenTracker(professor=professor)`` instance.
         """
         ...
+
+
+def register_plugin_module(plugin_dir: Path, module_name: str, rel_path: str, *,
+                           override: bool = False) -> None:
+    """Make one of a plugin's own files importable under the name core looks for.
+
+    A plugin keeps its service in its own folder, but ``SandboxProcessor``
+    finds services under ``src.services.<name>``, orchestration methods under
+    ``src.runtime.<name>`` and settings under ``pu_plugin.<plugin>.settings``.
+    This loads the file and files it under that name, so core can find it
+    without containing a line about the plugin. Call it as the plugin's
+    ``plugin.py`` is imported, not inside ``run()``: core looks at what is
+    registered while it is itself being imported.
+
+    The module is also set as an attribute of the package above it, so that
+    ``src.services.myplugin_service`` can be reached attribute by attribute —
+    which is how pytest's ``monkeypatch.setattr("src.services....", ...)``
+    finds it.
+
+    A plugin usually binds its own folder once and calls the result
+    ``_register``::
+
+        _register = functools.partial(register_plugin_module, Path(__file__).parent)
+        _register("src.services.myplugin_service", "src/services/myplugin_service.py")
+
+    Args:
+        plugin_dir: The plugin's own folder, e.g. ``plugins/translation``.
+        module_name: The name to file it under, e.g.
+            ``"src.services.translation_service"``.
+        rel_path: Where the file really is, relative to *plugin_dir*. A file
+            that is not there is skipped: an optional part of the plugin.
+        override: Normally ``False``, so that a name something else has
+            already registered is left alone. ``True`` only for a plugin that
+            deliberately replaces another's module — an extension that must
+            supply its own prompts, for instance. Two plugins that register one
+            name without meaning to get whichever loaded first, so prefer a
+            name that includes your plugin's.
+    """
+    if module_name in sys.modules and not override:
+        return
+    path = Path(plugin_dir) / rel_path
+    if not path.exists():
+        return
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    if spec is None or spec.loader is None:
+        return
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+
+    parent_name, _, attribute = module_name.rpartition(".")
+    if not parent_name:
+        return
+    parent = sys.modules.get(parent_name)
+    if parent is None:
+        # A real package nothing has imported yet, such as src.processors. A
+        # made-up one such as pu_plugin.translation cannot be imported, and
+        # has nothing to set the attribute on.
+        try:
+            parent = importlib.import_module(parent_name)
+        except ImportError:
+            return
+    setattr(parent, attribute, module)
