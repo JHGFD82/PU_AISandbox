@@ -366,9 +366,13 @@ class TestWhichPort:
     """The port is the web interface's setting, and the sandbox is asked for it,
     so the launcher and the sandbox can't disagree."""
 
-    def test_the_sandbox_is_asked_and_its_layers_apply(self, launcher):
+    def test_the_sandbox_is_asked_and_its_layers_apply(self, launcher, monkeypatch):
         """The same answer webui serve would come to, preferences.toml included."""
         from src.settings import plugin_settings
+
+        # The Python running these tests has the sandbox's software; a .venv
+        # in the package may not exist (GitHub Actions installs without one).
+        monkeypatch.setattr(launcher.START, "venv_python", lambda: sys.executable)
 
         expected = plugin_settings(
             launcher.WEBUI_SETTINGS_MODULE, "webui")["webui"].get("port", 8000)
