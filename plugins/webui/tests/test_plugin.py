@@ -174,3 +174,117 @@ class TestServeBindGuard:
         )
         plugin_mod._serve(self._args("0.0.0.0"))
         assert started == {"host": "0.0.0.0", "port": 8000}
+
+
+class TestTheOtherSubcommands:
+    @pytest.mark.parametrize("subcommand,function", [
+        ("setup", "_serve_setup"),
+        ("set-session-secret", "_generate_session_secret"),
+    ])
+    def test_each_goes_to_its_own_function(self, monkeypatch, subcommand, function):
+        called = []
+        replacement = (lambda a: called.append(a)) if function == "_serve_setup" else (lambda: called.append(True))
+        monkeypatch.setattr(f"plugins.webui.plugin.{function}", replacement)
+        plugin.run(argparse.Namespace(webui_subcommand=subcommand, port=None), None, None, None, None, None)
+        assert len(called) == 1
+
+
+class TestANewSessionSecret:
+    @pytest.fixture
+    def settings_file(self, tmp_path, monkeypatch):
+        import src.settings_store as store
+
+        monkeypatch.setattr(store, "SETTINGS_PATH", tmp_path / "settings.toml")
+        return store
+
+    def test_a_long_random_one_is_saved_and_not_shown(self, settings_file, capsys):
+        from plugins.webui.plugin import _generate_session_secret
+
+        _generate_session_secret()
+        secret = settings_file.get_value("webui.session_secret")
+        assert len(secret) >= 40
+        out = capsys.readouterr().out
+        assert secret not in out and "not shown" in out
+
+    def test_replacing_one_says_everyone_is_signed_out(self, settings_file, capsys):
+        from plugins.webui.plugin import _generate_session_secret
+
+        _generate_session_secret()
+        first = settings_file.get_value("webui.session_secret")
+        capsys.readouterr()
+        _generate_session_secret()
+        assert settings_file.get_value("webui.session_secret") != first
+        assert "signed out" in capsys.readouterr().out
+
+
+class TestSetupInTheBrowser:
+    """A one-page server that asks where the files go, then stops."""
+
+    @pytest.fixture
+    def setup_server(self, monkeypatch):
+        """The setup page and its server, with a stand-in browser that either answers or walks away."""
+        from types import SimpleNamespace
+
+        import uvicorn
+
+        from src import paths
+
+        monkeypatch.setattr(paths, "is_installed", lambda: False)
+        seen = SimpleNamespace(answer=None, on_complete=None, config=None)
+        app = SimpleNamespace(state=SimpleNamespace())
+
+        def create_setup_app(on_complete):
+            seen.on_complete = on_complete
+            return app
+
+        class Server:
+            def __init__(self, config):
+                seen.config = config
+                self.should_exit = False
+
+            def run(self):
+                if seen.answer is not None:
+                    seen.on_complete(seen.answer)
+
+        monkeypatch.setattr(sys.modules["_pu_webui_setup_web"], "create_setup_app", create_setup_app)
+        monkeypatch.setattr(uvicorn, "Config", lambda app, **kw: kw)
+        monkeypatch.setattr(uvicorn, "Server", Server)
+        seen.app = app
+        return seen
+
+    def test_it_says_which_folder_was_chosen(self, setup_server, capsys):
+        from plugins.webui.plugin import _serve_setup
+
+        setup_server.answer = "/Users/heller/PU_AISandbox_data"
+        _serve_setup(argparse.Namespace(port=None))
+        assert "Your files are in /Users/heller/PU_AISandbox_data" in capsys.readouterr().out
+
+    def test_it_listens_on_this_computer_only_at_the_port_asked_for(self, setup_server, capsys):
+        from plugins.webui.plugin import _serve_setup
+
+        setup_server.answer = "/somewhere"
+        _serve_setup(argparse.Namespace(port=8123))
+        assert setup_server.config["host"] == "127.0.0.1" and setup_server.config["port"] == 8123
+        assert "http://127.0.0.1:8123" in capsys.readouterr().out
+
+    def test_the_server_can_be_stopped_from_the_page(self, setup_server):
+        from plugins.webui.plugin import _serve_setup
+
+        setup_server.answer = "/somewhere"
+        _serve_setup(argparse.Namespace(port=None))
+        assert setup_server.app.state.server is not None
+
+    def test_closing_the_browser_without_answering_says_how_to_start_again(self, setup_server):
+        from plugins.webui.plugin import _serve_setup
+
+        with pytest.raises(CLIError, match="Setup was not finished"):
+            _serve_setup(argparse.Namespace(port=None))
+
+    def test_a_copy_already_set_up_is_left_alone(self, setup_server, monkeypatch, capsys):
+        from plugins.webui.plugin import _serve_setup
+        from src import paths
+
+        monkeypatch.setattr(paths, "is_installed", lambda: True)
+        _serve_setup(argparse.Namespace(port=None))
+        assert "already set up" in capsys.readouterr().out
+        assert setup_server.config is None
