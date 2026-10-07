@@ -203,6 +203,37 @@ The package holds the code and is what gets replaced on upgrade. Everything belo
 | Your settings location | `settings.toml` (API keys, endpoint credentials, web UI secrets, external usage sources), `model_catalog.json`, `preferences.toml`, `data/` |
 | The package | `settings.default.toml`, `plugins/*/settings.toml`, `templates/`, `.installation` (the marker naming your settings location) |
 
+### Replacing the package
+
+The package is a git clone, so an upgrade is `git fetch` and `git merge --ff-only`. `plugins/webui/src/upgrade.py` does that from the browser, and `plugins/webui/src/git_tool.py` is where both it and the plugin installer get a git that cannot stop and wait for a password.
+
+Three things about it are worth knowing before changing it:
+
+- **`git merge --ff-only`, never `git pull`.** A pull that cannot fast-forward leaves a half-merged working tree, which nobody is recovering from in a browser. It refuses instead, and a preflight rules out the cases worth explaining first — no `.git`, an *enclosing* repository rather than this one, a detached HEAD, a branch other than `main`, a `main` with no upstream or following some other branch, a dirty tree, or local commits. Only `main` is ever offered an update: another branch's distance from its own upstream is somebody's work in progress, not a new version. Each answer also records the branch and commit it was about (`Available.position`), and `GET /api/updates` looks again rather than repeat one the checked-out copy has since moved away from.
+- **The restart skips `start.py`.** `_restart_into_the_new_code()` execs `main.py`, so nothing re-reads `requirements.txt`. The update installs changed dependencies itself, and writes `.venv/.requirements-stamp` only on success — a stale stamp is what makes the next `python3 start.py` notice and repair a half-installed environment.
+- **`start.py` owns the fingerprint.** It cannot import from `src/` (it runs on whatever Python the computer has, before `.venv` exists), so `upgrade.py` loads it by path and asks it for `requirements_fingerprint()`, `STAMP` and `venv_python()` rather than keeping a second copy.
+
+Because every installed copy fast-forwards, **`main` must never be rebased or force-pushed** once this has shipped: every copy would become non-fast-forwardable at once, and each would report it as "this copy has changes of its own".
+
+### Starting and stopping
+
+`start.py` is the way in for people. It does the part every copy of the sandbox needs — finding a Python new enough to run it, and installing its software into `.venv` — and then, if the web interface is there, hands over to `plugins/webui/launcher/launcher.py`, which does everything else. It is run three ways:
+
+| | |
+|---|---|
+| `python3 start.py` | From a terminal. Installs what is missing (after asking), then the launcher's `open_from_a_terminal()`: first-time setup if needed, an icon on the Desktop the first time, then `webui serve` in that window. |
+| `start.py --launch` | What the icon runs. The launcher's `launch()` stops a copy already running, starts `--run-hidden` on its own with no window and its output going to a log file, opens the browser once the loading page answers, and exits. |
+| `start.py --run-hidden` | The long-running part of an icon start, `run_hidden()`: the same steps as a terminal run, with progress shown on the loading page rather than printed. |
+
+Six things about it are worth knowing before changing it:
+
+- **The launcher is the web interface's, and is loaded by path.** It lives in the plugin folder because a copy with the web interface removed has no use for it; `start.py` falls back to setting up in the terminal when `has_the_web_interface()` says no or the launcher is missing. `start.py` loads it with `importlib` from its path and hands itself over (`attach()`), so finding a Python and installing live in one place. Like `start.py`, the launcher has to parse on the Python a Mac ships and must not import `src/` or anything installed, because it runs before `.venv` exists. `plugins/webui/tests/test_launcher.py` checks both.
+- **The port is the web interface's setting, asked of the sandbox.** `port` under `[webui]` can be changed in a shared file or `preferences.toml` like any other setting, so the launcher runs `.venv`'s Python to load the plugin's own `src/settings.py` and print `WEBUI_PORT`, then passes `--port` to `webui setup` and `webui serve`. Before `.venv` exists there is nothing to ask, and it reads `port =` from `plugins/webui/settings.toml` itself. If installing then turns up a different answer, the loading page starts a second copy of itself on the new port and tells the browser to go there (`LoadingPage.move_to()`).
+- **The loading page holds the port until the sandbox takes it.** `LoadingPage` is a small server, built from what comes with Python, that answers with `loading.html`. The page asks `/__loading` every half second; when anything other than the loading page answers, it reloads onto the sandbox. `hand_over()` lets go of the port only after the browser has fetched the page once, so a browser slow to open never lands on nothing.
+- **Every start is a fresh start, and only this copy is ever stopped.** Each start writes a random stop token to `.venv/.stop-token` (readable by its owner only) and passes it to the server in `PU_SANDBOX_STOP_TOKEN`, which `os.execv` in `_restart_into_the_new_code()` carries across a restart. The next start presents it to `POST /__stop`, added to both the setup app and the sandbox by `plugins/webui/src/stopping.py`. 200 means it is stopping; 409 means it is busy (a job or an update running), and the launcher opens it instead; anything else means the port belongs to something else, which is reported and never touched.
+- **Quit replaced Lock.** `POST /quit` needs the passphrase, refuses with 409 under the same conditions as `/__stop`, and stops the server through `stopping.stop_soon()`. Both routes find the server at `app.state.server`, which `run_server()` and `webui setup` put there; `run_server()` gives open requests five seconds to finish (`timeout_graceful_shutdown`), because a browser tab can hold one open indefinitely and the launcher is waiting for the port.
+- **The icon is made on the computer, not shipped, and survives Python going away.** `make_shortcut()` writes a small `.app` on a Mac (an `Info.plist` with `LSUIElement`, `sandbox.icns`, and a script), a `.lnk` on Windows through PowerShell, and a `.desktop` entry on Linux. None is subject to download checks, since nothing about it was downloaded, so none needs signing. On a Mac and Linux the icon runs `open-sandbox.sh` with the Python it was made with; the script falls back to the usual places for one, and with none at all opens `loading.html` from disk unfilled, which then explains that Python needs installing. On Windows the shortcut runs `pyw.exe`, which finds whichever Python 3 is installed, when there is one.
+
 ### Configuration layers
 
 | Source | Controls |

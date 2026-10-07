@@ -63,6 +63,8 @@ In the `data/` folder of the settings location — active: `token_usage_{netid}.
 ### Where files live
 The package (the code, replaced on upgrade) and the settings location are kept apart. `src/paths.py` resolves the split; a `.installation` marker inside the package records the folder, and its absence is the signal "not set up yet".
 
+The package replaces itself, from the web interface, via `plugins/webui/src/upgrade.py` — `git merge --ff-only`, never `git pull`. Two rules it depends on: the requirements fingerprint, the `.venv/.requirements-stamp` path and `venv_python()` have exactly one home, in `start.py`, which `upgrade.py` loads by path rather than copying (start.py can't import from `src/`); and **`main` must never be rebased or force-pushed**, because every installed copy fast-forwards onto it and would all break at once. See `docs/architecture.md` § Replacing the package.
+
 | Location | Contents |
 |---|---|
 | The person's settings location (`~/PU_AISandbox_data` by default) | `settings.toml`, `model_catalog.json`, `preferences.toml`, `data/` |

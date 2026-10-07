@@ -18,8 +18,16 @@ import logging
 import re
 import shutil
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
+
+# Picked out of sys.modules rather than imported by name, for the reason
+# app.py's module docstring gives: the plugin loader hands this file a
+# fabricated module name whose parent package does not exist, so `from
+# .git_tool import ...` has nothing to reach through. plugin.py puts it there
+# before this file is loaded.
+git_tool = sys.modules["_pu_webui_git_tool"]
 
 logger = logging.getLogger(__name__)
 
@@ -179,16 +187,22 @@ def install_from_git(repository: str, name: str, plugins_dir: Path) -> Installed
     address = check_repository(repository)
     target = check_folder_name(name, plugins_dir)
 
-    git = _usable_git()
+    try:
+        git = git_tool.usable_git("a plugin cannot be fetched")
+    except git_tool.GitUnusable as e:
+        raise InstallError(str(e)) from e
 
     # Arguments as a list, never a command line: nothing here is handed to a
     # shell to take apart. The `--` says that what follows is a place and a
     # folder, not more flags, whatever it happens to begin with.
-    command = [git, "clone", "--quiet", "--", address, str(target)]
+    #
+    # Through run_git so that an address wanting a password fails now and says
+    # so, rather than stopping to ask somebody who is looking at a browser and
+    # holding this request open until it is timed out.
     try:
-        done = subprocess.run(
-            command, capture_output=True, text=True,
-            timeout=_CLONE_TIMEOUT_SECONDS, check=False,
+        done = git_tool.run_git(
+            git, plugins_dir, "clone", "--quiet", "--", address, str(target),
+            timeout=_CLONE_TIMEOUT_SECONDS,
         )
     except subprocess.TimeoutExpired:
         _remove(target)
@@ -197,15 +211,15 @@ def install_from_git(repository: str, name: str, plugins_dir: Path) -> Installed
             f"{_CLONE_TIMEOUT_SECONDS // 60} minutes, so it was stopped and "
             "nothing was installed."
         ) from None
-    except OSError as e:
+    except git_tool.GitUnusable as e:
         _remove(target)
-        raise InstallError(f"Could not run git: {e}") from e
+        raise InstallError(str(e)) from e
 
     if done.returncode != 0:
         _remove(target)
         # git's own words. It is better at saying "repository not found" and
         # "could not resolve host" than a guess made from an exit code.
-        said = (done.stderr or done.stdout or "").strip()
+        said = git_tool.what_it_said(done)
         raise InstallError(
             f"Could not fetch {address}.\n\n{said}" if said
             else f"Could not fetch {address}."
@@ -222,42 +236,6 @@ def install_from_git(repository: str, name: str, plugins_dir: Path) -> Installed
 
     logger.info("Installed plugin %s from %s", target.name, address)
     return Installed(name=target.name, path=target, commands=_commands_named_in(target))
-
-
-def _usable_git() -> str:
-    """Return the path to a git that works, or say why there isn't one.
-
-    Being on the computer is not the same as working. A Mac without the Xcode
-    command line tools still has ``/usr/bin/git`` — a stub that exists, is
-    found, and then fails with an xcrun error the moment it is run. Asking it
-    its version is a cheap way to tell the two apart, and turns "could not
-    fetch, here is a paragraph about xcrun" into something somebody can act
-    on.
-
-    Raises:
-        InstallError: If git is missing, or is there and cannot run.
-    """
-    found = shutil.which("git")
-    advice = ("Install it and try again — on a Mac, `xcode-select --install` "
-              "is enough.")
-    if found is None:
-        raise InstallError(
-            "git is not installed on this computer, and it is what fetches a "
-            f"plugin. {advice}"
-        )
-    try:
-        done = subprocess.run([found, "--version"], capture_output=True,
-                              text=True, timeout=30, check=False)
-    except (OSError, subprocess.SubprocessError) as e:
-        raise InstallError(f"git is installed at {found} but cannot be run: {e}") from e
-    if done.returncode != 0:
-        said = (done.stderr or done.stdout or "").strip()
-        raise InstallError(
-            f"There is a git at {found}, but running it does not work, so a "
-            f"plugin cannot be fetched.\n\n{said}\n\n{advice}" if said else
-            f"There is a git at {found}, but running it does not work. {advice}"
-        )
-    return found
 
 
 def _commands_named_in(folder: Path) -> list[str]:

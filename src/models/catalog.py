@@ -243,48 +243,116 @@ def get_available_models() -> List[str]:
 
 
 # Routes that carry another company's models. Everywhere else the part before
-# the slash is the company itself — including for a company nobody here has
-# heard of yet, which is the point: a new provider appears under its own name
-# without anyone editing this.
+# the slash in a model's ``portkey_id`` is the company itself — including for a
+# company nobody here has heard of yet.
 _RESELLING_ROUTES = {"azure-ai", "azure-openai", "vertex-ai", "bedrock", "openrouter"}
 
-# For those routes only, who a model belongs to can be read from its name.
-_OWNER_BY_PREFIX = (
-    ("claude", "Anthropic"),
-    ("gpt", "OpenAI"), ("o1", "OpenAI"), ("o3", "OpenAI"), ("o4", "OpenAI"),
-    ("gemini", "Google"), ("gemma", "Google"), ("palm", "Google"),
-    ("llama", "Meta"),
-    ("mistral", "Mistral"), ("mixtral", "Mistral"), ("codestral", "Mistral"),
-    ("qwen", "Alibaba"), ("deepseek", "DeepSeek"), ("phi", "Microsoft"),
-    ("command", "Cohere"), ("grok", "xAI"), ("jamba", "AI21"),
-)
 
-# Tidied spellings for the routes that are a company. Anything absent is shown
-# as it is recorded, so a new one is never hidden or mislabelled.
-_ROUTE_NAMES = {
-    "openai": "OpenAI", "anthropic": "Anthropic", "google": "Google",
-    "mistral": "Mistral", "mistral-ai": "Mistral", "cohere": "Cohere",
-    "meta": "Meta", "perplexity": "Perplexity", "deepseek": "DeepSeek",
-    "alibaba": "Alibaba", "xai": "xAI", "ai21": "AI21",
-}
+def _endpoint_and_name(model: str) -> tuple:
+    """Split a model's name into the endpoint it runs on and its name there.
+
+    Args:
+        model: The model's name as the catalog or a conversation holds it —
+               ``'claude-haiku-4-5'``, or ``'my_mac_studio:qwen3.8:27b-mlx'``
+               for one on this installation's own endpoints.
+
+    Returns:
+        ``(endpoint, name)``. ``endpoint`` is ``None`` for a sandbox model, and
+        ``name`` is then the model's name unchanged. Worked out from the
+        catalog entry where there is one. Otherwise a name with a colon in it
+        is taken to be an endpoint's, named by the part before the colon: the
+        built-in service names none of its models that way, and a model an
+        endpoint has stopped listing — or an endpoint since taken out of the
+        settings — still ran there.
+    """
+    models = load_model_catalog()["models"]
+    entry = models.get(model)
+    if isinstance(entry, dict) and entry.get("endpoint"):
+        return str(entry["endpoint"]), str(entry.get("model") or model.split(":", 1)[-1])
+    if ":" in model and entry is None:
+        in_front, _, rest = model.partition(":")
+        return in_front, rest
+    return None, model
+
+
+def endpoint_label(api_name: str) -> str:
+    """Return the name an endpoint goes by in lists, given its name in the settings.
+
+    Args:
+        api_name: The endpoint's table name, as in ``[endpoints.my_mac_studio]``.
+
+    Returns:
+        Its ``name`` setting (``'My Mac Studio'``) if it has one, and the table
+        name otherwise.
+    """
+    from .. import settings
+
+    return str((settings.ENDPOINTS.get(api_name) or {}).get("name") or api_name)
+
+
+def model_endpoint(model: str) -> Optional[str]:
+    """Return the name of the endpoint a model runs on, or ``None`` for a sandbox model.
+
+    Args:
+        model: The model's name, as the catalog or a conversation holds it.
+
+    Returns:
+        The endpoint's name as lists show it (see ``endpoint_label()``).
+    """
+    api_name, _ = _endpoint_and_name(model)
+    return endpoint_label(api_name) if api_name else None
+
+
+def model_company(model: str) -> str:
+    """Return the company that made a model, wherever it runs.
+
+    Asked of OpenRouter's public list of models (see ``src/models/makers.py``),
+    which knows the company behind every family of models, so a company added
+    later names itself without any change here. A model on one of this
+    installation's own endpoints is looked up by its name there, which is
+    usually its family's name with a size after it.
+
+    Two things are consulted before and after that list:
+
+    - An ``owner`` written in the model's catalog entry by hand is always used
+      as it is, for a model the list gets wrong or doesn't know.
+    - Failing the list, the route recorded in the model's ``portkey_id`` — the
+      part before the slash — is used, unless that route resells other
+      companies' models (Azure and Vertex carry OpenAI's, Anthropic's and
+      Meta's alike), which would file the model under the shop instead of the
+      maker.
+
+    Args:
+        model: The model's catalog key (e.g. ``'claude-haiku-4-5'``, or
+               ``'my_mac_studio:qwen3.8:27b-mlx'``).
+
+    Returns:
+        The company's name. ``'Other'`` only when nothing at all is known.
+    """
+    from . import makers
+
+    entry = load_model_catalog()["models"].get(model)
+    if isinstance(entry, dict) and entry.get("owner"):
+        return str(entry["owner"])
+    _, name = _endpoint_and_name(model)
+    found = makers.model_maker(name)
+    if found:
+        return found
+    route = ""
+    if isinstance(entry, dict):
+        route = str(entry.get("portkey_id", "")).split("/")[0].strip().lower()
+    if route and route not in _RESELLING_ROUTES:
+        return makers.maker_named(route) or route
+    return "Other"
 
 
 def model_owner(model: str) -> str:
     """Return whose model this is, for grouping a list of them.
 
-    Read from the route recorded against the model — the part before the slash
-    in its ``portkey_id`` — because for almost every model that route *is* the
-    company, and a company added later therefore names itself without any
-    change here.
-
-    The exception is a route that resells: Azure and Vertex carry OpenAI's,
-    Anthropic's and Meta's models alike, so a model reached that way would
-    otherwise be filed under the shop rather than the maker. For those, and for
-    a model with no route recorded at all, the name is read instead.
-
     A model on one of this installation's own endpoints is grouped under that
-    endpoint's name instead, since what somebody choosing it needs to know is
-    that it runs there.
+    endpoint's name, since what somebody choosing it needs to know is that it
+    runs there. Every other model is grouped under the company that made it —
+    see ``model_company()``.
 
     Args:
         model: The model's catalog key (e.g. ``'claude-haiku-4-5'``).
@@ -292,24 +360,7 @@ def model_owner(model: str) -> str:
     Returns:
         A name to group under. ``'Other'`` only when nothing at all is known.
     """
-    entry = load_model_catalog()["models"].get(model)
-    if isinstance(entry, dict) and entry.get("endpoint"):
-        from .. import settings
-
-        api_name = str(entry["endpoint"])
-        return str((settings.ENDPOINTS.get(api_name) or {}).get("name") or api_name)
-    route = ""
-    if isinstance(entry, dict):
-        route = str(entry.get("portkey_id", "")).split("/")[0].strip().lower()
-
-    if route and route not in _RESELLING_ROUTES:
-        return _ROUTE_NAMES.get(route, route)
-
-    lowered = model.lower()
-    for prefix, owner in _OWNER_BY_PREFIX:
-        if lowered.startswith(prefix):
-            return owner
-    return _ROUTE_NAMES.get(route, route) if route else "Other"
+    return model_endpoint(model) or model_company(model)
 
 
 def models_in_reading_order() -> List[str]:

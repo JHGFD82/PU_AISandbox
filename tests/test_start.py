@@ -24,8 +24,12 @@ def start():
     spec = importlib.util.spec_from_file_location("_start_under_test", _START)
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
+    # Registered, as a script is under __main__: the launcher is handed this
+    # module through sys.modules.
+    sys.modules[spec.name] = module
     spec.loader.exec_module(module)
-    return module
+    yield module
+    sys.modules.pop(spec.name, None)
 
 
 class TestRunsOnAnOldPython:
@@ -397,6 +401,23 @@ class TestSayingWhereTheSoftwareGoes:
         assert "Software installed into %s." in source
 
 
+class _PretendLauncher:
+    """Stands in for the web interface's launcher, so no test takes a real port."""
+
+    def __init__(self, answers=None):
+        self.opened = []
+        self.asked = []
+        self.answers = answers or {}
+
+    def open_from_a_terminal(self):
+        self.opened.append(True)
+        return 0
+
+    def entry(self, arguments):
+        self.asked.append(arguments)
+        return self.answers.get(tuple(arguments))
+
+
 class TestACopyWithNoWebInterface:
     """The web interface is a plugin, and removing it is a supported choice —
     every other command keeps working. This script is the part that did not:
@@ -412,8 +433,9 @@ class TestACopyWithNoWebInterface:
         monkeypatch.setattr(start, "environment_is_ready", lambda: True)
         monkeypatch.setattr(start, "has_the_web_interface", lambda sandbox: has_web)
         monkeypatch.setattr(start, "is_set_up", lambda sandbox: set_up)
-        opened = []
-        monkeypatch.setattr(start, "open_browser_shortly", opened.append)
+        launcher = _PretendLauncher()
+        monkeypatch.setattr(start, "the_web_interfaces_launcher", lambda: launcher)
+        opened = launcher.opened
         ran = []
 
         def fake_call(args, **kwargs):
@@ -460,12 +482,29 @@ class TestACopyWithNoWebInterface:
             start, monkeypatch, has_web=False, set_up=True)
         assert "plugins/webui" in said
 
-    def test_with_the_plugin_there_nothing_changes(self, start, monkeypatch):
-        _code, said, opened, ran = self._run_main(
+    def test_with_the_plugin_there_it_hands_over_to_it(self, start, monkeypatch):
+        _code, said, opened, _ran = self._run_main(
             start, monkeypatch, has_web=True, set_up=True)
-        assert opened, "the browser should still be opened"
+        assert opened == [True], "the web interface's launcher should take over"
         assert "web interface is not installed" not in said
-        assert any("webui" in args for args in ran)
+
+    def test_a_plugin_without_its_launcher_is_treated_as_absent(self, start, monkeypatch):
+        """Better the terminal than a browser nothing will answer."""
+        said = []
+        monkeypatch.setattr(start, "say", said.append)
+        monkeypatch.setattr(start, "find_python", lambda: "/usr/bin/python3")
+        monkeypatch.setattr(start, "environment_is_ready", lambda: True)
+        monkeypatch.setattr(start, "has_the_web_interface", lambda sandbox: True)
+        monkeypatch.setattr(start, "is_set_up", lambda sandbox: True)
+        monkeypatch.setattr(start, "LAUNCHER", "/nowhere/launcher.py")
+        monkeypatch.setattr(start.subprocess, "call", lambda *a, **k: 0)
+        assert start.main() == 0
+        assert "web interface is not installed" in "\n".join(said)
+
+    def test_the_launcher_is_loaded_with_this_file_handed_to_it(self, start):
+        launcher = start.the_web_interfaces_launcher()
+        assert launcher is not None
+        assert launcher.START is start
 
     def test_the_question_is_asked_of_the_sandbox_not_of_a_folder(self, start):
         """A plugin that is there but cannot load is the same problem as one
@@ -476,3 +515,35 @@ class TestACopyWithNoWebInterface:
                        source.index("def finish_without_the_web_interface")]
         assert '"webui", "--help"' in block
         assert "isdir" not in block and "exists" not in block
+
+
+class TestTheWordsAfterStartPy:
+    def test_no_icon_for_a_copy_without_the_web_interface(self, start, monkeypatch):
+        monkeypatch.setattr(start, "say", lambda line: None)
+        monkeypatch.setattr(start, "has_the_web_interface", lambda sandbox: False)
+        launcher = _PretendLauncher()
+        monkeypatch.setattr(start, "the_web_interfaces_launcher", lambda: launcher)
+        assert start.entry(["--make-shortcut"]) == 1
+        assert launcher.asked == []
+
+    def test_nothing_is_the_ordinary_start(self, start, monkeypatch):
+        monkeypatch.setattr(start, "main", lambda: "main")
+        assert start.entry([]) == "main"
+
+    @pytest.mark.parametrize("flag", ["--launch", "--run-hidden"])
+    def test_the_icons_own_ways_in_go_to_the_launcher(self, start, monkeypatch, flag):
+        launcher = _PretendLauncher({(flag,): 0})
+        monkeypatch.setattr(start, "the_web_interfaces_launcher", lambda: launcher)
+        assert start.entry([flag]) == 0
+        assert launcher.asked == [[flag]]
+
+    def test_something_unknown_is_answered_with_how_to_use_it(self, start, monkeypatch):
+        said = []
+        monkeypatch.setattr(start, "say", said.append)
+        monkeypatch.setattr(start, "the_web_interfaces_launcher", lambda: _PretendLauncher())
+        assert start.entry(["--nonsense"]) == 2
+        assert "--make-shortcut" in said[0]
+
+    def test_help_is_not_a_mistake(self, start, monkeypatch):
+        monkeypatch.setattr(start, "say", lambda line: None)
+        assert start.entry(["--help"]) == 0

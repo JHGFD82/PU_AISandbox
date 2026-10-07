@@ -12,7 +12,8 @@ Adds the `webui` command: a browser interface for people who would rather not wo
 | What the `/settings` page can and can't edit | [`docs/configuration.md`](../../docs/configuration.md#settings-at-a-glance) |
 | How to give your own plugin a form in the composer | [`docs/plugin-authoring-guide.md`](../../docs/plugin-authoring-guide.md#a-button-in-the-web-interface) |
 | How plugins fit into the whole | [`docs/architecture.md`](../../docs/architecture.md) |
-| What this plugin's own code does | the module docstrings at the top of [`plugin.py`](plugin.py), [`src/app.py`](src/app.py), [`src/jobs.py`](src/jobs.py) and [`src/auth.py`](src/auth.py) |
+| How the update button works, and what it refuses to do | [`README.md`](../../README.md#upgrading) to use it, [`docs/architecture.md`](../../docs/architecture.md#replacing-the-package) to change it |
+| What this plugin's own code does | the module docstrings at the top of [`plugin.py`](plugin.py), [`src/app.py`](src/app.py), [`src/jobs.py`](src/jobs.py), [`src/auth.py`](src/auth.py) and [`src/upgrade.py`](src/upgrade.py) |
 
 ## What's particular to this one
 

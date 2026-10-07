@@ -25,7 +25,7 @@ installation, it names the two separately for that reason.
 | `settings.toml` | your settings location | API keys, endpoint credentials, web UI secrets, external usage-data sources — this installation's own private configuration |
 | `model_catalog.json` | your settings location | Model pricing and capabilities |
 | `preferences.toml` | your settings location | Your own adjustments to how the sandbox behaves |
-| `data/` | your settings location, unless a person has a folder of their own | Usage history, archives, conversations |
+| `data/` | your settings location, unless a person has a folder of their own | Usage history, archives, conversations, and a saved copy of who makes which model |
 | `settings.default.toml` | the package, tracked by git | The defaults everyone starts from, plus alternate-endpoint definitions |
 | A shared file | anywhere (optional) | Defaults a group wants to share, e.g. via Dropbox |
 | `plugins/*/settings.toml` | the package, tracked by git | Each plugin's own defaults |
@@ -234,6 +234,34 @@ fill in the rest:
 }
 ```
 
+### Which company a model is listed under
+
+The web interface groups its lists of models by the company that made each one.
+The sandbox finds that out from [OpenRouter](https://openrouter.ai)'s public
+list of models, which is free and needs no account. It asks for the list at most
+once a month and saves a copy as `data/model_makers.json` in your settings
+location. Nothing you type is sent to OpenRouter; the sandbox only downloads its
+list.
+
+A model OpenRouter doesn't list by name is placed by the first word of its name,
+so `qwen3.8:27b-mlx` running on your own computer is listed under Qwen, and
+`gemma4:12b-mlx` under Google.
+
+If a model ends up under the wrong company, or under **Other**, add `owner` to
+its entry in `model_catalog.json`. That is used as written, and always wins:
+
+```json
+"my-model": {
+  "input": 0.1,
+  "output": 0.3,
+  "owner": "Mistral"
+}
+```
+
+If the list can't be reached, for example because the computer is offline, the
+sandbox goes on using the copy it saved last. Without any saved copy, a model is
+listed under the provider in its `portkey_id`, or under **Other**.
+
 ### Viewing it
 
 ```bash
@@ -245,6 +273,8 @@ python main.py --list-models
 ## `settings.default.toml` — runtime defaults
 
 Tracked by git and shipped with the package. It holds the defaults for everyone; to change any of them for yourself, copy the lines you want into `preferences.toml` in your settings location.
+
+Editing it in place has a second cost beyond being overwritten: this file and every `plugins/*/settings.toml` are tracked by git, so an edited copy of one stops the sandbox being able to update itself, and says so rather than undoing your change. `preferences.toml` sits outside the package and is never touched by an upgrade, which is why it is the place for anything you set yourself.
 
 ```toml
 [prompt]

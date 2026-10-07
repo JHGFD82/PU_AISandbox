@@ -61,15 +61,29 @@
                  margin-top: 0.15rem; max-width: 60ch; }
   /* Same row-of-boxes shape as form.inline, but as a block inside a form
      that also has explanatory text and an error line under it. */
-  .inline-fields { display: flex; gap: 0.5rem; align-items: flex-end; flex-wrap: wrap; margin-top: 0.75rem; }
-  .inline-fields > div { flex: 1; min-width: 140px; }
-  /* A path is far longer than anything it shares a line with. */
-  .inline-fields > .wide { flex: 2.5; }
   .required { color: var(--orange); font-size: var(--text-xs); }
   .field-note { margin: 0.6rem 0 0; }
   .field-note code { background: var(--bg); border-radius: var(--radius-sm); padding: 0.05rem 0.25rem; font-size: 0.9em; }
   .form-error { font-size: var(--text-sm); color: var(--danger-text); border: 1px solid var(--danger-border);
                 background: var(--danger-hover-bg); border-radius: var(--radius-md); padding: 0.5rem 0.7rem; margin: 0.7rem 0 0; }
+  /* Updates. The bar is this page's own rather than the one chat.html draws
+     for a running job: that rule lives in chat.html and not in a shared
+     partial, so sharing the name would mean keeping a second copy of it. */
+  .update-progress-track {
+    height: 6px; background: var(--bg); border-radius: var(--radius-pill);
+    overflow: hidden; margin: var(--space-3) 0 var(--space-2);
+  }
+  .update-progress-fill {
+    height: 100%; width: 0; background: var(--orange);
+    border-radius: var(--radius-pill); transition: width 0.3s ease;
+  }
+  /* A refusal, and the reason with it. These arrive already broken into
+     paragraphs, because they are several sentences and the last one is
+     usually the one to act on, so the breaks are kept. */
+  .update-note { white-space: pre-wrap; max-width: var(--measure); }
+  #update-changes { margin: var(--space-2) 0 0; padding-left: 1.2rem; }
+  #update-changes li { font-size: var(--text-sm); color: var(--text-muted); }
+  #update-buttons { display: flex; gap: var(--space-2); flex-wrap: wrap; }
   #add-professor-form button[type=submit] { margin-top: 0.8rem; }
   form[data-usage-for] button { margin-top: var(--space-3); }
   form[data-usage-for] select { width: 100%; }
@@ -79,7 +93,7 @@
   <div id="topbar" hidden>
     <h1>Settings</h1>
     <a href="#" id="back-link" style="display:none">&larr; Back to chat</a>
-    <button class="secondary" id="lock-btn">Lock</button>
+    <button class="secondary" id="quit-btn">Quit</button>
   </div>
 
   <!-- Seven cards in one column was a page you scrolled to find things in.
@@ -264,6 +278,48 @@
 
     </div>
 
+    <div class="card" id="section-update" data-section="update" data-tab="system">
+      <h2>Updates</h2>
+
+      <p class="hint" id="update-version">Looking…</p>
+
+      <!-- Why this copy cannot update itself, when it cannot: downloaded as a
+           ZIP file, files edited in place, no git on the computer. -->
+      <p class="hint update-note" id="update-blocked" hidden></p>
+
+      <!-- What is waiting, when something is. -->
+      <p id="update-summary" hidden></p>
+      <p class="hint update-note" id="update-warnings" hidden></p>
+      <details id="update-changes-box" hidden>
+        <summary>What has changed</summary>
+        <ul id="update-changes"></ul>
+      </details>
+
+      <div id="update-progress" hidden>
+        <div class="update-progress-track">
+          <div class="update-progress-fill" id="update-progress-fill"></div>
+        </div>
+        <p class="hint" id="update-step"></p>
+      </div>
+
+      <p class="form-error update-note" id="update-error" hidden></p>
+      <pre class="snippet" id="update-said" hidden></pre>
+
+      <p id="update-buttons">
+        <button type="button" id="update-check">Check for updates</button>
+        <button type="button" id="update-apply" hidden>Update now</button>
+        <button type="button" class="secondary" id="update-retry" hidden>Try again</button>
+        <button type="button" class="secondary" id="update-undo" hidden>Put it back</button>
+      </p>
+
+      <p class="hint">
+        Your <code>settings</code> location and your <code>data</code> locations
+        are kept outside the sandbox's own folder, so updating never touches
+        your API keys, your spending records or your conversations. Updating
+        does restart the sandbox, which signs everybody out.
+      </p>
+    </div>
+
     <div class="card" id="section-endpoints" data-section="endpoints" data-tab="models">
       <h2>Alternate AI endpoints</h2>
       <p class="hint">An AI service other than the Princeton University AI Sandbox — a model on a cluster, or a provider's own API. Calls are counted but carry no cost and are reported separately.</p>
@@ -374,7 +430,7 @@
 // professors are configured yet, or a bookmarked /settings URL).
 const embeddedInModal = window.self !== window.top;
 // Opened from the chat page, the modal around this already carries the word
-// "Settings" and a way out, so a second heading, a second close and a Lock
+// "Settings" and a way out, so a second heading, a second close and a Quit
 // button underneath them are three ways of saying what is already said.
 // Opened on its own, the bar is the only one of those there is.
 document.getElementById("topbar").hidden = embeddedInModal;
@@ -1048,6 +1104,294 @@ document.getElementById("add-model-form").addEventListener("submit", async (ev) 
   }
 });
 
+// ── Updates ─────────────────────────────────────────────────────────────────
+// The sandbox's own folder is a copy of a git repository, and updating means
+// moving it forward onto whatever has been published since. What that will and
+// will not do is decided in plugins/webui/src/upgrade.py; this draws it.
+//
+// The server looks once when it starts, so arriving here costs nothing and the
+// page can say straight away whether something is waiting. "Check for updates"
+// is for looking again without restarting.
+
+// What this copy was before an update, remembered across the restart the
+// update ends with. Kept in the browser because the server that knew it is
+// replaced by then, and it is what lets coming back tell a restart that
+// happened from one that quietly did not.
+const WHAT_IT_WAS = "the-version-before-an-update";
+
+// Which of these were shown last, so a redraw does not have to unhide
+// everything by hand and leave one behind.
+const UPDATE_PARTS = ["blocked", "summary", "warnings", "changes-box",
+                      "progress", "error", "said"];
+
+function updatePart(name) {
+  return document.getElementById("update-" + name);
+}
+
+function showOnly(names) {
+  UPDATE_PARTS.forEach(name => { updatePart(name).hidden = !names.includes(name); });
+}
+
+function showUpdateButtons(names) {
+  ["check", "apply", "retry", "undo"].forEach(name => {
+    updatePart(name).hidden = !names.includes(name);
+  });
+}
+
+// Built from the parts rather than handed to Date as it stands: a plain
+// "2026-09-17" is read as midnight in UTC, which is the day before it says
+// everywhere west of Greenwich.
+function readableDate(iso) {
+  const parts = String(iso || "").split("-").map(Number);
+  if (parts.length !== 3 || parts.some(isNaN)) return String(iso || "");
+  return new Date(parts[0], parts[1] - 1, parts[2]).toLocaleDateString(
+    undefined, { day: "numeric", month: "long", year: "numeric" });
+}
+
+// No version number is shown, because there isn't an honest one: nothing in
+// the sandbox keeps one up to date. What is shown instead is the identifier
+// and date of the last change to the code, which cannot drift because they
+// are the thing itself.
+function drawTheVersion(version) {
+  const line = updatePart("version");
+  if (!version) { line.textContent = ""; line.hidden = true; return; }
+  line.hidden = false;
+  line.textContent = "You have the version from " + readableDate(version.date)
+    + " (" + version.sha + ").";
+}
+
+function drawWhatWasFound(found) {
+  drawTheVersion(found.current);
+
+  if (found.checked_at === null || found.checked_at === undefined) {
+    updatePart("summary").textContent = "Looking for a newer version…";
+    showOnly(["summary"]);
+    showUpdateButtons(["check"]);
+    return;
+  }
+
+  if (found.blocked) {
+    updatePart("blocked").textContent = found.blocked;
+    showOnly(["blocked"]);
+    // No button: nothing here is fixed by pressing something. Every one of
+    // these needs doing somewhere else first.
+    showUpdateButtons([]);
+    return;
+  }
+
+  if (found.offline) {
+    updatePart("error").textContent = found.offline;
+    showOnly(["error"]);
+    showUpdateButtons(["check"]);
+    return;
+  }
+
+  if (!found.behind) {
+    updatePart("summary").textContent = "This is the latest version.";
+    showOnly(["summary"]);
+    showUpdateButtons(["check"]);
+    return;
+  }
+
+  const many = found.behind === 1 ? "1 change has" : found.behind + " changes have";
+  updatePart("summary").textContent =
+    many + " been published since this version"
+    + (found.latest ? ", the most recent on " + readableDate(found.latest.date) : "")
+    + ".";
+
+  const warnings = [];
+  if (found.requirements_changing) {
+    warnings.push("This update also needs new software installed, so it may "
+                  + "take a few minutes.");
+  }
+  if (found.defaults_changing) {
+    warnings.push("It changes some of the sandbox's built-in default settings. "
+                  + "Anything you have set yourself still wins over those.");
+  }
+  updatePart("warnings").textContent = warnings.join(" ");
+
+  const list = updatePart("changes");
+  list.replaceChildren();
+  (found.changes || []).forEach(summary => {
+    const item = document.createElement("li");
+    // textContent, never innerHTML: this is text written in another
+    // repository and fetched over the network.
+    item.textContent = summary;
+    list.appendChild(item);
+  });
+
+  const parts = ["summary"];
+  if (warnings.length) parts.push("warnings");
+  if (list.childElementCount) parts.push("changes-box");
+  showOnly(parts);
+  showUpdateButtons(["check", "apply"]);
+}
+
+async function askAboutUpdates(lookAgain) {
+  try {
+    const found = lookAgain
+      ? await api("/api/updates/check", { method: "POST" })
+      : await api("/api/updates");
+    drawWhatWasFound(found);
+  } catch (e) {
+    updatePart("error").textContent = readableError(e);
+    showOnly(["error"]);
+    showUpdateButtons(["check"]);
+  }
+}
+
+// Reads the stream the server sends while it works: any number of "progress"
+// events and then exactly one "done" or "error". Written with fetch and a
+// reader rather than EventSource, which can only ask with GET.
+async function runTheUpdate() {
+  showOnly(["progress"]);
+  showUpdateButtons([]);
+  updatePart("progress-fill").style.width = "0%";
+  updatePart("step").textContent = "Starting…";
+
+  let resp;
+  try {
+    resp = await fetch("/api/updates/apply", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+    });
+  } catch (e) {
+    return updateWentWrong(readableError(e), {});
+  }
+  if (!resp.ok) {
+    return updateWentWrong(readableError(new Error(await resp.text())), {});
+  }
+
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  for (;;) {
+    const chunk = await reader.read();
+    if (chunk.done) break;
+    buffer += decoder.decode(chunk.value, { stream: true });
+    // An event ends at a blank line. Whatever is after the last one is the
+    // beginning of the next and is kept for the following chunk.
+    const events = buffer.split("\n\n");
+    buffer = events.pop();
+    for (const event of events) {
+      for (const line of event.split("\n")) {
+        if (line.startsWith("data: ")) handleUpdateEvent(JSON.parse(line.slice(6)));
+      }
+    }
+  }
+}
+
+function handleUpdateEvent(event) {
+  if (event.type === "progress") {
+    const share = Math.round((event.step / event.total) * 100);
+    updatePart("progress-fill").style.width = share + "%";
+    updatePart("step").textContent = event.label + "…";
+    return;
+  }
+  if (event.type === "error") {
+    return updateWentWrong(event.message, event);
+  }
+  // Done. The server replaces itself a moment after sending this, so the last
+  // thing to do here is start waiting for it to answer again.
+  updatePart("progress-fill").style.width = "100%";
+  updatePart("step").textContent =
+    "Updated to " + event.now + ". Restarting the sandbox…";
+  try { sessionStorage.setItem(WHAT_IT_WAS, event.was); } catch (e) { /* fine */ }
+  waitForTheSandboxToComeBack(function (said) {
+    updatePart("step").textContent = said;
+  });
+}
+
+function updateWentWrong(message, event) {
+  updatePart("error").textContent = event.can_retry
+    ? "The new files are in place, but the extra software the new version "
+      + "needs could not be installed, so the sandbox has not been restarted "
+      + "and is still working as it was. Installing usually fails for a "
+      + "passing reason, so trying again is worth doing first. Closing this "
+      + "window and running `python3 start.py` would also finish the job."
+    : message;
+  const shown = ["error"];
+  if (event.can_retry) {
+    updatePart("said").textContent = message;
+    shown.push("said");
+  }
+  showOnly(shown);
+  updatePart("undo").dataset.was = event.was || "";
+  showUpdateButtons(event.can_retry ? ["retry", "undo"] : ["check"]);
+}
+
+// Only ever reached from the button offered after an update stopped partway,
+// and only because somebody chose it over trying again.
+async function putTheFilesBack(was) {
+  showUpdateButtons([]);
+  updatePart("step").textContent = "Putting the files back…";
+  showOnly(["progress"]);
+  try {
+    await api("/api/updates/undo", {
+      method: "POST", body: JSON.stringify({ was: was }),
+    });
+  } catch (e) {
+    updatePart("error").textContent = readableError(e);
+    showOnly(["error"]);
+    showUpdateButtons(["retry", "undo"]);
+    return;
+  }
+  await askAboutUpdates(false);
+}
+
+// An update ends by replacing the running sandbox with a fresh one. If that
+// does not happen — it is logged and carried on from, rather than being fatal
+// — the page comes back looking exactly as if nothing had been updated, which
+// is the one outcome nobody could work out for themselves.
+function checkTheRestartHappened(version) {
+  let before = null;
+  try {
+    before = sessionStorage.getItem(WHAT_IT_WAS);
+    sessionStorage.removeItem(WHAT_IT_WAS);
+  } catch (e) { return; }
+  if (!before || !version || version.sha !== before) return;
+  updatePart("error").textContent =
+    "The new files were put in place, but the sandbox did not restart into "
+    + "them, so it is still running the version it was. Close this window and "
+    + "run `python3 start.py` again.";
+  updatePart("error").hidden = false;
+}
+
+function startUpdates(data) {
+  const card = document.getElementById("section-update");
+  // Taken off the page rather than hidden, because showTab() decides what is
+  // hidden every time a tab is chosen and would put it back. Reaching the
+  // sandbox from another computer is the case: the server refuses to update
+  // itself for a browser that is not on it, so showing the card would be
+  // showing a button that cannot work. See _require_updating_from_this_computer.
+  if (!data.same_computer) { card.remove(); return; }
+  // Arrived at by name, from the sidebar button or the notice on the chat
+  // page. Both of those are about this card specifically, so opening on
+  // whichever tab was last used would be answering a different question.
+  if (location.hash === "#update") {
+    showTab("system");
+    card.scrollIntoView({ block: "start" });
+  }
+  drawTheVersion(data.version);
+  checkTheRestartHappened(data.version);
+  askAboutUpdates(false);
+}
+
+document.getElementById("update-check").addEventListener("click", async (e) => {
+  e.target.disabled = true;
+  e.target.textContent = "Looking…";
+  try {
+    await askAboutUpdates(true);
+  } finally {
+    e.target.disabled = false;
+    e.target.textContent = "Check for updates";
+  }
+});
+document.getElementById("update-apply").addEventListener("click", runTheUpdate);
+document.getElementById("update-retry").addEventListener("click", runTheUpdate);
+document.getElementById("update-undo").addEventListener("click", (e) => {
+  putTheFilesBack(e.target.dataset.was || "");
+});
+
 async function loadSettings() {
   const data = await api("/api/settings");
   applyOrder(data.order);
@@ -1059,6 +1403,7 @@ async function loadSettings() {
   renderShared(data);
   renderSourceId(data);
   renderModelProfessors(data);
+  startUpdates(data);
   renderFolderChoices(await api("/api/settings/conversation-folder"));
   // Fetched separately, and not awaited with the rest: the catalog is read
   // from disk per model and this section is far down the page. Letting it
@@ -1075,12 +1420,7 @@ document.getElementById("back-link").addEventListener("click", (ev) => {
   ev.preventDefault();
   window.top.location.href = "/";
 });
-document.getElementById("lock-btn").addEventListener("click", async () => {
-  await fetch("/lock", { method: "POST" });
-  // window.top, not window — this needs to break out of the modal iframe
-  // and lock/redirect the whole app, not just the embedded settings page.
-  window.top.location.href = "/";
-});
+document.getElementById("quit-btn").addEventListener("click", quitTheSandbox);
 
 loadSettings().catch(e => alert("Error loading settings: " + readableError(e)));
 </script>

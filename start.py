@@ -12,6 +12,18 @@ then starts the web interface in that same window. Nothing to configure
 beforehand, and no questions asked in this window: everything this file
 starts is answered in the browser.
 
+The first time it runs, it also puts an icon for the sandbox on the Desktop.
+Double-clicking that opens the sandbox with no terminal window at all: a page
+saying it is starting appears in the browser, and turns into the sandbox when
+it is ready. Each double-click starts a fresh copy — stopping the one already
+running, if there is one — because starting is when the sandbox looks for a
+newer version. The Quit button in the sandbox stops it. (`start.py --launch`
+is what the icon runs; `start.py --make-shortcut` makes the icon again.)
+
+This file does the part every copy needs: finding a Python and installing the
+sandbox's software. Opening the browser, the loading page and the icon belong
+to the web interface, and live in its folder, plugins/webui/launcher/.
+
 The command line can do all of it too (``python main.py settings setup``,
 ``settings add-professor``, and the rest), and someone who prefers that is
 free to use it. This file is the other way in, and it doesn't ask which
@@ -28,7 +40,6 @@ import hashlib
 import os
 import subprocess
 import sys
-import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 VENV_DIR = os.path.join(HERE, ".venv")
@@ -40,9 +51,21 @@ STAMP = os.path.join(VENV_DIR, ".requirements-stamp")
 MINIMUM = (3, 11)
 MINIMUM_TEXT = "3.11"
 
+# Extra settings for every program this file starts. Empty in a terminal.
+# Started from the icon on Windows, it holds the flag that stops each of them
+# opening a black window of its own — see run_hidden() in the web interface's
+# launcher.
+WINDOWLESS = {}
+
 
 def say(message):
-    """Print a line and flush it, so progress appears as it happens."""
+    """Print a line and flush it, so progress appears as it happens.
+
+    Started from its icon on Windows, there is nowhere to print to at all
+    (``pythonw`` has no window), and saying nothing beats stopping over it.
+    """
+    if sys.stdout is None:
+        return
     sys.stdout.write(message + "\n")
     sys.stdout.flush()
 
@@ -225,7 +248,7 @@ def version_of(python):
     try:
         out = subprocess.check_output(
             [python, "-c", "import sys; print('%d %d' % sys.version_info[:2])"],
-            stderr=subprocess.STDOUT,
+            stderr=subprocess.STDOUT, **WINDOWLESS
         )
     except (OSError, subprocess.CalledProcessError):
         return None
@@ -323,7 +346,7 @@ def build_environment(python):
     if not os.path.exists(venv_python()):
         say("Setting up a private space for the sandbox's software...")
         try:
-            subprocess.check_call([python, "-m", "venv", VENV_DIR])
+            subprocess.check_call([python, "-m", "venv", VENV_DIR], **WINDOWLESS)
         except (OSError, subprocess.CalledProcessError):
             say("")
             say("Could not create that space in:")
@@ -333,13 +356,15 @@ def build_environment(python):
 
     try:
         subprocess.check_call(
-            [venv_python(), "-m", "pip", "install", "--upgrade", "pip", "--quiet"]
+            [venv_python(), "-m", "pip", "install", "--upgrade", "pip", "--quiet"],
+            **WINDOWLESS
         )
         # Not quiet: this is the long step, and silence for several minutes
         # reads as a hang. Watching package names go by is the difference
         # between "it's working" and "something's broken".
         subprocess.check_call(
-            [venv_python(), "-m", "pip", "install", "-r", REQUIREMENTS]
+            [venv_python(), "-m", "pip", "install", "-r", REQUIREMENTS],
+            **WINDOWLESS
         )
     except (OSError, subprocess.CalledProcessError):
         say("")
@@ -383,7 +408,8 @@ def has_the_web_interface(sandbox):
         return True
     try:
         return subprocess.call([venv_python(), sandbox, "webui", "--help"],
-                               cwd=HERE, stdout=quiet, stderr=quiet) == 0
+                               cwd=HERE, stdout=quiet, stderr=quiet,
+                               **WINDOWLESS) == 0
     except (OSError, subprocess.CalledProcessError):
         return False
     finally:
@@ -438,30 +464,44 @@ def is_set_up(sandbox):
         [venv_python(), "-c",
          "import sys; from src import paths; "
          "sys.exit(0 if paths.is_installed() else 1)"],
-        cwd=HERE,
+        cwd=HERE, **WINDOWLESS
     ) == 0
 
 
-def open_browser_shortly(url):
-    """Open *url* in the browser a moment from now, in the background.
+# ── Handing over to the web interface ──────────────────────────────────────
+#
+# Everything past installing — the loading page, the icon, stopping a copy
+# already running, starting with no window — belongs to the web interface,
+# and lives in its plugin folder (plugins/webui/launcher/launcher.py). It is
+# loaded from there by its path, as a plain file: it can't be imported the
+# usual way, because this runs on whatever Python the computer has, before
+# the sandbox's software is installed.
 
-    The web interface has to be running before the browser asks for it, and
-    starting it is the last thing this file does — so the wait happens in a
-    separate thread while the server takes over this one.
+LAUNCHER = os.path.join(HERE, "plugins", "webui", "launcher", "launcher.py")
+
+
+def the_web_interfaces_launcher():
+    """Load the web interface's launcher and hand it this file.
+
+    Returns:
+        The launcher module, or None if this copy doesn't have one — the web
+        interface has been removed.
     """
-    import threading
-    import webbrowser
+    if not os.path.exists(LAUNCHER):
+        return None
+    import importlib.util
 
-    def wait_then_open():
-        time.sleep(2.0)
-        webbrowser.open(url)
-
-    thread = threading.Thread(target=wait_then_open)
-    thread.daemon = True
-    thread.start()
+    spec = importlib.util.spec_from_file_location("_pu_webui_launcher", LAUNCHER)
+    if spec is None or spec.loader is None:
+        return None
+    launcher = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(launcher)
+    launcher.attach(sys.modules[__name__])
+    return launcher
 
 
 def main():
+    """Set up and open the sandbox from a terminal window — `python3 start.py`."""
     say("")
     say("Princeton University AI Sandbox")
     say("=" * 60)
@@ -493,42 +533,40 @@ def main():
     # browser, and a copy with the web interface removed has none.
     if not has_the_web_interface(sandbox):
         return finish_without_the_web_interface(sandbox)
+    launcher = the_web_interfaces_launcher()
+    if launcher is None:
+        return finish_without_the_web_interface(sandbox)
+    return launcher.open_from_a_terminal()
 
-    url = "http://127.0.0.1:8000"
-    # First-time setup, but only if this copy has never been used.
-    needs_setup = not is_set_up(sandbox)
-    if needs_setup:
-        # Setup runs as its own step, on the same address the web interface
-        # will use afterwards, and it stops as soon as it has an answer. The
-        # browser opened here lands on the setup page and follows itself to
-        # the sandbox once the answer is in, so nobody has to find a second
-        # window. Answering the same questions at the command line instead
-        # is still there — `python main.py settings setup` — but this file
-        # is the route for someone who just wants to open the sandbox.
-        say("")
-        say("Setup will continue in your browser. Please have your API key ready.")
-        say("")
-        open_browser_shortly(url)
-        setup = subprocess.call([venv_python(), sandbox, "webui", "setup"])
-        if setup != 0:
-            return setup
 
-    say("")
-    if needs_setup:
-        # Setup already opened a window, and its last page moves itself here.
-        say("Starting the web interface. The setup page will move to it.")
-    else:
-        say("Starting the web interface. It will open in your browser.")
-        open_browser_shortly(url)
-    say("Leave this window open while you use it; close it or press Ctrl-C to stop.")
-    say("")
-    try:
-        return subprocess.call([venv_python(), sandbox, "webui", "serve"])
-    except KeyboardInterrupt:
-        say("")
-        say("Stopped.")
+USAGE = """Usage: python3 start.py [--make-shortcut]
+
+  (nothing)         Set the sandbox up if it needs it, then open it.
+  --make-shortcut   Put the sandbox's icon on your Desktop again, e.g. after
+                    moving this folder.
+
+The icon itself runs `start.py --launch`, which you don't need to type."""
+
+
+def entry(arguments):
+    """Choose what to do from the words after `start.py`."""
+    if not arguments:
+        return main()
+    if arguments in (["-h"], ["--help"]):
+        say(USAGE)
         return 0
+    if arguments == ["--make-shortcut"] and not has_the_web_interface(
+            os.path.join(HERE, "main.py")):
+        say("The icon opens the web interface, which isn't installed in this")
+        say("copy (or hasn't been set up yet: run `python3 start.py` first).")
+        return 1
+    launcher = the_web_interfaces_launcher()
+    answer = launcher.entry(arguments) if launcher is not None else None
+    if answer is None:
+        say(USAGE)
+        return 2
+    return answer
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(entry(sys.argv[1:]))

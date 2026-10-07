@@ -17,7 +17,9 @@ from plugins.webui.src.conversation import (  # noqa: E402
     Conversation,
     ConversationStore,
     Message,
+    conversation_summary,
     new_conversation_id,
+    reply_model_name,
 )
 
 
@@ -339,6 +341,58 @@ class TestConversationStore:
 
         listed = store.list_conversations()
         assert [c["title"] for c in listed] == ["Second", "First"]
+
+    def test_listing_names_every_model_a_conversation_involved(self, store):
+        # The spending sidebar lists the name a reply came back under, which
+        # can carry a date the requested name lacks; a filter started there
+        # has to find the conversation by either.
+        conv = store.create(model="gpt-4o", title="Mixed")
+        conv.messages += [
+            Message(role="user", content="q", timestamp="t"),
+            Message(role="assistant", content="a", timestamp="t", model="gpt-4o-2024-08-06"),
+            Message(role="assistant", content="b", timestamp="t", model="gpt-4o-2024-08-06"),
+            Message(role="assistant", content="c", timestamp="t", model="gpt-4o"),
+        ]
+        store.save(conv)
+        (listed,) = store.list_conversations()
+        assert listed["models"] == ["gpt-4o", "gpt-4o-2024-08-06"]
+
+    def test_listing_totals_cost_and_tokens_of_priced_replies_only(self, store):
+        conv = store.create(model="gpt-4o")
+        conv.messages += [
+            Message(role="assistant", content="a", timestamp="t",
+                    prompt_tokens=10, completion_tokens=5, cost=0.25),
+            Message(role="assistant", content="b", timestamp="t",
+                    prompt_tokens=3, completion_tokens=2, cost=0.5),
+            # No cost recorded: counted in neither total, as in the bar above
+            # an open conversation.
+            Message(role="assistant", content="c", timestamp="t",
+                    prompt_tokens=1000, completion_tokens=1000),
+        ]
+        store.save(conv)
+        (listed,) = store.list_conversations()
+        assert listed["cost"] == 0.75
+        assert listed["tokens"] == 20
+
+    def test_listing_says_whether_a_document_job_ran(self, store):
+        chat = store.create(model="gpt-4o", title="Chat")
+        chat.messages.append(Message(role="user", content="hi", timestamp="t"))
+        store.save(chat)
+        job = store.create(model="gpt-4o", title="Job")
+        job.messages.append(Message(role="assistant", content="done", timestamp="t",
+                                    kind="job_result"))
+        store.save(job)
+        by_title = {c["title"]: c for c in store.list_conversations()}
+        assert by_title["Chat"]["has_job"] is False
+        assert by_title["Job"]["has_job"] is True
+
+    def test_listing_of_an_empty_conversation(self, store):
+        store.create(model="", title="Blank")
+        (listed,) = store.list_conversations()
+        assert listed["models"] == []
+        assert listed["cost"] == 0
+        assert listed["tokens"] == 0
+        assert listed["has_job"] is False
 
     def test_delete_existing_returns_true(self, store):
         conv = store.create(model="gpt-4o")
@@ -1012,3 +1066,52 @@ class TestACopyASyncServiceSetAside:
         with pytest.raises(OSError):
             store.load(cid)
         assert copy.exists(), "the only copy of those messages was removed"
+
+
+class TestARepliesModelOnAnEndpoint:
+    """One model, one name, whichever end of the conversation names it."""
+
+    @pytest.fixture(autouse=True)
+    def _an_endpoint(self, monkeypatch):
+        from src import settings
+
+        monkeypatch.setattr(settings, "ENDPOINTS", {"my_mac": {}})
+
+    def test_the_endpoint_is_put_in_front(self):
+        assert reply_model_name("my_mac:qwen3.8:27b-mlx", "qwen3.8:27b-mlx") == \
+            "my_mac:qwen3.8:27b-mlx"
+
+    def test_whatever_name_the_endpoint_answers_under(self):
+        """It may answer under a fuller name than the one asked for."""
+        assert reply_model_name("my_mac:qwen3.8", "qwen3.8:27b-mlx") == "my_mac:qwen3.8:27b-mlx"
+
+    def test_not_twice(self):
+        assert reply_model_name("my_mac:m", "my_mac:m") == "my_mac:m"
+
+    def test_a_sandbox_model_is_left_alone(self):
+        assert reply_model_name("gpt-4o", "gpt-4o-2024-08-06") == "gpt-4o-2024-08-06"
+
+    def test_a_colon_is_not_an_endpoint_unless_one_is_set_up(self):
+        """Ollama's own names have colons in them."""
+        assert reply_model_name("qwen3.8:27b", "qwen3.8:27b") == "qwen3.8:27b"
+
+
+class TestRepliesSavedBeforeTheyCarriedTheirEndpoint:
+    """Conversations already on disk, read the way new ones are written."""
+
+    def _models(self, conversation_model, *replies):
+        data = {"model": conversation_model,
+                "messages": [{"role": "assistant", "model": r} for r in replies]}
+        return conversation_summary(data, "c_0")["models"]
+
+    def test_a_reply_named_as_the_model_part_is_the_same_model(self):
+        """Even with the endpoint gone from the settings: nothing else then
+        says where the model ran."""
+        assert self._models("my_mac_studio:qwen3.8:27b-mlx", "qwen3.8:27b-mlx") == \
+            ["my_mac_studio:qwen3.8:27b-mlx"]
+
+    def test_anything_less_certain_is_left_as_it_was_saved(self):
+        """An earlier reply may have come from a model the conversation was
+        on before it moved to the endpoint."""
+        assert self._models("my_mac:qwen3.8:27b-mlx", "gpt-4o-2024-08-06") == \
+            ["gpt-4o-2024-08-06", "my_mac:qwen3.8:27b-mlx"]

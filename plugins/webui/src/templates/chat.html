@@ -124,6 +124,17 @@
   .conv-item:hover .conv-menu-btn, .conv-item:focus-within .conv-menu-btn,
   .conv-menu-btn:focus-visible, .conv-menu-btn.menu-open { opacity: 1; }
   .conv-menu-btn:hover { background: var(--border); }
+  /* The filter sits beside the plus rather than in a bar of its own: it is
+     used now and then, and the list is what the column is for. Grey while it
+     does nothing and orange while it narrows or reorders the list, so a list
+     that looks short says why. The cross beside it appears only then, and
+     puts the whole list back in one click. */
+  .section-actions { display: flex; align-items: center; gap: 0.2rem; }
+  #conv-filter, #conv-filter-clear { width: 28px; height: 28px; }
+  #conv-filter svg { width: 17px; height: 17px; }
+  #conv-filter-clear svg { width: 14px; height: 14px; }
+  #conv-filter[aria-pressed="true"] { color: var(--orange); }
+  .conv-empty { font-size: var(--text-sm); color: var(--text-muted); padding: 0.5rem; line-height: 1.4; }
   /* Square, because the drawing is a wide row of dots that gets turned upright:
      the old 3x13 box was shaped for a drawing that was already vertical, and
      would shrink this one to almost nothing before rotating it. */
@@ -182,12 +193,38 @@
   }
   .icon-btn:hover { background: var(--hover-bg); }
   .icon-btn.neutral { color: var(--text-muted); }
+  /* An element's own display beats the hidden attribute, so anything that
+     sets one has to say again that hidden means hidden. Once here for every
+     icon button, rather than once for each of the ones that come and go. */
+  .icon-btn[hidden] { display: none; }
   .icon-btn svg { width: 18px; height: 18px; display: block; }
   /* The three dots are drawn in a row; the button wants them in a column. */
   .icon-upright { transform: rotate(90deg); }
   /* A cross is a plus turned half a right angle. Scaled by the same amount its
      corners gain, so it takes up no more room than the icons beside it. */
   .icon-as-cross { transform: rotate(45deg) scale(0.707); }
+  /* The marker on the Updates button. Position rather than a second icon, so
+     the button itself stays the same size as the two beside it. */
+  #updates-btn { position: relative; }
+  .update-dot {
+    position: absolute; top: 5px; right: 5px; width: 7px; height: 7px;
+    border-radius: var(--radius-pill); background: var(--orange);
+    border: 1.5px solid var(--panel-bg);
+  }
+  /* The notice above the transcript. Deliberately a line of text and not a
+     banner: it is worth knowing and it is not urgent. */
+  #update-notice {
+    display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap;
+    padding: var(--space-2) var(--space-4); font-size: var(--text-sm);
+    color: var(--text-muted); border-bottom: 1px solid var(--border);
+    background: var(--orange-tint);
+  }
+  #update-notice[hidden] { display: none; }
+  .link-btn {
+    background: none; border: none; padding: 0; color: var(--link);
+    font-size: inherit; text-decoration: underline; width: auto; height: auto;
+  }
+  .link-btn:hover { background: none; color: var(--orange-hover); }
   .sidebar-footer .icon-btn { width: 36px; height: 36px; }
   .sidebar-footer .icon-btn svg { width: 17px; height: 17px; }
   .conv-menu-divider { height: 1px; background: var(--border-raised); margin: 0.3rem 0.2rem; }
@@ -527,6 +564,17 @@
   .spend-figure { font-size: var(--text-xxl); font-weight: 600; }
   .spend-label { font-size: var(--text-xs); color: var(--text-muted); }
   .spend-row { display: flex; justify-content: space-between; font-size: var(--text-md); padding: 0.2rem 0; }
+  /* A model's name here also filters the conversation list to that model. It
+     is a small extra, not what anyone opens this panel for, so it reads as
+     plain text until the pointer or the keyboard reaches it — then it lights
+     up the way the conversation title above the message box does, and its
+     tooltip says what a click will do. The negative margin cancels the
+     padding the highlight needs, so the name stays level with the column. */
+  .spend-model-filter {
+    min-width: 0; overflow-wrap: anywhere; cursor: pointer;
+    padding: 0 0.3rem; margin-left: -0.3rem; border-radius: var(--radius-sm);
+  }
+  .spend-model-filter:hover, .spend-model-filter:focus-visible { background: var(--hover-bg); }
   /* Instructions run long — a sentence at least, sometimes a paragraph — so
      the box grows to fit what is in it and can be dragged taller still. The
      three settings above it are numbers and stay single-line. */
@@ -614,6 +662,46 @@
     padding: 0.7rem 1rem; border-top: 1px solid var(--border);
   }
   #adjust-measured { color: var(--text-muted); }
+  /* Each kind of filter is a section, headed and spaced like a section of a
+     settings card, so the two read as one interface. The ones made of
+     choices are fieldsets, so a screen reader announces the heading with
+     each choice; the frame a fieldset draws by default is taken off, and the
+     legend is dressed as the heading beside it. */
+  .filter-section { border: none; padding: 0; margin: 0; min-width: 0; }
+  .filter-section + .filter-section { margin-top: var(--space-6); }
+  .filter-section > legend, .filter-section > h3 {
+    padding: 0; margin: 0 0 0.25rem; font-size: var(--text-md); font-weight: 600;
+  }
+  .filter-section > .hint { margin-bottom: 0.4rem; }
+  .filter-options { display: flex; flex-wrap: wrap; gap: 0.3rem 1rem; }
+  /* The models are the one part that grows without limit as a catalog does,
+     so they scroll inside the box instead of pushing everything below them
+     out of reach. Framed like a field, because that is what it is. */
+  .filter-scroll {
+    max-height: 11rem; overflow-y: auto;
+    border: 1px solid var(--border); border-radius: var(--radius-md);
+    background: var(--input-bg); padding: var(--space-2);
+  }
+  /* Where the models ran, then whose they are, then the models, each level
+     indented under the one before, so the eye can skip a whole service or a
+     whole company at a time. */
+  .filter-service + .filter-service {
+    margin-top: var(--space-3); padding-top: var(--space-3);
+    border-top: 1px solid var(--border);
+  }
+  .filter-service-companies { margin-left: 1.4rem; }
+  .filter-company { margin-top: var(--space-2); }
+  /* Named through the row as well, because .job-field-checkbox label sets
+     the weight back to normal further down this file and would otherwise
+     win the tie by being later. */
+  .job-field-checkbox .filter-service-box + label { font-weight: 600; font-size: var(--text-md); }
+  .job-field-checkbox .filter-company-box + label { font-weight: 600; }
+  .filter-company-models {
+    display: flex; flex-wrap: wrap; gap: 0.3rem 1rem; margin-left: 1.4rem;
+  }
+  #filter-models-none { margin: 0.4rem 0 0; }
+  #filter-error[hidden], #filter-models-none[hidden] { display: none; }
+  .filter-clear-all { margin-right: auto; }
   #adjust-error[hidden], #adjust-preview:empty { display: none; }
   #settings-iframe { flex: 1; border: none; width: 100%; background: var(--panel-bg); }
 
@@ -853,9 +941,19 @@
 
     <div class="section-header">
       <h2>Conversations</h2>
-      <button id="new-conv" class="plus-btn" title="New conversation" aria-label="New conversation">
-        <svg viewBox="0 0 23.3203 22.959"><path d="M3.79883 22.959L19.1504 22.959C21.6797 22.959 22.959 21.6797 22.959 19.1992L22.959 3.76953C22.959 1.2793 21.6797 0 19.1504 0L3.79883 0C1.2793 0 0 1.26953 0 3.76953L0 19.1992C0 21.6992 1.2793 22.959 3.79883 22.959Z" fill="none" class="plus-plate"/><path d="M12.4121 16.4258L12.4121 6.49414C12.4121 5.92773 12.0312 5.53711 11.4648 5.53711C10.9375 5.53711 10.5566 5.9375 10.5566 6.49414L10.5566 16.4258C10.5566 16.9727 10.9375 17.373 11.4648 17.373C12.0312 17.373 12.4121 16.9824 12.4121 16.4258ZM6.52344 12.3828L16.4648 12.3828C17.002 12.3828 17.4023 12.0117 17.4023 11.4746C17.4023 10.9082 17.0117 10.5273 16.4648 10.5273L6.52344 10.5273C5.95703 10.5273 5.56641 10.9082 5.56641 11.4746C5.56641 12.0117 5.9668 12.3828 6.52344 12.3828Z" fill="currentColor"/></svg>
-      </button>
+      <div class="section-actions">
+        <button type="button" id="conv-filter-clear" class="icon-btn neutral"
+                title="Clear the filter" aria-label="Clear the filter" hidden>
+          {{ icons.plus("icon-as-cross") }}
+        </button>
+        <button type="button" id="conv-filter" class="icon-btn neutral" aria-pressed="false"
+                title="Filter conversations" aria-label="Filter conversations">
+          <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.6 3.4h12.8l-4.9 5.9v4.6l-3 1.7V9.3z"/></svg>
+        </button>
+        <button id="new-conv" class="plus-btn" title="New conversation" aria-label="New conversation">
+          <svg viewBox="0 0 23.3203 22.959"><path d="M3.79883 22.959L19.1504 22.959C21.6797 22.959 22.959 21.6797 22.959 19.1992L22.959 3.76953C22.959 1.2793 21.6797 0 19.1504 0L3.79883 0C1.2793 0 0 1.26953 0 3.76953L0 19.1992C0 21.6992 1.2793 22.959 3.79883 22.959Z" fill="none" class="plus-plate"/><path d="M12.4121 16.4258L12.4121 6.49414C12.4121 5.92773 12.0312 5.53711 11.4648 5.53711C10.9375 5.53711 10.5566 5.9375 10.5566 6.49414L10.5566 16.4258C10.5566 16.9727 10.9375 17.373 11.4648 17.373C12.0312 17.373 12.4121 16.9824 12.4121 16.4258ZM6.52344 12.3828L16.4648 12.3828C17.002 12.3828 17.4023 12.0117 17.4023 11.4746C17.4023 10.9082 17.0117 10.5273 16.4648 10.5273L6.52344 10.5273C5.95703 10.5273 5.56641 10.9082 5.56641 11.4746C5.56641 12.0117 5.9668 12.3828 6.52344 12.3828Z" fill="currentColor"/></svg>
+        </button>
+      </div>
     </div>
     <div id="conv-list"></div>
 
@@ -867,8 +965,19 @@
              knobs) to stay unambiguous next to the theme toggle. -->
         <svg viewBox="0 0 25.4785 21.2793"><path d="M17.207 21.2793C18.8086 21.2793 20.1172 19.9707 20.1172 18.3691C20.1172 16.7773 18.8086 15.4688 17.207 15.4688C15.6152 15.4688 14.3066 16.7773 14.3066 18.3691C14.3066 19.9707 15.6152 21.2793 17.207 21.2793ZM17.207 19.8926C16.3574 19.8926 15.6934 19.2188 15.6934 18.3691C15.6934 17.5098 16.3574 16.8457 17.207 16.8457C18.0664 16.8457 18.7305 17.5098 18.7305 18.3691C18.7305 19.2188 18.0664 19.8926 17.207 19.8926ZM15.1953 17.5L0.869141 17.5C0.380859 17.5 0 17.8809 0 18.3691C0 18.8477 0.380859 19.2285 0.869141 19.2285L15.1953 19.2285ZM24.2871 17.5L19.3652 17.5L19.3652 19.2285L24.2871 19.2285C24.7363 19.2285 25.1172 18.8477 25.1172 18.3691C25.1172 17.8809 24.7363 17.5 24.2871 17.5ZM8.1543 13.5742C9.75586 13.5742 11.0645 12.2754 11.0645 10.6738C11.0645 9.07227 9.75586 7.76367 8.1543 7.76367C6.5625 7.76367 5.25391 9.07227 5.25391 10.6738C5.25391 12.2754 6.5625 13.5742 8.1543 13.5742ZM8.1543 12.1973C7.30469 12.1973 6.64062 11.5137 6.64062 10.6641C6.64062 9.80469 7.30469 9.14062 8.1543 9.14062C9.01367 9.14062 9.67773 9.80469 9.67773 10.6641C9.67773 11.5137 9.01367 12.1973 8.1543 12.1973ZM0.830078 9.80469C0.380859 9.80469 0 10.1855 0 10.6641C0 11.1523 0.380859 11.5332 0.830078 11.5332L6.02539 11.5332L6.02539 9.80469ZM24.248 9.80469L10.1758 9.80469L10.1758 11.5332L24.248 11.5332C24.7363 11.5332 25.1172 11.1523 25.1172 10.6641C25.1172 10.1855 24.7363 9.80469 24.248 9.80469ZM17.207 5.85938C18.8086 5.85938 20.1172 4.55078 20.1172 2.94922C20.1172 1.35742 18.8086 0.0488281 17.207 0.0488281C15.6152 0.0488281 14.3066 1.35742 14.3066 2.94922C14.3066 4.55078 15.6152 5.85938 17.207 5.85938ZM17.207 4.47266C16.3574 4.47266 15.6934 3.79883 15.6934 2.94922C15.6934 2.08984 16.3574 1.42578 17.207 1.42578C18.0664 1.42578 18.7305 2.08984 18.7305 2.94922C18.7305 3.79883 18.0664 4.47266 17.207 4.47266ZM15.2246 2.09961L0.869141 2.09961C0.380859 2.09961 0 2.48047 0 2.96875C0 3.44727 0.380859 3.82812 0.869141 3.82812L15.2246 3.82812ZM24.2871 2.09961L19.2578 2.09961L19.2578 3.82812L24.2871 3.82812C24.7363 3.82812 25.1172 3.44727 25.1172 2.96875C25.1172 2.48047 24.7363 2.09961 24.2871 2.09961Z" fill="currentColor"/></svg>
       </button>
-      <button class="icon-btn neutral" id="lock-btn" title="Lock" aria-label="Lock">
-        <svg viewBox="0 0 17.5 25.2051"><path d="M2.73438 24.541L14.4043 24.541C16.1523 24.541 17.1387 23.5352 17.1387 21.6602L17.1387 12.7734C17.1387 10.8984 16.1523 9.89258 14.4043 9.89258L2.73438 9.89258C0.976562 9.89258 0 10.8984 0 12.7734L0 21.6602C0 23.5352 0.976562 24.541 2.73438 24.541ZM2.77344 22.9102C2.13867 22.9102 1.73828 22.4805 1.73828 21.7676L1.73828 12.6562C1.73828 11.9434 2.13867 11.5234 2.77344 11.5234L14.375 11.5234C15.0098 11.5234 15.3906 11.9434 15.3906 12.6562L15.3906 21.7676C15.3906 22.4805 15.0098 22.9102 14.375 22.9102ZM2.23633 10.7129L3.95508 10.7129L3.95508 6.72852C3.95508 3.47656 6.01562 1.63086 8.56445 1.63086C11.1133 1.63086 13.1934 3.47656 13.1934 6.72852L13.1934 10.7129L14.9121 10.7129L14.9121 6.92383C14.9121 2.38281 11.9434 0 8.56445 0C5.19531 0 2.23633 2.38281 2.23633 6.92383Z" fill="currentColor"/></svg>
+      <!-- Only drawn once the server says a newer version is waiting. There is
+           nothing useful to say the rest of the time, and a permanent button
+           for a thing that almost never happens is one more thing in the way
+           of the ones that do. The card in Settings is always there. -->
+      <button class="icon-btn neutral" id="updates-btn" hidden
+              title="An update is available" aria-label="An update is available">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.75 20.5 11.25 15.5 11.25 15.5 21.25 8.5 21.25 8.5 11.25 3.5 11.25Z" fill="currentColor"/></svg>
+        <span class="update-dot" aria-hidden="true"></span>
+      </button>
+      <!-- Quit, not Lock: the sandbox usually runs with no window of its own,
+           so this is the way to stop it. See quitTheSandbox() in _helpers.html. -->
+      <button class="icon-btn neutral" id="quit-btn" title="Quit the sandbox" aria-label="Quit the sandbox">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 1.75A1.125 1.125 0 0 1 13.125 2.875V10.875A1.125 1.125 0 0 1 10.875 10.875V2.875A1.125 1.125 0 0 1 12 1.75ZM18.187 5.627A9.625 9.625 0 1 1 5.813 5.627A1.125 1.125 0 0 1 7.259 7.351A7.375 7.375 0 1 0 16.741 7.351A1.125 1.125 0 0 1 18.187 5.627Z" fill="currentColor"/></svg>
       </button>
     </div>
   </nav>
@@ -947,6 +1056,14 @@
           </div>
         </div>
       </div>
+    </div>
+    <!-- Said once, quietly, and only when there is something to say. Somebody
+         who never opens Settings would otherwise never find out. -->
+    <div id="update-notice" hidden>
+      <span id="update-notice-words"></span>
+      <button type="button" class="link-btn" id="update-notice-open">Open Settings</button>
+      <button type="button" class="link-btn" id="update-notice-dismiss"
+              aria-label="Hide this until next time">Not now</button>
     </div>
     <div id="messages"><div class="empty">Select or start a conversation.</div></div>
     <!-- What is open, what it has cost, and the two things anyone does with a
@@ -1084,6 +1201,95 @@
        This is --dry-run made
        interactive: the right side re-renders after every change to a field
        on the left, without ever making a real API call. -->
+  <!-- Narrowing and ordering the conversation list. Every choice here is
+       combined with the others: a conversation is shown only if it matches
+       all of them, and a choice left empty narrows nothing. -->
+  <div id="filter-modal-backdrop" class="modal-backdrop" hidden>
+    <div class="modal-panel compact">
+      <div class="modal-header">
+        <h2 style="margin:0; text-transform:none; font-size:var(--text-lg); letter-spacing:normal;">
+          Filter conversations
+        </h2>
+        <button type="button" class="icon-btn" id="filter-modal-close" title="Close" aria-label="Close">
+          {{ icons.plus("icon-as-cross") }}
+        </button>
+      </div>
+      <div class="modal-body" id="filter-modal-body">
+        <div class="filter-section">
+          <h3>Title</h3>
+          <label for="filter-text">Contains these letters</label>
+          <input type="text" id="filter-text" autocomplete="off" placeholder="letter">
+        </div>
+
+        <fieldset class="filter-section">
+          <legend>Models</legend>
+          <div class="filter-scroll" id="filter-models"></div>
+          <p class="hint" id="filter-models-none">No conversation has used a model yet.</p>
+        </fieldset>
+
+        <fieldset class="filter-section">
+          <legend>Last used</legend>
+          <div class="filter-options" id="filter-ages">
+            <div class="job-field-checkbox"><input type="checkbox" id="filter-age-today" value="Today"><label for="filter-age-today">Today</label></div>
+            <div class="job-field-checkbox"><input type="checkbox" id="filter-age-week" value="This week"><label for="filter-age-week">This week</label></div>
+            <div class="job-field-checkbox"><input type="checkbox" id="filter-age-month" value="This month"><label for="filter-age-month">This month</label></div>
+            <div class="job-field-checkbox"><input type="checkbox" id="filter-age-older" value="Older"><label for="filter-age-older">Older</label></div>
+          </div>
+        </fieldset>
+
+        <fieldset class="filter-section">
+          <legend>Kind</legend>
+          <div class="filter-options">
+            <div class="job-field-checkbox"><input type="radio" name="filter-kind" id="filter-kind-all" value="all"><label for="filter-kind-all">All</label></div>
+            <div class="job-field-checkbox"><input type="radio" name="filter-kind" id="filter-kind-chat" value="chat"><label for="filter-kind-chat">Chats only</label></div>
+            <div class="job-field-checkbox"><input type="radio" name="filter-kind" id="filter-kind-job" value="job"><label for="filter-kind-job">With a document job</label></div>
+          </div>
+        </fieldset>
+
+        <div class="filter-section">
+          <h3>What it cost</h3>
+          <div class="inline-fields">
+            <div>
+              <label for="filter-cost-min">Dollars from</label>
+              <input type="text" id="filter-cost-min" inputmode="decimal" placeholder="0.00" autocomplete="off">
+            </div>
+            <div>
+              <label for="filter-cost-max">up to</label>
+              <input type="text" id="filter-cost-max" inputmode="decimal" placeholder="no limit" autocomplete="off">
+            </div>
+            <div>
+              <label for="filter-tokens-min">Tokens from</label>
+              <input type="text" id="filter-tokens-min" inputmode="numeric" placeholder="0" autocomplete="off">
+            </div>
+            <div>
+              <label for="filter-tokens-max">up to</label>
+              <input type="text" id="filter-tokens-max" inputmode="numeric" placeholder="no limit" autocomplete="off">
+            </div>
+          </div>
+        </div>
+
+        <div class="filter-section">
+          <h3>Order</h3>
+          <label for="filter-sort">Sort the list by</label>
+          <select id="filter-sort">
+            <option value="newest">Newest first</option>
+            <option value="oldest">Oldest first</option>
+            <option value="cost">Most expensive first</option>
+            <option value="tokens">Most tokens first</option>
+            <option value="title">Title, A to Z</option>
+          </select>
+        </div>
+
+        <p class="spend-warning" id="filter-error" hidden></p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="secondary filter-clear-all" id="filter-clear-all">Clear all</button>
+        <button type="button" class="secondary" id="filter-cancel">Cancel</button>
+        <button type="button" id="filter-apply">Show these</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Correcting a month to match the bill. Asks for the total rather than the
        difference, because the total is the number on the bill and the
        difference is arithmetic nobody should have to do. -->
@@ -1182,6 +1388,13 @@
 <script>
 const state = {
   professor: null, conversationId: null, conversationModel: null, conversationHasMessages: false,
+  // The list as the server last sent it, newest first, and what the filter
+  // button has narrowed and reordered it to. Kept apart so a change to the
+  // filter redraws the list without asking the server again.
+  conversations: [], filter: defaultFilter(), sort: "newest",
+  // Where each model in that list ran and who made it, as the server works
+  // it out, for grouping the filter's models by service and then company.
+  modelGroups: {},
   models: [], defaultModel: null,
   pluginActions: [], languages: null, jobPollTimer: null, jobLocked: false, activeAction: null,
   // The job modal's full field list for whichever action is open right now
@@ -1294,6 +1507,11 @@ async function chooseProfessor(netid, name) {
   state.professor = netid;
   await api("/api/active-professor", { method: "POST", body: JSON.stringify({ professor: netid }) });
   state.conversationId = null;
+  // Another person's list: a filter chosen for the last one would only hide
+  // things from them.
+  state.filter = defaultFilter();
+  state.sort = "newest";
+  updateFilterButton();
   await Promise.all([loadConversations(), loadUsage(), loadModels()]);
   renderMessages(null);
 }
@@ -2151,7 +2369,7 @@ document.getElementById("install-go").addEventListener("click", async () => {
       : "";
     busy.textContent = result.installed + " installed." + commands
       + " Restarting the sandbox so it can be used…";
-    waitForTheSandboxToComeBack();
+    waitForTheSandboxToComeBack(function (said) { busy.textContent = said; });
   } catch (e) {
     // textContent: git's own words come back in here, and they are words.
     error.textContent = readableError(e);
@@ -2160,42 +2378,6 @@ document.getElementById("install-go").addEventListener("click", async () => {
     button.disabled = false;
   }
 });
-
-// The sandbox restarts into the new plugin, so this page outlives the server
-// that sent it. How long that takes depends on the computer, so this asks
-// until it answers rather than guessing a number and reloading onto nothing.
-// The same wait the last page of setup does.
-//
-// It asks for "/", which answers whoever is asking. The first version asked
-// for /api/plugin-actions — the very thing it was waiting to see change —
-// and that endpoint requires an unlocked session. Restarting mints a new
-// session secret unless one is configured, so every session from before the
-// restart is void: the poll got 401 once a second, forever, and the page
-// never reloaded.
-const RESTART_PATIENCE_MS = 60000;
-
-function waitForTheSandboxToComeBack() {
-  const busy = document.getElementById("install-busy");
-  const gaveUpAt = Date.now() + RESTART_PATIENCE_MS;
-  setTimeout(function () {
-    (function ask() {
-      fetch("/", { method: "HEAD", cache: "no-store" })
-        .then(function () { location.reload(); })
-        .catch(function () {
-          // Only a failure to connect reaches here, which is what a server
-          // that is still starting looks like. Any answer at all, including
-          // one asking to unlock again, means it is back.
-          if (Date.now() > gaveUpAt) {
-            busy.textContent =
-              "The plugin was installed, but the sandbox is taking longer than "
-              + "expected to restart. Reload this page in a moment.";
-            return;
-          }
-          setTimeout(ask, 500);
-        });
-    })();
-  }, 1200);
-}
 
 document.getElementById("plugin-action-btn").addEventListener("click", (e) => {
   e.stopPropagation();
@@ -2858,6 +3040,10 @@ document.addEventListener("keydown", (e) => {
   }
   if (e.key === "Escape" && !document.getElementById("job-modal-backdrop").hidden) {
     closeJobModal();
+    return;
+  }
+  if (e.key === "Escape" && !document.getElementById("filter-modal-backdrop").hidden) {
+    closeFilterModal();
   }
 });
 closeWhenTheBackdropItselfIsClicked("job-modal-backdrop", closeJobModal);
@@ -3055,17 +3241,154 @@ function conversationAgeGroup(updatedAt) {
   return "Older";
 }
 
+// ── Filtering and sorting the conversation list ───────────────────────────
+// None of this is remembered past a reload. A filter left on and forgotten
+// would make conversations look lost, and a fresh page is the surest way back.
+
+// The filter that narrows nothing. Every empty choice here means "any".
+function defaultFilter() {
+  return {
+    models: new Set(), ages: new Set(), kind: "all", text: "",
+    costMin: null, costMax: null, tokensMin: null, tokensMax: null,
+  };
+}
+
+const SORT_LABELS = {
+  newest: "newest first", oldest: "oldest first", cost: "most expensive first",
+  tokens: "most tokens first", title: "title, A to Z",
+};
+
+// Whether the list is showing anything other than everything, newest first.
+// A different order counts: it changes what is at the top as surely as a
+// filter does, so it turns the button orange and the cross undoes it too.
+function filterIsActive() {
+  const f = state.filter;
+  return f.models.size > 0 || f.ages.size > 0 || f.kind !== "all" || f.text !== ""
+    || [f.costMin, f.costMax, f.tokensMin, f.tokensMax].some(v => v !== null)
+    || state.sort !== "newest";
+}
+
+function withinRange(value, min, max) {
+  return (min === null || value >= min) && (max === null || value <= max);
+}
+
+function describeRange(min, max, format) {
+  if (min !== null && max !== null) return `${format(min)}–${format(max)}`;
+  return min !== null ? `at least ${format(min)}` : `at most ${format(max)}`;
+}
+
+// The filter in a few words, for the button's tooltip, so what is hidden can
+// be read without opening anything.
+function describeFilter() {
+  const f = state.filter;
+  const parts = [];
+  if (f.models.size) parts.push(f.models.size <= 2 ? [...f.models].join(", ") : `${f.models.size} models`);
+  if (f.ages.size) parts.push([...f.ages].join(", "));
+  if (f.kind === "chat") parts.push("chats only");
+  if (f.kind === "job") parts.push("with a document job");
+  if (f.text) parts.push(`title contains “${f.text}”`);
+  if (f.costMin !== null || f.costMax !== null) parts.push(describeRange(f.costMin, f.costMax, fmtMoney));
+  if (f.tokensMin !== null || f.tokensMax !== null) {
+    parts.push(describeRange(f.tokensMin, f.tokensMax, n => n.toLocaleString()) + " tokens");
+  }
+  if (state.sort !== "newest") parts.push(SORT_LABELS[state.sort]);
+  return parts.join(" · ");
+}
+
+function conversationMatches(c) {
+  const f = state.filter;
+  // Any of the ticked models, not all of them: ticking two means "either".
+  if (f.models.size && !(c.models || []).some(m => f.models.has(m))) return false;
+  if (f.ages.size && !f.ages.has(conversationAgeGroup(c.updated_at))) return false;
+  if (f.kind === "chat" && c.has_job) return false;
+  if (f.kind === "job" && !c.has_job) return false;
+  if (f.text && !(c.title || "").toLowerCase().includes(f.text.toLowerCase())) return false;
+  return withinRange(c.cost || 0, f.costMin, f.costMax)
+    && withinRange(c.tokens || 0, f.tokensMin, f.tokensMax);
+}
+
+// Newest first is the server's own order and is left exactly as it came.
+// The others work on a copy; sorting is stable, so conversations that tie
+// stay newest first among themselves.
+function sortedConversations(list) {
+  const byTitle = (a, b) => (a.title || "").localeCompare(b.title || "", undefined, { sensitivity: "base" });
+  switch (state.sort) {
+    case "oldest": return list.slice().reverse();
+    case "cost": return list.slice().sort((a, b) => (b.cost || 0) - (a.cost || 0));
+    case "tokens": return list.slice().sort((a, b) => (b.tokens || 0) - (a.tokens || 0));
+    case "title": return list.slice().sort(byTitle);
+    default: return list;
+  }
+}
+
+function updateFilterButton() {
+  const button = document.getElementById("conv-filter");
+  const active = filterIsActive();
+  const label = active ? `Filtering: ${describeFilter()} — click to change` : "Filter conversations";
+  button.setAttribute("aria-pressed", active ? "true" : "false");
+  button.title = label;
+  button.setAttribute("aria-label", label);
+  document.getElementById("conv-filter-clear").hidden = !active;
+}
+
+function applyFilter() {
+  updateFilterButton();
+  renderConversationList();
+}
+
+function clearFilter() {
+  state.filter = defaultFilter();
+  state.sort = "newest";
+  applyFilter();
+}
+
+// The shortcut from the spending sidebar. It replaces whatever filter was on
+// rather than adding to it: a click on one name means "show me this model",
+// and a list still narrowed by something chosen earlier would hide some of
+// what was asked for. The order is left as it was, since it hides nothing.
+function filterByModel(model) {
+  const filter = defaultFilter();
+  filter.models.add(model);
+  state.filter = filter;
+  applyFilter();
+}
+
 async function loadConversations() {
   const data = await api("/api/conversations?professor=" + encodeURIComponent(state.professor));
+  state.conversations = data.conversations;
+  state.modelGroups = data.model_groups || {};
+  renderConversationList();
+}
+
+function renderConversationList() {
   const list = document.getElementById("conv-list");
   list.innerHTML = "";
   openConvMenu = null;
-  // The server hands these back newest first, so each group is reached once and
-  // a heading goes in wherever the group changes.
+  // Filtered and ordered before any heading goes in, so no heading is left
+  // with nothing under it.
+  const shown = sortedConversations(state.conversations.filter(conversationMatches));
+  if (state.conversations.length && !shown.length) {
+    const empty = document.createElement("p");
+    empty.className = "conv-empty";
+    empty.textContent = "No conversation matches this filter. ";
+    const clear = document.createElement("button");
+    clear.type = "button";
+    clear.className = "link-btn";
+    clear.textContent = "Show them all";
+    clear.addEventListener("click", clearFilter);
+    empty.appendChild(clear);
+    list.appendChild(empty);
+    return;
+  }
+  // The age headings belong to an order by age. Sorted by cost or by title,
+  // they would break the list into dozens of one-line groups.
+  const dated = state.sort === "newest" || state.sort === "oldest";
+  // In either order by age each group is reached once, so a heading goes in
+  // wherever the group changes.
   let currentGroup = null;
-  data.conversations.forEach(c => {
+  shown.forEach(c => {
     const group = conversationAgeGroup(c.updated_at);
-    if (group !== currentGroup) {
+    if (dated && group !== currentGroup) {
       currentGroup = group;
       const heading = document.createElement("div");
       heading.className = "conv-group";
@@ -3260,6 +3583,16 @@ async function loadUsage() {
     // and it costs nothing to close.
     const nameEl = document.createElement("span");
     nameEl.textContent = model;
+    nameEl.className = "spend-model-filter";
+    nameEl.setAttribute("role", "button");
+    nameEl.tabIndex = 0;
+    nameEl.title = `Click to list only the conversations that used ${model}`;
+    nameEl.addEventListener("click", () => filterByModel(model));
+    nameEl.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter" && e.key !== " ") return;
+      e.preventDefault();   // Space would otherwise scroll the panel.
+      filterByModel(model);
+    });
     const costEl = document.createElement("span");
     costEl.textContent = fmtMoney(stats.total_cost);
     row.append(nameEl, costEl);
@@ -3697,10 +4030,7 @@ document.getElementById("conv-list").addEventListener("click", () => {
 document.getElementById("input").addEventListener("keydown", (e) => {
   if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); }
 });
-document.getElementById("lock-btn").addEventListener("click", async () => {
-  await fetch("/lock", { method: "POST" });
-  window.location.href = "/";
-});
+document.getElementById("quit-btn").addEventListener("click", quitTheSandbox);
 // ── Settings modal ──────────────────────────────────────────────────────
 // ── Correcting a month to match the bill ─────────────────────────────────
 function openAdjustModal() {
@@ -3789,6 +4119,207 @@ document.getElementById("spend-uncounted-btn").addEventListener("click", (e) => 
 });
 document.getElementById("adjust-modal-close").addEventListener("click", closeAdjustModal);
 document.getElementById("adjust-cancel").addEventListener("click", closeAdjustModal);
+
+// ── The filter modal ──────────────────────────────────────────────────────
+// What it shows is filled in from the filter each time it opens, and nothing
+// changes until "Show these" — so Cancel, Escape or the cross leave the list
+// exactly as it was.
+// A checkbox and its label, as every list in this modal draws one.
+function tickBox(id, value, labelText, className) {
+  const row = document.createElement("div");
+  row.className = "job-field-checkbox";
+  const box = document.createElement("input");
+  box.type = "checkbox";
+  box.id = id;
+  box.value = value;
+  box.className = className;
+  const label = document.createElement("label");
+  label.htmlFor = id;
+  label.textContent = labelText;
+  row.append(box, label);
+  return { row, box };
+}
+
+// The name the filter gives the sandbox's own models, set apart from the
+// services somebody has added of their own.
+const SANDBOX_SERVICE = "Princeton University AI Sandbox";
+
+// The models, by where they ran and then by whose they are — a catalog of
+// thirty models is a lot to read through when you already know which you
+// want. The sandbox comes first and the other services after it, companies
+// alphabetically with "Other" last, and a model the server could not place
+// goes under "Other" too.
+function groupModelsByService(names) {
+  const services = new Map();
+  names.forEach(name => {
+    const where = state.modelGroups[name] || {};
+    const service = where.service || SANDBOX_SERVICE;
+    const company = where.company || "Other";
+    if (!services.has(service)) services.set(service, new Map());
+    const companies = services.get(service);
+    if (!companies.has(company)) companies.set(company, []);
+    companies.get(company).push(name);
+  });
+  const inOrder = (first, last) => (a, b) =>
+    (a === first ? -1 : b === first ? 1 : 0) || (a === last ? 1 : b === last ? -1 : 0)
+    || a.toLowerCase().localeCompare(b.toLowerCase());
+  return [...services.entries()]
+    .sort((a, b) => inOrder(SANDBOX_SERVICE, null)(a[0], b[0]))
+    .map(([service, companies]) => [service, [...companies.entries()]
+      .sort((a, b) => inOrder(null, "Other")(a[0], b[0]))
+      .map(([company, mine]) => [company, mine.sort()])]);
+}
+
+// A service's box and a company's box each tick and untick every model under
+// them, and follow those models the rest of the time: on when every one is
+// on, half-ticked while only some are. Half-ticked is a look, not a value —
+// it is never read back, because what the filter is made of is the models
+// themselves. One listener on the whole list, because ticking a company
+// changes what its service's box should show, and a model box set from code
+// announces nothing.
+function tieGroupsToTheirModels(container, groups) {
+  const follow = () => groups.forEach(({ box, models }) => {
+    const ticked = models.filter(m => m.checked).length;
+    box.checked = ticked === models.length;
+    box.indeterminate = ticked > 0 && ticked < models.length;
+  });
+  container.onchange = event => {
+    const group = groups.find(g => g.box === event.target);
+    if (group) group.models.forEach(m => { m.checked = group.box.checked; });
+    follow();   // Which also puts the half-ticked look away.
+  };
+  follow();
+}
+
+function fillFilterModal(filter, sort) {
+  document.getElementById("filter-text").value = filter.text;
+  const models = document.getElementById("filter-models");
+  models.innerHTML = "";
+  // Every model any conversation used, plus any already ticked — one chosen
+  // from the spending sidebar may belong to no conversation here, and should
+  // still be seen ticked so it can be unticked.
+  const names = new Set(filter.models);
+  state.conversations.forEach(c => (c.models || []).forEach(m => names.add(m)));
+  let counter = 0;
+  const groups = [];
+  const indented = (className, rows) => {
+    const holder = document.createElement("div");
+    holder.className = className;
+    holder.append(...rows);
+    return holder;
+  };
+  groupModelsByService([...names]).forEach(([service, companies]) => {
+    const serviceRow = tickBox(`filter-service-${counter++}`, service, service,
+                               "filter-service-box");
+    const serviceModels = [];
+    const companyRows = companies.map(([company, mine]) => {
+      const companyRow = tickBox(`filter-company-${counter++}`, company, company,
+                                 "filter-company-box");
+      const modelRows = mine.map(name => {
+        const model = tickBox(`filter-model-${counter++}`, name, name, "filter-model-box");
+        model.box.checked = filter.models.has(name);
+        serviceModels.push(model.box);
+        return model;
+      });
+      groups.push({ box: companyRow.box, models: modelRows.map(m => m.box) });
+      return indented("filter-company", [
+        companyRow.row,
+        indented("filter-company-models", modelRows.map(m => m.row)),
+      ]);
+    });
+    groups.push({ box: serviceRow.box, models: serviceModels });
+    models.appendChild(indented("filter-service", [
+      serviceRow.row,
+      indented("filter-service-companies", companyRows),
+    ]));
+  });
+  // Last, so each service's and company's box starts out saying what its
+  // models say.
+  tieGroupsToTheirModels(models, groups);
+  document.getElementById("filter-models-none").hidden = names.size > 0;
+  document.querySelectorAll("#filter-ages input").forEach(box => { box.checked = filter.ages.has(box.value); });
+  document.querySelectorAll('input[name="filter-kind"]').forEach(r => { r.checked = r.value === filter.kind; });
+  const show = (id, value) => { document.getElementById(id).value = value === null ? "" : String(value); };
+  show("filter-cost-min", filter.costMin);
+  show("filter-cost-max", filter.costMax);
+  show("filter-tokens-min", filter.tokensMin);
+  show("filter-tokens-max", filter.tokensMax);
+  document.getElementById("filter-sort").value = sort;
+  document.getElementById("filter-error").hidden = true;
+}
+
+function openFilterModal() {
+  fillFilterModal(state.filter, state.sort);
+  const backdrop = document.getElementById("filter-modal-backdrop");
+  backdrop.hidden = false;
+  requestAnimationFrame(() => backdrop.classList.add("open"));
+  document.getElementById("filter-text").focus();
+}
+
+function closeFilterModal() {
+  const backdrop = document.getElementById("filter-modal-backdrop");
+  backdrop.classList.remove("open");
+  setTimeout(() => { backdrop.hidden = true; }, 200);
+}
+
+// One end of a range as typed: null when left empty, NaN when it is not a
+// number that can be a cost or a count. A dollar sign and thousands commas
+// are allowed, since that is how both are usually written.
+function readFilterBound(id) {
+  const typed = document.getElementById(id).value.replace(/[$,\s]/g, "");
+  if (typed === "") return null;
+  const value = Number(typed);
+  return isFinite(value) && value >= 0 ? value : NaN;
+}
+
+function applyFilterModal() {
+  const error = document.getElementById("filter-error");
+  const bounds = {
+    costMin: readFilterBound("filter-cost-min"), costMax: readFilterBound("filter-cost-max"),
+    tokensMin: readFilterBound("filter-tokens-min"), tokensMax: readFilterBound("filter-tokens-max"),
+  };
+  if (Object.values(bounds).some(v => Number.isNaN(v))) {
+    error.textContent = "Cost and tokens take plain numbers, for example 0.50 or 20000. Leave a box empty for no limit.";
+    error.hidden = false;
+    return;
+  }
+  const backwards = (min, max) => min !== null && max !== null && min > max;
+  if (backwards(bounds.costMin, bounds.costMax) || backwards(bounds.tokensMin, bounds.tokensMax)) {
+    error.textContent = "The “From” figure is larger than the “To” figure, so nothing could match. Swap them round.";
+    error.hidden = false;
+    return;
+  }
+  const ticked = selector => new Set([...document.querySelectorAll(selector)].map(box => box.value));
+  const kind = document.querySelector('input[name="filter-kind"]:checked');
+  state.filter = {
+    models: ticked("#filter-models .filter-model-box:checked"),
+    ages: ticked("#filter-ages input:checked"),
+    kind: kind ? kind.value : "all",
+    text: document.getElementById("filter-text").value.trim(),
+    ...bounds,
+  };
+  state.sort = document.getElementById("filter-sort").value;
+  closeFilterModal();
+  applyFilter();
+}
+
+document.getElementById("conv-filter").addEventListener("click", openFilterModal);
+document.getElementById("conv-filter-clear").addEventListener("click", clearFilter);
+document.getElementById("filter-modal-close").addEventListener("click", closeFilterModal);
+document.getElementById("filter-cancel").addEventListener("click", closeFilterModal);
+document.getElementById("filter-apply").addEventListener("click", applyFilterModal);
+// Puts the boxes back to "everything, newest first" without closing, so it
+// can be the start of a new filter; nothing changes until "Show these".
+document.getElementById("filter-clear-all").addEventListener("click", () => {
+  fillFilterModal(defaultFilter(), "newest");
+});
+document.getElementById("filter-modal-body").addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && e.target.matches('input[type="text"]')) {
+    e.preventDefault();
+    applyFilterModal();
+  }
+});
+closeWhenTheBackdropItselfIsClicked("filter-modal-backdrop", closeFilterModal);
 document.getElementById("adjust-save").addEventListener("click", saveAdjustment);
 document.getElementById("adjust-total").addEventListener("input", previewAdjustment);
 document.getElementById("adjust-total").addEventListener("keydown", (e) => {
@@ -3796,10 +4327,13 @@ document.getElementById("adjust-total").addEventListener("keydown", (e) => {
   if (e.key === "Escape") closeAdjustModal();
 });
 
-function openSettingsModal() {
+function openSettingsModal(goTo) {
   const backdrop = document.getElementById("settings-modal-backdrop");
   const iframe = document.getElementById("settings-iframe");
-  iframe.src = "/settings";
+  // The part of the page to open at, written the way a link to it would be.
+  // The settings page reads it and chooses the tab and the card, so the two
+  // ways in here can both arrive somewhere useful.
+  iframe.src = "/settings" + (typeof goTo === "string" ? goTo : "");
   backdrop.hidden = false;
   // Set src and un-hide first, then add the class on the next frame so the
   // opacity/transform transition actually plays instead of jumping straight
@@ -3822,7 +4356,7 @@ function closeSettingsModal() {
   loadProfessors().then(() => Promise.all([loadModels(), loadConversations(), loadUsage()]));
 }
 
-document.getElementById("settings-btn").addEventListener("click", openSettingsModal);
+document.getElementById("settings-btn").addEventListener("click", () => openSettingsModal());
 document.getElementById("settings-modal-close").addEventListener("click", closeSettingsModal);
 closeWhenTheBackdropItselfIsClicked("settings-modal-backdrop", closeSettingsModal);
 document.addEventListener("keydown", (e) => {
@@ -3837,9 +4371,58 @@ document.getElementById("spend-toggle-btn").addEventListener("click", () => {
   btn.title = hidden ? "Show spend panel" : "Hide spend panel";
 });
 
+// ── A newer version, if there is one ────────────────────────────────────────
+// Answered from what the server already found when it started, so this reaches
+// no network of its own and cannot be slow. Everything that can be done about
+// an update is on the settings page; all this does is say there is a reason to
+// open it.
+//
+// A browser on another computer is refused and told nothing, because the
+// sandbox will not update itself for one — see the guard in app.py. That is
+// not a failure worth putting on screen, so it is passed over in silence.
+const UPDATE_NOTICE_PUT_ASIDE = "update-notice-put-aside";
+
+async function lookForANewerVersion() {
+  let found;
+  try {
+    found = await api("/api/updates");
+  } catch (e) {
+    return;
+  }
+  if (!found || !found.behind || found.blocked) return;
+
+  document.getElementById("updates-btn").hidden = false;
+
+  // Put aside by version rather than outright, so saying "not now" to this one
+  // does not also silence the next one.
+  const which = (found.latest && found.latest.sha) || String(found.behind);
+  let asideFor = null;
+  try { asideFor = sessionStorage.getItem(UPDATE_NOTICE_PUT_ASIDE); } catch (e) { /* fine */ }
+  if (asideFor === which) return;
+
+  document.getElementById("update-notice-dismiss").dataset.which = which;
+  document.getElementById("update-notice-words").textContent =
+    "A newer version of the sandbox is available.";
+  document.getElementById("update-notice").hidden = false;
+}
+
+document.getElementById("updates-btn").addEventListener(
+  "click", () => openSettingsModal("#update"));
+document.getElementById("update-notice-open").addEventListener(
+  "click", () => openSettingsModal("#update"));
+document.getElementById("update-notice-dismiss").addEventListener("click", (e) => {
+  try {
+    sessionStorage.setItem(UPDATE_NOTICE_PUT_ASIDE, e.target.dataset.which || "");
+  } catch (err) { /* fine: it comes back next time instead */ }
+  document.getElementById("update-notice").hidden = true;
+});
+
 (async function init() {
   await loadProfessors();
   await Promise.all([loadModels(), loadConversations(), loadUsage(), loadPluginActions()]);
+  // Last, and not waited on: nothing else here depends on it, and the page is
+  // usable whether or not it ever answers.
+  lookForANewerVersion();
 })();
 </script>
 </body>

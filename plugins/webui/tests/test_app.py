@@ -181,11 +181,92 @@ class TestUnlock:
         resp = client.get("/api/professors")
         assert resp.status_code == 401
 
-    def test_lock_clears_session(self, unlocked_client):
-        resp = unlocked_client.post("/lock")
+    def test_quit_clears_session(self, unlocked_client):
+        resp = unlocked_client.post("/quit")
         assert resp.status_code == 200
         resp2 = unlocked_client.get("/api/professors")
         assert resp2.status_code == 401
+
+
+class TestStopping:
+    """Quit, from the page, and /__stop, from the launcher.
+
+    The sandbox usually runs with no window of its own, so these are the only
+    two ways it stops. Both leave a server they were given standing when
+    stopping would throw work away.
+    """
+
+    @pytest.fixture
+    def server(self, client):
+        from types import SimpleNamespace
+
+        stand_in = SimpleNamespace(should_exit=False)
+        client.app.state.server = stand_in
+        return stand_in
+
+    @pytest.fixture
+    def busy(self, monkeypatch):
+        app_module = sys.modules["_pu_webui_app"]
+        monkeypatch.setattr(app_module._job_store, "running", lambda: 1)
+
+    def test_quit_needs_the_passphrase_like_everything_else(self, client, server):
+        assert client.post("/quit").status_code == 401
+        assert server.should_exit is False
+
+    def test_quit_stops_the_server(self, unlocked_client, server):
+        assert unlocked_client.post("/quit").status_code == 200
+        assert server.should_exit is True
+
+    def test_quit_refuses_while_something_is_being_worked_on(self, unlocked_client, server, busy):
+        resp = unlocked_client.post("/quit")
+        assert resp.status_code == 409
+        assert "still being worked on" in resp.json()["detail"]
+        assert server.should_exit is False
+
+    def test_quit_refuses_during_an_update(self, unlocked_client, server, monkeypatch):
+        upgrade = sys.modules["_pu_webui_upgrade"]
+        monkeypatch.setattr(upgrade, "an_update_is_running", lambda: True)
+        assert unlocked_client.post("/quit").status_code == 409
+        assert server.should_exit is False
+
+    def test_stop_is_not_there_when_no_token_was_given(self, client, server, monkeypatch):
+        """Started some other way than start.py — nothing can prove it is the launcher."""
+        monkeypatch.delenv("PU_SANDBOX_STOP_TOKEN", raising=False)
+        resp = client.post("/__stop", headers={"X-Sandbox-Stop-Token": ""})
+        assert resp.status_code == 404
+        assert server.should_exit is False
+
+    def test_stop_refuses_the_wrong_token(self, client, server, monkeypatch):
+        monkeypatch.setenv("PU_SANDBOX_STOP_TOKEN", "right")
+        resp = client.post("/__stop", headers={"X-Sandbox-Stop-Token": "wrong"})
+        assert resp.status_code == 403
+        assert server.should_exit is False
+
+    def test_stop_refuses_a_request_with_no_token(self, client, server, monkeypatch):
+        """What a web page elsewhere sending a request here looks like."""
+        monkeypatch.setenv("PU_SANDBOX_STOP_TOKEN", "right")
+        assert client.post("/__stop").status_code == 403
+        assert server.should_exit is False
+
+    def test_stop_with_the_right_token_needs_no_passphrase(self, client, server, monkeypatch):
+        monkeypatch.setenv("PU_SANDBOX_STOP_TOKEN", "right")
+        resp = client.post("/__stop", headers={"X-Sandbox-Stop-Token": "right"})
+        assert resp.status_code == 200
+        assert server.should_exit is True
+
+    def test_stop_waits_for_work_in_progress(self, client, server, monkeypatch, busy):
+        """The launcher opens the running copy instead, and the work carries on."""
+        monkeypatch.setenv("PU_SANDBOX_STOP_TOKEN", "right")
+        resp = client.post("/__stop", headers={"X-Sandbox-Stop-Token": "right"})
+        assert resp.status_code == 409
+        assert server.should_exit is False
+
+    def test_every_page_offers_quit_and_none_offers_lock(self):
+        for name in ("chat.html", "settings.html", "shared_settings.html"):
+            page = _rendered_template(name)
+            assert 'id="quit-btn"' in page, name
+            assert "quitTheSandbox" in page, name
+            assert '"/lock"' not in page, name
 
 
 class TestProfessors:
@@ -236,6 +317,69 @@ class TestConversations:
         resp = unlocked_client.delete(f"/api/conversations/{conv_id}", params={"professor": "heller"})
         assert resp.status_code == 200
         assert unlocked_client.get(f"/api/conversations/{conv_id}", params={"professor": "heller"}).status_code == 404
+
+    def test_a_model_named_with_its_provider_is_the_same_model(self, unlocked_client):
+        """A model can be named anthropic/claude-fable-5 — that is how one is
+        added, and the model box goes on accepting it — while the catalog
+        files it as claude-fable-5 and every reply comes back under that. Two
+        entries for one model in the filter is the visible half of that."""
+        created = unlocked_client.post(
+            "/api/conversations",
+            json={"professor": "heller", "model": "openai/gpt-4o"}).json()
+        assert created["model"] == "gpt-4o"
+        (listed,) = unlocked_client.get(
+            "/api/conversations", params={"professor": "heller"}).json()["conversations"]
+        assert listed["models"] == ["gpt-4o"]
+
+    def test_a_name_the_catalog_does_not_hold_is_left_as_it_was_written(
+            self, unlocked_client):
+        """Somebody's own spelling, and not ours to rewrite."""
+        created = unlocked_client.post(
+            "/api/conversations",
+            json={"professor": "heller", "model": "someone/their-model"}).json()
+        assert created["model"] == "someone/their-model"
+
+    def test_a_model_on_your_own_endpoint_keeps_its_whole_name(self, unlocked_client):
+        """There the endpoint and the model together are the name."""
+        created = unlocked_client.post(
+            "/api/conversations",
+            json={"professor": "heller", "model": "della:alibaba/qwen35"}).json()
+        assert created["model"] == "della:alibaba/qwen35"
+
+    def test_the_name_is_settled_the_same_way_wherever_it_arrives(self, settings_env):
+        """A conversation's model is also set by sending a message with a
+        different one chosen, which is a whole chat turn away from here."""
+        settle = sys.modules["_pu_webui_app"]._as_the_catalog_knows_it
+        assert settle("openai/gpt-4o") == "gpt-4o"
+        assert settle("gpt-4o") == "gpt-4o"
+        assert settle("someone/their-model") == "someone/their-model"
+        assert settle("della:alibaba/qwen35") == "della:alibaba/qwen35"
+
+    def test_the_list_says_where_each_model_ran_and_whose_it_is(
+            self, unlocked_client, monkeypatch):
+        """Worked out here: the name a reply came back under is often not in
+        the catalog, and only the server can read whose it is."""
+        from src import settings
+
+        monkeypatch.setattr(settings, "ENDPOINTS", {"my_mac": {"name": "My Mac"}})
+        unlocked_client.post("/api/conversations", json={"professor": "heller", "model": "gpt-4o"})
+        unlocked_client.post("/api/conversations",
+                             json={"professor": "heller", "model": "my_mac:qwen3.8:27b-mlx"})
+        groups = unlocked_client.get(
+            "/api/conversations", params={"professor": "heller"}).json()["model_groups"]
+        assert groups["gpt-4o"] == {"service": None, "company": "OpenAI"}
+        assert groups["my_mac:qwen3.8:27b-mlx"] == {"service": "My Mac", "company": "Qwen"}
+
+    def test_the_list_carries_what_the_filter_narrows_by(self, unlocked_client):
+        """The filter works in the browser, over the list it already has, so
+        each entry has to arrive with everything it can be filtered on."""
+        unlocked_client.post("/api/conversations", json={"professor": "heller", "model": "gpt-4o"})
+        (listed,) = unlocked_client.get(
+            "/api/conversations", params={"professor": "heller"}).json()["conversations"]
+        assert listed["models"] == ["gpt-4o"]
+        assert listed["cost"] == 0
+        assert listed["tokens"] == 0
+        assert listed["has_job"] is False
 
     def test_conversations_isolated_per_professor(self, unlocked_client):
         unlocked_client.post("/api/conversations", json={"professor": "heller", "model": "gpt-4o"})
@@ -439,6 +583,32 @@ class TestChat:
         assert conv["messages"][-1]["content"] == "Hello back!"
         assert conv["messages"][-1]["cost"] == 0.001
         assert conv["title"] == "Hi there"
+
+    def test_a_reply_from_an_endpoint_is_saved_under_the_endpoints_name_for_it(
+            self, unlocked_client, monkeypatch):
+        """The endpoint answers as qwen3.8:27b-mlx alone, which on its own reads
+        as a second, different model, and one on the built-in service."""
+        from src import settings
+
+        monkeypatch.setattr(settings, "ENDPOINTS", {"my_mac": {"name": "My Mac"}})
+        conv_id = unlocked_client.post("/api/conversations", json={
+            "professor": "heller", "model": "my_mac:qwen3.8:27b-mlx"}).json()["id"]
+        fake_sandbox = MagicMock()
+        fake_sandbox.chat_service.stream_message.return_value = iter([
+            {"type": "done", "content": "ok", "model": "qwen3.8:27b-mlx",
+             "prompt_tokens": 1, "completion_tokens": 1, "cost": 0.0},
+        ])
+        fake_sandbox.chat_service.generate_title.return_value = None
+        monkeypatch.setattr("src.runtime.sandbox_processor.SandboxProcessor",
+                            lambda *a, **kw: fake_sandbox)
+
+        resp = unlocked_client.post("/api/chat", json={
+            "professor": "heller", "conversation_id": conv_id, "message": "Hi"})
+        (done,) = [e for e in _parse_sse(resp.text) if e["type"] == "done"]
+        assert done["conversation"]["messages"][-1]["model"] == "my_mac:qwen3.8:27b-mlx"
+        (listed,) = unlocked_client.get(
+            "/api/conversations", params={"professor": "heller"}).json()["conversations"]
+        assert listed["models"] == ["my_mac:qwen3.8:27b-mlx"]
 
     def test_sampling_overrides_persist_and_are_passed_to_sandbox(self, unlocked_client, monkeypatch):
         create = unlocked_client.post("/api/conversations", json={"professor": "heller", "model": "gpt-4o"})
@@ -1495,7 +1665,7 @@ class TestSettingsPage:
         assert data["has_professors"] is False
         assert data["order"] == [
             "professors", "webui", "shared", "endpoints", "models",
-            "folder",
+            "folder", "update",
         ]
         assert data["professors"] == []
 
@@ -1517,7 +1687,8 @@ class TestSettingsProfessors:
         data = unlocked_client.get("/api/settings").json()
         assert data["has_professors"] is True
         assert data["order"] == [
-            "folder", "shared", "endpoints", "models", "professors", "webui",
+            "update", "folder", "shared", "endpoints", "models", "professors",
+            "webui",
         ]
         prof = data["professors"][0]
         assert prof == {
@@ -2803,9 +2974,12 @@ class TestConversationsAreGroupedByAge:
             assert f'"{group}"' in page
 
     def test_a_heading_goes_in_only_where_the_group_changes(self):
-        """Otherwise every conversation gets one."""
+        """Otherwise every conversation gets one — and only while the list is
+        in an order by age, since sorted by cost the groups would be split up
+        into dozens of one-line pieces."""
         page = self._page()
-        assert "if (group !== currentGroup) {" in page
+        assert "if (dated && group !== currentGroup) {" in page
+        assert 'const dated = state.sort === "newest" || state.sort === "oldest";' in page
 
     def test_the_headings_stay_in_view_while_scrolling(self):
         page = self._page()
@@ -2832,10 +3006,14 @@ class TestConversationsAreGroupedByAge:
         )
 
     def test_the_server_still_decides_the_order(self, unlocked_client):
-        """Grouping is a heading over an order it does not change."""
+        """Grouping is a heading over an order it does not change, and newest
+        first — what the list shows until someone picks another order — is
+        the server's own, passed through untouched."""
         page = self._page()
-        assert "data.conversations.forEach" in page
+        assert "state.conversations = data.conversations;" in page
         assert "conversations.sort" not in page
+        sorter = page.split("function sortedConversations(list) {")[1].split("\n}\n")[0]
+        assert "default: return list;" in sorter
 
 
 class TestTheModelSaysWhatItCanDo:
@@ -3048,7 +3226,7 @@ class TestTheSuppliedButtonIcons:
     def test_every_icon_takes_its_colour_from_the_button(self):
         """They were supplied painted white, which is invisible on a light page."""
 
-        for button_id in ("theme-toggle-btn", "lock-btn", "sampling-options-btn",
+        for button_id in ("theme-toggle-btn", "quit-btn", "sampling-options-btn",
                           "plugin-action-btn", "settings-btn", "spend-toggle-btn",
                           "model-toggle-btn", "model-add-btn", "job-modal-reset",
                           "settings-modal-close", "job-modal-close"):
@@ -3070,7 +3248,7 @@ class TestTheSuppliedButtonIcons:
         import re
         import xml.etree.ElementTree as ET
 
-        expected = {"lock-btn": 1, "sampling-options-btn": 1, "plugin-action-btn": 1}
+        expected = {"quit-btn": 1, "sampling-options-btn": 1, "plugin-action-btn": 1}
         for button_id, paths in expected.items():
             root = ET.fromstring(re.search(r"<svg\b.*?</svg>", self._button(button_id), re.S).group(0))
             assert len(root) == paths, button_id
@@ -3087,9 +3265,10 @@ class TestTheSuppliedButtonIcons:
         # toggle" was a second copy of the padlock, so that button — which only
         # appears on a narrow screen — is still on a plain one. Nothing was
         # supplied for a folder or a download either, so those two are drawn,
-        # in the same stroked style as the download arrow on a single message.
+        # in the same stroked style as the download arrow on a single message,
+        # and nor for the funnel that filters the conversation list.
         awaiting_artwork = {"sidebar-toggle-btn", "conv-bar-folder",
-                            "conv-bar-download-btn"}
+                            "conv-bar-download-btn", "conv-filter"}
         for m in re.finditer(r'<button\b[^>]*id="([^"]+)"[^>]*>(.*?)</button>', page, re.S):
             block = m.group(2)
             if "<svg" not in block or m.group(1) in awaiting_artwork:
@@ -3159,7 +3338,7 @@ class TestTheSuppliedButtonIcons:
 
     def test_no_drawing_carries_a_hidden_backing_rectangle(self):
         """Each was supplied with a fully transparent rect the size of itself."""
-        for button_id in ("theme-toggle-btn", "lock-btn", "sampling-options-btn",
+        for button_id in ("theme-toggle-btn", "quit-btn", "sampling-options-btn",
                           "plugin-action-btn", "settings-btn", "spend-toggle-btn",
                           "new-conv", "model-toggle-btn", "model-add-btn",
                           "job-modal-reset", "settings-modal-close", "job-modal-close"):
@@ -3682,7 +3861,7 @@ class TestTheSettingsPageSaysThingsOnce:
 
     def test_the_page_carries_no_second_heading_inside_the_modal(self):
         """The modal already says "Settings" and already has a way out; a
-        heading, a close and a Lock button under them are three ways of saying
+        heading, a close and a Quit button under them are three ways of saying
         what has been said."""
         source = self._source()
         assert 'document.getElementById("topbar").hidden = embeddedInModal;' in source
@@ -3690,7 +3869,7 @@ class TestTheSettingsPageSaysThingsOnce:
     def test_but_keeps_it_when_opened_on_its_own(self):
         """Then the bar is the only heading, and the only way to lock."""
         source = self._source()
-        assert 'id="lock-btn"' in source
+        assert 'id="quit-btn"' in source
         assert "hidden = embeddedInModal" in source
         # The bar specifically. Other things on this page are hidden and shown
         # by their own logic — an empty-catalog note, for one — and reading
@@ -4911,7 +5090,7 @@ class TestTheSettingsPageIsInThreeTabs:
     """Seven cards in one column meant scrolling to find anything."""
 
     ASSIGNED = {
-        "professors": "system", "shared": "system",
+        "professors": "system", "shared": "system", "update": "system",
         "webui": "webui", "folder": "webui",
         "models": "models", "endpoints": "models",
     }
@@ -5913,6 +6092,321 @@ class TestInstallingAPluginOverTheWeb:
         assert handler.index("threading.Timer") < handler.index("return {")
 
 
+class TestUpdatingTheSandboxOverTheWeb:
+    """An update replaces the sandbox's own program code and then runs it.
+    As with installing a plugin above, most of what is tested here is what the
+    endpoint declines to do — and, past that, what it leaves behind when it
+    cannot finish."""
+
+    @pytest.fixture
+    def upgrade(self, monkeypatch):
+        """The upgrade module, with nothing in it that reaches a network."""
+        module = sys.modules["_pu_webui_upgrade"]
+        monkeypatch.setattr(module, "check_for_updates",
+                            lambda: module.Available(checked_at="2026-09-18T00:00:00+00:00"))
+        monkeypatch.setattr(module, "an_update_is_running", lambda: False)
+        return module
+
+    def _elsewhere(self, tmp_path, monkeypatch):
+        """A client that looks like a browser on some other computer."""
+        app_module = sys.modules["_pu_webui_app"]
+        conversation = sys.modules["_pu_webui_conversation"]
+        jobs = sys.modules["_pu_webui_jobs"]
+        monkeypatch.setattr(conversation, "CONVERSATIONS_DIR", tmp_path / "conversations")
+        monkeypatch.setattr(jobs, "_CONVERSATIONS_DIR", tmp_path / "conversations")
+        client = TestClient(app_module.create_app(), client=("10.0.0.5", 50000))
+        client.post("/unlock", data={"passphrase": ""})
+        return client
+
+    def test_every_one_of_them_needs_the_interface_unlocked(self, client):
+        assert client.get("/api/updates").status_code == 401
+        assert client.post("/api/updates/check").status_code == 401
+        assert client.post("/api/updates/apply").status_code == 401
+        assert client.post("/api/updates/undo",
+                           json={"was": "abc1234"}).status_code == 401
+
+    def test_it_is_refused_from_another_computer(self, tmp_path, monkeypatch, upgrade):
+        """A passphrase says somebody may use the sandbox. It does not say
+        they may replace what it is."""
+        applied = []
+        monkeypatch.setattr(upgrade, "apply_update",
+                            lambda on_progress: applied.append(True))
+        elsewhere = self._elsewhere(tmp_path, monkeypatch)
+        assert elsewhere.post("/api/updates/apply").status_code == 403
+        assert applied == [], "it went and updated anyway"
+
+    def test_and_so_is_merely_looking(self, tmp_path, monkeypatch, upgrade):
+        """Showing somebody a newer version they are not allowed to install
+        would be telling them about a button that is not there."""
+        elsewhere = self._elsewhere(tmp_path, monkeypatch)
+        assert elsewhere.get("/api/updates").status_code == 403
+        assert elsewhere.post("/api/updates/check").status_code == 403
+
+    def test_the_address_it_judges_by_is_the_connection(self, tmp_path, monkeypatch,
+                                                        upgrade):
+        """Not a header. Anybody can send X-Forwarded-For; nobody can forge
+        which socket they connected on."""
+        elsewhere = self._elsewhere(tmp_path, monkeypatch)
+        resp = elsewhere.post("/api/updates/apply",
+                              headers={"X-Forwarded-For": "127.0.0.1"})
+        assert resp.status_code == 403
+
+    def test_the_settings_page_is_told_which_computer_is_asking(self, unlocked_client,
+                                                                settings_env):
+        """It is what the card hides itself on."""
+        assert unlocked_client.get("/api/settings").json()["same_computer"] is True
+
+    def test_nothing_has_been_looked_for_yet_is_not_the_same_as_nothing_found(
+            self, unlocked_client, upgrade, monkeypatch):
+        app_module = sys.modules["_pu_webui_app"]
+        monkeypatch.setattr(app_module, "_update_check", None)
+        assert unlocked_client.get("/api/updates").json() == {"checked_at": None}
+
+    def test_looking_again_is_remembered(self, unlocked_client, upgrade, monkeypatch):
+        found = upgrade.Available(behind=2, changes=["a", "b"], checked_at="then")
+        monkeypatch.setattr(upgrade, "check_for_updates", lambda: found)
+        assert unlocked_client.post("/api/updates/check").json()["behind"] == 2
+        # And the next page to ask is answered without looking again.
+        monkeypatch.setattr(upgrade, "check_for_updates",
+                            lambda: pytest.fail("it looked a second time"))
+        assert unlocked_client.get("/api/updates").json()["behind"] == 2
+
+    def test_an_answer_about_somewhere_this_copy_has_left_is_not_shown(
+            self, unlocked_client, upgrade, monkeypatch):
+        """Switching branch, or pulling in a terminal, while the sandbox runs
+        must not leave the page repeating what was true when it started."""
+        app_module = sys.modules["_pu_webui_app"]
+        monkeypatch.setattr(app_module, "_update_check", upgrade.Available(
+            behind=3, checked_at="then", position="refs/heads/main aaa"))
+        monkeypatch.setattr(upgrade, "where_this_copy_is",
+                            lambda: "refs/heads/something-else bbb")
+        looked = []
+        monkeypatch.setattr(app_module, "_look_for_an_update_in_the_background",
+                            lambda: looked.append(True))
+
+        assert unlocked_client.get("/api/updates").json() == {"checked_at": None}
+        assert looked, "it did not look again"
+
+    def test_an_answer_about_where_this_copy_still_is_stands(
+            self, unlocked_client, upgrade, monkeypatch):
+        app_module = sys.modules["_pu_webui_app"]
+        monkeypatch.setattr(app_module, "_update_check", upgrade.Available(
+            behind=3, checked_at="then", position="refs/heads/main aaa"))
+        monkeypatch.setattr(upgrade, "where_this_copy_is", lambda: "refs/heads/main aaa")
+        monkeypatch.setattr(app_module, "_look_for_an_update_in_the_background",
+                            lambda: pytest.fail("it looked again for no reason"))
+
+        assert unlocked_client.get("/api/updates").json()["behind"] == 3
+
+    def test_it_will_not_start_while_something_is_being_worked_on(
+            self, unlocked_client, upgrade, monkeypatch):
+        """Restarting does not pause a translation. It destroys it — jobs are
+        kept in memory only and there is nothing to pick up again."""
+        app_module = sys.modules["_pu_webui_app"]
+        monkeypatch.setattr(app_module._job_store, "running", lambda: 1)
+        applied = []
+        monkeypatch.setattr(upgrade, "apply_update",
+                            lambda on_progress: applied.append(True))
+
+        resp = unlocked_client.post("/api/updates/apply")
+        assert resp.status_code == 409
+        assert applied == []
+
+    def test_a_second_update_is_turned_away(self, unlocked_client, upgrade, monkeypatch):
+        monkeypatch.setattr(upgrade, "an_update_is_running", lambda: True)
+        assert unlocked_client.post("/api/updates/apply").status_code == 409
+
+    def test_the_stream_says_what_is_happening_and_then_stops(
+            self, unlocked_client, upgrade, monkeypatch):
+        def fake(on_progress):
+            on_progress(1, "Checking this copy can be updated")
+            on_progress(2, "Asking for what has changed")
+            on_progress(3, "Getting the new files")
+            on_progress(4, "Finishing up")
+            return upgrade.Applied(was="old1234", now="new5678",
+                                   installed_dependencies=False)
+        monkeypatch.setattr(upgrade, "apply_update", fake)
+        monkeypatch.setattr(app_module_threading(), "Timer",
+                            lambda delay, fn: type("T", (), {"start": lambda s: None})())
+
+        events = _parse_sse(unlocked_client.post("/api/updates/apply").text)
+        progress = [e for e in events if e["type"] == "progress"]
+        assert len(progress) == 4
+        for event in progress:
+            assert set(event) == {"type", "step", "total", "label"}
+            assert 1 <= event["step"] <= event["total"]
+        endings = [e for e in events if e["type"] in ("done", "error")]
+        assert len(endings) == 1, "a stream must end exactly once"
+        assert events[-1] is endings[0], "and the ending must be last"
+        assert endings[0]["now"] == "new5678"
+        assert endings[0]["restarting"] is True
+
+    def test_a_successful_update_asks_for_a_restart(self, unlocked_client, upgrade,
+                                                    monkeypatch):
+        monkeypatch.setattr(
+            upgrade, "apply_update",
+            lambda on_progress: upgrade.Applied("old1234", "new5678", True))
+        scheduled = []
+        monkeypatch.setattr(
+            app_module_threading(), "Timer",
+            lambda delay, fn: type("T", (), {"start": lambda s: scheduled.append(fn)})())
+
+        unlocked_client.post("/api/updates/apply")
+        assert scheduled, "nothing was scheduled to restart the sandbox"
+
+    def test_nothing_restarts_when_the_update_stopped_partway(
+            self, unlocked_client, upgrade, monkeypatch):
+        """This is the whole safety net. Restarting into new code whose
+        software is not installed is exactly the sandbox that will not start.
+
+        What is watched is the scheduling, not the firing — the same reason
+        the install test above gives.
+        """
+        def fail(on_progress):
+            raise upgrade.StoppedPartway("No matching distribution found", "old1234")
+        monkeypatch.setattr(upgrade, "apply_update", fail)
+        scheduled = []
+        monkeypatch.setattr(
+            app_module_threading(), "Timer",
+            lambda delay, fn: type("T", (), {"start": lambda s: scheduled.append(fn)})())
+
+        events = _parse_sse(unlocked_client.post("/api/updates/apply").text)
+        assert scheduled == [], "a failed update asked for a restart"
+        assert events[-1]["type"] == "error"
+
+    def test_stopping_partway_offers_both_ways_out(self, unlocked_client, upgrade,
+                                                   monkeypatch):
+        """Installing fails for passing reasons more often than lasting ones,
+        so trying again is worth offering before putting it back."""
+        def fail(on_progress):
+            raise upgrade.StoppedPartway("No matching distribution found", "old1234")
+        monkeypatch.setattr(upgrade, "apply_update", fail)
+
+        last = _parse_sse(unlocked_client.post("/api/updates/apply").text)[-1]
+        assert last["can_retry"] is True
+        assert last["can_undo"] is True
+        assert last["was"] == "old1234"
+        assert "No matching distribution" in last["message"]
+
+    def test_any_other_failure_offers_neither(self, unlocked_client, upgrade,
+                                              monkeypatch):
+        """Nothing moved, so there is nothing to put back and nothing that a
+        second attempt would do differently."""
+        def fail(on_progress):
+            raise upgrade.UpgradeError("Could not reach the published version")
+        monkeypatch.setattr(upgrade, "apply_update", fail)
+
+        last = _parse_sse(unlocked_client.post("/api/updates/apply").text)[-1]
+        assert last["type"] == "error"
+        assert last["can_retry"] is False and last["can_undo"] is False
+
+    def test_putting_it_back_says_where_it_landed(self, unlocked_client, upgrade,
+                                                  monkeypatch):
+        asked = []
+        monkeypatch.setattr(upgrade, "put_the_files_back",
+                            lambda was: asked.append(was) or "old1234")
+        resp = unlocked_client.post("/api/updates/undo", json={"was": "old1234"})
+        assert resp.status_code == 200
+        assert resp.json() == {"back_at": "old1234"}
+        assert asked == ["old1234"]
+
+    def test_the_last_event_goes_before_the_restart(self, unlocked_client):
+        """os.execv replaces this process. Restarting before the stream has
+        ended would mean the browser never hears that it worked, and never
+        starts waiting for the sandbox to come back."""
+        app_module = sys.modules["_pu_webui_app"]
+        source = Path(app_module.__file__).read_text()
+        handler = source[source.index("def api_apply_update"):]
+        handler = handler[:handler.index("@app.post(\"/api/updates/undo\")")]
+        assert handler.index('"restarting": True') < handler.index("threading.Timer")
+
+
+def app_module_threading():
+    """The threading module app.py schedules its restarts through."""
+    return sys.modules["_pu_webui_app"].threading
+
+
+def _code_only(text: str) -> str:
+    """Return *text* with its line comments taken out.
+
+    These tests ask what the page does, and a comment saying why it does not
+    do something else is not the page doing it. Without this, explaining in a
+    comment that innerHTML is the wrong choice reads as having used it.
+    """
+    return "\n".join(line.split("//")[0] for line in text.splitlines())
+
+
+class TestTheUpdatesCard:
+    """Drawn on the settings page, and pointed at from the chat page."""
+
+    def _settings(self):
+        return _rendered_template("settings.html")
+
+    def test_it_is_on_the_system_tab(self):
+        page = self._settings()
+        assert 'data-section="update" data-tab="system"' in page
+
+    def test_it_is_placed_in_both_orders(self):
+        """A card the server never names keeps the default order of nought and
+        floats to the top of the tab, above everything else."""
+        app_module = sys.modules["_pu_webui_app"]
+        assert "update" in app_module._SETTINGS_ORDER_FIRST_RUN
+        assert "update" in app_module._SETTINGS_ORDER_REPEAT
+
+    def test_it_comes_last_on_a_first_run_and_near_the_front_after(self):
+        """A copy downloaded minutes ago has nothing to update."""
+        app_module = sys.modules["_pu_webui_app"]
+        assert app_module._SETTINGS_ORDER_FIRST_RUN[-1] == "update"
+        assert app_module._SETTINGS_ORDER_REPEAT[0] == "update"
+
+    def test_what_has_changed_goes_in_as_text(self):
+        """Those summaries are written in another repository and arrive over
+        the network. innerHTML would be running whatever they contain."""
+        page = self._settings()
+        block = page[page.index("function drawWhatWasFound"):]
+        block = _code_only(block[:block.index("async function askAboutUpdates")])
+        assert "textContent" in block
+        assert "innerHTML" not in block
+
+    def test_it_says_that_settings_and_work_are_not_touched(self):
+        """The first question anybody sensible asks before pressing it."""
+        page = self._settings()
+        card = page[page.index('id="section-update"'):]
+        card = card[:card.index('id="section-endpoints"')]
+        assert "<code>settings</code>" in card and "<code>data</code>" in card
+
+    def test_it_warns_that_everybody_is_signed_out(self):
+        page = self._settings()
+        card = page[page.index('id="section-update"'):]
+        card = card[:card.index('id="section-endpoints"')]
+        assert "signs everybody out" in card
+
+
+class TestWaitingForARestartIsWrittenOnce:
+    """It used to live in chat.html and name that page's own status line, so
+    the settings page could not have called it without getting a null."""
+
+    def test_it_is_in_the_shared_partial(self):
+        helpers = (Path(__file__).resolve().parents[1] / "src" / "templates"
+                   / "_helpers.html").read_text()
+        assert "function waitForTheSandboxToComeBack(say)" in helpers
+        assert "install-busy" not in _code_only(helpers), (
+            "it still names one page's element")
+
+    def test_the_page_is_only_declared_once_how_long_to_wait(self):
+        """Two `const RESTART_PATIENCE_MS` in one scope is a SyntaxError that
+        would take the whole of chat.html's script with it."""
+        assert _rendered_chat().count("const RESTART_PATIENCE_MS") == 1
+
+    def test_it_reloads_the_whole_window_and_not_just_the_panel(self):
+        """The settings page is also shown inside the chat page's settings
+        panel. Reloading that frame alone would leave a fresh settings page
+        inside a chat page still talking to a server that no longer exists."""
+        helpers = (Path(__file__).resolve().parents[1] / "src" / "templates"
+                   / "_helpers.html").read_text()
+        assert "window.top.location.reload()" in helpers
+
+
 class TestTheInstallEntryInThePluginMenu:
 
     def test_it_is_offered(self):
@@ -6074,7 +6568,7 @@ class TestAModalDoesNotCloseOnADragThatLeavesIt:
         assert helper.index("startedOnTheBackdrop = false;") < helper.index("if (both)")
 
     def test_every_modal_uses_it(self):
-        """Three modals, one rule. A fourth written by hand would be a fourth
+        """Four modals, one rule. A fifth written by hand would be a fifth
         chance to lose what somebody had typed."""
         import re
 
@@ -6084,7 +6578,7 @@ class TestAModalDoesNotCloseOnADragThatLeavesIt:
         used = set(re.findall(
             r'closeWhenTheBackdropItselfIsClicked\("([a-z-]+)"', script))
         assert used == {"install-plugin-backdrop", "job-modal-backdrop",
-                        "settings-modal-backdrop"}, used
+                        "settings-modal-backdrop", "filter-modal-backdrop"}, used
 
 
 class TestAJobGetsAConversationToItself:
@@ -7127,3 +7621,274 @@ class TestACutOffStreamEndToEnd:
         # And it was counted as spending nobody could measure.
         assert noted["model"] == "gpt-4o"
         assert "no usage" in noted["note"]
+
+
+class TestTheConversationListCanBeFiltered:
+    """A long list narrowed to what someone is looking for, by a button that
+    says when it is doing so and a cross that stops it."""
+
+    def _chat(self) -> str:
+        return _rendered_chat()
+
+    def _script(self) -> str:
+        import re
+
+        return "\n".join(re.findall(r"<script>(.*?)</script>", self._chat(), re.S))
+
+    def _function(self, name: str) -> str:
+        return self._script().split(f"function {name}(")[1].split("\n}\n")[0]
+
+    def test_the_button_sits_beside_the_plus_and_says_whether_it_is_on(self):
+        page = self._chat()
+        header = page[page.index("<h2>Conversations</h2>"):page.index('id="conv-list"')]
+        assert 'id="conv-filter"' in header and 'id="new-conv"' in header
+        button = header[header.index('id="conv-filter"'):]
+        assert 'aria-pressed="false"' in button[:button.index(">")]
+
+    def test_it_turns_orange_while_on(self):
+        rule = self._chat().split('#conv-filter[aria-pressed="true"] {')[1].split("}")[0]
+        assert "color: var(--orange)" in rule
+
+    def test_the_cross_appears_only_while_on_and_puts_everything_back(self):
+        page = self._chat()
+        cross = page[page.index('id="conv-filter-clear"'):]
+        assert "hidden" in cross[:cross.index(">")]
+        # .icon-btn sets a display of its own, which would override [hidden];
+        # TestHiddenMeansHidden checks that every icon button says otherwise.
+        assert 'class="icon-btn neutral"' in cross[:cross.index(">")]
+        update = self._function("updateFilterButton")
+        assert 'getElementById("conv-filter-clear").hidden = !active' in update
+        clear = self._function("clearFilter")
+        assert "state.filter = defaultFilter();" in clear
+        assert 'state.sort = "newest";' in clear
+
+    def test_a_different_order_counts_as_on(self):
+        """It changes what is at the top as surely as a filter does."""
+        assert 'state.sort !== "newest"' in self._function("filterIsActive")
+
+    def test_the_list_is_filtered_before_any_heading_goes_in(self):
+        render = self._function("renderConversationList")
+        assert render.index("state.conversations.filter(conversationMatches)") \
+            < render.index("conversationAgeGroup(")
+
+    def test_a_list_filtered_to_nothing_says_so(self):
+        render = self._function("renderConversationList")
+        assert "No conversation matches this filter." in render
+        assert 'addEventListener("click", clearFilter)' in render
+
+    def test_the_modal_offers_every_kind_of_filter_and_the_order(self):
+        page = self._chat()
+        modal = page[page.index('id="filter-modal-backdrop"'):page.index('id="adjust-modal-backdrop"')]
+        for field in ("filter-text", "filter-models", "filter-ages", 'name="filter-kind"',
+                      "filter-cost-min", "filter-cost-max",
+                      "filter-tokens-min", "filter-tokens-max", "filter-sort"):
+            assert field in modal, field
+        for sort in ("newest", "oldest", "cost", "tokens", "title"):
+            assert f'<option value="{sort}">' in modal
+
+    def test_the_models_are_grouped_by_service_then_company(self):
+        """The sandbox's own models first, then each service somebody added,
+        and the companies inside each. A flat run of every model in the
+        catalog is a lot to read when you know which you want."""
+        grouping = self._function("groupModelsByService")
+        assert "state.modelGroups[name]" in grouping
+        assert "where.service || SANDBOX_SERVICE" in grouping
+        assert 'where.company || "Other"' in grouping, "a model nobody could place needs a group too"
+        assert 'inOrder(SANDBOX_SERVICE, null)' in grouping, "the sandbox is not listed first"
+        assert 'inOrder(null, "Other")' in grouping, "Other is not listed last"
+
+    def test_a_service_or_company_ticks_and_unticks_all_of_its_models(self):
+        tie = self._function("tieGroupsToTheirModels")
+        assert "group.models.forEach(m => { m.checked = group.box.checked; });" in tie
+        # Half-ticked while only some of them are, so the box never claims
+        # more than is true.
+        assert "box.indeterminate = ticked > 0 && ticked < models.length;" in tie
+        # Every box is brought up to date after any change: ticking a company
+        # changes what its service's box should show.
+        assert "container.onchange" in tie
+
+    def test_a_service_holds_every_model_of_every_company_in_it(self):
+        fill = self._function("fillFilterModal")
+        assert "serviceModels.push(model.box);" in fill
+        assert "groups.push({ box: serviceRow.box, models: serviceModels });" in fill
+
+    def test_only_the_models_themselves_are_read_back(self):
+        """The company boxes are a way of ticking; what the filter is made of
+        is the models."""
+        apply = self._function("applyFilterModal")
+        assert 'ticked("#filter-models .filter-model-box:checked")' in apply
+
+    def test_the_models_scroll_instead_of_pushing_the_rest_away(self):
+        """The one part that grows as a catalog does."""
+        page = self._chat()
+        assert 'class="filter-scroll" id="filter-models"' in page
+        rule = page.split(".filter-scroll {")[1].split("}")[0]
+        assert "overflow-y: auto" in rule
+        assert "max-height" in rule
+
+    def test_a_service_and_a_company_read_as_headings(self):
+        """And keep doing so: .job-field-checkbox label sets the weight back
+        to normal further down the file, and would win a tie by being later."""
+        page = self._chat()
+        for box in ("filter-service-box", "filter-company-box"):
+            rule = page.split(f".job-field-checkbox .{box} + label {{")[1]
+            assert "font-weight: 600" in rule.split("}")[0], box
+
+    def test_it_is_laid_out_the_way_a_settings_card_is(self):
+        """One interface, not two. The sections are headed and spaced like a
+        card's, the explanations are .hint, and the figures sit on one line
+        of labelled fields the way the settings page lays fields out."""
+        page = self._chat()
+        modal = page[page.index('id="filter-modal-backdrop"'):page.index('id="adjust-modal-backdrop"')]
+        assert modal.count('class="filter-section"') >= 5
+        assert 'class="hint"' in modal
+        assert '<div class="inline-fields">' in modal
+        assert modal.count("<label for=\"filter-") >= 6, "a field without a label of its own"
+        headings = page.split(".filter-section > legend, .filter-section > h3 {")[1].split("}")[0]
+        assert "font-size: var(--text-md)" in headings, "not the size a card's heading is"
+
+    def test_the_shared_layout_lives_in_the_shared_partial(self):
+        """.inline-fields is used by the settings page and by this modal, so
+        it belongs where both of them read it from."""
+        from pathlib import Path
+
+        templates = Path(__file__).resolve().parents[1] / "src" / "templates"
+        assert ".inline-fields {" in (templates / "_forms.html").read_text()
+        assert ".inline-fields {" not in (templates / "settings.html").read_text()
+
+    def test_a_model_ticked_elsewhere_stays_ticked_in_the_modal(self):
+        """One chosen from the sidebar may belong to no conversation here."""
+        assert "const names = new Set(filter.models);" in self._function("fillFilterModal")
+
+    def test_nothing_changes_until_the_filter_is_applied(self):
+        """Cancel, Escape and the cross close without touching the list."""
+        script = self._script()
+        assert "state.filter" not in self._function("closeFilterModal")
+        assert "state.filter" not in self._function("openFilterModal").replace(
+            "fillFilterModal(state.filter, state.sort)", "")
+        assert 'getElementById("filter-modal-backdrop").hidden) {\n    closeFilterModal();' in script
+
+    def test_switching_professor_starts_with_the_whole_list(self):
+        choose = self._script().split("async function chooseProfessor(")[1].split("\n}\n")[0]
+        assert "state.filter = defaultFilter();" in choose
+
+
+class TestAModelNameInTheSidebarFiltersTheList:
+    """A small extra: clicking a model's name in the spending sidebar lists
+    only the conversations that used it."""
+
+    def _chat(self) -> str:
+        return _rendered_chat()
+
+    def _usage(self) -> str:
+        return self._chat().split("async function loadUsage() {")[1].split("\n}\n")[0]
+
+    def test_the_name_is_a_real_button_underneath(self):
+        usage = self._usage()
+        assert 'nameEl.className = "spend-model-filter";' in usage
+        assert 'nameEl.setAttribute("role", "button");' in usage
+        assert "nameEl.tabIndex = 0;" in usage
+        assert "filterByModel(model)" in usage
+        # Still text, not markup: a model name never becomes HTML.
+        assert "nameEl.textContent = model;" in usage
+
+    def test_its_tooltip_says_it_filters(self):
+        assert "nameEl.title = `Click to list only the conversations that used ${model}`;" in self._usage()
+
+    def test_it_looks_like_plain_text_until_reached(self):
+        page = self._chat()
+        rule = page.split(".spend-model-filter {")[1].split("}")[0]
+        for look in ("color", "text-decoration", "background", "font-weight"):
+            assert look not in rule, look
+        hover = page.split(".spend-model-filter:hover, .spend-model-filter:focus-visible {")[1].split("}")[0]
+        assert "var(--hover-bg)" in hover
+
+    def test_a_click_replaces_the_filter_rather_than_adding_to_it(self):
+        script = self._chat().split("function filterByModel(model) {")[1].split("\n}\n")[0]
+        assert "const filter = defaultFilter();" in script
+        assert "state.filter = filter;" in script
+
+
+class TestHiddenMeansHidden:
+    """An element's own ``display`` beats the ``hidden`` attribute.
+
+    So a rule that gives something ``display: flex`` quietly keeps it on
+    screen however often the script hides it. That is how the update notice
+    came to sit above every conversation, with nothing in it and a "Not now"
+    that did nothing: the words are only written in when there is an update,
+    and hiding it had no effect. The Updates button and the conversation
+    folder button were stuck showing for the same reason.
+
+    Checked across every page, for everything that starts hidden or is hidden
+    by id from a script: if a rule of its own gives it a display, a
+    ``[hidden]`` rule of its own has to take that back.
+    """
+
+    PAGES = ("chat.html", "settings.html", "setup.html", "unlock.html",
+             "shared_settings.html")
+
+    @staticmethod
+    def _rules(page: str) -> list[tuple[list[str], str, bool]]:
+        """Every one-part selector's #id/.class names, its display, and
+        whether it is a [hidden] rule. A selector with a descendant or a
+        pseudo-class is left out: it applies only somewhere in particular."""
+        import re
+
+        css = "\n".join(re.findall(r"<style[^>]*>(.*?)</style>", page, re.S))
+        css = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+        rules = []
+        for selectors, body in re.findall(r"([^{}]+)\{([^{}]*)\}", css):
+            shown = re.search(r"display:\s*([a-z-]+)", body)
+            for selector in selectors.split(","):
+                selector = selector.strip()
+                if not selector or " " in selector or ">" in selector or ":" in selector:
+                    continue
+                names = re.findall(r"[#.][\w-]+", selector)
+                if names:
+                    rules.append((names, shown.group(1) if shown else "",
+                                  "[hidden]" in selector))
+        return rules
+
+    @staticmethod
+    def _hideable(page: str) -> list[tuple[str, set[str]]]:
+        """Each element that starts hidden or is hidden by id, as a
+        description and the #id/.class names it answers to."""
+        import re
+
+        by_script = set(re.findall(r'getElementById\("([\w-]+)"\)\.hidden\s*=', page))
+        found = []
+        for m in re.finditer(r"<([a-z][\w-]*)(\s[^>]*)?>", page):
+            attrs = m.group(2) or ""
+            ident = re.search(r'\bid="([^"]+)"', attrs)
+            classes = re.search(r'\bclass="([^"]+)"', attrs)
+            starts_hidden = re.search(r"\shidden(?=[\s>=/]|$)", attrs) is not None
+            if not starts_hidden and not (ident and ident.group(1) in by_script):
+                continue
+            names = {"." + c for c in (classes.group(1).split() if classes else [])}
+            if ident:
+                names.add("#" + ident.group(1))
+            found.append((m.group(0)[:80], names))
+        return found
+
+    @pytest.mark.parametrize("name", PAGES)
+    def test_nothing_hidden_is_kept_on_screen_by_its_own_display(self, name):
+        page = _rendered_template(name)
+        rules = self._rules(page)
+        stuck = []
+        for element, names in self._hideable(page):
+            mine = [r for r in rules if all(n in names for n in r[0])]
+            shows = any(d and d != "none" and not hidden for _, d, hidden in mine)
+            takes_back = any(hidden and d == "none" for _, d, hidden in mine)
+            if shows and not takes_back:
+                stuck.append(element)
+        assert not stuck, f"hidden has no effect on: {stuck}"
+
+    def test_it_would_catch_the_update_notice(self):
+        """The check itself, against the rule that went wrong."""
+        page = ('<style>#update-notice { display: flex; }</style>'
+                '<div id="update-notice" hidden></div>')
+        rules = self._rules(page)
+        ((_, names),) = self._hideable(page)
+        mine = [r for r in rules if all(n in names for n in r[0])]
+        assert any(d == "flex" for _, d, _h in mine)
+        assert not any(h for _n, _d, h in mine)

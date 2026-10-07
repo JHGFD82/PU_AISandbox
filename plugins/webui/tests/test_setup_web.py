@@ -961,3 +961,30 @@ class TestAnEmptyFolderBoxIsAnswered:
     def test_the_form_is_still_there_to_correct(self, client_and_result):
         client, _ = client_and_result
         assert 'name="folder"' in self._post_empty(client).text
+
+
+class TestTheLauncherCanReplaceIt:
+    """A setup page left open is still holding the port the sandbox needs, so
+    a double-click on the sandbox's icon has to be able to stop it too."""
+
+    def test_the_right_token_stops_it(self, client_and_result, monkeypatch):
+        from types import SimpleNamespace
+
+        client, chosen = client_and_result
+        server = SimpleNamespace(should_exit=False)
+        client.app.state.server = server
+        monkeypatch.setenv("PU_SANDBOX_STOP_TOKEN", "right")
+        resp = client.post("/__stop", headers={"X-Sandbox-Stop-Token": "right"})
+        assert resp.status_code == 200
+        assert server.should_exit is True
+        assert chosen == [], "stopping is not the same as finishing setup"
+
+    def test_anything_else_does_not(self, client_and_result, monkeypatch):
+        from types import SimpleNamespace
+
+        client, _chosen = client_and_result
+        server = SimpleNamespace(should_exit=False)
+        client.app.state.server = server
+        monkeypatch.setenv("PU_SANDBOX_STOP_TOKEN", "right")
+        assert client.post("/__stop").status_code == 403
+        assert server.should_exit is False

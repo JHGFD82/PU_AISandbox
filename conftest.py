@@ -90,3 +90,36 @@ def _no_settings_path_left_behind():
     yield
     import src.settings_store as store
     store.__dict__.pop("SETTINGS_PATH", None)
+
+
+# A small, fixed stand-in for OpenRouter's list of who makes which models,
+# holding the companies the tests' models belong to. See src/models/makers.py.
+_FIXTURE_MAKERS = Path(__file__).parent / "tests" / "fixtures" / "model_makers.json"
+
+
+@pytest.fixture(autouse=True)
+def _fixture_model_makers(_isolated_extras_folder, monkeypatch):
+    """Give every test the same list of model makers, and never ask OpenRouter.
+
+    The list is written into each test's own throwaway folder, dated today so
+    it counts as up to date, which lets the real reading code run. Asking
+    OpenRouter itself is replaced by a failure: a test that went over the
+    network would pass or fail with whatever OpenRouter listed that morning.
+    A test of the asking replaces ``_fetch`` again in its own body.
+    """
+    import json
+    from datetime import datetime
+
+    from src.models import makers
+
+    saved = json.loads(_FIXTURE_MAKERS.read_text(encoding="utf-8"))
+    saved["fetched"] = datetime.now().isoformat(timespec="seconds")
+    target = makers.makers_path()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(json.dumps(saved), encoding="utf-8")
+
+    def _no_network():
+        raise RuntimeError("The tests never ask OpenRouter.")
+
+    monkeypatch.setattr(makers, "_fetch", _no_network)
+    monkeypatch.setattr(makers, "_last_failed", None)

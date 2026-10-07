@@ -299,6 +299,17 @@ class JobStore:
         with self._lock:
             return self._jobs.get(job_id)
 
+    def running(self) -> int:
+        """Return how many jobs are going on right now.
+
+        Asked before anything that restarts the sandbox. A job lives only in
+        this process's memory (see this module's docstring), so restarting
+        does not pause a translation halfway through — it destroys it, with
+        nothing to resume from and the person's document still unconverted.
+        """
+        with self._lock:
+            return sum(1 for job in self._jobs.values() if job.status == "running")
+
     def set_status(self, job_id: str, status: str, error: Optional[str] = None) -> None:
         with self._lock:
             job = self._jobs.get(job_id)

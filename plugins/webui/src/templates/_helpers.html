@@ -24,4 +24,94 @@ function readableError(err) {
   } catch (e) { /* not JSON: show it as it is */ }
   return raw;
 }
+
+// How long to keep asking before saying something has gone wrong.
+const RESTART_PATIENCE_MS = 60000;
+
+// Wait for the sandbox to finish restarting, then show the page again.
+//
+// Two things restart it: installing a plugin, and updating the sandbox. Either
+// way this page outlives the server that sent it, and how long the new one
+// takes to answer depends on the computer — so this asks until it does rather
+// than guessing a number and reloading onto nothing. The same wait the last
+// page of setup does.
+//
+// It asks for "/", which answers whoever is asking. The first version asked
+// for /api/plugin-actions — the very thing it was waiting to see change — and
+// that endpoint requires an unlocked session. Restarting mints a new session
+// secret unless one is configured, so every session from before the restart is
+// void: the poll got 401 once a second, forever, and the page never reloaded.
+//
+// `say` is passed in rather than an element named here. This used to name
+// #install-busy, which is the install dialog's own status line and does not
+// exist on the settings page — the second caller would have got a null and
+// nothing would have been said at all.
+function waitForTheSandboxToComeBack(say) {
+  const gaveUpAt = Date.now() + RESTART_PATIENCE_MS;
+  setTimeout(function () {
+    (function ask() {
+      fetch("/", { method: "HEAD", cache: "no-store" })
+        // window.top, not window: the settings page is also shown inside the
+        // chat page's settings panel, and reloading only that frame would
+        // leave a fresh settings page sitting inside a chat page still talking
+        // to a server that no longer exists. Standing on its own, window.top
+        // is this window, so this is right either way.
+        .then(function () { window.top.location.reload(); })
+        .catch(function () {
+          // Only a failure to connect reaches here, which is what a server
+          // that is still starting looks like. Any answer at all, including
+          // one asking to unlock again, means it is back.
+          if (Date.now() > gaveUpAt) {
+            say("The sandbox is taking longer than expected to restart. "
+                + "Reload this page in a moment. If it does not come back, "
+                + "open the sandbox again from its icon, or run "
+                + "`python3 start.py` to see in the terminal what went wrong.");
+            return;
+          }
+          setTimeout(ask, 500);
+        });
+    })();
+  }, 1200);
+}
+
+// Stop the sandbox, from the Quit button every page has.
+//
+// The sandbox usually runs with no window of its own — it is started from an
+// icon — so this is how it stops. The server refuses while something is still
+// being worked on, and says why; that is shown rather than stopping anyway.
+//
+// Once it has stopped, nothing is left to fetch a page from, so the one saying
+// so is written here. window.top, not window, because the settings page is also
+// shown inside the chat page's settings panel, and the whole window should say
+// it — not a panel inside a chat page that no longer works.
+async function quitTheSandbox() {
+  let response = null;
+  try {
+    response = await fetch("/quit", { method: "POST" });
+  } catch (e) {
+    // Nothing answered: it has already stopped. Say so.
+  }
+  if (response && response.status === 401) {
+    // This browser was never let in (or the sandbox restarted since). The
+    // passphrase page is where to go, and it is what "/" shows.
+    window.top.location.href = "/";
+    return;
+  }
+  if (response && !response.ok) {
+    alert(readableError(new Error(await response.text())));
+    return;
+  }
+  const page = window.top.document;
+  page.title = "Sandbox stopped — Princeton University AI Sandbox";
+  page.body.innerHTML =
+    '<main style="position: fixed; inset: 0; display: grid; place-items: center;'
+    + ' padding: var(--space-4); background: var(--bg); color: var(--text);'
+    + ' font-family: var(--font-ui); text-align: center;">'
+    + '<div style="max-width: var(--measure);">'
+    + '<h1 style="font-size: var(--text-xl);">The sandbox has stopped.</h1>'
+    + '<p style="font-size: var(--text-md); color: var(--text-muted);">'
+    + 'You can close this tab. To open the sandbox again, double-click its icon'
+    + ' on your Desktop.</p>'
+    + '</div></main>';
+}
 </script>

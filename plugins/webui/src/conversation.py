@@ -464,6 +464,105 @@ class Conversation:
         return out
 
 
+def reply_model_name(conversation_model: str, answered_as: str) -> str:
+    """Name the model behind a reply the way the conversation names its models.
+
+    A model on one of this installation's own endpoints is chosen as the
+    endpoint, a colon, and the model — ``my_mac_studio:qwen3.8:27b-mlx`` — but
+    the endpoint answers under the model's name alone, which on its own reads
+    as a model on the built-in service. Saved that way, one model looks like
+    two in the conversation list's filter, and the second is filed under
+    whichever company its name suggests rather than under the endpoint it ran
+    on.
+
+    Args:
+        conversation_model: The model the conversation was set to when the
+            reply was asked for.
+        answered_as: The name the reply came back under.
+
+    Returns:
+        ``answered_as`` with the endpoint in front, when the conversation was
+        on one of this installation's endpoints and the name doesn't already
+        carry it; ``answered_as`` unchanged otherwise.
+    """
+    from src import settings
+
+    endpoint, colon, _ = conversation_model.partition(":")
+    if colon and endpoint in settings.ENDPOINTS and not answered_as.startswith(endpoint + ":"):
+        return f"{endpoint}:{answered_as}"
+    return answered_as
+
+
+def _as_saved_before_replies_carried_their_endpoint(conversation_model: str,
+                                                    answered_as: str) -> str:
+    """Read an older reply's model name as ``reply_model_name()`` would have saved it.
+
+    Replies saved before that function existed carry the endpoint's own name
+    for the model and nothing else. Only the one case that is certain is put
+    right: the reply's name is exactly the model part of what the conversation
+    is set to. That holds even when the endpoint has since been taken out of
+    the settings, which is when it matters most, because nothing else then
+    says where the model ran.
+    """
+    _, colon, on_endpoint = conversation_model.partition(":")
+    return conversation_model if colon and answered_as == on_endpoint else answered_as
+
+
+def conversation_summary(data: dict[str, Any], folder_name: str) -> dict[str, Any]:
+    """Describe one saved conversation in the few facts the sidebar list needs.
+
+    The list shows each conversation by title and age, and its filter narrows
+    it by model, cost, tokens (roughly, words sent and received) and whether a
+    document was translated or transcribed in it. Everything here is worked
+    out from the saved file, so nothing extra has to be kept up to date as a
+    conversation grows.
+
+    Args:
+        data: The contents of one ``conversation.json``, as read from disk.
+        folder_name: The conversation's folder name, used as its id if the
+            file somehow lacks one.
+
+    Returns:
+        A dict with ``id``, ``title``, ``updated_at`` and ``model`` (the model
+        the conversation was set to), plus:
+
+        - ``models``: every model name the conversation involved, sorted —
+          the one it was set to and each name a reply came back under. The
+          two can differ (``gpt-4o`` asked for, ``gpt-4o-2024-08-06``
+          answering), and the spending sidebar lists the second kind, so a
+          filter started there needs both to find its conversations.
+        - ``cost`` and ``tokens``: the totals across every reply that
+          reported them, counted the way the bar above an open conversation
+          counts them. A reply with no cost recorded is left out of both.
+        - ``has_job``: whether a document job ran in this conversation.
+    """
+    messages = data.get("messages") or []
+    model = data.get("model", "")
+    models = {model} if model else set()
+    cost = 0.0
+    tokens = 0
+    has_job = False
+    for m in messages:
+        if m.get("model"):
+            models.add(_as_saved_before_replies_carried_their_endpoint(model, m["model"]))
+        if str(m.get("kind", "message")).startswith("job_"):
+            has_job = True
+        if m.get("cost") is None:
+            continue
+        cost += m["cost"]
+        tokens += (m.get("prompt_tokens") or 0) + (m.get("completion_tokens") or 0)
+    return {
+        "id": data.get("id", folder_name),
+        "title": data.get("title", "Untitled conversation"),
+        "updated_at": data.get("updated_at", ""),
+        "model": model,
+        "models": sorted(models),
+        "cost": cost,
+        "tokens": tokens,
+        "has_job": has_job,
+    }
+
+
 class ConversationStore:
     """Reads and writes one professor's conversations under data/conversations/{professor}/."""
 
@@ -573,9 +672,9 @@ class ConversationStore:
         """Return a short summary of every saved conversation, newest first.
 
         Returns:
-            A list of ``{'id', 'title', 'updated_at', 'model'}`` dicts, sorted
-            by ``updated_at`` descending. Files that can't be read (e.g.
-            corrupted JSON) are skipped rather than raising.
+            A list of summaries as ``conversation_summary()`` describes them,
+            sorted by ``updated_at`` descending. Files that can't be read
+            (e.g. corrupted JSON) are skipped rather than raising.
         """
         summaries = []
         for f in self._dir.glob("c_*/conversation.json"):
@@ -583,12 +682,7 @@ class ConversationStore:
                 data = json.loads(f.read_text())
             except (json.JSONDecodeError, OSError):
                 continue
-            summaries.append({
-                "id": data.get("id", f.parent.name),
-                "title": data.get("title", "Untitled conversation"),
-                "updated_at": data.get("updated_at", ""),
-                "model": data.get("model", ""),
-            })
+            summaries.append(conversation_summary(data, f.parent.name))
         summaries.sort(key=lambda s: s["updated_at"], reverse=True)
         return summaries
 
