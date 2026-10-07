@@ -13,6 +13,7 @@ from ..models import (
 )
 from ..tracking.token_tracker import TokenTracker
 from .base_service import BaseService
+from .constants import MAX_RETRIES
 from .prompts import TranscriptionReviewPromptSpec
 from ..settings import (
     TRANSCRIPTION_REVIEW_ROLE,
@@ -138,12 +139,28 @@ class TranscriptionReviewService(BaseService):
         model = self._get_model()
         system_role = get_model_system_role(self._catalog_model_name(model))
 
-        def body(_attempt: int) -> Optional[str]:
+        def body(attempt: int) -> Optional[str]:
             response = self._call_api(model, system_role, system_prompt, user_prompt)
             self._record_response_usage(response, model, critical=False)
             raw = ""
             if response.choices and response.choices[0].message:
                 raw = response.choices[0].message.content or ""
+            if not raw.strip():
+                # Asked again, as an empty transcription is. Passed on, it
+                # showed the person a blank report as though nothing had
+                # been wrong with the text.
+                logging.warning(
+                    f"Transcription review came back empty "
+                    f"(attempt {attempt + 1}/{MAX_RETRIES}). Retrying..."
+                )
+                return None
             return self._inject_model_and_validate(raw, model, language)
 
-        return self._run_with_retry(body, model, "transcription_review")
+        return self._run_with_retry(
+            body, model, "transcription_review",
+            timeout_msg=(
+                f"The review came back empty {MAX_RETRIES} times, so there is no "
+                "report to show. Trying again in a few minutes, or with another "
+                "model (-m), usually works."
+            ),
+        )
