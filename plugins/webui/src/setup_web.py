@@ -38,6 +38,7 @@ from src import first_run, paths
 
 file_picker = sys.modules["_pu_webui_file_picker"]
 branding = sys.modules["_pu_webui_branding"]
+stopping = sys.modules["_pu_webui_stopping"]
 
 
 class PickFolderBody(BaseModel):
@@ -659,6 +660,9 @@ def create_setup_app(on_complete) -> FastAPI:
     """
     app = FastAPI()
     branding.add_favicon_route(app)
+    # So a double-click on the sandbox's icon can replace a setup page that
+    # was left open, rather than finding the port taken.
+    stopping.add_stop_route(app)
 
     @app.get("/", response_class=HTMLResponse)
     async def show_form() -> str:

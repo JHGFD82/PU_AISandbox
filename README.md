@@ -35,7 +35,22 @@ python3 start.py
 
 `start.py` does everything: detects whether to provide instructions on installing required software in an existing virtual environment or create a new one, which then includes finding an installed Python version new enough to run the sandbox (version 3.11 or higher), installing the additional software (approximately 200 MB), and finally opening the web interface in your browser for first-time setup.
 
-**NOTE:** It is typical for an error message to appear when the web UI is launched. Reload the page if your browser doesn't do it automatically.
+While it gets going, your browser shows a page saying the sandbox is starting, which turns into the sandbox by itself once it is ready. The first time, that is first-time setup; after that, it is the passphrase screen.
+
+### Opening the sandbox after the first time
+
+The first time `start.py` finishes, it puts an icon for the sandbox on your Desktop, named **PU AI Sandbox**. From then on, double-clicking that icon is all it takes: no terminal window opens, a page saying the sandbox is starting appears in your browser, and it turns into the sandbox when it is ready. On a Mac, you can drag the icon into your Applications folder or onto the Dock and it will keep working from there.
+
+Every double-click starts the sandbox afresh, stopping the copy already running if there is one. This is on purpose: the sandbox looks for a newer version when it starts, so opening it is how you find out an update is waiting. The one exception is a copy in the middle of a translation or transcription, which is left running and simply opened in your browser, since restarting it would throw that work away.
+
+To stop the sandbox, use **Quit**, which is the power button at the bottom of the sidebar (and the button at the top of the settings pages). It will not quit while a job is still being worked on, and tells you so.
+
+A few things worth knowing:
+
+1. If you move the sandbox's folder, the icon will stop working, since it holds the folder's full path. Run `python3 start.py --make-shortcut` from the new location to replace it.
+2. On Linux, some desktops ask once whether to trust a new icon before they will open it. Right-click it and choose **Allow Launching**.
+3. If Python is ever removed from your computer, or upgraded in a way that moves it, the icon opens a page saying so instead of doing nothing. Install the latest Python from [python.org](https://www.python.org/downloads/) and double-click the icon again; your settings and history are untouched.
+4. If the page says the sandbox couldn't be started, it tells you why, and where the full account of what happened is written down: `~/Library/Logs/PU_AISandbox-launcher.log` on a Mac, `%LOCALAPPDATA%\PU_AISandbox\launcher.log` on Windows, and `~/.local/state/PU_AISandbox/launcher.log` on Linux. Running `python3 start.py` in a terminal window instead shows the same thing as it happens.
 
 ### If you already have a virtual environment of your own
 
@@ -291,7 +306,7 @@ Start it:
 python main.py webui serve
 ```
 
-Your web browser should automatically open and navigate to **http://127.0.0.1:8000**. If it opens to an error message, wait a few seconds and reload the page if it does not happen automatically. Leave the terminal window open as closing it stops the server that runs the interface.
+Your web browser should automatically open and navigate to **http://127.0.0.1:8000**. If it opens to an error message, wait a few seconds and reload the page if it does not happen automatically. Leave the terminal window open as closing it stops the server that runs the interface; **Quit** in the sidebar stops it too. (Opening the sandbox from its icon, described in "Getting Started", skips all of this.)
 
 ### Features
 
