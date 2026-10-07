@@ -19,6 +19,11 @@
 ruff==0.16.0
 pyright==1.1.390
 
+# The test runner, and its coverage measurement (what to measure is set in
+# .coveragerc; `pytest --cov` reads it).
+pytest
+pytest-cov
+
 # Used by FastAPI's TestClient, which the web UI tests rely on. It currently
 # arrives indirectly as a dependency of `openai`, so the suite happens to
 # work without it being named anywhere — listed here so that stays true if
