@@ -409,3 +409,54 @@ class TestAnAutoAddedModelAnnouncesWhatItCannotDo:
             _, entry = add_model_to_catalog("openai/corrected")
         assert entry["supports_vision"] is True
         assert "supports_vision" not in caplog.text
+
+
+class TestWhatAModelThatCannotBeAddedSays:
+    """The reason reached the person as the network library phrased it.
+
+    "HTTP Error 404: Not Found" names neither the model nor anything to do
+    about it, and 404 from the pricing service almost always means the name
+    was mistyped.
+    """
+
+    def _raise(self, error):
+        def fake_urlopen(*args, **kwargs):
+            raise error
+        return fake_urlopen
+
+    def test_a_name_the_pricing_service_does_not_know_says_to_check_it(self, monkeypatch):
+        import urllib.error
+
+        import src.models.pricing as pricing
+
+        monkeypatch.setattr(pricing.urllib.request, "urlopen", self._raise(
+            urllib.error.HTTPError("u", 404, "Not Found", {}, None)))
+        with pytest.raises(RuntimeError) as caught:
+            pricing._fetch_model_pricing("openai/gpt-typo", 1_000_000)
+        message = str(caught.value)
+        assert "openai/gpt-typo" in message
+        assert "misspelling" in message
+        assert "404" not in message
+
+    def test_a_service_that_is_down_is_not_reported_as_a_bad_name(self, monkeypatch):
+        import urllib.error
+
+        import src.models.pricing as pricing
+
+        monkeypatch.setattr(pricing.urllib.request, "urlopen", self._raise(
+            urllib.error.HTTPError("u", 503, "Service Unavailable", {}, None)))
+        with pytest.raises(RuntimeError) as caught:
+            pricing._fetch_model_pricing("openai/gpt-4o", 1_000_000)
+        assert "misspelling" not in str(caught.value)
+        assert "again" in str(caught.value)
+
+    def test_no_connection_says_so(self, monkeypatch):
+        import urllib.error
+
+        import src.models.pricing as pricing
+
+        monkeypatch.setattr(pricing.urllib.request, "urlopen", self._raise(
+            urllib.error.URLError("nodename nor servname provided")))
+        with pytest.raises(RuntimeError) as caught:
+            pricing._fetch_model_pricing("openai/gpt-4o", 1_000_000)
+        assert "internet connection" in str(caught.value)

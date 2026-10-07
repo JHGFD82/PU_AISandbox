@@ -1,7 +1,7 @@
 """Tests for plugins/webui/plugin.py — the plugin contract itself.
 
 Covers requires_professor, subcommand registration/parsing, and run()
-dispatch. Does not start a real server (see test_app.py for route behavior).
+dispatch. Does not start a real server (the routes are tested in test_app*.py).
 """
 
 from __future__ import annotations

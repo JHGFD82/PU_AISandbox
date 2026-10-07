@@ -10,6 +10,7 @@ import time
 
 import pytest
 
+
 jobs = sys.modules["_pu_webui_jobs"]
 conversation = sys.modules["_pu_webui_conversation"]
 
@@ -1196,3 +1197,32 @@ class TestAConversationIsNeverLeftLocked:
         jobs._release_conversation(finished, store, jobs.JobStore())
 
         assert store.load(conv.id).active_job_id == "job_the_one_running_now"
+
+
+class TestWhereAJobsOutputGoes:
+    """Whether a finished job's file lands in the conversation's folder."""
+
+    def test_it_goes_in_the_conversation_by_default(self, tmp_path):
+        jobs = sys.modules["_pu_webui_jobs"]
+        path = jobs.job_output_dir("jh43", "j1", base_dir=tmp_path,
+                                   conversation_id="c_05b92b6ac41a9449")
+        assert path.parts[-3:] == ("c_05b92b6ac41a9449", "outputs", "j1")
+
+    def test_turned_off_it_goes_to_the_shared_folder_of_results(self, tmp_path):
+        jobs = sys.modules["_pu_webui_jobs"]
+        path = jobs.job_output_dir("jh43", "j1", base_dir=tmp_path,
+                                   conversation_id=None)
+        assert "_job_outputs" in path.parts
+        assert "c_05b92b6ac41a9449" not in path.parts
+
+    def test_the_download_link_still_finds_it_either_way(self, tmp_path, monkeypatch):
+        """Turning it off must not break a saved conversation's download."""
+        jobs = sys.modules["_pu_webui_jobs"]
+        monkeypatch.setattr(jobs, "_CONVERSATIONS_DIR", tmp_path)
+        outside = jobs.job_output_dir("jh43", "j1", conversation_id=None)
+        outside.mkdir(parents=True, exist_ok=True)
+        (outside / "translated.docx").write_bytes(b"result")
+        found = jobs.resolve_output_path(
+            "jh43", "j1", "translated.docx", conversation_id="c_05b92b6ac41a9449")
+        assert found is not None and found.exists()
+        assert found.read_bytes() == b"result"
