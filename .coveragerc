@@ -1,15 +1,33 @@
+# What `pytest --cov` measures, here and in CI (.github/workflows/upload-coverage.yml).
+#
+# Everything that ships in this repository: core, every built-in plugin, the
+# two entry points and the maintenance scripts. The -ea plugins are separate
+# repositories with their own tests and are omitted below.
+#
+# CI runs plain `--cov` so that this list is the only one. Naming a path on
+# the command line as well (`--cov=src/`) replaces it rather than adding to it.
+
 [run]
-source =
-    src
-    plugins/translation/utils.py
-    plugins/translation/src
-    plugins/translation/plugin.py
-    plugins/prompt/src
-    plugins/prompt/plugin.py
-    plugins/transcription/src
-    plugins/transcription/plugin.py
+branch = True
+# One root, so every report names files by their full path from here. With
+# several, the XML report Codecov reads names each file relative to whichever
+# root holds it, and the four plugins' plugin.py and settings.py come out as
+# one file each. A single root also catches start.py and main.py, which the
+# tests load from their paths under names of their own.
+source = .
+omit =
+    .venv/*
+    plugins/*-ea/*
+    tests/*
+    plugins/*/tests/*
+    */conftest.py
+    docs/*
+    templates/*
+    # Jinja reports the web pages it renders under their own file names; they
+    # are pages, not Python, and have no lines coverage can count.
+    *.html
 
 [report]
-omit =
-    plugins/*/tests/*
-    plugins/*/conftest.py
+# The plugins' folders have no __init__.py. Without this, a plugin file that
+# no test touches would quietly drop out of the total rather than count at 0%.
+include_namespace_packages = True

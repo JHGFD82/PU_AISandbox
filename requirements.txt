@@ -8,8 +8,6 @@ tqdm
 reportlab
 python-docx
 openpyxl
-pytest
-pytest-mock
 fastapi
 uvicorn[standard]
 jinja2

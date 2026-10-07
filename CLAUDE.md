@@ -23,8 +23,9 @@ python main.py settings add-professor  # then add whoever will use it
 pytest                                          # whole suite (see testpaths in pytest.ini)
 pytest -m "not live"                            # skip tests that hit the real PortKey pricing endpoint
 pytest tests/test_token_tracker.py -k TestConcurrentRecordUsage   # single test/class
-PYTHONPATH=$(pwd) pytest --cov=src/ --cov-branch --cov-report=xml # matches CI (upload-coverage.yml)
+pytest -m "not live" --cov --cov-report=term-missing:skip-covered   # what CI measures (upload-coverage.yml)
 ```
+What counts toward coverage is decided in `.coveragerc` alone: core, every built-in plugin, `scripts/`, `start.py` and `main.py`. Use plain `--cov`; naming a folder (`--cov=src/`) replaces that list rather than narrowing it. `codecov.yml` holds only the pass/fail rules, never a second list of files.
 `pytest.ini` sets `testpaths` to `tests` plus `plugins/{translation,prompt,transcription,webui}/tests`, and `pythonpath = .`. Discovery is by explicit list, so a new plugin's tests must be added there. `translation-ea`/`transcription-ea` are separate git-ignored repos with their own `pytest.ini` — run those from inside their own directory.
 
 ### Lint / type-check

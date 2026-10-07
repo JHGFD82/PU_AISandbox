@@ -1,4 +1,8 @@
-# This workflow will test the package against multiple versions of Python and archive test results as artifacts.
+# Runs the test suite on every push and sends Codecov two things: how much of
+# the code the tests reach, and which tests passed or failed.
+#
+# What counts as "the code" is decided in .coveragerc alone, which is why the
+# pytest line below says plain `--cov` and names no folder.
 name: Upload to Codecov
 
 on: [push]
@@ -8,18 +12,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Setup Python (Latest)
-        uses: actions/setup-python@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
-          python-version: "3.13"  # Specify one version for Codecov
+          python-version: "3.13"
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install pytest pytest-cov
-      - name: Test for CodeCov
+          pip install -r requirements.txt -r requirements-dev.txt
+      - name: Run the tests
         run: |
-          PYTHONPATH=$(pwd) pytest -m "not live" --cov=src/ --cov-branch --cov-report=xml
+          pytest -m "not live" --cov --cov-report=xml --junitxml=junit.xml -o junit_family=legacy
       - name: Upload coverage reports to Codecov
         uses: codecov/codecov-action@v5
         with:
