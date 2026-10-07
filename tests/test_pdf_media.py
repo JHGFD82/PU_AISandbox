@@ -1,24 +1,21 @@
 """
 Tests for:
   1. Tables in PDF output (save_to_pdf with table_registry)
-  2. PdfMediaExtractor — image extraction from PDF files
-  3. --preserve-media validation now accepts .pdf input
-  4. sandbox_processor wires PdfMediaExtractor for PDF input
+  2. Placing pictures taken from a PDF beside the page they came from, in a
+     Word document (save_to_docx with page_number set)
+
+Finding those pictures in the first place is in test_pdf_media_extractor.py.
 """
 
 import struct
 import zlib
-from io import BytesIO
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
 from src.output.file_output import FileOutputHandler
-from src.processors.pdf_media_extractor import PdfMediaExtractor
 from src.models.embedded_media import EmbeddedMedia
-
-_PLUGINS_DIR = Path(__file__).parent.parent / "plugins"
 
 
 # ---------------------------------------------------------------------------
@@ -40,33 +37,8 @@ def _make_png(width: int = 64, height: int = 64) -> bytes:
     return sig + ihdr + idat + iend
 
 
-# Convenience alias used by tests that only need *a* valid PNG.
-_make_1x1_png = lambda: _make_png(1, 1)  # noqa: E731 (kept for preserve-media compat)
-
-
-def _make_pdf_with_image() -> BytesIO:
-    """Create a minimal PDF containing one embedded 64×64 PNG using PyMuPDF."""
-    import fitz
-    doc = fitz.open()
-    page = doc.new_page(width=595, height=842)
-    png_bytes = _make_png(64, 64)
-    rect = fitz.Rect(100, 100, 200, 200)
-    page.insert_image(rect, stream=png_bytes)
-    out = BytesIO()
-    doc.save(out)
-    out.seek(0)
-    return out
-
-
-def _make_empty_pdf() -> BytesIO:
-    """Create a minimal PDF with no images."""
-    import fitz
-    doc = fitz.open()
-    doc.new_page(width=595, height=842)
-    out = BytesIO()
-    doc.save(out)
-    out.seek(0)
-    return out
+def _make_1x1_png() -> bytes:
+    return _make_png(1, 1)
 
 
 # ---------------------------------------------------------------------------
@@ -145,120 +117,6 @@ class TestSaveTranslationOutputPdfTableForwarding:
         call_kwargs = mock_pdf.call_args.kwargs
         assert call_kwargs.get("table_registry") is None
 
-
-# ---------------------------------------------------------------------------
-# Part 2: PdfMediaExtractor
-# ---------------------------------------------------------------------------
-
-class TestPdfMediaExtractorBasic:
-    @pytest.fixture(autouse=True)
-    def _bypass_size_filter(self):
-        """Lower the minimum size threshold so our small test PNGs are accepted."""
-        with patch("src.processors.pdf_media_extractor._MIN_IMAGE_BYTES", 0):
-            yield
-
-    def test_returns_list(self):
-        buf = _make_empty_pdf()
-        result = PdfMediaExtractor.extract_media(buf)
-        assert isinstance(result, list)
-
-    def test_empty_pdf_returns_empty_list(self):
-        buf = _make_empty_pdf()
-        result = PdfMediaExtractor.extract_media(buf)
-        assert result == []
-
-    def test_pdf_with_image_returns_one_item(self):
-        buf = _make_pdf_with_image()
-        result = PdfMediaExtractor.extract_media(buf)
-        assert len(result) == 1
-
-    def test_extracted_item_is_embedded_media(self):
-        buf = _make_pdf_with_image()
-        items = PdfMediaExtractor.extract_media(buf)
-        assert isinstance(items[0], EmbeddedMedia)
-
-    def test_image_data_is_non_empty_bytes(self):
-        buf = _make_pdf_with_image()
-        items = PdfMediaExtractor.extract_media(buf)
-        assert isinstance(items[0].data, bytes)
-        assert len(items[0].data) > 0
-
-    def test_content_type_is_string(self):
-        buf = _make_pdf_with_image()
-        items = PdfMediaExtractor.extract_media(buf)
-        assert isinstance(items[0].content_type, str)
-        assert items[0].content_type.startswith("image/")
-
-    def test_position_fraction_in_unit_interval(self):
-        buf = _make_pdf_with_image()
-        items = PdfMediaExtractor.extract_media(buf)
-        assert 0.0 <= items[0].position_fraction <= 1.0
-
-    def test_emu_dimensions_are_positive_or_none(self):
-        buf = _make_pdf_with_image()
-        items = PdfMediaExtractor.extract_media(buf)
-        item = items[0]
-        if item.width_emu is not None:
-            assert item.width_emu > 0
-        if item.height_emu is not None:
-            assert item.height_emu > 0
-
-
-class TestPdfMediaExtractorMultiPage:
-    @pytest.fixture(autouse=True)
-    def _bypass_size_filter(self):
-        with patch("src.processors.pdf_media_extractor._MIN_IMAGE_BYTES", 0):
-            yield
-
-    def test_image_on_second_page_has_higher_fraction(self):
-        import fitz
-        doc = fitz.open()
-        # Page 0: no image
-        doc.new_page(width=595, height=842)
-        # Page 1: image near the top
-        page1 = doc.new_page(width=595, height=842)
-        page1.insert_image(fitz.Rect(50, 50, 150, 150), stream=_make_png(64, 64))
-        buf = BytesIO()
-        doc.save(buf)
-        buf.seek(0)
-
-        items = PdfMediaExtractor.extract_media(buf)
-        assert len(items) >= 1
-        # Image is on page 1 of 2, so fraction should be >= 0.5
-        assert items[0].position_fraction >= 0.5
-
-    def test_deduplication_across_pages(self):
-        """Same xref referenced on two pages should only appear once."""
-        import fitz
-        doc = fitz.open()
-        png = _make_png(64, 64)
-        p0 = doc.new_page(width=595, height=842)
-        p0.insert_image(fitz.Rect(10, 10, 100, 100), stream=png)
-        p1 = doc.new_page(width=595, height=842)
-        # Insert the same PNG bytes again — PyMuPDF may reuse the xref or create a new one.
-        p1.insert_image(fitz.Rect(10, 10, 100, 100), stream=png)
-        buf = BytesIO()
-        doc.save(buf)
-        buf.seek(0)
-
-        items = PdfMediaExtractor.extract_media(buf)
-        # However many unique xrefs were created, each should appear exactly once.
-        assert len(items) == len({id(it.data): it for it in items})
-
-
-class TestPdfMediaExtractorImportError:
-    def test_raises_import_error_when_fitz_missing(self):
-        buf = _make_empty_pdf()
-        with patch.dict("sys.modules", {"fitz": None}):
-            with pytest.raises(ImportError, match="PyMuPDF"):
-                PdfMediaExtractor.extract_media(buf)
-
-
-# ---------------------------------------------------------------------------
-# Part 3: --preserve-media validation — PDF input now allowed
-# ---------------------------------------------------------------------------
-
-# ---------------------------------------------------------------------------
 
 class TestSaveToDocxPageMarkerInsertion:
     """Images with page_number set use '-- Page N --' markers for placement."""
@@ -369,12 +227,3 @@ class TestSaveToDocxPageMarkerInsertion:
         doc = Document(out)
         # 2 page-marker paras + 3 text paras (A., B., C.) + 1 image para = 6
         assert len(doc.paragraphs) == 6
-
-    def test_page_number_field_on_extractor_output(self):
-        """PdfMediaExtractor sets page_number to the 0-based page index."""
-        with patch("src.processors.pdf_media_extractor._MIN_IMAGE_BYTES", 0):
-            buf = _make_pdf_with_image()
-            items = PdfMediaExtractor.extract_media(buf)
-        assert len(items) == 1
-        assert items[0].page_number == 0  # single-page PDF → page_index 0
-

@@ -1,58 +1,17 @@
-"""Pytest configuration for the transcription base plugin.
+"""Pytest set-up for the transcription plugin's tests.
 
-Adds the main PU_AISandbox repo root to sys.path so that ``src.*`` imports
-resolve correctly when running tests from within this plugin directory.
-
-Also pre-registers this plugin's service and runtime-mixin modules into
-sys.modules (mirroring plugins/translation/conftest.py) so tests can import
-them via their src.services.*/src.runtime.* names without depending on
-another test file incidentally loading the real plugin.py first.
+Files this plugin's own modules under the ``src.*`` names its code and tests
+import them by (see tests/plugin_modules.py), and keeps its services from
+recording usage to real files.
 """
 
-import importlib.util
-import sys
+from functools import partial
 from pathlib import Path
-from unittest.mock import MagicMock
 
-import pytest
+from tests.plugin_modules import no_real_token_tracker  # noqa: F401  (importing it applies it here)
+from tests.plugin_modules import register
 
-_REPO_ROOT = Path(__file__).resolve().parents[2]
-if str(_REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(_REPO_ROOT))
-
-
-
-_PLUGIN_DIR = Path(__file__).resolve().parent
-
-
-def _register(module_name: str, rel_path: str) -> None:
-    """Inject a plugin-owned module into sys.modules under its src.* name."""
-    if module_name in sys.modules:
-        return
-    path = _PLUGIN_DIR / rel_path
-    if not path.exists():
-        return
-    spec = importlib.util.spec_from_file_location(module_name, path)
-    if spec and spec.loader:
-        mod = importlib.util.module_from_spec(spec)
-        sys.modules[module_name] = mod
-        spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    # Expose the module as an attribute on its parent package so that
-    # pytest's string-based monkeypatch.setattr("src.runtime.<name>.*")
-    # resolution (which walks package attributes, not sys.modules) works.
-    # Falls back to importlib.import_module because src.runtime may not
-    # have been imported yet at this point.
-    parts = module_name.rsplit(".", 1)
-    if len(parts) == 2:
-        parent = sys.modules.get(parts[0])
-        if parent is None:
-            try:
-                parent = importlib.import_module(parts[0])
-            except ImportError:
-                parent = None
-        if parent is not None:
-            setattr(parent, parts[1], sys.modules[module_name])
-
+_register = partial(register, Path(__file__).resolve().parent)
 
 # Register in dependency order: settings → fragments → specs → services → runtime.
 _register("pu_plugin.transcription.settings", "src/settings.py")
@@ -80,22 +39,3 @@ _register(
     "src.runtime.image_handler",
     "src/runtime/image_handler.py",
 )
-
-
-@pytest.fixture(autouse=True)
-def _mock_token_tracker(monkeypatch):
-    """Prevent real TokenTracker instances from writing to data/ during tests.
-
-    All service constructors that receive no explicit token_tracker fall back to
-    ``TokenTracker(professor=..., data_file=...)`` inside BaseService.__init__.
-    Patching it here keeps test runs side-effect-free without requiring every
-    call site to pass a mock explicitly.
-    """
-    def _make_tracker(**_):
-        tracker = MagicMock()
-        usage = MagicMock()
-        usage.total_cost = 0.0
-        tracker.record_usage.return_value = usage
-        return tracker
-
-    monkeypatch.setattr("src.services.base_service.TokenTracker", _make_tracker)

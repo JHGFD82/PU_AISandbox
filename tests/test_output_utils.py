@@ -1,4 +1,4 @@
-"""Coverage tests for src/output/_output_utils.py."""
+"""Tests for src/output/_output_utils.py: finding Markdown tables in text and drawing them as plain-text grids."""
 
 
 from src.output._output_utils import (

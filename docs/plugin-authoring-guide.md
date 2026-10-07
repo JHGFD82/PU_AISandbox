@@ -558,20 +558,25 @@ Put tests in `plugins/myplugin/tests/` and **add that path to `testpaths` in the
 testpaths = tests plugins/translation/tests plugins/prompt/tests plugins/transcription/tests plugins/webui/tests plugins/myplugin/tests
 ```
 
-`plugin.py` itself is not pre-registered for tests, so a test that needs it loads it the same way `_register()` does. Add a `plugins/myplugin/conftest.py` mirroring your plugin's own registrations if your tests import your service or handler modules directly — `plugins/translation/conftest.py` is the pattern.
+You do not need to do anything to keep your tests away from real settings and spending. The `conftest.py` at the repository root applies to your tests as much as to core's: each test gets its own empty settings location and its own copy of a small test model catalog, so nothing a test does can reach the settings or usage records of whoever runs it.
 
-Use the core `conftest.py`'s `_use_template_catalog` fixture so tests never touch the real model catalog:
+What you do need is a `conftest.py` of your own if your tests import your service or handler modules by their `src.*` names. Your `plugin.py` files those modules under those names when the sandbox starts, but a test imports them before any plugin has loaded, so the conftest files them first. It lists the same modules, in the same order, as your `plugin.py` does:
 
 ```python
-# plugins/myplugin/tests/conftest.py
-import pytest
-from tests.conftest import _use_template_catalog   # re-export from core
+# plugins/myplugin/conftest.py
+from functools import partial
+from pathlib import Path
 
+from tests.plugin_modules import no_real_token_tracker  # noqa: F401  (importing it applies it here)
+from tests.plugin_modules import register
 
-@pytest.fixture(autouse=True)
-def use_template_catalog(_use_template_catalog):
-    pass
+_register = partial(register, Path(__file__).resolve().parent)
+
+_register("pu_plugin.myplugin.settings", "src/settings.py")
+_register("src.services.myplugin_service", "src/services/myplugin_service.py")
 ```
+
+`no_real_token_tracker` stops your services from writing to the usage files while they are tested; leave that line out if your plugin has no services. `plugin.py` itself is not filed by the conftest, so a test that needs it loads it the way `plugins/translation/tests/test_translation_plugin_ui_action.py` does.
 
 ---
 

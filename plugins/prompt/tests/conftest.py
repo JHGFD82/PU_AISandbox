@@ -1,33 +1,14 @@
-"""conftest for plugins/prompt/tests — ensures prompt_service is in sys.modules."""
+"""Pytest set-up for the prompt plugin's tests: files its modules under their ``src.*`` names (see tests/plugin_modules.py)."""
 
-import importlib.util
-import sys
+from functools import partial
 from pathlib import Path
 
-_PLUGIN_DIR = Path(__file__).parent.parent
+from tests.plugin_modules import register
 
-
-def _register(module_name: str, rel_path: str) -> None:
-    if module_name in sys.modules:
-        return
-    path = _PLUGIN_DIR / rel_path
-    if not path.exists():
-        return
-    spec = importlib.util.spec_from_file_location(module_name, path)
-    if spec and spec.loader:
-        mod = importlib.util.module_from_spec(spec)
-        sys.modules[module_name] = mod
-        spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    # Make the module accessible as an attribute of its parent package so that
-    # pytest's monkeypatch.setattr("src.services.prompt_service.*") works.
-    parts = module_name.rsplit(".", 1)
-    if len(parts) == 2:
-        parent = sys.modules.get(parts[0])
-        if parent is not None:
-            setattr(parent, parts[1], sys.modules[module_name])
-
+_register = partial(register, Path(__file__).resolve().parent.parent)
 
 # Same order plugin.py uses: the settings module first, so the service can
 # import PROMPT_ROLE from it through src.settings.
 _register("pu_plugin.prompt.settings", "src/settings.py")
 _register("src.services.prompt_service", "src/services/prompt_service.py")
+

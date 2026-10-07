@@ -6,6 +6,7 @@ Tests for BaseTextProcessor static methods:
 These are pure functions with no I/O or network dependencies.
 """
 
+import logging
 
 from src.processors.base_text_processor import BaseTextProcessor
 
@@ -72,9 +73,11 @@ class TestParseTextIntoParagraphs:
 
 class TestSplitTextIntoPages:
 
-    def test_empty_list_returns_single_empty_string(self):
-        result = BaseTextProcessor.split_text_into_pages([])
+    def test_empty_list_returns_single_empty_string(self, caplog):
+        with caplog.at_level(logging.WARNING):
+            result = BaseTextProcessor.split_text_into_pages([])
         assert result == [""]
+        assert any("No paragraphs" in r.message for r in caplog.records)
 
     def test_single_small_paragraph_stays_on_one_page(self):
         result = BaseTextProcessor.split_text_into_pages(["Hello World"])

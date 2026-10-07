@@ -1,77 +1,24 @@
-"""
-Tests for small utility modules:
-- src/console.py (print_pass_result and other formatting functions)
-- src/services/parallel_utils.py (tqdm_logging, update_pbar_postfix)
-- src/processors/base_text_processor.py (split_text_into_pages, parse_text_into_paragraphs)
+"""Tests for src/services/parallel_utils.py: running pages or images several at a time.
+
+Covers keeping log lines from breaking up progress bars (``tqdm_logging``),
+the progress figures shown beside a bar, how many workers a run gets, finding
+a folder's images in reading order, and reporting progress to the web
+interface while a folder runs.
 """
 
 import logging
+import os
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-
-# ===========================================================================
-# src/console.py
-# ===========================================================================
-
-from src.console import (
-    print_section,
-    print_banner,
-    print_subsection,
-    print_pass_result,
+from src.services.parallel_utils import (
+    cap_worker_count,
+    collect_image_files,
+    run_folder_parallel,
+    tqdm_logging,
+    update_pbar_postfix,
 )
-
-
-class TestPrintSection:
-    def test_outputs_title_and_content(self, capsys):
-        print_section("Translation", "Hello world")
-        out = capsys.readouterr().out
-        assert "Translation" in out
-        assert "Hello world" in out
-        assert "===" in out
-
-
-class TestPrintBanner:
-    def test_outputs_title_between_lines(self, capsys):
-        print_banner("TOKEN REPORT")
-        out = capsys.readouterr().out
-        assert "TOKEN REPORT" in out
-        assert "=" * 10 in out
-
-    def test_custom_width(self, capsys):
-        print_banner("TITLE", width=30)
-        out = capsys.readouterr().out
-        assert "=" * 30 in out
-
-
-class TestPrintSubsection:
-    def test_outputs_label_and_rule(self, capsys):
-        print_subsection("Model Breakdown")
-        out = capsys.readouterr().out
-        assert "Model Breakdown" in out
-        assert "---" in out
-
-
-class TestPrintPassResult:
-    def test_outputs_label_and_content(self, capsys):
-        print_pass_result("Pass 1/3 result", "transcribed text")
-        out = capsys.readouterr().out
-        assert "Pass 1/3 result" in out
-        assert "transcribed text" in out
-        assert "---" in out
-
-    def test_outputs_empty_content_without_error(self, capsys):
-        print_pass_result("label", "")
-        out = capsys.readouterr().out
-        assert "label" in out
-
-
-# ===========================================================================
-# src/services/parallel_utils.py
-# ===========================================================================
-
-from src.services.parallel_utils import tqdm_logging, update_pbar_postfix
 
 
 @pytest.fixture(autouse=True)
@@ -374,78 +321,6 @@ class TestUpdatePbarPostfix:
         pbar.set_postfix.assert_not_called()
 
 
-# ===========================================================================
-# src/processors/base_text_processor.py
-# ===========================================================================
-
-from src.processors.base_text_processor import BaseTextProcessor
-
-
-class TestSplitTextIntoPages:
-    def test_empty_list_returns_empty_string(self, caplog):
-        with caplog.at_level(logging.WARNING):
-            result = BaseTextProcessor.split_text_into_pages([])
-        assert result == [""]
-        assert any("No paragraphs" in r.message for r in caplog.records)
-
-    def test_splits_large_content_into_pages(self):
-        # Create 10 paragraphs each 500 chars — target 2000 chars/page means ~4 per page
-        paras = ["A" * 500] * 10
-        pages = BaseTextProcessor.split_text_into_pages(paras, target_page_size=2000)
-        assert len(pages) > 1
-
-    def test_single_small_para_stays_on_one_page(self):
-        pages = BaseTextProcessor.split_text_into_pages(["hello"], target_page_size=2000)
-        assert pages == ["hello"]
-
-    def test_very_small_paras_create_one_page(self):
-        paras = ["a", "b", "c"]
-        pages = BaseTextProcessor.split_text_into_pages(paras, target_page_size=100)
-        # All tiny paras fit in one page
-        assert len(pages) >= 1
-        assert "a" in pages[0]
-
-    def test_multiple_paras_joined_with_double_newline(self):
-        paras = ["First", "Second"]
-        pages = BaseTextProcessor.split_text_into_pages(paras, target_page_size=10000)
-        assert pages[0] == "First\n\nSecond"
-
-
-class TestParseTextIntoParagraphs:
-    def test_splits_on_double_newlines(self):
-        content = "Para one\n\nPara two\n\nPara three"
-        result = BaseTextProcessor.parse_text_into_paragraphs(content)
-        assert result == ["Para one", "Para two", "Para three"]
-
-    def test_empty_or_blank_string_returns_empty_list(self):
-        assert BaseTextProcessor.parse_text_into_paragraphs("") == []
-        assert BaseTextProcessor.parse_text_into_paragraphs("   ") == []
-
-    def test_no_double_newline_returns_whole_string(self):
-        content = "line one\nline two\nline three"
-        result = BaseTextProcessor.parse_text_into_paragraphs(content)
-        # No double newline → treated as a single paragraph
-        assert len(result) == 1
-        assert "line one" in result[0]
-
-    def test_no_newlines_returns_full_content(self):
-        content = "Single paragraph no breaks"
-        result = BaseTextProcessor.parse_text_into_paragraphs(content)
-        assert result == ["Single paragraph no breaks"]
-
-    def test_strips_whitespace_from_paragraphs(self):
-        content = "  Para one  \n\n  Para two  "
-        result = BaseTextProcessor.parse_text_into_paragraphs(content)
-        assert result == ["Para one", "Para two"]
-
-
-# ===========================================================================
-# src/services/parallel_utils.py — cap_worker_count
-# ===========================================================================
-
-from src.services.parallel_utils import cap_worker_count
-
-
 class TestCapWorkerCount:
 
     def test_no_cap_when_workers_within_limits(self, caplog):
@@ -473,15 +348,6 @@ class TestCapWorkerCount:
         assert cap_worker_count(8, 4, 6) == 4
         assert cap_worker_count(8, 6, 4) == 4
         assert cap_worker_count(3, 6, 4) == 3
-
-
-# ===========================================================================
-# src/services/parallel_utils.py — collect_image_files / natural_sort_key
-# ===========================================================================
-
-import os
-
-from src.services.parallel_utils import collect_image_files
 
 
 class TestCollectImageFiles:
@@ -514,21 +380,15 @@ class TestCollectImageFiles:
         assert names == ["page_1.jpg", "page_2.jpg", "page_10.jpg"]
 
 
-# ===========================================================================
-# src/services/parallel_utils.py — run_folder_parallel's on_progress callback
-# (regression coverage for the "progress bar frozen with workers > 1" bug:
-# this function previously had no callback mechanism at all — only a local
-# console tqdm bar, invisible to a caller running it on a background
-# thread, like the webui's job runner does. Every plugin's own parallel
-# path — transcription's process_image_folder, translation's
-# process_image_translation_folder and _translate_pages_parallel — funnels
-# through here or mirrors this exact pattern.)
-# ===========================================================================
-
-from src.services.parallel_utils import run_folder_parallel
-
-
 class TestRunFolderParallelOnProgress:
+    """Progress reaches a caller that cannot see the terminal's bar.
+
+    The web interface runs a folder on a background thread, where a bar drawn
+    in the terminal is invisible, so it is told of each finished item instead.
+    Every plugin's parallel path — transcription's process_image_folder,
+    translation's process_image_translation_folder and _translate_pages_parallel
+    — goes through here or follows the same pattern.
+    """
 
     def _usage_data(self):
         return {"total_usage": {"total_tokens": 0, "total_cost": 0.0}}
@@ -584,4 +444,3 @@ class TestRunFolderParallelOnProgress:
             desc="Testing",
         )
         assert len(results) == 1
-
