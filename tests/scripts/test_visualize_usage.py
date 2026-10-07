@@ -66,3 +66,114 @@ class TestComputeSummaryMonthSpan:
         assert summary["total_cost"] == 4.0
         assert summary["total_tokens"] == 30
         assert summary["total_calls"] == 4
+
+
+def _usage(day, cost, model="gpt-4o-2024-08-06", source=None, tokens_in=1000, tokens_out=500):
+    """One month of one person's usage, with all of it on *day*."""
+    record = {"total_cost": cost}
+    if source:
+        record["source"] = source
+    return {
+        "total_usage": {"total_cost": cost, "total_tokens": tokens_in + tokens_out, "call_count": 1,
+                        "total_input_tokens": tokens_in, "total_output_tokens": tokens_out},
+        "daily_usage": {day: {"total_cost": cost}},
+        "model_usage": {model: {"total_cost": cost}},
+        "session_history": [record],
+    }
+
+
+class TestTheChartData:
+    @pytest.fixture
+    def charts(self, viz):
+        from datetime import date
+
+        today = date.today().strftime("%Y-%m-%d")
+        return viz.build_charts_data({
+            "heller": {today[:7]: _usage(today, 2.0, source="lab-mac")},
+            "smith": {"2026-01": _usage("2026-01-15", 1.0, model="gpt-4o-mini")},
+        })
+
+    def test_each_person_has_a_cost_for_every_month(self, charts):
+        assert charts["professors"] == ["heller", "smith"]
+        assert all(len(series) == len(charts["months"]) for series in charts["monthly_cost_by_prof"].values())
+
+    def test_tokens_are_counted_in_thousands_across_everyone(self, charts):
+        assert sum(charts["monthly_input"]) == 2.0 and sum(charts["monthly_output"]) == 1.0
+
+    def test_the_last_thirty_days_add_up_day_by_day(self, charts):
+        assert len(charts["daily_dates"]) == 30
+        assert charts["daily_cost_by_prof"]["heller"][-1] == 2.0
+        assert charts["daily_cost_by_prof"]["smith"][-1] == 0.0
+
+    def test_dated_model_names_are_counted_as_one_model(self, charts):
+        assert dict(zip(charts["model_labels"], charts["model_values"], strict=True)) == {"gpt-4o": 2.0, "gpt-4o-mini": 1.0}
+
+    def test_calls_with_no_source_are_grouped_rather_than_dropped(self, charts):
+        assert dict(zip(charts["source_labels"], charts["source_values"], strict=True)) == {
+            "lab-mac": 2.0, "unspecified": 1.0}
+
+
+class TestThePage:
+    def test_it_carries_the_summary_and_the_chart_data(self, viz):
+        data = {"smith": {"2026-01": _usage("2026-01-15", 1.25)}}
+        html = viz.generate_html(viz.compute_summary(data), viz.build_charts_data(data))
+        assert "1.2500" in html
+        assert '"professors": ["smith"]' in html
+
+
+class TestRunningIt:
+    @pytest.fixture
+    def run(self, viz, monkeypatch, tmp_path):
+        opened = []
+        monkeypatch.setattr(viz, "data_root", lambda: tmp_path)
+        monkeypatch.setattr(viz.webbrowser, "open", opened.append)
+        monkeypatch.setattr("src.tracking.token_tracker.unreadable_folders", lambda: [])
+
+        def run(data, *flags):
+            monkeypatch.setattr(viz, "load_all_data", lambda: data)
+            monkeypatch.setattr(viz.sys, "argv", ["visualize_usage.py", *flags])
+            viz.main()
+            return opened
+        return run
+
+    def test_the_report_is_written_and_opened(self, run, tmp_path):
+        opened = run({"smith": {"2026-01": _usage("2026-01-15", 1.0)}})
+        assert (tmp_path / "usage_report.html").exists()
+        assert opened == [(tmp_path / "usage_report.html").as_uri()]
+
+    def test_no_open_leaves_the_browser_alone(self, run, tmp_path):
+        assert run({"smith": {"2026-01": _usage("2026-01-15", 1.0)}}, "--no-open") == []
+        assert (tmp_path / "usage_report.html").exists()
+
+    def test_no_usage_at_all_stops_with_a_reason(self, run, capsys):
+        with pytest.raises(SystemExit):
+            run({})
+        assert "No usage data found" in capsys.readouterr().out
+
+    def test_a_folder_that_is_not_there_is_warned_about_first(self, viz, run, monkeypatch, capsys):
+        """Its figures are missing, and a quiet report would read as nobody having spent anything."""
+        from types import SimpleNamespace
+
+        gone = SimpleNamespace(professor="heller", resolved_path=lambda: "/Volumes/lab/heller")
+        monkeypatch.setattr("src.tracking.token_tracker.unreadable_folders", lambda: [gone])
+        with pytest.raises(SystemExit):
+            run({})
+        out = capsys.readouterr().out
+        assert "heller's work is kept in /Volumes/lab/heller" in out
+        assert "Every folder that was supposed to hold some is unreadable" in out
+
+
+class TestGatheringEveryonesUsage:
+    def test_folders_are_merged_and_a_shared_one_counts_only_for_its_owner(self, viz, monkeypatch):
+        trees = {
+            "local": {"heller": {"2026-01": "local jan"}, "smith": {"2026-01": "smith jan"}},
+            "shared": {"heller": {"2026-01": "shared jan", "2026-02": "shared feb"},
+                       "intruder": {"2026-01": "not theirs"}},
+        }
+        monkeypatch.setattr(viz, "get_configured_data_roots",
+                            lambda: [("local", "local", None), ("shared", "shared", "heller")])
+        monkeypatch.setattr(viz, "load_usage_tree", lambda root, only: trees[root])
+        assert viz.load_all_data() == {
+            "heller": {"2026-01": "shared jan", "2026-02": "shared feb"},
+            "smith": {"2026-01": "smith jan"},
+        }
