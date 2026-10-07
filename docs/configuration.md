@@ -513,8 +513,15 @@ verify_ssl = false
 | `base_url` | **Yes** | — | Root URL of the API |
 | `openai_compatible` | No | `false` | When `true`, uses the OpenAI SDK pointed at `base_url` |
 | `default_model` | No | none | Model used when the colon syntax names none |
-| `timeout` | No | `30` | Request timeout in seconds |
+| `timeout` | No | `30` | How many seconds to wait for a reply before giving up. Raise it for a model running on your own hardware — see below |
 | `verify_ssl` | No | `true` | Set `false` for an internal cluster with a self-signed certificate |
+
+`timeout` is the setting most worth changing. Thirty seconds is comfortable for
+a server that answers quickly, and far too short for a large model running on
+your own machine: reading one scanned page can take a couple of minutes there,
+where the built-in sandbox is allowed 300 seconds for the same work. If pages
+fail with *Request timed out* while the model is plainly still working, that is
+this setting — put `timeout = 600` in the endpoint's table and try again.
 
 `base_url` is the address the sandbox adds `/chat/completions` to, so it usually ends in `/v1`. **For Ollama it is `http://localhost:11434/v1`**, not the `/api/generate` address most of Ollama's own documentation shows: that is Ollama's own way of being reached, and the sandbox can only talk the way OpenAI's servers do. If an endpoint's address is one of these recognisable mistakes, the sandbox refuses it before sending anything, says so on the Settings page, and tells you what to change it to.
 

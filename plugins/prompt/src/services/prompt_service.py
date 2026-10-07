@@ -107,7 +107,7 @@ class PromptService(BaseService):
     ) -> str:
         """Send a custom prompt and return the response text."""
         model = self._get_model()
-        system_role = get_model_system_role(model)
+        system_role = get_model_system_role(self._catalog_model_name(model))
         effective_system = system_prompt if system_prompt else DEFAULT_SYSTEM_PROMPT
 
         logging.info(f"Sending custom prompt to model: {model}")
