@@ -360,3 +360,54 @@ class TestRejectedRequestField:
         was never the problem hides the real one.
         """
         assert rejected_request_field(msg) is None
+
+
+class TestTheRawErrorIsLoggedOnlyWhenAskedFor:
+    """PU_SANDBOX_DEBUG_API=1 writes a provider's whole reply to the log, for working out a refusal."""
+
+    class _Response:
+        status_code = 400
+        text = "the model does not exist"
+
+        def __init__(self, payload):
+            self._payload = payload
+
+        def json(self):
+            if isinstance(self._payload, Exception):
+                raise self._payload
+            return self._payload
+
+    def _error(self, payload=None, body=None):
+        error = RuntimeError("Bad request")
+        error.response = self._Response(payload if payload is not None else {"error": "no such model"})
+        if body is not None:
+            error.body = body
+        return error
+
+    def test_nothing_is_logged_without_the_switch(self, monkeypatch, caplog):
+        from src.services.api_errors import _log_raw_error_payload
+
+        monkeypatch.delenv("PU_SANDBOX_DEBUG_API", raising=False)
+        _log_raw_error_payload(self._error())
+        assert caplog.records == []
+
+    def test_with_it_the_reply_is_logged_in_full(self, monkeypatch, caplog):
+        from src.services.api_errors import _log_raw_error_payload
+
+        monkeypatch.setenv("PU_SANDBOX_DEBUG_API", "1")
+        _log_raw_error_payload(self._error(body={"code": "model_not_found"}))
+        logged = caplog.records[-1].getMessage()
+        assert "type=RuntimeError" in logged
+        assert "response.status_code=400" in logged
+        assert "response.text=the model does not exist" in logged
+        assert "response.json={'error': 'no such model'}" in logged
+        assert "error.body={'code': 'model_not_found'}" in logged
+
+    def test_a_reply_that_is_not_json_is_still_logged(self, monkeypatch, caplog):
+        from src.services.api_errors import _log_raw_error_payload
+
+        monkeypatch.setenv("PU_SANDBOX_DEBUG_API", "1")
+        _log_raw_error_payload(self._error(payload=ValueError("not JSON")))
+        logged = caplog.records[-1].getMessage()
+        assert "response.text=the model does not exist" in logged
+        assert "response.json" not in logged

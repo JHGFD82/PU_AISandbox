@@ -124,3 +124,105 @@ class TestAddingOneThatIsNotThereYet:
             with pytest.raises(CLIError):
                 _settings_test_model(_args("claude-opus-9"))
             key.assert_not_called()
+
+
+class TestWhoseKeyATestIsBilledTo:
+    """Testing makes real requests, so it is always somebody's key — never a guess between several."""
+
+    def test_the_person_named(self, monkeypatch):
+        from src.runtime.info_commands import _key_for_testing
+
+        monkeypatch.setattr("src.config.get_api_key", lambda netid: (f"sk-{netid}", netid))
+        assert _key_for_testing("heller") == "sk-heller"
+
+    def test_the_only_person_there_is(self, monkeypatch):
+        from src.runtime.info_commands import _key_for_testing
+
+        monkeypatch.setattr("src.config.load_professor_config", lambda: {"heller": {}})
+        monkeypatch.setattr("src.config.get_api_key", lambda netid: (f"sk-{netid}", netid))
+        assert _key_for_testing(None) == "sk-heller"
+
+    def test_nobody_set_up_says_to_add_someone(self, monkeypatch):
+        from src.runtime.info_commands import _key_for_testing
+
+        monkeypatch.setattr("src.config.load_professor_config", lambda: {})
+        with pytest.raises(CLIError, match="add-professor"):
+            _key_for_testing(None)
+
+    def test_several_people_and_none_named_lists_who_to_choose_from(self, monkeypatch):
+        from src.runtime.info_commands import _key_for_testing
+
+        monkeypatch.setattr("src.config.load_professor_config", lambda: {"smith": {}, "heller": {}})
+        with pytest.raises(CLIError, match="Choose from: heller, smith"):
+            _key_for_testing(None)
+
+
+class TestASweepOfTheCatalog:
+    """With no model named, every model is tried, and each says what happened to it."""
+
+    @pytest.fixture
+    def sweep(self, monkeypatch):
+        from types import SimpleNamespace
+
+        from src.models.capabilities import CapabilityReport
+
+        state = SimpleNamespace(catalog={"models": {m: {} for m in IN_CATALOG}},
+                                reports={}, saves=[], unreachable=set())
+
+        def report(name):
+            return state.reports.get(name, CapabilityReport(
+                findings={}, settled=[], unsettled=[], reachable=True, missing=False))
+
+        def target(name, key):
+            if name in state.unreachable:
+                raise ValueError(f"no route to {name}")
+            return object(), name
+
+        monkeypatch.setattr("src.models.get_available_models", lambda: list(IN_CATALOG))
+        monkeypatch.setattr("src.runtime.info_commands._key_for_testing", lambda p: "sk-test")
+        monkeypatch.setattr("src.models.load_model_catalog", lambda: state.catalog)
+        monkeypatch.setattr("src.models.save_model_catalog",
+                            lambda c: state.saves.append({k: dict(v) for k, v in c["models"].items()}))
+        monkeypatch.setattr("src.models.capabilities.testing_target", target)
+        monkeypatch.setattr("src.models.capabilities.probe_model_capabilities",
+                            lambda asked_as, client: report(asked_as))
+        return state
+
+    def _report(self, **kw):
+        from src.models.capabilities import CapabilityReport
+
+        return CapabilityReport(**({"findings": {}, "settled": [], "unsettled": [],
+                                    "reachable": True, "missing": False} | kw))
+
+    def test_what_is_learned_is_saved_as_it_goes(self, sweep, capsys):
+        sweep.reports["gpt-4o"] = self._report(findings={"supports_vision": True},
+                                               settled=["reads images"])
+        _settings_test_model(_args())
+        out = capsys.readouterr().out
+        assert "reads images" in out and "saved" in out
+        assert sweep.saves[-1]["gpt-4o"]["supports_vision"] is True
+
+    def test_a_model_that_could_not_be_reached_is_left_as_it_was(self, sweep, capsys):
+        sweep.reports["gpt-4o"] = self._report(reachable=False, unsettled=["timed out"])
+        _settings_test_model(_args())
+        out = capsys.readouterr().out
+        assert "could not be reached — nothing changed" in out and "timed out" in out
+
+    def test_a_model_with_no_way_to_test_it_is_skipped(self, sweep, capsys):
+        sweep.unreachable.add("gemini-2.5-pro")
+        _settings_test_model(_args())
+        assert "could not be tested — nothing changed\n  no route to gemini-2.5-pro" in capsys.readouterr().out
+
+    def test_a_model_that_no_longer_exists_is_named_and_kept(self, sweep, capsys):
+        """One failed request is not reason enough to delete what somebody configured."""
+        sweep.reports["gpt-4o"] = self._report(missing=True)
+        _settings_test_model(_args())
+        out = capsys.readouterr().out
+        assert "1 no longer exist: gpt-4o" in out and "--remove-missing" in out
+        assert "gpt-4o" in sweep.catalog["models"]
+
+    def test_and_is_removed_when_asked(self, sweep, capsys):
+        sweep.reports["gpt-4o"] = self._report(missing=True)
+        _settings_test_model(_args(remove_missing=True))
+        assert "Removed 1: gpt-4o" in capsys.readouterr().out
+        assert "gpt-4o" not in sweep.saves[-1]

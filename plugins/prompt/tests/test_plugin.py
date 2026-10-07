@@ -325,3 +325,21 @@ class TestResolveOutputPath:
         args = _make_args(output_file=abs_path)
         result = _resolve_output_path(args)
         assert result == abs_path
+
+
+class TestSavingAResponse:
+    """The file's extension says which format the response is saved in."""
+
+    @pytest.mark.parametrize("name,writer", [
+        ("reply.json", "save_to_json"),
+        ("reply.md", "save_to_markdown"),
+        ("reply.xlsx", "save_to_excel"),
+        ("reply.txt", "save_to_text_file"),
+        ("reply", "save_to_text_file"),
+    ])
+    def test_each_extension_goes_to_its_writer(self, monkeypatch, name, writer):
+        written = []
+        monkeypatch.setattr(plugin_mod.FileOutputHandler, writer,
+                            lambda response, path, label: written.append((response, path, label)))
+        plugin_mod._save_response("The answer.", name)
+        assert written == [("The answer.", name, "Response")]

@@ -517,3 +517,131 @@ class TestOnlyOneAtATime:
         with pytest.raises(upgrade.UpgradeError):
             upgrade.apply_update(lambda step, label: None)
         assert upgrade.an_update_is_running() is False
+
+
+class TestInstallingTheNewSoftware:
+    """pip's output is read as it comes, so the page can say what is being installed."""
+
+    class _Pip:
+        """Stands in for a running pip: prints *lines*, then ends with *code*."""
+
+        def __init__(self, lines, code=0):
+            self.stdout = iter(f"{line}\n" for line in lines)
+            self.returncode = None
+            self._code = code
+            self.killed = False
+
+        def wait(self):
+            self.returncode = self._code
+
+        def kill(self):
+            self.killed = True
+
+    @pytest.fixture
+    def pip(self, sandbox, monkeypatch):
+        ran = {}
+
+        def start(command, **kwargs):
+            ran["command"] = command
+            return ran["pip"]
+
+        monkeypatch.setattr(upgrade.subprocess, "Popen", start)
+        return ran
+
+    def test_it_installs_from_the_list_into_the_sandboxs_own_python(self, pip):
+        pip["pip"] = self._Pip(["Collecting tomlkit"])
+        upgrade._install_dependencies(lambda line: None)
+        assert pip["command"][1:4] == ["-m", "pip", "install"]
+        assert pip["command"][-2:] == ["-r", upgrade._launcher().REQUIREMENTS]
+
+    def test_only_what_is_happening_is_shown(self, pip):
+        pip["pip"] = self._Pip([
+            "Requirement already satisfied: tomlkit",
+            "Collecting fastapi",
+            "WARNING: pip is out of date",
+            "  some indented detail",
+            "Installing collected packages: fastapi",
+        ])
+        shown = []
+        upgrade._install_dependencies(shown.append)
+        assert shown == ["Collecting fastapi", "Installing collected packages: fastapi"]
+
+    def test_a_failure_carries_pips_own_last_words_without_the_noise(self, pip):
+        pip["pip"] = self._Pip([
+            "Requirement already satisfied: tomlkit",
+            "ERROR: No matching distribution found for nosuchthing",
+        ], code=1)
+        with pytest.raises(upgrade.UpgradeError) as raised:
+            upgrade._install_dependencies(lambda line: None)
+        said = str(raised.value)
+        assert "No matching distribution found for nosuchthing" in said
+        assert "already satisfied" not in said
+
+    def test_pip_that_will_not_start_is_reported(self, sandbox, monkeypatch):
+        def cannot(command, **kwargs):
+            raise OSError("no such file")
+        monkeypatch.setattr(upgrade.subprocess, "Popen", cannot)
+        with pytest.raises(upgrade.UpgradeError, match="Could not start installing"):
+            upgrade._install_dependencies(lambda line: None)
+
+    def test_an_install_that_never_finishes_is_given_up_on(self, pip, monkeypatch):
+        """Stopped by a watch on the clock, not a wait that would never return."""
+        pip["pip"] = running = self._Pip([])
+
+        class _Fires:
+            def __init__(self, seconds, action):
+                self.action = action
+
+            def start(self):
+                self.action()
+
+            def cancel(self):
+                pass
+
+        monkeypatch.setattr(upgrade.threading, "Timer", _Fires)
+        with pytest.raises(upgrade.UpgradeError, match="still going after"):
+            upgrade._install_dependencies(lambda line: None)
+        assert running.killed
+
+
+class TestWhenTheNetworkIsNotThere:
+    @needs_git
+    def test_looking_for_updates_says_so_rather_than_failing(self, sandbox):
+        published, _copy = sandbox
+        shutil.rmtree(published)
+        found = upgrade.check_for_updates()
+        assert found.offline and "almost always the network" in found.offline
+        assert found.blocked is None
+
+    @needs_git
+    def test_updating_changes_nothing_and_says_why(self, sandbox):
+        published, copy = sandbox
+        before = _git(copy, "rev-parse", "HEAD")
+        shutil.rmtree(published)
+        with pytest.raises(upgrade.UpgradeError, match="nothing was changed"):
+            upgrade.apply_update(lambda step, text: None)
+        assert _git(copy, "rev-parse", "HEAD") == before
+
+
+class TestWhenPuttingItBackFails:
+    """The one thing worth saying loudly: the files could not be put back either."""
+
+    @needs_git
+    def test_a_version_git_does_not_know_says_how_to_do_it_by_hand(self, sandbox):
+        with pytest.raises(upgrade.UpgradeError, match="git reset --hard 0000000"):
+            upgrade._put_the_files_back("0000000")
+
+    def test_a_git_that_cannot_be_run_says_how_to_do_it_by_hand(self, monkeypatch):
+        def unusable(*arguments, timeout):
+            raise git_tool.GitUnusable("git is not installed")
+        monkeypatch.setattr(upgrade, "_run", unusable)
+        with pytest.raises(upgrade.UpgradeError, match="(?s)git is not installed.*git reset --hard abc123"):
+            upgrade._put_the_files_back("abc123")
+
+    def test_a_second_request_while_an_update_runs_is_turned_away(self, monkeypatch):
+        assert upgrade._only_one_at_a_time.acquire(blocking=False)
+        try:
+            with pytest.raises(upgrade.UpgradeError, match="An update is running"):
+                upgrade.put_the_files_back("abc123")
+        finally:
+            upgrade._only_one_at_a_time.release()
