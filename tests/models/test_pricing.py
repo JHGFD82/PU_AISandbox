@@ -190,7 +190,7 @@ class TestAddModelToCatalog:
 
 
 # ---------------------------------------------------------------------------
-# _fetch_model_pricing — zero-price raises RuntimeError (pricing.py line 46)
+# _fetch_model_pricing — reading what PortKey publishes
 # ---------------------------------------------------------------------------
 
 
@@ -219,6 +219,16 @@ class TestFetchModelPricing:
             with pytest.raises(RuntimeError, match="No valid pricing data"):
                 from src.models.pricing import _fetch_model_pricing as _fmp
                 _fmp("openai/gpt-4o", 1_000_000)
+
+    def test_prices_per_hundred_tokens_become_prices_per_pricing_unit(self):
+        """PortKey quotes per 100 tokens; the catalog keeps prices per pricing_unit (a million)."""
+        payload = {"pay_as_you_go": {
+            "request_token": {"price": 0.00025},
+            "response_token": {"price": 0.001},
+        }}
+        with patch("urllib.request.urlopen", return_value=self._make_urlopen_mock(payload)):
+            assert pricing_module._fetch_model_pricing("openai/gpt-4o", 1_000_000) == {
+                "input": 2.5, "output": 10.0}
 
 
 # ---------------------------------------------------------------------------
@@ -460,3 +470,51 @@ class TestWhatAModelThatCannotBeAddedSays:
         with pytest.raises(RuntimeError) as caught:
             pricing._fetch_model_pricing("openai/gpt-4o", 1_000_000)
         assert "internet connection" in str(caught.value)
+
+
+class TestTestingAModelWhileAddingIt:
+    """A model is tried as it is added, and a failure to try it never stops it being added."""
+
+    def _report(self, **kw):
+        from src.models.capabilities import CapabilityReport
+
+        return CapabilityReport(**({"findings": {}, "settled": [], "unsettled": [],
+                                    "reachable": True, "missing": False} | kw))
+
+    def test_what_is_learned_goes_into_its_entry(self, monkeypatch, caplog):
+        report = self._report(findings={"supports_vision": True}, settled=["reads images"],
+                              unsettled=["could not tell about streaming"])
+        monkeypatch.setattr("src.models.capabilities.client_for_testing", lambda key: object())
+        monkeypatch.setattr("src.models.capabilities.probe_model_capabilities",
+                            lambda model, client, on_progress=None: report)
+        with caplog.at_level(logging.INFO):
+            entry = pricing_module._test_and_describe("gpt-4o", {"input": 2.5}, "sk-test")
+        assert entry["supports_vision"] is True and entry["input"] == 2.5
+        assert "gpt-4o: reads images" in caplog.text
+        assert "gpt-4o: could not tell about streaming" in caplog.text
+
+    def test_a_test_that_fails_leaves_the_entry_as_it_was(self, monkeypatch, caplog):
+        def unreachable(key):
+            raise ConnectionError("no network")
+        monkeypatch.setattr("src.models.capabilities.client_for_testing", unreachable)
+        entry = {"input": 2.5}
+        assert pricing_module._test_and_describe("gpt-4o", entry, "sk-test") is entry
+        assert "Could not test 'gpt-4o': no network" in caplog.text
+
+    def test_adding_with_a_key_tests_it(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(catalog_module, "get_model_catalog_path", lambda: tmp_path / "model_catalog.json")
+        monkeypatch.setattr(pricing_module, "_fetch_model_pricing", _make_fake_fetch())
+        tested = []
+        monkeypatch.setattr(pricing_module, "_test_and_describe",
+                            lambda name, entry, key, on_progress=None: tested.append((name, key))
+                            or dict(entry, supports_vision=True))
+        _, entry = add_model_to_catalog("openai/gpt-4o", api_key="sk-test")
+        assert tested == [("gpt-4o", "sk-test")]
+        assert entry["supports_vision"] is True
+
+    def test_adding_without_a_key_says_it_was_not_tested(self, monkeypatch, tmp_path, caplog):
+        monkeypatch.setattr(catalog_module, "get_model_catalog_path", lambda: tmp_path / "model_catalog.json")
+        monkeypatch.setattr(pricing_module, "_fetch_model_pricing", _make_fake_fetch())
+        _, entry = add_model_to_catalog("openai/gpt-4o")
+        assert entry["supports_vision"] is False
+        assert "without testing whether it can read images" in caplog.text
