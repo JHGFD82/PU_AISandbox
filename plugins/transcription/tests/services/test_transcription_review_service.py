@@ -25,6 +25,8 @@ def _reply(content):
 @pytest.fixture
 def service(monkeypatch):
     """A review service on gpt-4o."""
+    # Asking again normally waits a few seconds first; here it need not.
+    monkeypatch.setattr("src.services.base_service.RETRY_DELAY_SECONDS", 0)
     monkeypatch.setattr("src.services.base_service.resolve_model", lambda **_: "gpt-4o")
     monkeypatch.setattr("src.services.base_service.maybe_sync_model_pricing", lambda m: None)
     monkeypatch.setattr("src.services.base_service.get_model_max_completion_tokens", lambda m, d: d)
@@ -115,3 +117,32 @@ class TestReviewing:
     def test_a_report_without_a_meta_section_is_left_as_it_is(self, monkeypatch, service):
         _answering(monkeypatch, service, json.dumps({"errors": ["x"]}))
         assert json.loads(service.review_transcription("some text", "English")) == {"errors": ["x"]}
+
+
+class TestAnEmptyReview:
+    """Nothing back from the model is asked again, not shown as a blank report."""
+
+    def _replies(self, monkeypatch, svc, *contents):
+        sent = []
+        replies = iter(contents)
+
+        def model(model, messages, max_tokens, **params):
+            sent.append(messages)
+            return _reply(next(replies))
+
+        monkeypatch.setattr(svc, "_create_completion", model)
+        return sent
+
+    @pytest.mark.parametrize("empty", [None, "", "  \n "], ids=["none", "nothing", "blank"])
+    def test_it_is_asked_again(self, monkeypatch, service, empty):
+        sent = self._replies(monkeypatch, service, empty, json.dumps(REPORT))
+        report = json.loads(service.review_transcription("some text", "English"))
+        assert report["errors"] == []
+        assert len(sent) == 2
+
+    def test_it_gives_up_saying_why_after_the_last_try(self, monkeypatch, service):
+        import src.services.base_service as base
+
+        self._replies(monkeypatch, service, *[""] * base.MAX_RETRIES)
+        with pytest.raises(RuntimeError, match="The review came back empty"):
+            service.review_transcription("some text", "English")
