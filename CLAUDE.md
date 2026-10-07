@@ -22,11 +22,13 @@ python main.py settings add-professor  # then add whoever will use it
 ```bash
 pytest                                          # whole suite (see testpaths in pytest.ini)
 pytest -m "not live"                            # skip tests that hit the real PortKey pricing endpoint
-pytest tests/test_token_tracker.py -k TestConcurrentRecordUsage   # single test/class
+pytest tests/tracking/test_token_tracker.py -k TestConcurrentRecordUsage   # single test/class
 pytest -m "not live" --cov --cov-report=term-missing:skip-covered   # what CI measures (upload-coverage.yml)
 ```
 What counts toward coverage is decided in `.coveragerc` alone: core, every built-in plugin, `scripts/`, `start.py` and `main.py`. Use plain `--cov`; naming a folder (`--cov=src/`) replaces that list rather than narrowing it. `codecov.yml` holds only the pass/fail rules, never a second list of files.
-`pytest.ini` sets `testpaths` to `tests` plus `plugins/{translation,prompt,transcription,webui}/tests`, and `pythonpath = .`. Discovery is by explicit list, so a new plugin's tests must be added there. `translation-ea`/`transcription-ea` are separate git-ignored repos with their own `pytest.ini` — run those from inside their own directory.
+`pytest.ini` sets `testpaths` to `tests` plus `plugins/{translation,prompt,transcription,webui}/tests`, `pythonpath = .`, and `--import-mode=importlib` (so test files in different folders may share a name). Discovery is by explicit list, so a new plugin's tests must be added there. `translation-ea`/`transcription-ea` are separate git-ignored repos with their own `pytest.ini` — run those from inside their own directory.
+
+Where a test goes: a plugin's tests live in that plugin's `tests/`, never in core's; and in either place a test file sits where the code it tests sits, with `src/` left out (`src/models/catalog.py` → `tests/models/test_catalog.py`). The rule and its naming are in `docs/plugin-authoring-guide.md` § Testing. Shared test helpers are `tests/helpers.py` (sample PNG/Word files, a bare `SandboxProcessor`) and `tests/plugin_modules.py` (what a plugin's conftest uses).
 
 ### Lint / type-check
 ```bash

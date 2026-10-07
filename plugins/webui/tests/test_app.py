@@ -19,10 +19,6 @@ from unittest.mock import MagicMock
 import pytest
 from fastapi.testclient import TestClient
 
-_REPO_ROOT = Path(__file__).resolve().parents[3]
-if str(_REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(_REPO_ROOT))
-
 import src.settings as core_settings_mod
 import src.settings_store as settings_store_mod
 from src.config import (
@@ -7144,6 +7140,7 @@ class TestWhatAModelThatCannotBeAddedSays:
 
     def test_a_name_the_pricing_service_does_not_know_says_to_check_it(self, monkeypatch):
         import urllib.error
+
         import src.models.pricing as pricing
 
         monkeypatch.setattr(pricing.urllib.request, "urlopen", self._raise(
@@ -7157,6 +7154,7 @@ class TestWhatAModelThatCannotBeAddedSays:
 
     def test_a_service_that_is_down_is_not_reported_as_a_bad_name(self, monkeypatch):
         import urllib.error
+
         import src.models.pricing as pricing
 
         monkeypatch.setattr(pricing.urllib.request, "urlopen", self._raise(
@@ -7168,6 +7166,7 @@ class TestWhatAModelThatCannotBeAddedSays:
 
     def test_no_connection_says_so(self, monkeypatch):
         import urllib.error
+
         import src.models.pricing as pricing
 
         monkeypatch.setattr(pricing.urllib.request, "urlopen", self._raise(

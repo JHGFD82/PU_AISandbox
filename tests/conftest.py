@@ -15,7 +15,7 @@ _PLUGINS = Path(__file__).parent.parent / "plugins"
 # The plugins' runtime mixins, filed under their src.* names when these tests
 # are collected rather than inside a fixture. pytest.ini's testpaths collects
 # tests/ before any plugin's own tests, so without this
-# tests/test_sandbox_processor.py would import SandboxProcessor before any
+# tests/runtime/test_sandbox_processor.py would import SandboxProcessor before any
 # plugin had added its mixin (document_handler.py, image_handler.py), and the
 # class would be put together without them. docx_translation must come before
 # document_handler, which imports it directly.

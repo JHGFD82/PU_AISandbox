@@ -1,0 +1,1102 @@
+"""Tests for src/models/catalog.py: the list of models, their prices and what each can do.
+
+Looking prices up and adding a model are in test_pricing.py; deciding which
+model a request runs on is in test_resolver.py.
+"""
+
+import json
+
+import pytest
+
+import src.models.catalog as catalog_module
+from src.errors import CLIError
+from src.models import (
+    cannot_read_images_message,
+    cheapest_model,
+    get_available_models,
+    get_model_catalog_path,
+    get_model_max_completion_tokens,
+    get_model_pricing,
+    get_model_system_role,
+    get_monthly_limit,
+    get_pricing_unit,
+    get_vision_capable_models,
+    is_sampling_param_deprecated_error,
+    load_model_catalog,
+    model_accepts_sampling_params,
+    model_max_tokens_field,
+    model_preferences,
+    model_rejected_fields,
+    model_supports_vision,
+    record_rejected_field,
+    record_sampling_params_rejected,
+    remove_model_from_catalog,
+    save_model_catalog,
+)
+
+
+# ---------------------------------------------------------------------------
+# Shared test catalog — used by every test that mocks load_model_catalog
+# ---------------------------------------------------------------------------
+
+SAMPLE_CATALOG = {
+    "config": {
+        "pricing_unit": 1_000_000,
+        "monthly_limit": 250.0,
+        "defaults": {
+            "translation": "gpt-4o",
+            "ocr": "gpt-4o",
+            "image_translation": "gpt-5",
+        },
+    },
+    "models": {
+        "gpt-5": {
+            "input": 1.38,
+            "output": 11.0,
+            "supports_vision": True,
+            "system_role": "developer",
+            "use_max_completion_tokens": True,
+            "fixed_parameters": True,
+            "max_completion_tokens": 16000,
+        },
+        "gpt-4o": {
+            "input": 2.75,
+            "output": 11.0,
+            "supports_vision": True,
+        },
+        "gpt-4o-mini": {
+            "input": 0.165,
+            "output": 0.66,
+            "supports_vision": True,
+        },
+        "text-only-model": {
+            "input": 0.10,
+            "output": 0.30,
+            "supports_vision": False,
+            "last_tested": "2026-08-03T18:19:02",
+        },
+        "my_cluster:llama-3-70b": {
+            "endpoint": "my_cluster",
+            "model": "llama-3-70b",
+        },
+    },
+}
+
+
+@pytest.fixture()
+def mock_catalog(monkeypatch):
+    """Patch load_model_catalog to return SAMPLE_CATALOG without hitting disk."""
+    monkeypatch.setattr(catalog_module, "load_model_catalog", lambda: SAMPLE_CATALOG)
+
+
+# ---------------------------------------------------------------------------
+# get_model_catalog_path
+# ---------------------------------------------------------------------------
+
+class TestGetModelCatalogPath:
+
+    def test_returns_path_ending_in_catalog_filename(self):
+        path = get_model_catalog_path()
+        assert path.name == "model_catalog.json"
+
+    def test_path_is_in_the_folder_this_installation_keeps_its_files_in(self):
+        """The catalog belongs to the person, not the package.
+
+        It used to live under src/, which meant replacing the package
+        replaced their pricing and model list too.
+        """
+        from src import paths
+        assert get_model_catalog_path() == paths.extras_root() / "model_catalog.json"
+
+
+# ---------------------------------------------------------------------------
+# load_model_catalog
+# ---------------------------------------------------------------------------
+
+class TestLoadModelCatalog:
+
+    def test_missing_file_raises_file_not_found(self, monkeypatch, tmp_path):
+        missing = tmp_path / "nonexistent.json"
+        monkeypatch.setattr(catalog_module, "get_model_catalog_path", lambda: missing)
+        with pytest.raises(FileNotFoundError):
+            load_model_catalog()
+
+    def test_invalid_json_raises_value_error(self, monkeypatch, tmp_path):
+        bad_file = tmp_path / "model_catalog.json"
+        bad_file.write_text("{ not valid json }")
+        monkeypatch.setattr(catalog_module, "get_model_catalog_path", lambda: bad_file)
+        with pytest.raises(ValueError, match="Invalid JSON"):
+            load_model_catalog()
+
+    def test_missing_config_section_raises_value_error(self, monkeypatch, tmp_path):
+        catalog = tmp_path / "model_catalog.json"
+        catalog.write_text(json.dumps({"models": {"gpt-4o": {}}}))
+        monkeypatch.setattr(catalog_module, "get_model_catalog_path", lambda: catalog)
+        with pytest.raises(ValueError, match="'config' section"):
+            load_model_catalog()
+
+    def test_missing_models_section_raises_value_error(self, monkeypatch, tmp_path):
+        catalog = tmp_path / "model_catalog.json"
+        catalog.write_text(json.dumps({"config": {"pricing_unit": 1000000, "monthly_limit": 250.0}}))
+        monkeypatch.setattr(catalog_module, "get_model_catalog_path", lambda: catalog)
+        with pytest.raises(ValueError, match="'models' section"):
+            load_model_catalog()
+
+    def test_reading_an_empty_catalog_is_allowed(self, monkeypatch, tmp_path):
+        """Because adding the first model has to read the file before writing it.
+
+        Objecting here made the first model impossible to add: the web
+        interface's Add-and-test loads the catalog, puts the new entry in, and
+        saves it — and the load raised before it got that far. An empty
+        catalog is an ordinary state on a copy that has just been set up.
+        """
+        catalog = tmp_path / "model_catalog.json"
+        catalog.write_text(json.dumps({"config": {}, "models": {}}))
+        monkeypatch.setattr(catalog_module, "get_model_catalog_path", lambda: catalog)
+        assert load_model_catalog()["models"] == {}
+
+    def test_asking_for_a_model_to_send_to_says_there_is_nothing(self, monkeypatch, tmp_path):
+        """The complaint belongs where a model is *needed*, not where one is listed.
+
+        Listing what exists and needing something to send to are different
+        questions. A settings page showing an empty list is doing its job.
+
+        A CLIError, not a ValueError: raised as an ordinary exception it reaches
+        the browser as an unexplained reference code, which is the worst
+        possible answer to "I just installed this and it doesn't work".
+        """
+        catalog = tmp_path / "model_catalog.json"
+        catalog.write_text(json.dumps({"config": {}, "models": {}}))
+        monkeypatch.setattr(catalog_module, "get_model_catalog_path", lambda: catalog)
+        # Listing is fine with none.
+        assert catalog_module.get_available_models() == []
+        # Wanting one to send to is not.
+        from src.models.resolver import resolve_model
+        with pytest.raises(CLIError) as caught:
+            resolve_model(None)
+        message = str(caught.value)
+        assert "no models set up yet" in message
+        # Where to add one, both ways, and where to look up what to add.
+        assert "Settings page" in message
+        assert "documentation" in message
+        assert str(catalog) in message
+
+    def test_the_first_model_can_actually_be_added(self, monkeypatch, tmp_path):
+        """The whole point: read an empty catalog, add to it, save, use it."""
+        catalog = tmp_path / "model_catalog.json"
+        catalog.write_text(json.dumps(
+            {"config": {"pricing_unit": 1000000}, "models": {}}))
+        monkeypatch.setattr(catalog_module, "get_model_catalog_path", lambda: catalog)
+        loaded = load_model_catalog()
+        loaded["models"]["gpt-4o"] = {"input": 2.5, "output": 10.0,
+                                      "supports_vision": True}
+        catalog_module.save_model_catalog(loaded)
+        monkeypatch.setattr(catalog_module, "_catalog_cache", None)
+        assert catalog_module.get_available_models() == ["gpt-4o"]
+
+    def test_valid_catalog_returns_dict(self, monkeypatch, tmp_path):
+        catalog = tmp_path / "model_catalog.json"
+        catalog.write_text(json.dumps(SAMPLE_CATALOG))
+        monkeypatch.setattr(catalog_module, "get_model_catalog_path", lambda: catalog)
+        result = load_model_catalog()
+        assert result["config"]["pricing_unit"] == 1_000_000
+        assert "gpt-4o" in result["models"]
+
+
+# ---------------------------------------------------------------------------
+# get_available_models
+# ---------------------------------------------------------------------------
+
+class TestGetAvailableModels:
+
+    def test_returns_all_model_keys(self, mock_catalog):
+        models = get_available_models()
+        assert set(models) == {
+            "gpt-5", "gpt-4o", "gpt-4o-mini", "text-only-model", "my_cluster:llama-3-70b",
+        }
+
+    def test_returns_list(self, mock_catalog):
+        assert isinstance(get_available_models(), list)
+
+
+# ---------------------------------------------------------------------------
+# get_model_pricing
+# ---------------------------------------------------------------------------
+
+class TestGetModelPricing:
+
+    def test_known_model_returns_pricing(self, mock_catalog):
+        pricing = get_model_pricing("gpt-4o")
+        assert pricing["input"] == 2.75
+        assert pricing["output"] == 11.0
+
+    def test_unknown_model_is_priced_at_the_cheapest_models_rates(self, mock_catalog):
+        """An uncatalogd model is recorded rather than lost, at the cheapest rates.
+
+        Deliberately not a named stand-in: whichever model were named here
+        would one day be retired, and then this path would raise instead of
+        recording anything.
+        """
+        pricing = get_model_pricing("unknown-model")
+        assert pricing["input"] == pytest.approx(0.1)   # text-only-model, cheapest in SAMPLE_CATALOG
+
+    def test_unknown_model_raises_when_nothing_has_a_price(self, monkeypatch):
+        """With no priced model to stand in, there is nothing honest to return."""
+        catalog_unpriced = {
+            "config": {"pricing_unit": 1_000_000, "monthly_limit": 250.0},
+            "models": {"placeholder": {"input": 0.0, "output": 0.0, "supports_vision": True}},
+        }
+        monkeypatch.setattr(catalog_module, "load_model_catalog", lambda: catalog_unpriced)
+        with pytest.raises(ValueError, match="not in the model catalog"):
+            get_model_pricing("mystery-model")
+
+
+# ---------------------------------------------------------------------------
+# get_pricing_unit / get_monthly_limit
+# ---------------------------------------------------------------------------
+
+class TestConfigValues:
+
+    def test_get_pricing_unit(self, mock_catalog):
+        assert get_pricing_unit() == 1_000_000
+
+    def test_get_monthly_limit(self, mock_catalog):
+        assert get_monthly_limit() == pytest.approx(250.0)
+
+
+class TestModelSupportsVision:
+
+    def test_vision_model_returns_true(self, mock_catalog):
+        assert model_supports_vision("gpt-4o") is True
+
+    def test_non_vision_model_returns_false(self, mock_catalog):
+        assert model_supports_vision("text-only-model") is False
+
+    def test_unknown_model_returns_false(self, mock_catalog):
+        assert model_supports_vision("ghost-model") is False
+
+    def test_gpt5_supports_vision(self, mock_catalog):
+        assert model_supports_vision("gpt-5") is True
+
+
+# ---------------------------------------------------------------------------
+# get_vision_capable_models
+# ---------------------------------------------------------------------------
+
+class TestGetVisionCapableModels:
+
+    def test_returns_only_vision_models(self, mock_catalog):
+        vision_models = get_vision_capable_models()
+        assert "text-only-model" not in vision_models
+        assert set(vision_models) == {"gpt-5", "gpt-4o", "gpt-4o-mini"}
+
+    def test_returns_list(self, mock_catalog):
+        assert isinstance(get_vision_capable_models(), list)
+
+
+# ---------------------------------------------------------------------------
+# cannot_read_images_message
+# ---------------------------------------------------------------------------
+
+class TestCannotReadImagesMessage:
+    """Why an image was refused, which is not one reason but three.
+
+    A model nobody has tested and a model tested and found unable look the
+    same in the catalog, and the person reading has to do different things
+    about them.
+    """
+
+    def test_an_untested_model_is_not_called_incapable(self, mock_catalog):
+        message = cannot_read_images_message("my_cluster:llama-3-70b")
+        assert "Nobody has found out yet" in message
+        # The way to find out, under the name that will actually resolve.
+        assert "settings test-model my_cluster:llama-3-70b" in message
+
+    def test_a_tested_model_says_when_it_was_tested(self, mock_catalog):
+        message = cannot_read_images_message("text-only-model")
+        assert "was tested on 2026-08-03" in message
+        assert "Nobody has found out yet" not in message
+
+    def test_a_model_not_in_the_catalog_says_so(self, mock_catalog):
+        message = cannot_read_images_message("ghost-model")
+        assert "is not in the model catalog" in message
+
+    def test_it_names_what_to_use_instead_in_reading_order(self, mock_catalog):
+        message = cannot_read_images_message("text-only-model")
+        assert "gpt-4o, gpt-4o-mini, gpt-5" in message
+
+    def test_with_no_vision_model_at_all_it_does_not_offer_an_empty_list(self, monkeypatch):
+        monkeypatch.setattr(
+            catalog_module, "load_model_catalog",
+            lambda: {"config": {}, "models": {"text-only-model": {"supports_vision": False}}},
+        )
+        message = cannot_read_images_message("text-only-model")
+        assert "No model in the catalog can read images yet." in message
+
+
+# ---------------------------------------------------------------------------
+# get_model_system_role
+# ---------------------------------------------------------------------------
+
+class TestGetModelSystemRole:
+
+    def test_reasoning_model_returns_developer(self, mock_catalog):
+        assert get_model_system_role("gpt-5") == "developer"
+
+    def test_standard_model_defaults_to_system(self, mock_catalog):
+        # gpt-4o has no system_role key in SAMPLE_CATALOG → defaults to "system"
+        assert get_model_system_role("gpt-4o") == "system"
+
+    def test_unknown_model_defaults_to_system(self, mock_catalog):
+        assert get_model_system_role("nonexistent-model") == "system"
+
+
+# ---------------------------------------------------------------------------
+# model_max_tokens_field
+# ---------------------------------------------------------------------------
+
+class TestModelMaxTokensField:
+
+    def test_reasoning_model_returns_true(self, mock_catalog):
+        assert model_max_tokens_field("gpt-5") == "max_completion_tokens"
+
+    def test_standard_model_returns_false(self, mock_catalog):
+        assert model_max_tokens_field("gpt-4o") == "max_tokens"
+
+    def test_unknown_model_returns_false(self, mock_catalog):
+        assert model_max_tokens_field("mystery") == "max_tokens"
+
+
+# ---------------------------------------------------------------------------
+# model_accepts_sampling_params
+# ---------------------------------------------------------------------------
+
+class TestModelHasFixedParameters:
+
+    def test_reasoning_model_returns_true(self, mock_catalog):
+        assert model_accepts_sampling_params("gpt-5") is False
+
+    def test_standard_model_returns_false(self, mock_catalog):
+        assert model_accepts_sampling_params("gpt-4o") is True
+
+    def test_unknown_model_returns_false(self, mock_catalog):
+        assert model_accepts_sampling_params("mystery") is True
+
+
+# ---------------------------------------------------------------------------
+# get_model_max_completion_tokens
+# ---------------------------------------------------------------------------
+
+class TestGetModelMaxCompletionTokens:
+
+    def test_model_with_override_returns_override(self, mock_catalog):
+        assert get_model_max_completion_tokens("gpt-5", default=4096) == 16000
+
+    def test_model_without_override_returns_default(self, mock_catalog):
+        # gpt-4o has no max_completion_tokens in SAMPLE_CATALOG
+        assert get_model_max_completion_tokens("gpt-4o", default=4096) == 4096
+
+    def test_unknown_model_returns_default(self, mock_catalog):
+        assert get_model_max_completion_tokens("ghost", default=2048) == 2048
+
+    def test_default_value_is_respected(self, mock_catalog):
+        assert get_model_max_completion_tokens("gpt-4o", default=8192) == 8192
+
+
+# ---------------------------------------------------------------------------
+# save_model_catalog
+# ---------------------------------------------------------------------------
+
+class TestSaveModelCatalog:
+
+    def test_saves_json_to_catalog_path(self, monkeypatch, tmp_path):
+        output_file = tmp_path / "model_catalog.json"
+        monkeypatch.setattr(catalog_module, "get_model_catalog_path", lambda: output_file)
+        save_model_catalog(SAMPLE_CATALOG)
+        assert output_file.exists()
+        loaded = json.loads(output_file.read_text())
+        assert loaded["config"]["pricing_unit"] == 1_000_000
+        assert "gpt-4o" in loaded["models"]
+
+    def test_saved_json_is_valid_and_round_trips(self, monkeypatch, tmp_path):
+        output_file = tmp_path / "model_catalog.json"
+        monkeypatch.setattr(catalog_module, "get_model_catalog_path", lambda: output_file)
+        save_model_catalog(SAMPLE_CATALOG)
+        round_tripped = json.loads(output_file.read_text())
+        assert round_tripped == SAMPLE_CATALOG
+
+
+# ---------------------------------------------------------------------------
+# load_model_catalog — missing file error mentions template
+# ---------------------------------------------------------------------------
+
+class TestLoadModelCatalogMissingFileError:
+
+    def test_missing_file_error_mentions_template(self, monkeypatch, tmp_path):
+        missing = tmp_path / "model_catalog.json"
+        monkeypatch.setattr(catalog_module, "get_model_catalog_path", lambda: missing)
+        with pytest.raises(FileNotFoundError, match="model_catalog.template.json"):
+            from src.models.catalog import load_model_catalog as lmc
+            lmc()
+
+    def test_missing_file_error_names_the_one_command_that_fixes_it(self, monkeypatch, tmp_path):
+        """Setup creates the catalog, so that is the whole answer.
+
+        This used to also suggest passing 'openai/model-name' to -m to
+        auto-register a model. That advice is unusable at this exact moment:
+        auto-registering writes *into* the catalog, which is the thing
+        that isn't there. Offering someone a second option that cannot work
+        makes the first one harder to find.
+        """
+        missing = tmp_path / "model_catalog.json"
+        monkeypatch.setattr(catalog_module, "get_model_catalog_path", lambda: missing)
+        with pytest.raises(FileNotFoundError, match="settings setup"):
+            from src.models.catalog import load_model_catalog as lmc
+            lmc()
+
+
+# ---------------------------------------------------------------------------
+# save_model_catalog — exception cleanup path (lines 76-81 of catalog.py)
+# ---------------------------------------------------------------------------
+
+class TestSaveModelCatalogExceptionPath:
+
+    def test_temp_file_cleaned_up_on_write_failure(self, monkeypatch, tmp_path):
+        """If writing the temp file fails the OSError is re-raised and no tmp file lingers."""
+        import os
+        import tempfile as _tempfile
+
+        output_file = tmp_path / "model_catalog.json"
+        monkeypatch.setattr(catalog_module, "get_model_catalog_path", lambda: output_file)
+
+        tmp_created = []
+
+        original_mkstemp = _tempfile.mkstemp
+
+        def fake_mkstemp(dir=None, suffix=None):
+            fd, path = original_mkstemp(dir=dir, suffix=suffix)
+            tmp_created.append(path)
+            return fd, path
+
+        # Make os.replace fail after the temp file is written
+
+        def bad_replace(src, dst):
+            raise OSError("simulated replace failure")
+
+        monkeypatch.setattr(_tempfile, "mkstemp", fake_mkstemp)
+        monkeypatch.setattr(os, "replace", bad_replace)
+        monkeypatch.setattr(catalog_module.os, "replace", bad_replace)
+
+        with pytest.raises(OSError, match="simulated replace failure"):
+            save_model_catalog(SAMPLE_CATALOG)
+
+    def test_unlink_oserror_is_suppressed_and_original_exception_reraised(
+        self, monkeypatch, tmp_path
+    ):
+        """If both os.replace and os.unlink fail, the OSError from unlink is
+        suppressed and the original replace failure is re-raised."""
+
+        output_file = tmp_path / "model_catalog.json"
+        monkeypatch.setattr(catalog_module, "get_model_catalog_path", lambda: output_file)
+
+        def bad_replace(src, dst):
+            raise OSError("simulated replace failure")
+
+        def bad_unlink(path):
+            raise OSError("simulated unlink failure")
+
+        monkeypatch.setattr(catalog_module.os, "replace", bad_replace)
+        monkeypatch.setattr(catalog_module.os, "unlink", bad_unlink)
+
+        with pytest.raises(OSError, match="simulated replace failure"):
+            save_model_catalog(SAMPLE_CATALOG)
+
+
+# ---------------------------------------------------------------------------
+# maybe_sync_model_pricing — missing/stale logic (pricing.py lines 125-153)
+# ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# remove_model_from_catalog — lines 206-212 of catalog.py
+# ---------------------------------------------------------------------------
+
+class TestRemoveModelFromCatalog:
+
+    def test_removes_existing_model_and_returns_true(self, monkeypatch):
+        import copy
+        cat = copy.deepcopy(SAMPLE_CATALOG)
+        monkeypatch.setattr(catalog_module, "load_model_catalog", lambda: cat)
+        saved = {}
+        monkeypatch.setattr(catalog_module, "save_model_catalog", lambda c: saved.update(c))
+        result = remove_model_from_catalog("gpt-4o-mini")
+        assert result is True
+        assert "gpt-4o-mini" not in saved.get("models", {})
+
+    def test_returns_false_when_model_absent(self, monkeypatch):
+        import copy
+        cat = copy.deepcopy(SAMPLE_CATALOG)
+        monkeypatch.setattr(catalog_module, "load_model_catalog", lambda: cat)
+        result = remove_model_from_catalog("does-not-exist")
+        assert result is False
+
+
+# ---------------------------------------------------------------------------
+# is_model_access_error — line 219 of catalog.py
+# ---------------------------------------------------------------------------
+
+class TestIsModelAccessError:
+
+    def test_returns_true_for_portkey_router_message(self):
+        from src.models.catalog import is_model_access_error
+        msg = "Invalid target name found in the query router"
+        assert is_model_access_error(msg) is True
+
+    def test_returns_false_for_unrelated_error(self):
+        from src.models.catalog import is_model_access_error
+        msg = "Rate limit exceeded"
+        assert is_model_access_error(msg) is False
+
+    def test_case_insensitive_match(self):
+        from src.models.catalog import is_model_access_error
+        msg = "INVALID TARGET NAME FOUND IN THE QUERY ROUTER"
+        assert is_model_access_error(msg) is True
+
+
+# ---------------------------------------------------------------------------
+# record_sampling_params_rejected
+# ---------------------------------------------------------------------------
+
+class TestRecordSamplingParamsRejected:
+
+    def _catalog(self, monkeypatch):
+        import copy
+        cat = copy.deepcopy(SAMPLE_CATALOG)
+        monkeypatch.setattr(catalog_module, "load_model_catalog", lambda: cat)
+        saved = {}
+        monkeypatch.setattr(catalog_module, "save_model_catalog", lambda c: saved.update(c))
+        return cat, saved
+
+    def test_records_every_sampling_field_as_refused(self, monkeypatch):
+        """All four together: a model that refuses one refuses the rest."""
+        cat, saved = self._catalog(monkeypatch)
+        assert record_sampling_params_rejected("gpt-4o") is True
+        assert set(cat["models"]["gpt-4o"]["rejects"]) == set(catalog_module._SAMPLING_FIELDS)
+
+    def test_leaves_pricing_untouched(self, monkeypatch):
+        cat, _saved = self._catalog(monkeypatch)
+        record_sampling_params_rejected("gpt-4o")
+        assert cat["models"]["gpt-4o"]["input"] == 2.75
+
+    def test_returns_false_when_already_recorded(self, monkeypatch):
+        cat, _saved = self._catalog(monkeypatch)
+        record_sampling_params_rejected("gpt-4o")
+        assert record_sampling_params_rejected("gpt-4o") is False
+
+    def test_returns_false_for_an_unknown_model(self, monkeypatch):
+        self._catalog(monkeypatch)
+        assert record_sampling_params_rejected("does-not-exist") is False
+
+
+# ---------------------------------------------------------------------------
+# is_sampling_param_deprecated_error
+# ---------------------------------------------------------------------------
+
+class TestIsSamplingParamDeprecatedError:
+
+    def test_returns_true_for_temperature_deprecated(self):
+        msg = "azure-ai error: `temperature` is deprecated for this model."
+        assert is_sampling_param_deprecated_error(msg) is True
+
+    def test_returns_true_for_top_p_deprecated(self):
+        msg = "azure-ai error: `top_p` is deprecated for this model."
+        assert is_sampling_param_deprecated_error(msg) is True
+
+    def test_case_insensitive_match(self):
+        msg = "AZURE-AI ERROR: `TEMPERATURE` IS DEPRECATED FOR THIS MODEL."
+        assert is_sampling_param_deprecated_error(msg) is True
+
+    def test_returns_false_for_unrelated_invalid_request(self):
+        msg = "Error code: 400 - {'type': 'invalid_request_error', 'message': 'bad request'}"
+        assert is_sampling_param_deprecated_error(msg) is False
+
+    def test_returns_false_when_deprecated_but_not_a_sampling_param(self):
+        """'deprecated for this model' alone (about some other field) shouldn't match."""
+        msg = "the `functions` field is deprecated for this model."
+        assert is_sampling_param_deprecated_error(msg) is False
+
+
+# ---------------------------------------------------------------------------
+# Learned per-model request quirks: "rejects"
+# ---------------------------------------------------------------------------
+
+class TestModelRejectedFields:
+
+    def test_absent_means_nothing_rejected(self, monkeypatch):
+        import copy
+        cat = copy.deepcopy(SAMPLE_CATALOG)
+        monkeypatch.setattr(catalog_module, "load_model_catalog", lambda: cat)
+        assert model_rejected_fields("gpt-4o") == {}
+
+    def test_unknown_model_means_nothing_rejected(self, monkeypatch):
+        import copy
+        cat = copy.deepcopy(SAMPLE_CATALOG)
+        monkeypatch.setattr(catalog_module, "load_model_catalog", lambda: cat)
+        assert model_rejected_fields("never-heard-of-it") == {}
+
+    def test_returns_recorded_fields(self, monkeypatch):
+        import copy
+        cat = copy.deepcopy(SAMPLE_CATALOG)
+        cat["models"]["gpt-4o"]["rejects"] = {"stream_options": "2026-07-29: nope"}
+        monkeypatch.setattr(catalog_module, "load_model_catalog", lambda: cat)
+        assert model_rejected_fields("gpt-4o") == {"stream_options": "2026-07-29: nope"}
+
+    def test_a_malformed_rejects_value_is_ignored_not_raised(self, monkeypatch):
+        """Someone hand-editing the catalog could write a list, or a string.
+
+        A wrong type here must not stop every request for that model: the
+        field is an optimisation, and the provider will say so again anyway.
+        """
+        import copy
+        cat = copy.deepcopy(SAMPLE_CATALOG)
+        cat["models"]["gpt-4o"]["rejects"] = ["stream_options"]
+        monkeypatch.setattr(catalog_module, "load_model_catalog", lambda: cat)
+        assert model_rejected_fields("gpt-4o") == {}
+
+
+class TestRecordRejectedField:
+
+    def _catalog(self, monkeypatch):
+        import copy
+        cat = copy.deepcopy(SAMPLE_CATALOG)
+        monkeypatch.setattr(catalog_module, "load_model_catalog", lambda: cat)
+        saved = {}
+        monkeypatch.setattr(catalog_module, "save_model_catalog", lambda c: saved.update(c))
+        return cat, saved
+
+    def test_records_field_with_a_dated_reason(self, monkeypatch):
+        _cat, saved = self._catalog(monkeypatch)
+        assert record_rejected_field("gpt-4o", "stream_options", "Extra inputs are not permitted") is True
+        note = saved["models"]["gpt-4o"]["rejects"]["stream_options"]
+        assert "Extra inputs are not permitted" in note
+        # Dated so a reader can judge how old the belief is.
+        from datetime import datetime
+        assert note.startswith(datetime.now().strftime("%Y-%m-%d"))
+
+    def test_leaves_other_fields_untouched(self, monkeypatch):
+        _cat, saved = self._catalog(monkeypatch)
+        record_rejected_field("gpt-4o", "stream_options", "nope")
+        assert saved["models"]["gpt-4o"]["input"] == 2.75
+        assert saved["models"]["gpt-4o"]["supports_vision"] is True
+
+    def test_second_field_joins_the_first(self, monkeypatch):
+        cat, saved = self._catalog(monkeypatch)
+        record_rejected_field("gpt-4o", "stream_options", "nope")
+        cat["models"]["gpt-4o"]["rejects"] = saved["models"]["gpt-4o"]["rejects"]
+        record_rejected_field("gpt-4o", "presence_penalty", "also nope")
+        assert set(saved["models"]["gpt-4o"]["rejects"]) == {"stream_options", "presence_penalty"}
+
+    def test_already_recorded_returns_false_and_does_not_rewrite(self, monkeypatch):
+        import copy
+        cat = copy.deepcopy(SAMPLE_CATALOG)
+        cat["models"]["gpt-4o"]["rejects"] = {"stream_options": "2026-01-01: earlier note"}
+        monkeypatch.setattr(catalog_module, "load_model_catalog", lambda: cat)
+        save_called = False
+
+        def fake_save(_c):
+            nonlocal save_called
+            save_called = True
+
+        monkeypatch.setattr(catalog_module, "save_model_catalog", fake_save)
+        assert record_rejected_field("gpt-4o", "stream_options", "a newer note") is False
+        assert save_called is False
+        # The original note survives — it records when this was first learned.
+        assert cat["models"]["gpt-4o"]["rejects"]["stream_options"] == "2026-01-01: earlier note"
+
+    def test_unknown_model_returns_false(self, monkeypatch):
+        _cat, saved = self._catalog(monkeypatch)
+        assert record_rejected_field("never-heard-of-it", "stream_options", "nope") is False
+        assert saved == {}
+
+
+class TestCheapestModel:
+
+    def test_picks_the_lowest_combined_price(self, mock_catalog):
+        assert cheapest_model() == "text-only-model"   # 0.1 + 0.3
+
+    def test_vision_requirement_narrows_the_field(self, mock_catalog):
+        assert cheapest_model(require_vision=True) == "gpt-4o-mini"   # 0.165 + 0.66
+
+    def test_an_unpriced_model_is_skipped_not_treated_as_free(self, monkeypatch):
+        """Both prices at zero is what a placeholder looks like, not a free model.
+
+        The shipped catalog template contains exactly such an entry, so letting
+        it win would quietly make an unpriced model the default for everything.
+        """
+        import copy
+        cat = copy.deepcopy(SAMPLE_CATALOG)
+        cat["models"]["placeholder"] = {"input": 0.0, "output": 0.0, "supports_vision": True}
+        monkeypatch.setattr(catalog_module, "load_model_catalog", lambda: cat)
+        assert cheapest_model() == "text-only-model"
+        assert cheapest_model(require_vision=True) == "gpt-4o-mini"
+
+    def test_a_missing_price_field_is_skipped(self, monkeypatch):
+        import copy
+        cat = copy.deepcopy(SAMPLE_CATALOG)
+        cat["models"]["half-priced"] = {"input": 0.01, "supports_vision": True}
+        monkeypatch.setattr(catalog_module, "load_model_catalog", lambda: cat)
+        assert cheapest_model() == "text-only-model"
+
+    def test_none_when_nothing_qualifies(self, monkeypatch):
+        cat = {"config": {}, "models": {"p": {"input": 0.0, "output": 0.0}}}
+        monkeypatch.setattr(catalog_module, "load_model_catalog", lambda: cat)
+        assert cheapest_model() is None
+
+    def test_a_tie_resolves_the_same_way_every_time(self, monkeypatch):
+        """Otherwise the answer depends on the order the file happened to be written in."""
+        cat = {"config": {}, "models": {
+            "zebra": {"input": 0.1, "output": 0.1, "supports_vision": True},
+            "alpha": {"input": 0.1, "output": 0.1, "supports_vision": True},
+        }}
+        monkeypatch.setattr(catalog_module, "load_model_catalog", lambda: cat)
+        assert cheapest_model() == "alpha"
+
+
+# ---------------------------------------------------------------------------
+# One shape for a model's quirks, whichever way the catalog spells them
+# ---------------------------------------------------------------------------
+
+class TestQuirksGatheredFromEitherSpelling:
+    """A catalog may name quirks as individual flags; both spellings must work.
+
+    This is the safety net for the change that introduced `rejects`/`prefers`:
+    real catalogs carry the flag spelling on many entries, and reading them
+    wrongly would silently send `temperature` to a model that refuses it.
+    """
+
+    def _catalog(self, monkeypatch, entry):
+        cat = {"config": {}, "models": {"m": entry}}
+        monkeypatch.setattr(catalog_module, "load_model_catalog", lambda: cat)
+
+    @pytest.mark.parametrize("flag", ["fixed_parameters", "omit_sampling_params"])
+    def test_a_sampling_flag_means_every_sampling_field_is_refused(self, monkeypatch, flag):
+        self._catalog(monkeypatch, {"input": 1.0, "output": 1.0, flag: True})
+        assert set(model_rejected_fields("m")) == set(catalog_module._SAMPLING_FIELDS)
+        assert model_accepts_sampling_params("m") is False
+
+    @pytest.mark.parametrize("flag", ["fixed_parameters", "omit_sampling_params"])
+    def test_a_sampling_flag_set_false_refuses_nothing(self, monkeypatch, flag):
+        self._catalog(monkeypatch, {"input": 1.0, "output": 1.0, flag: False})
+        assert model_rejected_fields("m") == {}
+        assert model_accepts_sampling_params("m") is True
+
+    def test_the_token_field_flag_becomes_the_field_name(self, monkeypatch):
+        """It was never a yes/no question — it is which of two names to use."""
+        self._catalog(monkeypatch, {"input": 1.0, "output": 1.0, "use_max_completion_tokens": True})
+        assert model_preferences("m")["max_tokens_field"] == "max_completion_tokens"
+        assert model_max_tokens_field("m") == "max_completion_tokens"
+
+    def test_system_role_is_carried_as_a_value(self, monkeypatch):
+        self._catalog(monkeypatch, {"input": 1.0, "output": 1.0, "system_role": "developer"})
+        assert model_preferences("m")["system_role"] == "developer"
+        assert get_model_system_role("m") == "developer"
+
+    def test_the_canonical_spelling_is_read_directly(self, monkeypatch):
+        self._catalog(monkeypatch, {
+            "input": 1.0, "output": 1.0,
+            "rejects": {"stream_options": "2026-07-29: refused"},
+            "prefers": {"system_role": "developer", "max_tokens_field": "max_completion_tokens"},
+        })
+        assert model_rejected_fields("m") == {"stream_options": "2026-07-29: refused"}
+        assert get_model_system_role("m") == "developer"
+        assert model_max_tokens_field("m") == "max_completion_tokens"
+
+    def test_both_spellings_at_once_keep_both_sets_of_information(self, monkeypatch):
+        self._catalog(monkeypatch, {
+            "input": 1.0, "output": 1.0,
+            "fixed_parameters": True,
+            "rejects": {"stream_options": "learned"},
+        })
+        rejected = model_rejected_fields("m")
+        assert "stream_options" in rejected
+        assert set(catalog_module._SAMPLING_FIELDS) <= set(rejected)
+
+    def test_the_canonical_entry_wins_a_disagreement(self, monkeypatch):
+        """`rejects`/`prefers` is what the sandbox learns into, so it is newer."""
+        self._catalog(monkeypatch, {
+            "input": 1.0, "output": 1.0,
+            "system_role": "system",
+            "prefers": {"system_role": "developer"},
+        })
+        assert get_model_system_role("m") == "developer"
+
+    def test_an_entry_with_no_quirks_is_untouched(self, monkeypatch):
+        self._catalog(monkeypatch, {"input": 1.0, "output": 1.0, "supports_vision": True})
+        assert model_rejected_fields("m") == {}
+        assert model_preferences("m") == {}
+        assert get_model_system_role("m") == "system"
+        assert model_max_tokens_field("m") == "max_tokens"
+        assert model_accepts_sampling_params("m") is True
+
+    @pytest.mark.parametrize("entry", ["not-a-dict", 42, None, []])
+    def test_a_junk_entry_does_not_raise(self, monkeypatch, entry):
+        """Hand-edited file: a wrong type must not break every request."""
+        self._catalog(monkeypatch, entry)
+        assert model_rejected_fields("m") == {}
+        assert model_preferences("m") == {}
+
+
+class TestModelsAreListedTheWayPeopleRead:
+    """One capitalised name should not sit alone at the top of the list."""
+
+    def _ordered(self, names, monkeypatch):
+        from src.models import catalog
+
+        monkeypatch.setattr(catalog, "get_available_models", lambda: list(names))
+        return catalog.models_in_reading_order()
+
+    def test_capitals_do_not_jump_the_queue(self, monkeypatch):
+        names = ["gpt-4o", "Llama-3.3-70B-Instruct", "mistral-small", "claude-sonnet-5"]
+        assert self._ordered(names, monkeypatch) == [
+            "claude-sonnet-5", "gpt-4o", "Llama-3.3-70B-Instruct", "mistral-small",
+        ]
+
+    def test_plain_sorting_is_what_this_replaces(self, monkeypatch):
+        """Stated so the difference is not mistaken for a matter of taste."""
+        names = ["gpt-4o", "Llama-3.3-70B-Instruct"]
+        assert sorted(names)[0] == "Llama-3.3-70B-Instruct"
+        assert self._ordered(names, monkeypatch)[0] == "gpt-4o"
+
+    def test_every_model_is_still_there(self, monkeypatch):
+        names = ["b", "A", "c"]
+        assert sorted(self._ordered(names, monkeypatch)) == sorted(names)
+
+
+class TestForgettingWhatAModelRefuses:
+    """A refusal is remembered for good, but providers change.
+
+    Nothing expires on its own — that would bring the original failure back on
+    a schedule — so forgetting is something somebody asks for.
+    """
+
+    def _catalog(self, tmp_path, monkeypatch, models):
+        import json
+
+        from src.models import catalog as catalog_mod
+
+        path = tmp_path / "model_catalog.json"
+        path.write_text(json.dumps({"models": models, "config": {}}))
+        monkeypatch.setattr(catalog_mod, "load_model_catalog",
+                            lambda: json.loads(path.read_text()))
+        monkeypatch.setattr(catalog_mod, "save_model_catalog",
+                            lambda c: path.write_text(json.dumps(c)))
+        return path
+
+    def test_it_forgets_what_was_learned(self, tmp_path, monkeypatch):
+        import json
+
+        from src.models.catalog import clear_rejected_fields
+
+        path = self._catalog(tmp_path, monkeypatch, {
+            "m": {"input": 1.0, "output": 2.0, "rejects": {"stream_options": "2026-07-29: no"}},
+        })
+        assert clear_rejected_fields("m") == {"stream_options": "2026-07-29: no"}
+        assert "rejects" not in json.loads(path.read_text())["models"]["m"]
+
+    def test_the_next_request_would_include_the_field_again(self, tmp_path, monkeypatch):
+        """The point of forgetting: it is tried once more."""
+        from src.models.catalog import clear_rejected_fields, model_rejected_fields
+
+        self._catalog(tmp_path, monkeypatch, {
+            "m": {"input": 1.0, "output": 2.0, "rejects": {"stream_options": "2026-07-29: no"}},
+        })
+        assert "stream_options" in model_rejected_fields("m")
+        clear_rejected_fields("m")
+        assert model_rejected_fields("m") == {}
+
+    def test_a_model_with_nothing_recorded_is_left_alone(self, tmp_path, monkeypatch):
+        from src.models.catalog import clear_rejected_fields
+
+        path = self._catalog(tmp_path, monkeypatch, {"m": {"input": 1.0, "output": 2.0}})
+        before = path.read_text()
+        assert clear_rejected_fields("m") == {}
+        assert path.read_text() == before, "the catalog was rewritten for nothing"
+
+    def test_a_model_that_is_not_there_at_all_is_not_an_error(self, tmp_path, monkeypatch):
+        from src.models.catalog import clear_rejected_fields
+
+        self._catalog(tmp_path, monkeypatch, {"m": {"input": 1.0, "output": 2.0}})
+        assert clear_rejected_fields("nothing-like-this") == {}
+
+    def test_a_quirk_written_by_hand_is_not_forgotten(self, tmp_path, monkeypatch):
+        """Nobody's request taught the sandbox that, so it is not ours to undo."""
+        import json
+
+        from src.models.catalog import clear_rejected_fields
+
+        path = self._catalog(tmp_path, monkeypatch, {
+            "m": {
+                "input": 1.0, "output": 2.0, "system_role": "developer",
+                "max_completion_tokens": 16000,
+                "rejects": {"stream_options": "2026-07-29: no"},
+            },
+        })
+        clear_rejected_fields("m")
+        entry = json.loads(path.read_text())["models"]["m"]
+        assert entry["system_role"] == "developer"
+        assert entry["max_completion_tokens"] == 16000
+
+    def test_it_can_say_what_is_known_before_anything_is_forgotten(self, tmp_path, monkeypatch):
+        from src.models.catalog import models_with_rejected_fields
+
+        self._catalog(tmp_path, monkeypatch, {
+            "quiet": {"input": 1.0, "output": 2.0},
+            "fussy": {"input": 1.0, "output": 2.0, "rejects": {"stream_options": "2026-07-29: no"}},
+            "empty": {"input": 1.0, "output": 2.0, "rejects": {}},
+        })
+        assert list(models_with_rejected_fields()) == ["fussy"]
+
+
+class TestWhoseModelIsIt:
+    """Grouping a menu by the company, not by the shop it was bought from.
+
+    The companies come from OpenRouter's list; the tests' own stand-in for it
+    is tests/fixtures/model_makers.json, put in place by the root conftest.
+    """
+
+    def _catalog(self, monkeypatch, models):
+        from src.models import catalog as catalog_mod
+
+        monkeypatch.setattr(catalog_mod, "load_model_catalog",
+                            lambda: {"models": models, "config": {}})
+
+    def test_the_company_comes_from_the_list_of_makers(self, monkeypatch):
+        self._catalog(monkeypatch, {"gpt-4o": {"portkey_id": "openai/gpt-4o"}})
+        from src.models.catalog import model_owner
+
+        assert model_owner("gpt-4o") == "OpenAI"
+
+    def test_a_model_the_list_does_not_name_is_placed_by_its_family(self, monkeypatch):
+        """A newer model than the saved list knows about, from a known family."""
+        self._catalog(monkeypatch, {"qwen9-max": {}})
+        from src.models.catalog import model_company
+
+        assert model_company("qwen9-max") == "Qwen"
+
+    def test_a_reselling_route_does_not_claim_the_model(self, monkeypatch):
+        """Vertex and Azure carry other companies' models. Read literally, the
+        route would file Claude under Google."""
+        self._catalog(monkeypatch, {
+            "claude-haiku-4-5": {"portkey_id": "vertex-ai/claude-haiku-4-5"},
+            "gpt-35-turbo": {"portkey_id": "azure-openai/gpt-35-turbo"},
+            "Llama-3.3-70B-Instruct": {"portkey_id": "azure-ai/Llama-3.3-70B-Instruct"},
+        })
+        from src.models.catalog import model_owner
+
+        assert model_owner("claude-haiku-4-5") == "Anthropic"
+        assert model_owner("gpt-35-turbo") == "OpenAI"
+        assert model_owner("Llama-3.3-70B-Instruct") == "Meta"
+
+    def test_a_company_the_list_does_not_know_names_itself_by_its_route(self, monkeypatch):
+        """A provider added later appears under its own name without anyone
+        editing this."""
+        self._catalog(monkeypatch, {"zeta-1": {"portkey_id": "zetaco/zeta-1"}})
+        from src.models.catalog import model_owner
+
+        assert model_owner("zeta-1") == "zetaco"
+
+    def test_an_owner_written_by_hand_always_wins(self, monkeypatch):
+        """For a model the list gets wrong."""
+        self._catalog(monkeypatch, {"gpt-4o": {"portkey_id": "openai/gpt-4o",
+                                               "owner": "Somebody Else"}})
+        from src.models.catalog import model_owner
+
+        assert model_owner("gpt-4o") == "Somebody Else"
+
+    def test_something_wholly_unknown_still_gets_a_place(self, monkeypatch):
+        """It must appear somewhere; a model that groups nowhere is a model
+        nobody can pick."""
+        self._catalog(monkeypatch, {"strange-thing": {"input": 1.0}})
+        from src.models.catalog import model_owner
+
+        assert model_owner("strange-thing") == "Other"
+
+    def test_with_no_saved_list_the_route_still_places_the_model(self, monkeypatch):
+        """Offline on first use: no list, and nothing breaks."""
+        from src.models import makers
+
+        makers.makers_path().unlink()
+        self._catalog(monkeypatch, {"gpt-4o": {"portkey_id": "openai/gpt-4o"},
+                                    "claude-haiku-4-5": {"portkey_id": "vertex-ai/claude-haiku-4-5"}})
+        from src.models.catalog import model_owner
+
+        assert model_owner("gpt-4o") == "openai"
+        assert model_owner("claude-haiku-4-5") == "Other"
+
+    def test_every_model_in_this_catalog_is_placed(self, monkeypatch):
+        from src.models.catalog import model_owner
+
+        self._catalog(monkeypatch, {
+            "gpt-4o": {"portkey_id": "openai/gpt-4o"},
+            "claude-haiku-4-5": {"portkey_id": "vertex-ai/claude-haiku-4-5"},
+            "gemma-3-4b-it": {"portkey_id": "google/gemma-3-4b-it"},
+            "mistral-small-2503": {},
+        })
+        owners = {model_owner(m) for m in
+                  ("gpt-4o", "claude-haiku-4-5", "gemma-3-4b-it", "mistral-small-2503")}
+        assert "Other" not in owners, owners
+
+
+class TestAModelOnAnEndpoint:
+    """Where it runs and who made it are two questions with two answers."""
+
+    def _catalog(self, monkeypatch, models, endpoints):
+        from src import settings
+        from src.models import catalog as catalog_mod
+
+        monkeypatch.setattr(catalog_mod, "load_model_catalog",
+                            lambda: {"models": models, "config": {}})
+        monkeypatch.setattr(settings, "ENDPOINTS", endpoints)
+
+    def test_it_is_grouped_under_its_endpoint(self, monkeypatch):
+        self._catalog(monkeypatch,
+                      {"my_mac:qwen3.8:27b-mlx": {"endpoint": "my_mac", "model": "qwen3.8:27b-mlx"}},
+                      {"my_mac": {"name": "My Mac"}})
+        from src.models.catalog import model_endpoint, model_owner
+
+        assert model_endpoint("my_mac:qwen3.8:27b-mlx") == "My Mac"
+        assert model_owner("my_mac:qwen3.8:27b-mlx") == "My Mac"
+
+    def test_its_company_is_read_from_its_name_there(self, monkeypatch):
+        """A local model's name is its family's, with a size after it."""
+        self._catalog(monkeypatch,
+                      {"my_mac:gemma4:12b-mlx": {"endpoint": "my_mac", "model": "gemma4:12b-mlx"}},
+                      {"my_mac": {}})
+        from src.models.catalog import model_company
+
+        assert model_company("my_mac:gemma4:12b-mlx") == "Google"
+
+    def test_one_the_endpoint_no_longer_lists_still_ran_there(self, monkeypatch):
+        """Gone from the catalog, but a conversation still names it."""
+        self._catalog(monkeypatch, {}, {"my_mac": {"name": "My Mac"}})
+        from src.models.catalog import model_company, model_endpoint
+
+        assert model_endpoint("my_mac:qwen3.8:27b-mlx") == "My Mac"
+        assert model_company("my_mac:qwen3.8:27b-mlx") == "Qwen"
+
+    def test_one_whose_endpoint_is_gone_from_the_settings_still_ran_there(self, monkeypatch):
+        """Nothing else says where it ran; the built-in service never names a
+        model with a colon."""
+        self._catalog(monkeypatch, {}, {})
+        from src.models.catalog import model_company, model_endpoint
+
+        assert model_endpoint("my_mac_studio:qwen3.8:27b-mlx") == "my_mac_studio"
+        assert model_company("my_mac_studio:qwen3.8:27b-mlx") == "Qwen"
+
+    def test_a_sandbox_model_runs_on_no_endpoint(self, monkeypatch):
+        self._catalog(monkeypatch, {"gpt-4o": {}, "odd:name": {}}, {"my_mac": {}})
+        from src.models.catalog import model_endpoint
+
+        assert model_endpoint("gpt-4o") is None
+        assert model_endpoint("gpt-4o-2024-08-06") is None, "not in the catalog, but no colon"
+        assert model_endpoint("odd:name") is None, "the catalog says it is the sandbox's"
