@@ -380,7 +380,10 @@ class LoadingPage(object):
             return False
         server.page = self
         self._server = server
-        thread = threading.Thread(target=server.serve_forever)
+        # Checked for a request to stop every twentieth of a second rather than
+        # the usual half second, so that stop() is as prompt as it says and
+        # the sandbox is not kept waiting for the address it is taking over.
+        thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.05})
         thread.daemon = True
         thread.start()
         return True

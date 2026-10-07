@@ -315,6 +315,10 @@ class TestSayingWhereTheSoftwareGoes:
     def _said(self, start, monkeypatch, **environment):
         for name in ("CONDA_DEFAULT_ENV", "VIRTUAL_ENV"):
             monkeypatch.delenv(name, raising=False)
+        # The Python running these tests is usually in an environment of its
+        # own, and the script names one it finds itself running in. Without
+        # this, what these tests saw would depend on which one ran them.
+        monkeypatch.setattr(start.sys, "base_prefix", start.sys.prefix, raising=False)
         for name, value in environment.items():
             monkeypatch.setenv(name, value)
         lines = []
@@ -365,9 +369,6 @@ class TestSayingWhereTheSoftwareGoes:
     ):
         """Nothing activated: a paragraph about leaving it alone would be a
         paragraph about nothing."""
-        import sys as _sys
-
-        monkeypatch.setattr(_sys, "base_prefix", _sys.prefix, raising=False)
         said = self._said(start, monkeypatch)
         assert "currently in" not in said
         assert "pip install" not in said

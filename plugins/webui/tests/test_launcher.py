@@ -104,7 +104,9 @@ def web_server(own_port):
             self.end_headers()
 
     server = HTTPServer(("127.0.0.1", own_port), Handler)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    # The usual half-second check for "stop" would be half a second added to
+    # every test that uses this.
+    thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True)
     thread.start()
     yield heard
     server.shutdown()

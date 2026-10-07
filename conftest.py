@@ -6,12 +6,25 @@ only applies a ``conftest.py`` to the directory it sits in and below, and
 ``plugins/*/tests/`` is not below ``tests/``.
 """
 
+import shutil
 from pathlib import Path
 
 import pytest
 
-import src.models.catalog as _catalog_module
 from src import paths
+
+# Before anything else from src/ is imported, make this copy of the package
+# look as though it has never been set up. Several modules read this person's
+# files once, as they are first imported — src/settings.py takes its
+# endpoints, model lists and sampling values from preferences.toml that way —
+# and that happens while pytest is still collecting, before any fixture below
+# has run. On a machine that has been set up, the whole run would otherwise
+# carry that person's own preferences, and ask their own endpoints for models.
+# The per-test folder that _isolated_extras_folder hands out replaces this
+# again for each test.
+paths.INSTALL_MARKER = Path(__file__).parent / "tests" / "no-such-marker"
+
+import src.models.catalog as _catalog_module  # noqa: E402  (must come after the line above)
 
 # The tests' own catalog, not the one the product ships. Those are two
 # different decisions: a new installation starts with no models, so that nobody
@@ -22,8 +35,13 @@ _FIXTURE_CATALOG = Path(__file__).parent / "tests" / "fixtures" / "model_catalog
 
 
 @pytest.fixture(autouse=True)
-def _use_fixture_catalog(monkeypatch):
-    """Point every test at the fixture catalog, wherever the test lives.
+def _use_fixture_catalog(tmp_path_factory, monkeypatch):
+    """Give every test its own copy of the fixture catalog, wherever the test lives.
+
+    A copy, because the catalog is something the sandbox writes as well as
+    reads: adding a model, or finding an endpoint's models, saves it. Pointed
+    at the file in tests/fixtures itself, those saves landed in the
+    repository, and the next test began from whatever the last one had left.
 
     This one is at the repository root rather than in ``tests/`` for the reason
     given above: the plugin suites are not below ``tests/``, and they need a
@@ -32,7 +50,9 @@ def _use_fixture_catalog(monkeypatch):
     A test needing its own catalog replaces this again in its own fixture;
     the later monkeypatch wins.
     """
-    monkeypatch.setattr(_catalog_module, "get_model_catalog_path", lambda: _FIXTURE_CATALOG)
+    catalog = tmp_path_factory.mktemp("catalog") / "model_catalog.json"
+    shutil.copyfile(_FIXTURE_CATALOG, catalog)
+    monkeypatch.setattr(_catalog_module, "get_model_catalog_path", lambda: catalog)
 
 
 @pytest.fixture(autouse=True)
