@@ -147,3 +147,136 @@ class TestChoosing:
     def test_only_folders_and_files_can_be_asked_for(self):
         with pytest.raises(ValueError):
             picker.choose("printer")
+
+
+@pytest.fixture
+def linux(monkeypatch):
+    """This computer, as far as the picker can tell, is a Linux desktop with nothing installed."""
+    monkeypatch.setattr(picker.sys, "platform", "linux")
+    monkeypatch.setattr(picker.shutil, "which", lambda name: None)
+    monkeypatch.setenv("DISPLAY", ":0")
+    monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
+
+
+class TestWhichComputersHaveAChooser:
+    def test_a_mac_has_one_when_osascript_is_there(self, monkeypatch):
+        monkeypatch.setattr(picker.sys, "platform", "darwin")
+        monkeypatch.setattr(picker.shutil, "which", lambda name: "/usr/bin/osascript")
+        assert picker.available() is True
+        monkeypatch.setattr(picker.shutil, "which", lambda name: None)
+        assert picker.available() is False
+
+    def test_windows_has_one_when_powershell_is_there(self, monkeypatch):
+        monkeypatch.setattr(picker.sys, "platform", "win32")
+        monkeypatch.setattr(picker.os, "name", "nt")
+        monkeypatch.setattr(picker.shutil, "which", lambda name: name if name == "powershell.exe" else None)
+        assert picker.available() is True
+
+    def test_a_linux_desktop_with_zenity_has_one(self, linux, monkeypatch):
+        monkeypatch.setattr(picker.shutil, "which", lambda name: "/usr/bin/zenity" if name == "zenity" else None)
+        assert picker._linux_helper() == "/usr/bin/zenity"
+        assert picker.available() is True
+
+    def test_a_linux_desktop_without_one_can_fall_back_on_pythons_own(self, linux, monkeypatch):
+        monkeypatch.setattr(picker.importlib.util, "find_spec", lambda name: object())
+        assert picker._linux_helper() is None
+        assert picker.available() is True
+
+    def test_python_without_tkinter_has_none_to_fall_back_on(self, linux, monkeypatch):
+        monkeypatch.setattr(picker.importlib.util, "find_spec", lambda name: None)
+        assert picker.available() is False
+
+    def test_a_linux_computer_with_no_screen_has_none(self, linux, monkeypatch):
+        """Reached over a plain remote connection, there is nothing to draw a window on."""
+        monkeypatch.delenv("DISPLAY")
+        monkeypatch.setattr(picker.importlib.util, "find_spec", lambda name: object())
+        assert picker._linux_helper() is None
+        assert picker._has_tkinter() is False
+
+
+class TestTheOtherChoosers:
+    def test_windows_folder_chooser_opens_where_asked(self):
+        script = picker._windows_command("folder", "Pick one", "C:\\Users")[-1]
+        assert "$dialog.SelectedPath = 'C:\\Users'" in script
+
+    def test_windows_file_chooser_opens_where_asked(self):
+        script = picker._windows_command("file", "Pick one", "C:\\Users")[-1]
+        assert "$dialog.InitialDirectory = 'C:\\Users'" in script
+
+    def test_zenity_with_nowhere_given_lets_it_choose(self):
+        assert picker._linux_command("/usr/bin/zenity", "file", "Pick one", None) == [
+            "/usr/bin/zenity", "--file-selection", "--title", "Pick one"]
+
+    def test_kdialog_with_nowhere_given_opens_at_home(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("HOME", str(tmp_path))
+        command = picker._linux_command("/usr/bin/kdialog", "file", "Pick one", None)
+        assert command[-2:] == ["--getopenfilename", str(tmp_path)]
+
+    @pytest.mark.parametrize("kind,chooser", [("folder", "askdirectory"), ("file", "askopenfilename")])
+    def test_pythons_own_chooser_is_told_what_and_where(self, kind, chooser):
+        command = picker._tkinter_command(kind, "Pick one", "/home/heller")
+        assert command[:2] == [sys.executable, "-c"]
+        assert f"chooser.{chooser}(title='Pick one', initialdir='/home/heller')" in command[2]
+
+
+class TestChoosingOnEachComputer:
+    @pytest.fixture
+    def ran(self, monkeypatch):
+        commands = []
+        monkeypatch.setattr(picker, "available", lambda: True)
+        monkeypatch.setattr(picker, "_run", lambda command: commands.append(command) or None)
+        return commands
+
+    def test_linux_uses_the_desktops_chooser(self, linux, monkeypatch, ran):
+        monkeypatch.setattr(picker.shutil, "which", lambda name: "/usr/bin/kdialog" if name == "kdialog" else None)
+        picker.choose("folder")
+        assert ran[0][0] == "/usr/bin/kdialog"
+
+    def test_linux_without_one_uses_pythons_own(self, linux, ran):
+        picker.choose("file")
+        assert ran[0][:2] == [sys.executable, "-c"]
+
+    def test_windows_uses_powershell(self, monkeypatch, ran):
+        monkeypatch.setattr(picker.sys, "platform", "win32")
+        monkeypatch.setattr(picker.os, "name", "nt")
+        monkeypatch.setattr(picker.shutil, "which", lambda name: "C:\\powershell.exe")
+        picker.choose("folder")
+        assert "-STA" in ran[0]
+
+
+class TestShowingAFolder:
+    """reveal() opens a folder the person already has, in the file browser they know."""
+
+    @pytest.fixture
+    def opened(self, monkeypatch):
+        commands = []
+        monkeypatch.setattr(picker.subprocess, "Popen", lambda command, **kw: commands.append(command))
+        return commands
+
+    @pytest.mark.parametrize("platform,program", [
+        ("darwin", "open"), ("win32", "explorer"), ("linux", "xdg-open"),
+    ])
+    def test_each_computer_uses_its_own_file_browser(self, monkeypatch, opened, tmp_path, platform, program):
+        monkeypatch.setattr(picker.sys, "platform", platform)
+        assert picker.reveal(tmp_path) is True
+        assert opened == [[program, str(tmp_path)]]
+
+    def test_a_folder_that_is_not_there_is_not_opened(self, opened, tmp_path):
+        assert picker.reveal(tmp_path / "gone") is False
+        assert opened == []
+
+    def test_a_computer_that_cannot_open_one_says_no_rather_than_failing(self, monkeypatch, tmp_path):
+        def no_file_browser(command, **kw):
+            raise OSError("xdg-open: not found")
+        monkeypatch.setattr(picker.subprocess, "Popen", no_file_browser)
+        assert picker.reveal(tmp_path) is False
+
+    @pytest.mark.parametrize("platform", ["darwin", "win32"])
+    def test_macs_and_windows_always_have_one(self, monkeypatch, platform):
+        monkeypatch.setattr(picker.sys, "platform", platform)
+        assert picker.can_reveal() is True
+
+    def test_linux_has_one_when_xdg_open_is_there(self, linux, monkeypatch):
+        assert picker.can_reveal() is False
+        monkeypatch.setattr(picker.shutil, "which", lambda name: "/usr/bin/xdg-open")
+        assert picker.can_reveal() is True
