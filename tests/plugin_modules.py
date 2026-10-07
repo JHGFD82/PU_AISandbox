@@ -5,62 +5,20 @@ A plugin keeps its services and helpers in its own folder, and its
 (see ``docs/plugin-authoring-guide.md``). A test cannot wait for that: it
 imports ``src.services.translation_service`` at the top of the file, before any
 plugin has been loaded. So each plugin's ``conftest.py`` files them itself,
-with ``register()`` below, as its tests are being collected.
-
-Shared here rather than copied into every conftest, so that a fix to how it is
-done reaches every plugin at once.
+with ``register()`` below — the plugins' own ``register_plugin_module()`` — as
+its tests are being collected.
 """
 
-import importlib
-import importlib.util
-import sys
-from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 
+from src.runtime.plugin import register_plugin_module
 
-def register(plugin_dir: Path, module_name: str, rel_path: str) -> None:
-    """File one of a plugin's own modules under the name its code imports it by.
 
-    Does nothing if something is already filed under that name, or if the
-    file does not exist — an optional part of a plugin that is not there.
-
-    The module is also set as an attribute of the package above it, so that a
-    test can replace something in it by name, as in
-    ``monkeypatch.setattr("src.services.translation_service.X", ...)``: pytest
-    finds the module by walking from ``src`` down through those attributes,
-    not by looking the full name up.
-
-    Args:
-        plugin_dir: The plugin's own folder, e.g. ``plugins/translation``.
-        module_name: The name to file it under, e.g.
-            ``"src.services.translation_service"``.
-        rel_path: Where the file is, relative to *plugin_dir*.
-    """
-    if module_name in sys.modules:
-        return
-    path = plugin_dir / rel_path
-    if not path.exists():
-        return
-    spec = importlib.util.spec_from_file_location(module_name, path)
-    if spec and spec.loader:
-        mod = importlib.util.module_from_spec(spec)
-        sys.modules[module_name] = mod
-        spec.loader.exec_module(mod)
-    parent_name, _, attribute = module_name.rpartition(".")
-    if not parent_name:
-        return
-    parent = sys.modules.get(parent_name)
-    if parent is None:
-        # A real package such as src.runtime that nothing has imported yet.
-        # A made-up parent such as pu_plugin.translation cannot be imported,
-        # and has nothing to set the attribute on.
-        try:
-            parent = importlib.import_module(parent_name)
-        except ImportError:
-            return
-    setattr(parent, attribute, sys.modules[module_name])
+# The same function each plugin's plugin.py uses, so a test's modules are filed
+# exactly as the running sandbox files them.
+register = register_plugin_module
 
 
 @pytest.fixture(autouse=True)

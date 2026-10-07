@@ -169,7 +169,7 @@ Plugins own their service files *and* their command-orchestration logic. Because
 _register("src.services.translation_service", "src/services/translation_service.py")
 ```
 
-`SandboxProcessor.__getattr__` then finds the module in `sys.modules` and instantiates the service class on first access. Nothing in `src/` changes when a plugin is added.
+`_register` is the plugin's own folder bound to `register_plugin_module()` in `src/runtime/plugin.py`, the one function every plugin — and every plugin's tests, through `tests/plugin_modules.py` — files its modules with. `SandboxProcessor.__getattr__` then finds the module in `sys.modules` and instantiates the service class on first access. Nothing in `src/` changes when a plugin is added.
 
 ### The same convention for orchestration methods
 

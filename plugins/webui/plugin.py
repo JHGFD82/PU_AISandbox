@@ -16,51 +16,20 @@ API key/budget/conversations are active for each request. See
 from __future__ import annotations
 
 import argparse
+import functools
 import getpass
-import importlib.util
 import sys
 import threading
 from pathlib import Path
 
+from src.runtime.plugin import register_plugin_module
+
 _PLUGIN_DIR = Path(__file__).parent
 
 
-def _register(module_name: str, rel_path: str) -> None:
-    """Load one of this plugin's own files and insert it into sys.modules under *module_name*.
-
-    Identical in spirit to the ``_register()`` helper every other plugin
-    uses (see ``plugins/prompt/plugin.py`` for the fully-annotated version).
-    Called once per internal file, in dependency order, before any command
-    runs.
-
-    Args:
-        module_name: The name to register the module under in
-                     ``sys.modules``. For files only this plugin's own code
-                     ever looks up, this is a flat, dot-free name (e.g.
-                     ``'_pu_webui_auth'``) rather than a dotted path — see
-                     ``src/app.py``'s module docstring for why. For files
-                     other parts of the core project look up by convention
-                     (this plugin's chat service, its settings), this
-                     follows the existing ``src.services.<name>`` /
-                     ``pu_plugin.<plugin>settings.toml`` convention instead.
-        rel_path: The file's real path, relative to this plugin's own
-                  directory.
-    """
-    if module_name in sys.modules:
-        return
-    path = _PLUGIN_DIR / rel_path
-    if not path.exists():
-        return
-    spec = importlib.util.spec_from_file_location(module_name, path)
-    if spec and spec.loader:
-        mod = importlib.util.module_from_spec(spec)
-        sys.modules[module_name] = mod
-        spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    parts = module_name.rsplit(".", 1)
-    if len(parts) == 2:
-        parent = sys.modules.get(parts[0])
-        if parent is not None:
-            setattr(parent, parts[1], sys.modules[module_name])
+# Each of this plugin's own files, filed under the name core looks for it by.
+# See register_plugin_module() in src/runtime/plugin.py.
+_register = functools.partial(register_plugin_module, _PLUGIN_DIR)
 
 
 # Registered in dependency order: settings first (nothing depends on

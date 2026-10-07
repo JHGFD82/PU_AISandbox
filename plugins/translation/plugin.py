@@ -126,8 +126,7 @@ src.services.translation_service`` statement.
 from __future__ import annotations
 
 import argparse
-import importlib.util
-import sys
+import functools
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
@@ -136,35 +135,16 @@ if TYPE_CHECKING:
 
 # ── Plugin directory ──────────────────────────────────────────────────────────
 
+from src.runtime.plugin import register_plugin_module
+
 _PLUGIN_DIR = Path(__file__).parent
 
 
 # ── Module registration ────────────────────────────────────────────────────────
 
-def _register(module_name: str, rel_path: str) -> None:
-    """Make one of this plugin's own files importable under a ``src.*`` path.
-
-    See the module docstring above ("How plugin-owned service files stay
-    importable") for the full explanation of why this is needed.
-
-    Args:
-        module_name: The dotted import path to register the module under
-                     (e.g. ``'src.services.translation_service'``).
-        rel_path: The module's real file path, relative to this plugin's
-                  own directory.
-    """
-    if module_name in sys.modules:
-        # Already registered — for example, a development override was
-        # loaded first — so there's nothing more to do.
-        return
-    path = _PLUGIN_DIR / rel_path
-    if not path.exists():
-        return
-    spec = importlib.util.spec_from_file_location(module_name, path)
-    if spec and spec.loader:
-        mod = importlib.util.module_from_spec(spec)
-        sys.modules[module_name] = mod
-        spec.loader.exec_module(mod)  # type: ignore[union-attr]
+# Each of this plugin's own files, filed under the name core looks for it by.
+# See register_plugin_module() in src/runtime/plugin.py.
+_register = functools.partial(register_plugin_module, _PLUGIN_DIR)
 
 
 # Register plugin settings first so service modules can import from src.settings.
