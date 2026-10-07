@@ -8,6 +8,7 @@ ships — the first class below checks it still can.
 
 import ast
 import importlib.util
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -277,10 +278,40 @@ class TestTheLaunchLog:
 class TestTheIcon:
     """Made here, on this computer, so it needs no signing and holds the right paths."""
 
-    def test_a_mac_application_that_runs_the_launcher(self, launcher, tmp_path, monkeypatch):
+    @pytest.mark.skipif(shutil.which("osacompile") is None, reason="needs a Mac")
+    def test_a_mac_application_that_can_ask_to_open_protected_folders(
+            self, launcher, tmp_path, monkeypatch):
+        import plistlib
+
+        monkeypatch.setattr(launcher.sys, "executable", '/Python "Folder"/python3')
+        app = tmp_path / "PU AI Sandbox.app"
+        launcher.make_mac_app(str(app))
+        info = plistlib.loads((app / "Contents" / "Info.plist").read_bytes())
+        # The name a Mac shows when it asks, and in Activity Monitor — not "applet".
+        assert info["CFBundleExecutable"] == launcher.SHORTCUT_NAME
+        assert (app / "Contents" / "MacOS" / launcher.SHORTCUT_NAME).exists()
+        assert info["CFBundleName"] == info["CFBundleDisplayName"] == launcher.SHORTCUT_NAME
+        assert info["CFBundleIdentifier"] == launcher.MAC_BUNDLE_ID
+        assert info["LSUIElement"] is True, "no Dock icon for something over in a second"
+        for key in launcher.MAC_FOLDER_ACCESS:
+            assert info[key] == launcher.MAC_FOLDER_REASON
+        assert "CFBundleIconName" not in info, "the generic AppleScript icon"
+        assert (app / "Contents" / "Resources" / "sandbox.icns").exists()
+        # Signed again after being changed, or a Mac won't remember the answer.
+        subprocess.check_call(["codesign", "--verify", "--strict", str(app)])
+        script = subprocess.check_output(["osadecompile", str(app)]).decode("utf-8")
+        assert launcher.OPEN_SCRIPT in script
+        assert '/Python \\"Folder\\"/python3' in script
+
+    def test_applescript_text_keeps_quotes_and_backslashes(self, launcher):
+        assert launcher.applescript_text('a "b" \\c') == '"a \\"b\\" \\\\c"'
+
+    def test_a_plain_script_application_when_osacompile_fails(
+            self, launcher, tmp_path, monkeypatch):
         import os
         import plistlib
 
+        monkeypatch.setenv("PATH", str(tmp_path))  # no osacompile to be found
         monkeypatch.setattr(launcher.sys, "executable", "/Python Folder/python3")
         app = tmp_path / "PU AI Sandbox.app"
         launcher.make_mac_app(str(app))

@@ -48,9 +48,10 @@ To stop the sandbox, use **Quit**, which is the power button at the bottom of th
 A few things worth knowing:
 
 1. If you move the sandbox's folder, the icon will stop working, since it holds the folder's full path. Run `python3 start.py --make-shortcut` from the new location to replace it.
-2. On Linux, some desktops ask once whether to trust a new icon before they will open it. Right-click it and choose **Allow Launching**.
-3. If Python is ever removed from your computer, or upgraded in a way that moves it, the icon opens a page saying so instead of doing nothing. Install the latest Python from [python.org](https://www.python.org/downloads/) and double-click the icon again; your settings and history are untouched.
-4. If the page says the sandbox couldn't be started, it tells you why, and where the full account of what happened is written down: `~/Library/Logs/PU_AISandbox-launcher.log` on a Mac, `%LOCALAPPDATA%\PU_AISandbox\launcher.log` on Windows, and `~/.local/state/PU_AISandbox/launcher.log` on Linux. Running `python3 start.py` in a terminal window instead shows the same thing as it happens.
+2. On a Mac, the first time you double-click the icon, your Mac may ask whether **PU AI Sandbox** can access files in your Documents (or Desktop, or Downloads) folder, wherever the sandbox's folder is. Click **Allow**: the sandbox's own software is kept there. If you clicked **Don't Allow**, the icon says how to change your mind: open **System Settings**, choose **Privacy & Security**, then **Files & Folders**, and turn on the folders listed under **PU AI Sandbox**.
+3. On Linux, some desktops ask once whether to trust a new icon before they will open it. Right-click it and choose **Allow Launching**.
+4. If Python is ever removed from your computer, or upgraded in a way that moves it, the icon opens a page saying so instead of doing nothing. Install the latest Python from [python.org](https://www.python.org/downloads/) and double-click the icon again; your settings and history are untouched.
+5. If the page says the sandbox couldn't be started, it tells you why, and where the full account of what happened is written down: `~/Library/Logs/PU_AISandbox-launcher.log` on a Mac, `%LOCALAPPDATA%\PU_AISandbox\launcher.log` on Windows, and `~/.local/state/PU_AISandbox/launcher.log` on Linux. Running `python3 start.py` in a terminal window instead shows the same thing as it happens.
 
 ### If you already have a virtual environment of your own
 

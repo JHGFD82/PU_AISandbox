@@ -920,19 +920,53 @@ def make_shortcut():
         return None
 
 
+# What a Mac shows when the icon first asks to open a protected folder (the
+# sandbox's folder is often in one), after "PU AI Sandbox would like to
+# access files in your Documents folder."
+MAC_FOLDER_REASON = "The sandbox's software is kept in this folder."
+MAC_FOLDER_ACCESS = (
+    "NSDocumentsFolderUsageDescription",
+    "NSDesktopFolderUsageDescription",
+    "NSDownloadsFolderUsageDescription",
+)
+
+
 def make_mac_app(target):
     """Make a small Mac application that opens the sandbox.
 
     An application on a Mac is a folder with a particular layout. This one
-    holds a two-line script that runs open-sandbox.sh, the icon, and a
-    description saying it shows nothing in the Dock — it finishes in a second
-    or two, and the sandbox runs in the browser.
+    runs open-sandbox.sh, and shows nothing in the Dock — it finishes in a
+    second or two, and the sandbox runs in the browser.
+
+    It is an AppleScript application, made with the osacompile program every
+    Mac has, rather than a plain script: a Mac keeps applications out of the
+    Documents, Desktop and Downloads folders until the person allows them in,
+    and only a real program can ask. A plain script is refused without a word,
+    and the icon does nothing at all. The plain script is still made if the
+    AppleScript one can't be.
 
     It can be moved anywhere, the Applications folder included: the paths
     it holds are to the sandbox's folder, not to wherever it sits.
     """
+    import shutil
+
+    remove_our_mac_app(target)
+    try:
+        return make_mac_applet(target)
+    except (IOError, OSError, subprocess.CalledProcessError):
+        if os.path.exists(target):
+            shutil.rmtree(target)
+        return make_mac_script_app(target)
+
+
+def remove_our_mac_app(target):
+    """Remove the icon made before, so a new one can go in its place.
+
+    Raises:
+        OSError: if *target* is something else of the same name, which is
+            left alone.
+    """
     import plistlib
-    import shlex
     import shutil
 
     if os.path.exists(target):
@@ -947,6 +981,99 @@ def make_mac_app(target):
             raise OSError("something else is already called %s"
                           % os.path.basename(target))
         shutil.rmtree(target)
+
+
+def applescript_text(text):
+    """Write *text* as it has to appear inside an AppleScript, quotes and all."""
+    return '"%s"' % text.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def mac_applet_source():
+    """The AppleScript the icon runs.
+
+    It first reads open-sandbox.sh, which is when a Mac asks whether the icon
+    may open the sandbox's folder. If the answer was no, it says how to allow
+    it, since nothing else can: everything else it would run is in that folder.
+    """
+    problem = (
+        "It needs permission to open its folder, %s.\n\n"
+        "To allow it, open System Settings, choose Privacy & Security, then "
+        "Files & Folders, and turn on the folders listed under %s. Then "
+        "double-click the icon again." % (PACKAGE, SHORTCUT_NAME))
+    return "\n".join([
+        "set opener to %s" % applescript_text(OPEN_SCRIPT),
+        "set python to %s" % applescript_text(sys.executable),
+        "try",
+        '    do shell script "head -c 1 " & quoted form of opener & " >/dev/null"',
+        "on error",
+        "    display alert %s message %s as critical" % (
+            applescript_text("%s couldn't open the sandbox." % SHORTCUT_NAME),
+            applescript_text(problem)),
+        "    return",
+        "end try",
+        "try",
+        # open-sandbox.sh says what goes wrong past this point in the browser.
+        '    do shell script "/bin/sh " & quoted form of opener & " " & quoted form of python',
+        "end try",
+        "",
+    ])
+
+
+def make_mac_applet(target):
+    """Make the icon as an AppleScript application (see make_mac_app)."""
+    import plistlib
+    import shutil
+
+    subprocess.check_call(["osacompile", "-o", target, "-e", mac_applet_source()],
+                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    contents = os.path.join(target, "Contents")
+    resources = os.path.join(contents, "Resources")
+    # Named after the sandbox rather than "applet", for Activity Monitor and
+    # anything else that names the program.
+    os.rename(os.path.join(contents, "MacOS", "applet"),
+              os.path.join(contents, "MacOS", SHORTCUT_NAME))
+    for generic_icon in ("Assets.car", "applet.icns"):
+        if os.path.exists(os.path.join(resources, generic_icon)):
+            os.remove(os.path.join(resources, generic_icon))
+    shutil.copyfile(os.path.join(FOLDER, "sandbox.icns"),
+                    os.path.join(resources, "sandbox.icns"))
+
+    info_path = os.path.join(contents, "Info.plist")
+    with open(info_path, "rb") as handle:
+        info = plistlib.load(handle)
+    info.pop("CFBundleIconName", None)  # the generic icon, in Assets.car
+    info.update({
+        "CFBundleExecutable": SHORTCUT_NAME,
+        "CFBundleIconFile": "sandbox.icns",
+        "CFBundleIdentifier": MAC_BUNDLE_ID,
+        "CFBundleName": SHORTCUT_NAME,
+        "CFBundleDisplayName": SHORTCUT_NAME,
+        "CFBundleShortVersionString": "1.0",
+        "LSUIElement": True,
+    })
+    for key in MAC_FOLDER_ACCESS:
+        info[key] = MAC_FOLDER_REASON
+    with open(info_path, "wb") as handle:
+        plistlib.dump(info, handle)
+
+    # Changing it undid osacompile's signature, and a Mac won't remember
+    # what the icon was allowed to open without one. "-" signs it as made
+    # on this computer, which needs no developer account.
+    subprocess.check_call(["codesign", "--force", "--sign", "-", target],
+                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    os.utime(target, None)
+    return target
+
+
+def make_mac_script_app(target):
+    """Make the icon as a plain script, for a Mac where osacompile failed.
+
+    It works only while the sandbox's folder is outside the Documents,
+    Desktop and Downloads folders (see make_mac_app).
+    """
+    import plistlib
+    import shlex
+    import shutil
 
     contents = os.path.join(target, "Contents")
     os.makedirs(os.path.join(contents, "MacOS"))
