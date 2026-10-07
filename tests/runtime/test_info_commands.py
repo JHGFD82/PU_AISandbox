@@ -663,3 +663,161 @@ class TestWhatCountsAsSetAndWhereItIsListed:
 
         assert endpoint_name_from_credential_path("webui.session_secret") is None
         assert endpoint_name_from_credential_path("endpoints.my_cluster.base_url") is None
+
+
+# ---------------------------------------------------------------------------
+# usage adjust — recording what the bill says
+# ---------------------------------------------------------------------------
+
+
+class TestAdjustingAMonthToTheBill:
+    """The sandbox's own figure is kept; the difference to the bill is recorded beside it."""
+
+    def _adjust(self, entry, capsys, month="2026-09"):
+        tracker = MagicMock()
+        tracker.record_cost_adjustment.return_value = entry
+        info_mod._adjust_monthly_total(tracker, "heller", stated_total=entry["stated_total"],
+                                       month=month, note="from the invoice")
+        return tracker, capsys.readouterr().out
+
+    def test_the_difference_is_recorded_and_both_figures_shown(self, capsys):
+        tracker, out = self._adjust({"measured_total": 10.0, "stated_total": 12.5,
+                                     "amount": 2.5, "previous_adjustment": 0}, capsys)
+        tracker.record_cost_adjustment.assert_called_once_with(12.5, month="2026-09", note="from the invoice")
+        assert "2026-09 for heller" in out
+        assert "Measured by the sandbox:  $10.00" in out
+        assert "The bill says:            $12.50" in out
+        assert "Difference recorded:      $+2.50" in out
+        assert "still shown separately" in out
+
+    def test_an_earlier_adjustment_is_shown(self, capsys):
+        _, out = self._adjust({"measured_total": 10.0, "stated_total": 11.0,
+                               "amount": -1.0, "previous_adjustment": 2.0}, capsys)
+        assert "Recorded earlier:         $+2.00" in out
+
+    def test_figures_that_agree_record_nothing(self, capsys):
+        _, out = self._adjust({"measured_total": 10.0, "stated_total": 10.0,
+                               "amount": 0, "previous_adjustment": 0}, capsys)
+        assert "nothing recorded" in out
+        assert "Difference recorded" not in out
+
+    def test_no_month_named_means_this_one(self, capsys):
+        from datetime import datetime
+
+        _, out = self._adjust({"measured_total": 1.0, "stated_total": 1.0,
+                               "amount": 0, "previous_adjustment": 0}, capsys, month=None)
+        assert f"{datetime.now():%Y-%m} for heller" in out
+
+    def test_a_total_no_month_could_have_cost_is_refused(self):
+        tracker = MagicMock()
+        tracker.record_cost_adjustment.side_effect = ValueError("A month cannot cost less than nothing.")
+        with pytest.raises(CLIError, match="less than nothing"):
+            info_mod._adjust_monthly_total(tracker, "heller", stated_total=-5, month=None, note="")
+
+
+# ---------------------------------------------------------------------------
+# settings — each subcommand reaches its own handler
+# ---------------------------------------------------------------------------
+
+
+class TestEachSettingsSubcommand:
+    @pytest.mark.parametrize("sub,handler", [
+        ("add-professor", "_settings_add_professor_interactive"),
+        ("list", "_print_optional_settings"),
+        ("export-shared", "_settings_export_shared"),
+        ("model-quirks", "_settings_model_quirks"),
+        ("test-model", "_settings_test_model"),
+    ])
+    def test_it_goes_to_its_own_handler(self, monkeypatch, sub, handler):
+        called = []
+        monkeypatch.setattr(info_mod, handler, lambda *a: called.append(a))
+        info_mod._handle_settings_command(_make_ns(settings_subcommand=sub))
+        assert len(called) == 1
+
+    def test_setup_asks_its_questions(self, monkeypatch):
+        called = []
+        monkeypatch.setattr("src.setup_prompts.run_interactive_setup", lambda: called.append(True))
+        info_mod._handle_settings_command(_make_ns(settings_subcommand="setup"))
+        assert called == [True]
+
+
+class TestAddingSomebodyAtTheCommandLine:
+    """Keys are typed at a hidden prompt, never as a flag, so they stay out of shell history."""
+
+    def test_they_are_saved_and_told_how_to_try_it(self, monkeypatch, capsys):
+        answers = iter(["sk-primary", ""])
+        monkeypatch.setattr(info_mod.getpass, "getpass", lambda prompt: next(answers))
+        info_mod._settings_add_professor_interactive(_make_ns(netid="jh43", name="Jeff Heller"))
+
+        saved = settings_store_mod.get_professors()
+        assert saved["jh43"]["key"] == "sk-primary"
+        assert "python main.py jh43 usage report" in capsys.readouterr().out
+
+    def test_the_netid_and_name_are_asked_for_when_not_given(self, monkeypatch):
+        typed = iter(["jh43", "Jeff Heller"])
+        monkeypatch.setattr("builtins.input", lambda prompt: next(typed))
+        monkeypatch.setattr(info_mod.getpass, "getpass", lambda prompt: "sk-primary")
+        info_mod._settings_add_professor_interactive(_make_ns(netid=None, name=None))
+        assert "jh43" in settings_store_mod.get_professors()
+
+    def test_a_netid_that_cannot_be_one_is_refused(self, monkeypatch):
+        monkeypatch.setattr(info_mod.getpass, "getpass", lambda prompt: "sk-primary")
+        with pytest.raises(CLIError):
+            info_mod._settings_add_professor_interactive(_make_ns(netid="not a netid!", name="X"))
+
+
+class TestListingWhereUsageIsReadFrom:
+    def test_each_source_is_listed_with_whose_it_is(self, monkeypatch, capsys):
+        from types import SimpleNamespace
+
+        monkeypatch.setattr(info_mod, "get_configured_sources", lambda: [
+            SimpleNamespace(professor="heller", mode="read", path="/shared/heller"),
+            SimpleNamespace(professor=None, mode="read", path="/shared/all"),
+        ])
+        info_mod._print_configured_sources()
+        out = capsys.readouterr().out
+        assert "heller  [read]  /shared/heller" in out
+        assert "everyone found there  [read]  /shared/all" in out
+
+    def test_anything_but_list_says_how_to_use_it(self):
+        with pytest.raises(CLIError, match="usage sources list"):
+            info_mod._handle_usage_sources(_make_ns(sources_subcommand=None))
+
+
+# ---------------------------------------------------------------------------
+# settings export-shared — a draft for whoever looks after the group's file
+# ---------------------------------------------------------------------------
+
+
+class TestADraftOfSharedSettings:
+    def _export(self, **flags):
+        info_mod._settings_export_shared(argparse.Namespace(**({"from_existing": None, "output": None} | flags)))
+
+    def test_it_is_written_where_asked_with_everything_commented_out(self, tmp_path, capsys):
+        out = tmp_path / "group.toml"
+        self._export(output=str(out))
+        text = out.read_text(encoding="utf-8")
+        assert text.strip()
+        assert all(not line.strip() or line.lstrip().startswith("#") or line.startswith("[")
+                   for line in text.splitlines())
+        assert "placing it unedited changes nothing" in capsys.readouterr().out
+
+    def test_with_nowhere_named_it_goes_beside_the_persons_own_files(self, capsys):
+        from src import paths
+
+        self._export()
+        assert (paths.extras_root() / "shared-settings.toml").exists()
+
+    def test_an_earlier_file_is_carried_across(self, tmp_path, capsys):
+        earlier = tmp_path / "earlier.toml"
+        earlier.write_text("", encoding="utf-8")
+        self._export(from_existing=str(earlier), output=str(tmp_path / "draft.toml"))
+        assert f"Carried your existing decisions across from:\n    {earlier}" in capsys.readouterr().out
+
+    def test_a_file_named_that_is_not_there_is_refused(self, tmp_path):
+        with pytest.raises(CLIError, match="No shared settings file"):
+            self._export(from_existing=str(tmp_path / "missing.toml"))
+
+    def test_somewhere_it_cannot_write_is_reported(self, tmp_path):
+        with pytest.raises(CLIError, match="Could not write"):
+            self._export(output=str(tmp_path / "no" / "such" / "folder" / "draft.toml"))
