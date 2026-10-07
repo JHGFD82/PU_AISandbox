@@ -596,14 +596,21 @@ def _settings_test_model(args: argparse.Namespace) -> None:
             print(f"  {line}")
         for line in report.unsettled:
             print(f"  (not settled) {line}")
-        if after != before:
-            catalog["models"][name] = after
+        # Saved either way, since when a model was last tested is worth
+        # keeping; but only counted as an update when something was learned.
+        # The new timestamp alone always differs, so comparing whole entries
+        # called every model updated. A model never tested before has learned
+        # something: that it has now been asked.
+        learned = (_without_last_tested(after) != _without_last_tested(before)
+                   or "last_tested" not in before)
+        catalog["models"][name] = after
+        # Written now rather than at the end. A sweep of the whole catalog is
+        # a few minutes of requests, and keeping it all until the last one
+        # means an interruption anywhere throws away every answer already
+        # paid for.
+        save_model_catalog(catalog)
+        if learned:
             changed += 1
-            # Written now rather than at the end. A sweep of the whole
-            # catalog is a few minutes of requests, and keeping it all until
-            # the last one means an interruption anywhere throws away every
-            # answer already paid for.
-            save_model_catalog(catalog)
             print("  saved")
         else:
             print("  already recorded correctly")
@@ -627,6 +634,15 @@ def _settings_test_model(args: argparse.Namespace) -> None:
 
     print(f"\n{changed} of {len(targets)} updated.")
     print("=" * 60)
+
+
+def _without_last_tested(entry: dict) -> dict:
+    """Return a catalog entry without the note of when it was last tested.
+
+    That note changes on every test, so comparing entries with it left in
+    would say a model's details had changed every time it was tested.
+    """
+    return {key: value for key, value in entry.items() if key != "last_tested"}
 
 
 def _settings_model_quirks(args: argparse.Namespace) -> None:

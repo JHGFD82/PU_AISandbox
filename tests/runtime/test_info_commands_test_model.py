@@ -166,7 +166,10 @@ class TestASweepOfTheCatalog:
 
         from src.models.capabilities import CapabilityReport
 
-        state = SimpleNamespace(catalog={"models": {m: {} for m in IN_CATALOG}},
+        # Each model tested before, so a test that finds nothing new is told
+        # apart from one that has never been tested at all.
+        tested = {"supports_vision": False, "last_tested": "2026-01-01T09:00:00"}
+        state = SimpleNamespace(catalog={"models": {m: dict(tested) for m in IN_CATALOG}},
                                 reports={}, saves=[], unreachable=set())
 
         def report(name):
@@ -201,6 +204,25 @@ class TestASweepOfTheCatalog:
         out = capsys.readouterr().out
         assert "reads images" in out and "saved" in out
         assert sweep.saves[-1]["gpt-4o"]["supports_vision"] is True
+        assert "1 of 3 updated." in out
+
+    def test_a_model_that_has_not_changed_is_not_counted_as_updated(self, sweep, capsys):
+        """Every test records when it happened; that alone is not news about the model."""
+        _settings_test_model(_args())
+        out = capsys.readouterr().out
+        assert out.count("already recorded correctly") == 3
+        assert "0 of 3 updated." in out
+
+    def test_but_when_it_was_tested_is_still_kept(self, sweep):
+        _settings_test_model(_args())
+        assert sweep.saves[-1]["gpt-4o"]["last_tested"] > "2026-01-01T09:00:00"
+
+    def test_a_model_never_tested_before_counts_as_updated(self, sweep, capsys):
+        """Being asked at all is the difference between 'cannot' and 'nobody knows'."""
+        sweep.catalog["models"]["gpt-4o"] = {"supports_vision": False}
+        _settings_test_model(_args())
+        out = capsys.readouterr().out
+        assert "1 of 3 updated." in out
 
     def test_a_model_that_could_not_be_reached_is_left_as_it_was(self, sweep, capsys):
         sweep.reports["gpt-4o"] = self._report(reachable=False, unsettled=["timed out"])
