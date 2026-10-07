@@ -209,7 +209,7 @@ class TranslationService(BaseService):
 
         def body(attempt: int) -> Any:
             logging.debug(f'Making API call to model: {model}')
-            system_role = get_model_system_role(model)
+            system_role = get_model_system_role(self._catalog_model_name(model))
             response = self._call_translation_api(model, system_role, system_prompt, user_prompt)
             self._record_response_usage(response, model)
             content = self._extract_response_content(response)
@@ -857,7 +857,7 @@ class TranslationService(BaseService):
         )
 
         model = self._get_model()
-        system_role = get_model_system_role(model)
+        system_role = get_model_system_role(self._catalog_model_name(model))
 
         def body(attempt: int) -> Any:
             response = self._call_translation_api(model, system_role, system_prompt, md)

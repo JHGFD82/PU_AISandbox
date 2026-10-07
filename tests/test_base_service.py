@@ -754,3 +754,90 @@ class TestAnUnpricedCallReachesTheReport:
         assert "Uncounted Spending" in out
         assert "1 call this month was not priced" in out
         assert "usage adjust" in out
+
+
+class TestTheCatalogIsAskedAboutTheRightModel:
+    """A model on an endpoint is known by two names, and only one is the catalog's.
+
+    What the request sends is the name the endpoint knows (``qwen3.8:27b-mlx``);
+    what the catalog records against it is filed under the name ``-m`` takes,
+    endpoint and colon included (``my_mac_studio:qwen3.8:27b-mlx``). Asking the
+    catalog the first name finds nothing, and finding nothing reads as an answer
+    of "no" — which is how a model that can read images came to be refused one.
+    """
+
+    @staticmethod
+    def _on_an_endpoint(monkeypatch, **kwargs) -> BaseService:
+        from src.services.api_config import APIConfig
+
+        svc = _make_svc(monkeypatch, **kwargs)
+        svc._endpoint = APIConfig(
+            api_name="my_mac_studio",
+            display_name="My Mac Studio",
+            base_url="http://localhost:11434/v1",
+            api_key="",
+            default_model="qwen3.8:27b-mlx",
+        )
+        svc.endpoint_name = "my_mac_studio"
+        return svc
+
+    def test_an_endpoint_s_model_is_asked_for_under_the_catalog_s_name(self, monkeypatch):
+        svc = self._on_an_endpoint(monkeypatch)
+        assert svc._catalog_model_name("qwen3.8:27b-mlx") == "my_mac_studio:qwen3.8:27b-mlx"
+
+    def test_a_sandbox_model_keeps_the_only_name_it_has(self, monkeypatch):
+        svc = _make_svc(monkeypatch)
+        assert svc._catalog_model_name("gpt-4o") == "gpt-4o"
+
+    def test_the_response_length_cap_is_looked_up_under_that_name(self, monkeypatch):
+        svc = self._on_an_endpoint(monkeypatch)
+        asked: list[str] = []
+        monkeypatch.setattr(
+            "src.services.base_service.get_model_max_completion_tokens",
+            lambda m, d: asked.append(m) or d,
+        )
+        svc._resolve_sampling_params("qwen3.8:27b-mlx", 0.3, 0.95, 4096)
+        assert asked == ["my_mac_studio:qwen3.8:27b-mlx"]
+
+    def test_what_the_model_refuses_is_looked_up_under_that_name(self, monkeypatch):
+        svc = self._on_an_endpoint(monkeypatch)
+        asked: list[str] = []
+        monkeypatch.setattr(
+            "src.services.base_service.model_rejected_fields",
+            lambda m: asked.append(m) or {},
+        )
+        monkeypatch.setattr(
+            "src.services.base_service.model_max_tokens_field", lambda m: "max_tokens"
+        )
+        kwargs = svc._build_completion_kwargs(
+            model="qwen3.8:27b-mlx", messages=[], max_tokens=100,
+            temperature=None, top_p=None, stream=False, extra_kwargs={},
+        )
+        assert asked == ["my_mac_studio:qwen3.8:27b-mlx"]
+        # The request itself still sends the name the endpoint knows.
+        assert kwargs["model"] == "qwen3.8:27b-mlx"
+
+    def test_a_refusal_is_recorded_under_that_name(self, monkeypatch):
+        """Otherwise nothing is recorded at all, and the same refusal repeats forever."""
+        recorded: list[str] = []
+        monkeypatch.setattr(
+            "src.services.base_service.record_rejected_field",
+            lambda m, field, reason: recorded.append(m) or True,
+        )
+        svc = self._on_an_endpoint(monkeypatch)
+
+        attempts = {"n": 0}
+
+        def refuse_then_accept(**kwargs):
+            attempts["n"] += 1
+            if "stream_options" in kwargs:
+                raise ValueError("Unrecognized request argument supplied: stream_options")
+            return "answered"
+
+        svc.client.chat.completions.create = refuse_then_accept
+        result = svc._send_completion(
+            {"model": "qwen3.8:27b-mlx", "messages": [], "stream_options": {}},
+            "qwen3.8:27b-mlx",
+        )
+        assert result == "answered"
+        assert recorded == ["my_mac_studio:qwen3.8:27b-mlx"]

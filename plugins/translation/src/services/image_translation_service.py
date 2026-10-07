@@ -16,7 +16,7 @@ import re
 from typing import Any, Optional
 
 from ..models import (
-    get_model_system_role, model_supports_vision, get_vision_capable_models,
+    get_model_system_role, model_supports_vision, cannot_read_images_message,
     get_model_max_completion_tokens,
 )
 from .base_service import BaseService
@@ -75,8 +75,9 @@ class ImageTranslationService(BaseService):
         limit for this specific model.
 
         Args:
-            model: The model whose token limit is being looked up, e.g.
-                   ``'gpt-4o'``.
+            model: The model whose token limit is being looked up, under the
+                   name the catalog holds it by — see
+                   ``BaseService._catalog_model_name()``.
 
         Returns:
             The maximum number of tokens the model may generate in its
@@ -275,17 +276,14 @@ class ImageTranslationService(BaseService):
                 attempts.
         """
         model = self._get_model()
+        catalog_model = self._catalog_model_name(model)
 
-        if not model_supports_vision(model):
-            vision_models = get_vision_capable_models()
-            raise ValueError(
-                f"Model '{model}' does not support image processing. "
-                f"Vision-capable models: {vision_models}"
-            )
+        if not model_supports_vision(catalog_model):
+            raise ValueError(cannot_read_images_message(catalog_model))
 
-        system_role = get_model_system_role(model)
+        system_role = get_model_system_role(catalog_model)
         system_prompt, user_prompt = self.build_prompts(source_language, target_language, vertical=vertical, spread=spread)
-        max_tokens = self._get_max_tokens(model)
+        max_tokens = self._get_max_tokens(catalog_model)
 
         if self.image_processor.is_blank_image(file_path):
             logging.info(

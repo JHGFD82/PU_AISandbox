@@ -307,3 +307,102 @@ class TestProcessImageFolderSequentialException:
         proc.process_image_folder(str(folder), "English", workers=1)
         out = capsys.readouterr().out
         assert "ERROR" in out or "error" in out.lower()
+
+
+# ---------------------------------------------------------------------------
+# process_scanned_pdf
+# ---------------------------------------------------------------------------
+
+class TestProcessScannedPdf:
+    """A PDF is a stack of pages, and the model can only look at one picture.
+
+    Sending the file itself is what a provider refuses as "invalid image
+    input", so every page is redrawn as an image first and read exactly as a
+    folder of scans would be.
+    """
+
+    @staticmethod
+    def _pdf(tmp_path, pages: int = 2) -> str:
+        import pymupdf
+
+        doc = pymupdf.open()
+        for number in range(pages):
+            doc.new_page().insert_text((72, 120), f"Page {number + 1}", fontsize=24)
+        path = str(tmp_path / "scans.pdf")
+        doc.save(path)
+        doc.close()
+        return path
+
+    def test_every_page_is_read(self, monkeypatch, tmp_path):
+        proc = _make_processor(monkeypatch)
+        seen: list[str] = []
+        proc.image_processor_service.process_image_ocr.side_effect = (
+            lambda path, *a, **kw: seen.append(os.path.basename(path)) or "text"
+        )
+
+        proc.process_scanned_pdf(self._pdf(tmp_path, pages=3), "English")
+
+        assert seen == ["page_0001.png", "page_0002.png", "page_0003.png"]
+
+    def test_the_pdf_itself_is_never_sent_to_the_model(self, monkeypatch, tmp_path):
+        """The whole point: what reaches the model is a picture, not the PDF."""
+        proc = _make_processor(monkeypatch)
+        sent: list[str] = []
+        proc.image_processor_service.process_image_ocr.side_effect = (
+            lambda path, *a, **kw: sent.append(path) or "text"
+        )
+
+        proc.process_scanned_pdf(self._pdf(tmp_path), "English")
+
+        assert sent, "nothing was sent at all"
+        assert not any(p.lower().endswith(".pdf") for p in sent)
+
+    def test_a_pdf_handed_to_process_image_is_routed_here(self, monkeypatch, tmp_path):
+        """No caller can send a PDF to the model by going through the image path."""
+        proc = _make_processor(monkeypatch)
+        proc.image_processor_service.process_image_ocr.return_value = "text"
+
+        proc.process_image(self._pdf(tmp_path), "English")
+
+        sent = [c.args[0] for c in proc.image_processor_service.process_image_ocr.call_args_list]
+        assert sent and all(p.endswith(".png") for p in sent)
+
+    def test_the_rendered_pages_are_cleaned_up(self, monkeypatch, tmp_path):
+        proc = _make_processor(monkeypatch)
+        folders: list[str] = []
+        proc.image_processor_service.process_image_ocr.side_effect = (
+            lambda path, *a, **kw: folders.append(os.path.dirname(path)) or "text"
+        )
+
+        proc.process_scanned_pdf(self._pdf(tmp_path), "English")
+
+        assert folders and not os.path.exists(folders[0])
+
+    def test_the_pages_are_combined_into_one_saved_transcription(self, monkeypatch, tmp_path):
+        proc = _make_processor(monkeypatch)
+        proc.image_processor_service.process_image_ocr.side_effect = ["first", "second"]
+
+        proc.process_scanned_pdf(self._pdf(tmp_path), "English", str(tmp_path / "out.txt"))
+
+        saved = proc.file_output.save_translation_output.call_args.args[0]
+        assert "first" in saved and "second" in saved
+
+    def test_progress_is_reported_page_by_page(self, monkeypatch, tmp_path):
+        """The browser's progress bar has nothing else to go on."""
+        proc = _make_processor(monkeypatch)
+        proc.image_processor_service.process_image_ocr.return_value = "text"
+        reported: list[tuple] = []
+
+        proc.process_scanned_pdf(
+            self._pdf(tmp_path, pages=3), "English", on_progress=lambda done, total: reported.append((done, total)),
+        )
+
+        assert reported == [(1, 3), (2, 3), (3, 3)]
+
+    def test_a_file_that_is_not_a_pdf_is_refused_clearly(self, monkeypatch, tmp_path):
+        proc = _make_processor(monkeypatch)
+        not_a_pdf = tmp_path / "broken.pdf"
+        not_a_pdf.write_text("this is not a PDF at all")
+
+        with pytest.raises(CLIError, match="Could not open"):
+            proc.process_scanned_pdf(str(not_a_pdf), "English")

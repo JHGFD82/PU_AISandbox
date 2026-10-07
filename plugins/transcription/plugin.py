@@ -384,9 +384,18 @@ class TranscriptionPlugin:
                 sandbox.process_image_folder(input_path, target_language, output_file, workers=workers)
             else:
                 file_type = sandbox._detect_and_validate_file(input_path)
-                if file_type != 'image':
-                    raise CLIError(f"Transcribe command requires an image file or folder, but got {file_type}.")
-                sandbox.process_image(input_path, target_language, output_file)
+                if file_type == 'pdf':
+                    sandbox.process_scanned_pdf(
+                        input_path, target_language, output_file,
+                        workers=getattr(args, 'workers', 1),
+                    )
+                elif file_type != 'image':
+                    raise CLIError(
+                        f"Transcribe reads images and PDFs of scans, but '{os.path.basename(input_path)}' "
+                        f"is {file_type}. Point -i at an image, a PDF, or a folder of scans."
+                    )
+                else:
+                    sandbox.process_image(input_path, target_language, output_file)
 
         else:  # transcription_review
             language: str = args.language_code
@@ -627,6 +636,16 @@ class TranscriptionPlugin:
                 workers=workers, on_progress=on_progress, on_page_text=on_page_text,
             )
             summary = f"Transcribed the images in '{file_name}' to {target_language}."
+        elif os.path.splitext(file_path)[1].lower() == ".pdf":
+            # process_image() would route a PDF here by itself; named explicitly
+            # so the browser gets the same page count, progress bar and streamed
+            # page text it gets for a folder of scans.
+            sandbox.process_scanned_pdf(
+                file_path, target_language, output_path,
+                vertical=vertical, spread=spread, passes=passes,
+                workers=workers, on_progress=on_progress, on_page_text=on_page_text,
+            )
+            summary = f"Transcribed the pages of '{file_name}' to {target_language}."
         else:
             sandbox.process_image(
                 file_path, target_language, output_path,
@@ -718,7 +737,7 @@ ui_action = UiAction(
     fields=[
         UiField(name="target_language", label="Language in the image", kind="language", group="Document"),
         UiField(
-            name="file", label="Image (or select multiple images / a whole folder of scans)",
+            name="file", label="Image or PDF (or select multiple images / a whole folder of scans)",
             kind="file", group="Document", allow_folder=True,
         ),
         UiField(

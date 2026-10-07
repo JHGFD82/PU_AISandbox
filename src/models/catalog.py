@@ -462,7 +462,10 @@ def model_supports_vision(model: str) -> bool:
     models = config["models"]
 
     if model not in models:
-        logging.warning(f"Model {model} not found in pricing config. Assuming no vision support.")
+        logging.warning(
+            f"'{model}' is not in the model catalog, so it is treated as unable to "
+            "read images."
+        )
         return False
 
     return models[model].get("supports_vision", False)
@@ -475,6 +478,77 @@ def get_vision_capable_models() -> List[str]:
         model for model, details in config["models"].items()
         if details.get("supports_vision", False)
     ]
+
+
+def cannot_read_images_message(model: str) -> str:
+    """Explain why a model was not sent an image, and what to do about it.
+
+    Said only once ``model_supports_vision()`` has already answered no: this
+    explains that answer rather than reaching it, and would misdescribe a model
+    that can read images.
+
+    Said in one place because it is said from several — transcription and
+    image translation both refuse this work — and because the reason is not
+    always the same. A model can have been tested and found unable to read
+    images, or simply never have been asked, and those two call for different
+    things from the person reading the message: the first for a different
+    model, the second for one command.
+
+    Args:
+        model: The model's name as the catalog holds it. For a model on one of
+               this installation's own endpoints that includes the endpoint and
+               the colon, as in ``'my_cluster:llama-3-70b'``.
+
+    Returns:
+        The explanation, in three parts: what is known about this model, what
+        to do about it, and which models can read images instead.
+    """
+    entry = load_model_catalog()["models"].get(model)
+    entry = entry if isinstance(entry, dict) else None
+    tested = str(entry.get("last_tested") or "")[:10] if entry else ""
+
+    if entry is None:
+        what_is_known = (
+            f"'{model}' is not in the model catalog, so there is no record of whether "
+            "it can read images, and it is treated as though it cannot."
+        )
+    elif tested:
+        what_is_known = (
+            f"'{model}' was tested on {tested} and could not read the image it was "
+            "sent, so it is not used for work that needs one."
+        )
+    else:
+        what_is_known = (
+            f"Nobody has found out yet whether '{model}' can read images, so it is "
+            "treated as though it cannot. A model that was added automatically "
+            "starts that way: neither the pricing service the sandbox reads nor an "
+            "endpoint's own list of models says either way."
+        )
+
+    if tested:
+        what_to_do = (
+            "If that has changed — a newer version of the model, or a different one "
+            f"now running under the same name — run 'python main.py settings "
+            f"test-model {model}' to test it again, or press Test beside it on the "
+            "web interface's Settings page."
+        )
+    else:
+        what_to_do = (
+            f"To find out, run 'python main.py settings test-model {model}', or press "
+            "Test beside it on the web interface's Settings page. If you already know "
+            f"it can read images, open {get_model_catalog_path()} and set "
+            '"supports_vision": true on its entry.'
+        )
+
+    # In reading order, like every other list of models shown to somebody —
+    # see models_in_reading_order().
+    able = sorted(get_vision_capable_models(), key=str.lower)
+    instead = (
+        "Models that can read images: " + ", ".join(able) + "."
+        if able
+        else "No model in the catalog can read images yet."
+    )
+    return f"{what_is_known}\n\n{what_to_do}\n\n{instead}"
 
 
 def get_model_system_role(model: str) -> str:
