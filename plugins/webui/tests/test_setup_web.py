@@ -85,21 +85,26 @@ class TestAskingWhereFilesGo:
         mode = (paths.DEFAULT_EXTRAS_ROOT / paths.SETTINGS_FILENAME).stat().st_mode & 0o777
         assert mode == 0o600
 
-    def test_choosing_the_folder_does_not_end_setup(self, client_and_result):
+    def test_choosing_the_folder_does_not_end_setup(self, client_and_result, monkeypatch):
         """It used to. The folder is the first of three things, not the last.
 
         Ending here handed somebody three files and nothing that worked: no key
         to bill and no model to send to. Setup carries on and asks.
         """
-        import time
+        from types import SimpleNamespace
+
+        # Setup ends on a timer, so the reply reaches the browser first. Any
+        # timer started here would be setup ending; watching for one is surer
+        # than waiting to see whether it fires.
+        timers = []
+        monkeypatch.setattr(setup_web, "threading", SimpleNamespace(
+            Timer=lambda *args, **kwargs: timers.append(args) or SimpleNamespace(start=lambda: None)))
 
         client, chosen = client_and_result
         page = client.post("/", data={"folder": str(paths.DEFAULT_EXTRAS_ROOT)})
         assert page.status_code == 200
         assert "Who will be using this" in page.text
-        # Long enough that the old timer would have fired by now.
-        time.sleep(0.8)
-        assert chosen == [], "setup ended before asking who is using this"
+        assert timers == [] and chosen == [], "setup ended before asking who is using this"
 
 
 class TestCarryingForwardAnExistingSetup:
