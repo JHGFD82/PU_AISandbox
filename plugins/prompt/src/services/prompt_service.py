@@ -1,35 +1,13 @@
 """Custom prompt service for direct AI interaction.
 
-Template notes for plugin authors
-----------------------------------
-All prompt text belongs in ``src/services/prompts/fragments.py``, not here.
-Import the constants you need and assemble them in ``build_prompts()`` below.
+The only text this service adds is the system prompt used when none is given,
+and that is a setting rather than prompt text in code: ``default_system_prompt``
+under ``[prompt]``, which a shared settings file or someone's
+``preferences.toml`` can change without touching this file.
 
-Basic assembly (single constant)::
-
-    from .prompts.fragments import DEFAULT_SYSTEM_PROMPT
-    ...  # use DEFAULT_SYSTEM_PROMPT directly
-
-Multi-part assembly (joining several fragments)::
-
-    from .prompts.fragments import ROLE_BLOCK, FORMAT_INSTRUCTION, SAFETY_REMINDER
-
-    system = "\n\n".join([ROLE_BLOCK, FORMAT_INSTRUCTION, SAFETY_REMINDER])
-
-Runtime substitution (``str.format()`` placeholders)::
-
-    from .prompts.fragments import PERSONA_BLOCK
-
-    system = PERSONA_BLOCK.format(name=professor, role="researcher",
-                                  institution="Princeton")
-
-Conditional inclusion::
-
-    from .prompts.fragments import BASE_SYSTEM, STRICT_MODE_ADDENDUM
-
-    system = BASE_SYSTEM
-    if args.strict:
-        system = "\n\n".join([system, STRICT_MODE_ADDENDUM])
+A plugin that builds its prompts from fixed pieces of text keeps them in a
+fragments module of its own instead, and assembles them in a prompt spec — see
+``plugins/translation/src/services/prompts/`` for that pattern in use.
 """
 
 import logging
