@@ -108,8 +108,8 @@ python main.py jh43 prompt -s --dry-run       # preview, no API call
 
 ## Test coverage notes
 
-- **Thread safety**: `tests/test_token_tracker.py::TestConcurrentRecordUsage` — 16 concurrent `record_usage()` calls, checking exact token count, call count and session-history length
-- **Plugin loading**: `tests/test_plugin_loader.py` — discovery, `ModePlugin` validation, malformed plugins
+- **Thread safety**: `tests/tracking/test_token_tracker.py::TestConcurrentRecordUsage` — 16 concurrent `record_usage()` calls, checking exact token count, call count and session-history length
+- **Plugin loading**: `tests/runtime/test_plugin_loader.py` — discovery, `ModePlugin` validation, malformed plugins
 - **Plugin suites**: each bundled plugin has its own `tests/` directory, listed explicitly in `pytest.ini`'s `testpaths` — a new plugin's tests must be added there
 
 ## Documentation and docstring standards

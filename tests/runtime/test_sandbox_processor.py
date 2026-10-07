@@ -1,0 +1,523 @@
+"""Tests for src/runtime/sandbox_processor.py — SandboxProcessor core behavior.
+
+Covers only what's genuinely core: __init__, the __getattr__ lazy service
+loader, and _detect_and_validate_file (from _FileTypeMixin). Document/image
+handling tests live with their owning plugins:
+- plugins/translation/tests/runtime/test_document_handler.py
+- plugins/transcription/tests/runtime/test_image_handler.py
+"""
+
+from unittest.mock import MagicMock
+
+import pytest
+
+from src.errors import CLIError
+from src.runtime.sandbox_processor import SandboxProcessor
+from tests.helpers import bare_processor
+
+
+def _make_processor(monkeypatch):
+    """A SandboxProcessor with nothing real behind it (see tests/helpers.py)."""
+    return bare_processor(monkeypatch)
+
+
+# ---------------------------------------------------------------------------
+# SandboxProcessor.__init__
+# ---------------------------------------------------------------------------
+
+class TestSandboxProcessorInit:
+
+    def test_init_sets_professor_name(self, monkeypatch, tmp_path):
+        monkeypatch.setattr("src.runtime.sandbox_processor.get_api_key",
+                            lambda name: ("fake-key", "Dr. Smith"))
+        monkeypatch.setattr("src.runtime.sandbox_processor.PromptService",
+                            MagicMock(return_value=MagicMock()), raising=False)
+        monkeypatch.setattr("src.runtime.sandbox_processor.TokenTracker",
+                            MagicMock(return_value=MagicMock()))
+
+        proc = SandboxProcessor("smith")
+        assert proc.professor_name == "smith"
+        assert proc.professor_display_name == "Dr. Smith"
+
+    def test_init_raises_cli_error_on_bad_config(self, monkeypatch):
+        monkeypatch.setattr("src.runtime.sandbox_processor.get_api_key",
+                            lambda name: (_ for _ in ()).throw(ValueError("unknown professor")))
+        with pytest.raises(CLIError, match="Configuration error"):
+            SandboxProcessor("nobody")
+
+    def test_colon_model_parsed_into_api_config(self, monkeypatch):
+        """Colon syntax in model string auto-resolves APIConfig without caller involvement."""
+        from src.services.api_config import APIConfig
+        fake_cfg = APIConfig(
+            api_name="hpc_cluster",
+            display_name="HPC Cluster",
+            base_url="https://cluster.example.com/v1",
+            api_key="key",
+            openai_compatible=True,
+            default_model=None,
+        )
+        monkeypatch.setattr("src.runtime.sandbox_processor.get_api_key",
+                            lambda name: ("fake-key", "Dr. Smith"))
+        monkeypatch.setattr("src.runtime.sandbox_processor.TokenTracker",
+                            MagicMock(return_value=MagicMock()))
+        monkeypatch.setattr(
+            "src.runtime.sandbox_processor.SandboxProcessor.__init__.__code__",
+            SandboxProcessor.__init__.__code__,
+            raising=False,
+        )
+        # Patch load_api_config inside the sandbox_processor module namespace
+        import src.services.api_config as _cfg_mod
+        original_load = _cfg_mod.load_api_config
+
+        def fake_load(name):
+            if name == "hpc_cluster":
+                return fake_cfg
+            return original_load(name)
+
+        monkeypatch.setattr(_cfg_mod, "load_api_config", fake_load)
+        remembered = []
+        monkeypatch.setattr("src.models.remember_endpoint_model",
+                            lambda api_name, model: remembered.append((api_name, model)))
+
+        proc = SandboxProcessor("smith", model="hpc_cluster:llama-3-70b")
+        assert proc._api_config is fake_cfg
+        assert proc._svc_kwargs["model"] == "llama-3-70b"
+        # Written into the catalog, so it is in the browser's list from now on.
+        assert remembered == [("hpc_cluster", "llama-3-70b")]
+
+    def test_bare_model_leaves_api_config_none_when_no_default(self, monkeypatch):
+        """Model without colon and no apis.default → _api_config stays None."""
+        monkeypatch.setattr("src.runtime.sandbox_processor.get_api_key",
+                            lambda name: ("fake-key", "Dr. Smith"))
+        monkeypatch.setattr("src.runtime.sandbox_processor.TokenTracker",
+                            MagicMock(return_value=MagicMock()))
+
+        proc = SandboxProcessor("smith", model="gpt-4o")
+        assert proc._api_config is None
+        assert proc._svc_kwargs["model"] == "gpt-4o"
+
+
+class TestAModelNameOnItsOwnRunsOnTheSandbox:
+    """Reaching an endpoint always means naming it. A name on its own runs on
+    the built-in service, even when an endpoint runs a model by that name."""
+
+    @pytest.fixture
+    def setup(self, monkeypatch, tmp_path):
+        import json
+
+        import src.models.catalog as catalog_module
+        import src.runtime.sandbox_processor as sp
+        import src.settings as settings_mod
+        import src.settings_store as settings_store
+
+        path = tmp_path / "model_catalog.json"
+        path.write_text(json.dumps({
+            "config": {"pricing_unit": 1_000_000, "monthly_limit": 250.0},
+            "models": {
+                "gpt-oss-120b": {"input": 0.1, "output": 0.5},
+                "my_cluster:gpt-oss-120b": {"endpoint": "my_cluster", "model": "gpt-oss-120b"},
+                "my_mac_studio:gpt-oss-120b": {"endpoint": "my_mac_studio", "model": "gpt-oss-120b"},
+                "my_mac_studio:qwen3.8:27b-mlx": {
+                    "endpoint": "my_mac_studio", "model": "qwen3.8:27b-mlx",
+                },
+            },
+        }))
+        monkeypatch.setattr(catalog_module, "get_model_catalog_path", lambda: path)
+        monkeypatch.setattr(catalog_module, "_catalog_cache", None)
+        monkeypatch.setattr(settings_mod, "ENDPOINTS", {
+            "my_cluster": {"base_url": "http://cluster.internal:8000/v1"},
+            "my_mac_studio": {"base_url": "http://localhost:11434/v1"},
+        })
+        monkeypatch.setattr(settings_mod, "DEFAULT_ENDPOINT", None)
+        monkeypatch.setattr(settings_store, "get_value", lambda _p: None)
+        monkeypatch.setattr(sp, "_already_said", set())
+        monkeypatch.setattr("src.runtime.sandbox_processor.get_api_key",
+                            lambda name: ("fake-key", "Dr. Smith"))
+        monkeypatch.setattr("src.runtime.sandbox_processor.TokenTracker",
+                            MagicMock(return_value=MagicMock()))
+        monkeypatch.setattr("src.models.remember_endpoint_model", lambda *a: None)
+        return settings_mod
+
+    def test_a_name_on_its_own_runs_on_the_sandbox_even_if_an_endpoint_has_it(self, setup):
+        proc = SandboxProcessor("smith", model="gpt-oss-120b")
+        assert proc._api_config is None
+
+    def test_it_says_where_else_the_model_is_and_how_to_get_it(self, setup, caplog):
+        import logging
+
+        with caplog.at_level(logging.WARNING):
+            SandboxProcessor("smith", model="gpt-oss-120b")
+        said = caplog.text
+        assert "more than one place" in said
+        assert "-m my_cluster:gpt-oss-120b" in said
+        assert "-m my_mac_studio:gpt-oss-120b" in said
+
+    def test_it_says_so_once_not_on_every_chat_turn(self, setup, caplog):
+        import logging
+
+        with caplog.at_level(logging.WARNING):
+            SandboxProcessor("smith", model="gpt-oss-120b")
+            SandboxProcessor("smith", model="gpt-oss-120b")
+        assert caplog.text.count("more than one place") == 1
+
+    def test_no_warning_for_a_model_only_the_sandbox_has(self, setup, caplog):
+        import json
+        import logging
+
+        import src.models.catalog as catalog_module
+
+        path = catalog_module.get_model_catalog_path()
+        data = json.loads(path.read_text())
+        data["models"]["gpt-4o-mini"] = {"input": 0.15, "output": 0.6}
+        path.write_text(json.dumps(data))
+        with caplog.at_level(logging.WARNING):
+            SandboxProcessor("smith", model="gpt-4o-mini")
+        assert "more than one place" not in caplog.text
+
+    def test_naming_the_endpoint_reaches_it_with_the_ollama_name_whole(self, setup):
+        proc = SandboxProcessor("smith", model="my_mac_studio:qwen3.8:27b-mlx")
+        assert proc._api_config.api_name == "my_mac_studio"
+        assert proc._svc_kwargs["model"] == "qwen3.8:27b-mlx"
+
+    def test_an_ollama_name_on_its_own_says_which_endpoint_to_name(self, setup):
+        with pytest.raises(CLIError) as caught:
+            SandboxProcessor("smith", model="qwen3.8:27b-mlx")
+        assert "-m my_mac_studio:qwen3.8:27b-mlx" in str(caught.value)
+
+    def test_a_wrong_address_is_not_mistaken_for_an_ollama_name(self, setup):
+        """The endpoint exists; its address is the problem, and only that is said."""
+        setup.ENDPOINTS["my_mac_studio"]["base_url"] = "http://localhost:11434/api/generate"
+        with pytest.raises(CLIError) as caught:
+            SandboxProcessor("smith", model="my_mac_studio:qwen3.8:27b-mlx")
+        said = str(caught.value)
+        assert 'base_url = "http://localhost:11434/v1"' in said
+        assert "full name" not in said
+
+    def test_default_endpoint_is_not_acted_on_and_says_so(self, setup, caplog):
+        import logging
+
+        setup.DEFAULT_ENDPOINT = "my_mac_studio"
+        with caplog.at_level(logging.WARNING):
+            proc = SandboxProcessor("smith", model="gpt-4o-mini")
+        assert proc._api_config is None
+        assert "default_endpoint" in caplog.text
+        assert "not used" in caplog.text
+
+    def test_a_model_only_an_endpoint_has_says_how_to_reach_it(self, setup):
+        """The resolver's "not in the catalog" is true, and no help."""
+        import json
+
+        import src.models.catalog as catalog_module
+        from src.models import resolve_model
+
+        path = catalog_module.get_model_catalog_path()
+        data = json.loads(path.read_text())
+        data["models"]["my_mac_studio:llama-3-70b"] = {
+            "endpoint": "my_mac_studio", "model": "llama-3-70b",
+        }
+        path.write_text(json.dumps(data))
+        with pytest.raises(CLIError) as caught:
+            resolve_model("llama-3-70b")
+        assert "-m my_mac_studio:llama-3-70b" in str(caught.value)
+
+
+# ---------------------------------------------------------------------------
+# _detect_and_validate_file (from _FileTypeMixin, always present on core)
+# ---------------------------------------------------------------------------
+
+class TestDetectAndValidateFile:
+
+    def test_pdf_detected(self, tmp_path, monkeypatch):
+        proc = _make_processor(monkeypatch)
+        f = tmp_path / "doc.pdf"
+        f.write_bytes(b"%PDF-1.4")
+        proc.image_processor.is_image_file.return_value = False
+        result = proc._detect_and_validate_file(str(f))
+        assert result == "pdf"
+
+    def test_docx_detected(self, tmp_path, monkeypatch):
+        proc = _make_processor(monkeypatch)
+        f = tmp_path / "doc.docx"
+        f.write_bytes(b"fake-docx")
+        proc.image_processor.is_image_file.return_value = False
+        result = proc._detect_and_validate_file(str(f))
+        assert result == "docx"
+
+    def test_txt_detected(self, tmp_path, monkeypatch):
+        proc = _make_processor(monkeypatch)
+        f = tmp_path / "file.txt"
+        f.write_text("hello")
+        proc.image_processor.is_image_file.return_value = False
+        result = proc._detect_and_validate_file(str(f))
+        assert result == "txt"
+
+    def test_image_detected(self, tmp_path, monkeypatch):
+        proc = _make_processor(monkeypatch)
+        f = tmp_path / "scan.jpg"
+        f.write_bytes(b"fake-jpg")
+        proc.image_processor.is_image_file.return_value = True
+        proc.image_processor.validate_image_file.return_value = True
+        result = proc._detect_and_validate_file(str(f))
+        assert result == "image"
+
+    def test_invalid_image_raises_cli_error(self, tmp_path, monkeypatch):
+        proc = _make_processor(monkeypatch)
+        f = tmp_path / "bad.jpg"
+        f.write_bytes(b"garbage")
+        proc.image_processor.is_image_file.return_value = True
+        proc.image_processor.validate_image_file.return_value = False
+        with pytest.raises(CLIError, match="not valid"):
+            proc._detect_and_validate_file(str(f))
+
+    def test_nonexistent_file_raises_cli_error(self, monkeypatch):
+        proc = _make_processor(monkeypatch)
+        with pytest.raises(CLIError, match="not found"):
+            proc._detect_and_validate_file("/no/such/file.txt")
+
+    def test_unsupported_extension_raises_cli_error(self, tmp_path, monkeypatch):
+        proc = _make_processor(monkeypatch)
+        f = tmp_path / "archive.zip"
+        f.write_bytes(b"PK")
+        proc.image_processor.is_image_file.return_value = False
+        with pytest.raises(CLIError, match="Unsupported"):
+            proc._detect_and_validate_file(str(f))
+
+
+# ---------------------------------------------------------------------------
+# SandboxProcessor.__getattr__ — lazy service loader
+# ---------------------------------------------------------------------------
+
+class TestSandboxProcessorGetattr:
+
+    def _make_bare_proc(self):
+        """Return a SandboxProcessor bypassing __init__, with only the bare minimum set."""
+        proc = SandboxProcessor.__new__(SandboxProcessor)
+        proc._api_key = "fake-key"
+        proc.professor_name = "test"
+        proc._svc_kwargs = {}
+        proc._api_config = None
+        return proc
+
+    def test_raises_attribute_error_when_no_module_in_sys_modules(self):
+        import sys
+        proc = self._make_bare_proc()
+        # Ensure the key is absent
+        sys.modules.pop("src.services.nonexistent_service", None)
+        with pytest.raises(AttributeError, match="has no attribute 'nonexistent_service'"):
+            _ = proc.nonexistent_service
+
+    def test_raises_attribute_error_when_class_missing_from_module(self):
+        import sys
+        import types
+        proc = self._make_bare_proc()
+        fake_mod = types.ModuleType("src.services.no_class_service")
+        # Module exists but has no matching class
+        sys.modules["src.services.no_class_service"] = fake_mod
+        try:
+            with pytest.raises(AttributeError, match="has no class 'NoClassService'"):
+                _ = proc.no_class_service
+        finally:
+            sys.modules.pop("src.services.no_class_service", None)
+
+    def test_instantiates_class_from_module(self):
+        import sys
+        import types
+        proc = self._make_bare_proc()
+        fake_mod = types.ModuleType("src.services.my_service")
+        instance = MagicMock()
+        fake_cls = MagicMock(return_value=instance)
+        fake_mod.MyService = fake_cls
+        sys.modules["src.services.my_service"] = fake_mod
+        try:
+            result = proc.my_service
+            assert result is instance
+            fake_cls.assert_called_once_with("fake-key", "test")
+        finally:
+            sys.modules.pop("src.services.my_service", None)
+
+    def test_result_is_cached_on_instance(self):
+        import sys
+        import types
+        proc = self._make_bare_proc()
+        fake_mod = types.ModuleType("src.services.cached_service")
+        instance = MagicMock()
+        fake_cls = MagicMock(return_value=instance)
+        fake_mod.CachedService = fake_cls
+        sys.modules["src.services.cached_service"] = fake_mod
+        try:
+            first = proc.cached_service
+            second = proc.cached_service
+            assert first is second
+            # Class constructor called only once
+            assert fake_cls.call_count == 1
+        finally:
+            sys.modules.pop("src.services.cached_service", None)
+
+
+class TestServicesKnowWhichEndpointTheyAreOn:
+    """A service pointed at an alternate endpoint has to say so when recording.
+
+    Its network client is swapped after it is built, so nothing about the
+    service itself changes — which is why usage from an alternate endpoint used
+    to be recorded as though the sandbox had answered it, and costed against the
+    university's price list.
+    """
+
+    def _service_from(self, monkeypatch, api_config):
+        import sys
+        import types
+
+        from src.services.base_service import BaseService
+
+        class Chatter(BaseService):
+            def __init__(self, *args, **kwargs):
+                self.client = object()
+
+        module = types.ModuleType("src.services.chatter")
+        module.Chatter = Chatter
+        monkeypatch.setitem(sys.modules, "src.services.chatter", module)
+
+        proc = SandboxProcessor.__new__(SandboxProcessor)
+        object.__setattr__(proc, "_api_key", "k")
+        object.__setattr__(proc, "professor_name", "Dr. Smith")
+        object.__setattr__(proc, "_svc_kwargs", {})
+        object.__setattr__(proc, "_api_config", api_config)
+        return proc.__getattr__("chatter")
+
+    def test_a_service_on_an_endpoint_is_told_its_name(self, monkeypatch):
+        from src.services.api_config import APIConfig
+
+        service = self._service_from(monkeypatch, APIConfig(
+            api_name="hpc_cluster", display_name="HPC Cluster",
+            base_url="https://cluster.example.com/v1", api_key="key",
+        ))
+        assert service.endpoint_name == "hpc_cluster"
+
+    def test_an_endpoint_that_does_not_speak_openai_is_refused_plainly(self, monkeypatch):
+        """The setting was read and ignored, so it looked like it took effect."""
+        import pytest
+
+        from src.errors import CLIError
+        from src.services.api_config import APIConfig
+
+        with pytest.raises(CLIError, match="OpenAI-compatible"):
+            self._service_from(monkeypatch, APIConfig(
+                api_name="odd_one", display_name="Odd", base_url="https://x/v1",
+                api_key="k", openai_compatible=False,
+            ))
+
+    def test_an_endpoint_that_says_nothing_about_it_still_works(self, monkeypatch):
+        """Omitting the setting used to work, and must go on working."""
+        from src.services.api_config import APIConfig
+
+        service = self._service_from(monkeypatch, APIConfig(
+            api_name="quiet", display_name="Quiet", base_url="https://x/v1", api_key="k",
+        ))
+        assert service.endpoint_name == "quiet"
+
+    def test_a_service_on_the_sandbox_names_no_endpoint(self, monkeypatch):
+        service = self._service_from(monkeypatch, None)
+        assert service.endpoint_name == ""
+
+
+class TestAnEndpointsOwnSettingsAreUsed:
+    """Settings that were parsed and then read by nothing.
+
+    A setting that is read and ignored is worse than one that does not exist:
+    it looks like it took effect.
+    """
+
+    def _service(self, monkeypatch, **config):
+        import sys
+        import types
+
+        from src.services.api_config import APIConfig
+        from src.services.base_service import BaseService
+
+        class Chatter(BaseService):
+            def __init__(self, *args, **kwargs):
+                # Stands in for the real one, which does the same two things
+                # among others. Skipping super() avoids building a Portkey
+                # client and a token tracker for a test about neither.
+                self.client = object()
+                self.custom_model = None
+
+        module = types.ModuleType("src.services.chatter")
+        module.Chatter = Chatter
+        monkeypatch.setitem(sys.modules, "src.services.chatter", module)
+
+        cfg = APIConfig(
+            api_name="cluster", display_name="Cluster",
+            base_url="https://cluster.example.com/v1",
+            api_key=config.pop("api_key", "key"), **config,
+        )
+        proc = SandboxProcessor.__new__(SandboxProcessor)
+        object.__setattr__(proc, "_api_key", "k")
+        object.__setattr__(proc, "professor_name", "Dr. Smith")
+        object.__setattr__(proc, "_svc_kwargs", {})
+        object.__setattr__(proc, "_api_config", cfg)
+        return proc.__getattr__("chatter")
+
+    def test_the_endpoints_address_is_the_one_used(self, monkeypatch):
+        service = self._service(monkeypatch)
+        assert "cluster.example.com" in str(service.client.base_url)
+
+    def test_an_endpoint_with_no_key_can_still_be_reached(self, monkeypatch):
+        """A model on a cluster or on this computer usually asks for no key,
+        and the OpenAI client refuses to be built with an empty one."""
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        service = self._service(monkeypatch, api_key="")
+        assert service.client.api_key
+
+    def test_no_key_never_borrows_one_from_the_environment(self, monkeypatch):
+        """Somebody's real OpenAI key must not be sent to a server that never
+        asked for one."""
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-somebodys-real-key")
+        service = self._service(monkeypatch, api_key="")
+        assert service.client.api_key != "sk-somebodys-real-key"
+
+    def test_a_key_that_is_set_is_the_one_sent(self, monkeypatch):
+        service = self._service(monkeypatch, api_key="the-clusters-key")
+        assert service.client.api_key == "the-clusters-key"
+
+    def test_its_timeout_is_the_one_used(self, monkeypatch):
+        service = self._service(monkeypatch, timeout=7)
+        assert service.client.timeout == 7.0
+
+    def test_turning_off_certificate_checking_actually_turns_it_off(self, monkeypatch):
+        """Parsed since it was added, and until now acted on by nothing."""
+        service = self._service(monkeypatch, verify_ssl=False)
+        transport = service.client._client._transport
+        assert transport._pool._ssl_context.verify_mode.name == "CERT_NONE"
+
+    def test_leaving_it_on_leaves_it_on(self, monkeypatch):
+        service = self._service(monkeypatch, verify_ssl=True)
+        transport = service.client._client._transport
+        assert transport._pool._ssl_context.verify_mode.name != "CERT_NONE"
+
+    def test_it_says_so_when_certificate_checking_is_off(self, monkeypatch, caplog):
+        """A real weakening should not happen quietly."""
+        import logging
+
+        with caplog.at_level(logging.WARNING):
+            self._service(monkeypatch, verify_ssl=False)
+        assert "Certificate checking is turned off" in caplog.text
+
+    def test_the_model_is_taken_as_given_not_looked_up(self, monkeypatch):
+        """The catalog describes the sandbox's models, not this endpoint's."""
+        service = self._service(monkeypatch, default_model="llama-3-70b")
+        assert service._get_model() == "llama-3-70b"
+
+    def test_a_model_asked_for_beats_the_endpoints_own_default(self, monkeypatch):
+        service = self._service(monkeypatch, default_model="llama-3-70b")
+        service.custom_model = "mistral-large"
+        assert service._get_model() == "mistral-large"
+
+    def test_no_model_anywhere_says_so_plainly(self, monkeypatch):
+        import pytest
+
+        from src.errors import CLIError
+
+        service = self._service(monkeypatch)
+        with pytest.raises(CLIError, match="No model was named"):
+            service._get_model()

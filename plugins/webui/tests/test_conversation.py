@@ -3,16 +3,10 @@
 from __future__ import annotations
 
 import json
-import sys
-from pathlib import Path
 
 import pytest
 
-_REPO_ROOT = Path(__file__).resolve().parents[3]
-if str(_REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(_REPO_ROOT))
-
-from plugins.webui.src.conversation import (  # noqa: E402
+from plugins.webui.src.conversation import (
     Attachment,
     Conversation,
     ConversationStore,
@@ -846,9 +840,8 @@ class TestConversationsMoveWithTheFolder:
     def test_core_is_told_to_ask_this_when_a_folder_changes(self):
         """Registered rather than known to core: conversations are this
         plugin's idea, and core moving them would mean core knowing it exists."""
-        from src.tracking import relocate
-
         from plugins.webui.src.conversation import _move_conversations, register_with_core
+        from src.tracking import relocate
 
         before = list(relocate._MOVERS)
         try:

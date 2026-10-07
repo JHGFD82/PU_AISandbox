@@ -36,7 +36,6 @@ There is no registration step anywhere. The loader (`src/runtime/plugin_loader.p
 plugins/myplugin/
 ├── plugin.py                      # required — the loader's entry point
 ├── settings.toml                  # optional — your own tuneable defaults
-├── conftest.py                    # optional — registers your modules for pytest
 ├── src/
 │   ├── settings.py                # optional — reads settings.toml
 │   ├── runtime/
@@ -44,6 +43,12 @@ plugins/myplugin/
 │   └── services/
 │       └── my_service.py          # optional — the class that calls the AI model
 └── tests/
+    ├── conftest.py                # optional — registers your modules for pytest
+    ├── test_plugin.py             # tests for plugin.py
+    ├── runtime/
+    │   └── test_my_handler.py
+    └── services/
+        └── test_my_service.py
 ```
 
 Only `plugin.py` is required; a working plugin can be about thirty lines.
@@ -551,32 +556,34 @@ this way (`plugins/webui/src/conversation.py`).
 
 ## Testing
 
-Put tests in `plugins/myplugin/tests/` and **add that path to `testpaths` in the root `pytest.ini`** — discovery is by explicit list, not automatic:
+Your plugin's tests live in your plugin's own folder, never in the core `tests/` folder, so that removing a plugin takes its tests with it. Put them in `plugins/myplugin/tests/` and **add that path to `testpaths` in the root `pytest.ini`** — discovery is by explicit list, not automatic:
 
 ```ini
 [pytest]
 testpaths = tests plugins/translation/tests plugins/prompt/tests plugins/transcription/tests plugins/webui/tests plugins/myplugin/tests
 ```
 
+Inside it, each test file sits where the code it tests sits, with `src/` left out of the path, and is named after that file: the tests for `src/services/my_service.py` go in `tests/services/test_my_service.py`, and those for `plugin.py` in `tests/test_plugin.py`. When one file's tests grow large enough to split, the parts keep that name and add what they cover, as in `test_plugin_ui_action.py`. Core's own tests follow the same rule, so a test for `src/models/catalog.py` is always in `tests/models/test_catalog.py`. Two plugins may each have a `test_plugin.py`; `pytest.ini` imports each test file under a name made from its whole path, so they never clash.
+
 You do not need to do anything to keep your tests away from real settings and spending. The `conftest.py` at the repository root applies to your tests as much as to core's: each test gets its own empty settings location and its own copy of a small test model catalog, so nothing a test does can reach the settings or usage records of whoever runs it.
 
 What you do need is a `conftest.py` of your own if your tests import your service or handler modules by their `src.*` names. Your `plugin.py` files those modules under those names when the sandbox starts, but a test imports them before any plugin has loaded, so the conftest files them first. It lists the same modules, in the same order, as your `plugin.py` does:
 
 ```python
-# plugins/myplugin/conftest.py
+# plugins/myplugin/tests/conftest.py
 from functools import partial
 from pathlib import Path
 
 from tests.plugin_modules import no_real_token_tracker  # noqa: F401  (importing it applies it here)
 from tests.plugin_modules import register
 
-_register = partial(register, Path(__file__).resolve().parent)
+_register = partial(register, Path(__file__).resolve().parent.parent)
 
 _register("pu_plugin.myplugin.settings", "src/settings.py")
 _register("src.services.myplugin_service", "src/services/myplugin_service.py")
 ```
 
-`no_real_token_tracker` stops your services from writing to the usage files while they are tested; leave that line out if your plugin has no services. `plugin.py` itself is not filed by the conftest, so a test that needs it loads it the way `plugins/translation/tests/test_translation_plugin_ui_action.py` does.
+`no_real_token_tracker` stops your services from writing to the usage files while they are tested; leave that line out if your plugin has no services. `plugin.py` itself is not filed by the conftest, so a test that needs it loads it the way `plugins/translation/tests/test_plugin_ui_action.py` does.
 
 ---
 

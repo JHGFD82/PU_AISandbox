@@ -12,25 +12,19 @@ Covers:
 from __future__ import annotations
 
 import argparse
-import sys
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 
-# Ensure the plugin module can be imported (repo root must be on sys.path).
-_REPO_ROOT = Path(__file__).resolve().parents[3]
-if str(_REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(_REPO_ROOT))
-
-import plugins.prompt.plugin as plugin_mod  # noqa: E402
-from plugins.prompt.plugin import (  # noqa: E402
+import plugins.prompt.plugin as plugin_mod
+from plugins.prompt.plugin import (
     PromptPlugin,
     _collect_multiline,
     _dry_run_display,
     _resolve_output_path,
 )
-from src.errors import CLIError  # noqa: E402
+from src.errors import CLIError
 
 
 # ---------------------------------------------------------------------------
@@ -66,27 +60,53 @@ class TestPluginIdentity:
 # ---------------------------------------------------------------------------
 
 class TestRegisterSubparsers:
+    """The flags the prompt command takes, and what each one is when left out."""
+
+    @staticmethod
+    def _parse(*argv):
+        parser = argparse.ArgumentParser()
+        PromptPlugin().register_subparsers(parser.add_subparsers(dest="command"))
+        return parser.parse_args(["prompt", *argv])
 
     def test_registers_prompt_subcommand(self):
-        parser = argparse.ArgumentParser()
-        subparsers = parser.add_subparsers(dest="command")
-        PromptPlugin().register_subparsers(subparsers)
-        args = parser.parse_args(["prompt"])
-        assert args.command == "prompt"
+        assert self._parse().command == "prompt"
 
-    def test_system_flag_defaults_false(self):
-        parser = argparse.ArgumentParser()
-        subparsers = parser.add_subparsers(dest="command")
-        PromptPlugin().register_subparsers(subparsers)
-        args = parser.parse_args(["prompt"])
+    def test_nothing_given(self):
+        args = self._parse()
         assert args.include_system_prompt is False
+        assert args.output_file is None
+        assert args.model is None
+        assert args.dry_run is False
+        assert args.temperature is None
+        assert args.top_p is None
 
-    def test_system_flag_set_true(self):
-        parser = argparse.ArgumentParser()
-        subparsers = parser.add_subparsers(dest="command")
-        PromptPlugin().register_subparsers(subparsers)
-        args = parser.parse_args(["prompt", "-s"])
+    def test_the_prompt_is_asked_for_rather_than_given_on_the_command_line(self):
+        assert not hasattr(self._parse(), "user_prompt")
+
+    @pytest.mark.parametrize("flag", ["-s", "--system"])
+    def test_system_flag(self, flag):
+        assert self._parse(flag).include_system_prompt is True
+
+    def test_output_file(self):
+        assert self._parse("-o", "out.txt").output_file == "out.txt"
+
+    def test_model(self):
+        assert self._parse("-m", "gpt-4o").model == "gpt-4o"
+
+    def test_dry_run(self):
+        assert self._parse("--dry-run").dry_run is True
+
+    def test_temperature(self):
+        assert self._parse("-t", "0.7").temperature == pytest.approx(0.7)
+
+    def test_top_p(self):
+        assert self._parse("-T", "1.0").top_p == pytest.approx(1.0)
+
+    def test_all_flags_together(self):
+        args = self._parse("-s", "-o", "resp.txt", "-m", "gpt-4o-mini")
         assert args.include_system_prompt is True
+        assert args.output_file == "resp.txt"
+        assert args.model == "gpt-4o-mini"
 
 
 # ---------------------------------------------------------------------------
