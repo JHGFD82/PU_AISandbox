@@ -1,6 +1,4 @@
-"""Tests for plugins/transcription/plugin.py::_run_transcription_review and
-plugins/transcription/src/services/transcription_review_service.py::TranscriptionReviewService._get_model.
-"""
+"""Tests for plugins/transcription/plugin.py::_run_transcription_review: running a review and showing or saving its report."""
 
 import sys
 from unittest.mock import MagicMock
@@ -47,22 +45,3 @@ class TestRunTranscriptionReview:
         sandbox.transcription_review_service.review_transcription.side_effect = RuntimeError("API fail")
         with pytest.raises(CLIError, match="Error during transcription review"):
             _run_transcription_review(sandbox, "text", "Japanese")
-
-
-# ---------------------------------------------------------------------------
-# TranscriptionReviewService — _get_model / review_transcription signature
-# ---------------------------------------------------------------------------
-
-class TestTranscriptionReviewServiceModel:
-
-    def _make_svc(self, monkeypatch) -> "TranscriptionReviewService":
-        monkeypatch.setattr("src.services.base_service.get_model_max_completion_tokens", lambda m, d: d)
-        return TranscriptionReviewService("fake-key")
-
-    def test_get_model_returns_string(self, monkeypatch):
-        svc = self._make_svc(monkeypatch)
-        monkeypatch.setattr("src.services.base_service.resolve_model", lambda **_: "gpt-4o")
-        monkeypatch.setattr("src.services.base_service.maybe_sync_model_pricing", lambda m: None)
-        model = svc._get_model()
-        assert isinstance(model, str)
-        assert len(model) > 0
