@@ -463,6 +463,25 @@ class TestWhenInstallingFails:
         upgrade.put_the_files_back(before)
         assert (copy / "my-notes.txt").exists()
 
+    def test_it_will_not_go_anywhere_but_back(self, sandbox, monkeypatch):
+        """The version comes from the page, so it is checked: a branch, an
+        option, or a version this copy was never at is refused untouched."""
+        published, copy = sandbox
+        _git(published, "switch", "-q", "-c", "elsewhere")
+        _publish(published, "feat: somebody else's work")
+        elsewhere = _git(published, "rev-parse", "HEAD")
+        _git(published, "switch", "-q", "main")
+        _publish(published, "feat: a new thing")
+        monkeypatch.setattr(upgrade, "dependencies_are_current", lambda: True)
+        upgrade.apply_update(lambda step, label: None)
+        _git(copy, "fetch", "-q", "origin", "elsewhere")
+        now = _git(copy, "rev-parse", "HEAD")
+
+        for not_back in (elsewhere, "origin/elsewhere", "--hard", "HEAD~1"):
+            with pytest.raises(upgrade.UpgradeError, match="nothing was changed"):
+                upgrade.put_the_files_back(not_back)
+            assert _git(copy, "rev-parse", "HEAD") == now
+
 
 @needs_git
 class TestOneAnswerAboutWhatIsInstalled:

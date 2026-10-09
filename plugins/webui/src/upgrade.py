@@ -35,6 +35,7 @@ from __future__ import annotations
 import importlib.util
 import logging
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -84,6 +85,10 @@ _HOW_MANY_LINES_OF_PIP = 25
 # same step then does the tidying up instead. A total that changed halfway
 # would show as a bar jumping backwards.
 TOTAL_STEPS = 4
+
+# What a version's identifier looks like: git's own, written in full or
+# shortened. Anything else — a branch name, an option — is not one.
+_A_VERSION = re.compile(r"[0-9a-f]{7,40}")
 
 # Held for the whole of an update. The settings page can be open in an ordinary
 # window and inside the chat window's settings panel at the same time, and two
@@ -609,11 +614,15 @@ def apply_update(on_progress: Callable[[int, str], None]) -> Applied:
         What was done, including whether new software had to be installed.
 
     Raises:
-        UpgradeError: If anything went wrong. The files are always back as
-                      they were before the call, and the record of what is
-                      installed has deliberately not been written — which is
-                      what makes the next ``python3 start.py`` notice and
-                      finish the job.
+        StoppedPartway: If the new files are in place but the software they
+                        need could not be installed. The files are left
+                        where they are, for the person to try again or put
+                        back — see ``StoppedPartway``.
+        UpgradeError: If anything else went wrong, in which case nothing was
+                      changed. Either way the record of what is installed
+                      has deliberately not been written — which is what
+                      makes the next ``python3 start.py`` notice and finish
+                      the job.
     """
     if not _only_one_at_a_time.acquire(blocking=False):
         raise UpgradeError(
@@ -734,6 +743,11 @@ def put_the_files_back(sha: str) -> str:
 
     Used by the "Put it back" button after an update stopped partway.
 
+    Only goes back, never sideways. The version comes from the page rather
+    than being remembered here (see ``UndoUpdateBody`` in ``app.py``), so it
+    is checked to be one this copy has actually been at: an earlier version
+    on its own line, not a branch or anything else git would also take.
+
     Args:
         sha: The version to go back to, as the failed update reported it.
 
@@ -741,16 +755,35 @@ def put_the_files_back(sha: str) -> str:
         The version that is now in place.
 
     Raises:
-        UpgradeError: If it could not be done.
+        UpgradeError: If it could not be done, or *sha* isn't a version this
+                      copy came from.
     """
     if not _only_one_at_a_time.acquire(blocking=False):
         raise UpgradeError("An update is running. Wait for it to finish.")
     try:
+        if not _is_a_version_this_copy_came_from(sha):
+            raise UpgradeError(
+                f"{sha!r} isn't a version this copy of the sandbox has been at, "
+                "so nothing was changed. Putting the files back only returns "
+                "to the version from before an update."
+            )
         _put_the_files_back(sha)
         now = package_version()
         return now.sha if now else sha
     finally:
         _only_one_at_a_time.release()
+
+
+def _is_a_version_this_copy_came_from(sha: str) -> bool:
+    """Return whether *sha* names this copy's current version or an earlier one."""
+    if not _A_VERSION.fullmatch(sha):
+        return False
+    try:
+        done = _run("merge-base", "--is-ancestor", sha, "HEAD",
+                    timeout=_LOOKING_TIMEOUT_SECONDS)
+    except (git_tool.GitUnusable, OSError) as e:
+        raise UpgradeError(f"Could not check which version that is: {e}") from e
+    return done.returncode == 0
 
 
 # ── The software an update may need ─────────────────────────────────────────
