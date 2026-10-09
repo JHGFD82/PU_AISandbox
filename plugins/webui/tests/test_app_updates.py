@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -295,7 +296,8 @@ class TestUpdatingTheSandboxOverTheWeb:
             lambda delay, fn: type("T", (), {"start": lambda s: scheduled.append(fn)})())
 
         unlocked_client.post("/api/updates/apply")
-        assert scheduled, "nothing was scheduled to restart the sandbox"
+        # Scheduled by the update's own thread, once the stream has ended.
+        assert _eventually(lambda: scheduled), "nothing was scheduled to restart the sandbox"
 
     def test_nothing_restarts_when_the_update_stopped_partway(
             self, unlocked_client, upgrade, monkeypatch):
@@ -356,12 +358,138 @@ class TestUpdatingTheSandboxOverTheWeb:
     def test_the_last_event_goes_before_the_restart(self, unlocked_client):
         """os.execv replaces this process. Restarting before the stream has
         ended would mean the browser never hears that it worked, and never
-        starts waiting for the sandbox to come back."""
+        starts waiting for the sandbox to come back.
+
+        Read from the source because the test client collects a whole stream
+        before handing any of it over, so the order can't be watched."""
         app_module = sys.modules["_pu_webui_app"]
         source = Path(app_module.__file__).read_text()
         handler = source[source.index("def api_apply_update"):]
         handler = handler[:handler.index("@app.post(\"/api/updates/undo\")")]
-        assert handler.index('"restarting": True') < handler.index("threading.Timer")
+        stream = handler[handler.index("def event_stream"):]
+        assert stream.index('"restarting": True') < stream.index("browser_has_been_told.set()")
+        assert (handler.index("browser_has_been_told.wait(")
+                < handler.index("threading.Timer(_RESTART_AFTER_AN_UPDATE_SECONDS"))
+
+    def test_an_update_nobody_is_watching_still_restarts(
+            self, unlocked_client, upgrade, monkeypatch):
+        """A browser closed partway must not leave new code on disk and the
+        sandbox turning every job away until somebody restarts it."""
+        from fastapi.responses import JSONResponse
+
+        app_module = sys.modules["_pu_webui_app"]
+        monkeypatch.setattr(
+            upgrade, "apply_update",
+            lambda on_progress: upgrade.Applied("old1234", "new5678", False))
+        monkeypatch.setattr(app_module, "_WAIT_FOR_THE_BROWSER_SECONDS", 0.05)
+        # A stream nobody reads.
+        monkeypatch.setattr(app_module, "StreamingResponse",
+                            lambda *a, **k: JSONResponse({}))
+        scheduled = []
+        monkeypatch.setattr(
+            app_module_threading(), "Timer",
+            lambda delay, fn: type("T", (), {"start": lambda s: scheduled.append(fn)})())
+
+        unlocked_client.post("/api/updates/apply")
+        assert _eventually(lambda: scheduled), "the update was never restarted into"
+
+    def test_no_job_can_start_while_an_update_runs(self, unlocked_client, upgrade,
+                                                   monkeypatch):
+        """An update can take a quarter of an hour, and a job started during
+        it would be destroyed by the restart at the end."""
+        app_module = sys.modules["_pu_webui_app"]
+        jobs = sys.modules["_pu_webui_jobs"]
+        refused = []
+
+        def update(on_progress):
+            try:
+                app_module._job_store.add(jobs.Job(
+                    id="job_1", professor="heller", conversation_id="c_1",
+                    action_id="translate"))
+            except RuntimeError as e:
+                refused.append(str(e))
+            return upgrade.Applied("old1234", "new5678", False)
+
+        monkeypatch.setattr(upgrade, "apply_update", update)
+        monkeypatch.setattr(app_module_threading(), "Timer",
+                            lambda delay, fn: type("T", (), {"start": lambda s: None})())
+
+        unlocked_client.post("/api/updates/apply")
+        assert refused and "restart" in refused[0]
+
+    def test_a_failed_update_takes_jobs_again(self, unlocked_client, upgrade,
+                                              monkeypatch):
+        app_module = sys.modules["_pu_webui_app"]
+        jobs = sys.modules["_pu_webui_jobs"]
+
+        def fail(on_progress):
+            raise upgrade.UpgradeError("Could not reach the published version")
+        monkeypatch.setattr(upgrade, "apply_update", fail)
+
+        unlocked_client.post("/api/updates/apply")
+        app_module._job_store.add(jobs.Job(id="job_1", professor="heller",
+                                           conversation_id="c_1", action_id="translate"))
+
+
+def _eventually(predicate, timeout=2.0):
+    """Return whether *predicate* comes true within *timeout* seconds."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return True
+        time.sleep(0.01)
+    return bool(predicate())
+
+
+class TestInstallingAPluginRestartsOnlyWhenItIsSafe:
+    """An install ends in a restart too, which destroys a running job."""
+
+    @pytest.fixture
+    def install(self, monkeypatch):
+        app_module = sys.modules["_pu_webui_app"]
+        module = sys.modules["_pu_webui_plugin_install"]
+        monkeypatch.setattr(app_module.upgrade, "an_update_is_running", lambda: False)
+        monkeypatch.setattr(app_module_threading(), "Timer",
+                            lambda delay, fn: type("T", (), {"start": lambda s: None})())
+        return module
+
+    def _ask(self, client):
+        return client.post("/api/plugins/install", json={
+            "repository": "https://github.com/x/y.git", "folder": "y"})
+
+    def test_it_will_not_start_while_something_is_being_worked_on(
+            self, unlocked_client, install, monkeypatch):
+        app_module = sys.modules["_pu_webui_app"]
+        monkeypatch.setattr(app_module._job_store, "running", lambda: 1)
+        monkeypatch.setattr(install, "install_from_git",
+                            lambda *a: pytest.fail("it installed anyway"))
+        assert self._ask(unlocked_client).status_code == 409
+
+    def test_it_will_not_start_during_an_update(self, unlocked_client, install,
+                                                monkeypatch):
+        app_module = sys.modules["_pu_webui_app"]
+        monkeypatch.setattr(app_module.upgrade, "an_update_is_running", lambda: True)
+        monkeypatch.setattr(install, "install_from_git",
+                            lambda *a: pytest.fail("it installed anyway"))
+        assert self._ask(unlocked_client).status_code == 409
+
+    def test_no_job_can_start_once_it_has_installed(self, unlocked_client, install,
+                                                    monkeypatch):
+        app_module = sys.modules["_pu_webui_app"]
+        monkeypatch.setattr(install, "install_from_git", lambda repository, folder, d:
+                            install.Installed(name=folder, path=d / folder, commands=[]))
+        assert self._ask(unlocked_client).status_code == 200
+        assert app_module._job_store.close("anything") is False
+
+    def test_a_refused_install_takes_jobs_again(self, unlocked_client, install,
+                                                monkeypatch):
+        app_module = sys.modules["_pu_webui_app"]
+
+        def refuse(*a):
+            raise install.InstallError("Could not fetch it")
+        monkeypatch.setattr(install, "install_from_git", refuse)
+        assert self._ask(unlocked_client).status_code == 400
+        assert app_module._job_store.close("anything") is True
 
 
 class TestWhereAnInstalledPluginLands:
