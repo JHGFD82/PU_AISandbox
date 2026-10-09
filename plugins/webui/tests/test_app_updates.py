@@ -46,7 +46,7 @@ class TestInstallingAPluginOverTheWeb:
         monkeypatch.setattr(sys.modules["_pu_webui_plugin_install"], "install_from_git",
                             lambda *a, **k: fetched.append(a))
 
-        elsewhere = TestClient(app_module.create_app(), client=("10.0.0.5", 50000))
+        elsewhere = TestClient(app_module.create_app(host="0.0.0.0"), client=("10.0.0.5", 50000))
         elsewhere.post("/unlock", data={"passphrase": ""})
         resp = elsewhere.post("/api/plugins/install",
                               json={"repository": "https://github.com/x/y.git",
@@ -65,7 +65,7 @@ class TestInstallingAPluginOverTheWeb:
         monkeypatch.setattr(conversation, "CONVERSATIONS_DIR", tmp_path / "conversations")
         monkeypatch.setattr(jobs, "_CONVERSATIONS_DIR", tmp_path / "conversations")
 
-        elsewhere = TestClient(app_module.create_app(), client=("10.0.0.5", 50000))
+        elsewhere = TestClient(app_module.create_app(host="0.0.0.0"), client=("10.0.0.5", 50000))
         elsewhere.post("/unlock", data={"passphrase": ""})
         resp = elsewhere.post("/api/plugins/install",
                               json={"repository": "https://github.com/x/y.git",
@@ -157,7 +157,7 @@ class TestUpdatingTheSandboxOverTheWeb:
         jobs = sys.modules["_pu_webui_jobs"]
         monkeypatch.setattr(conversation, "CONVERSATIONS_DIR", tmp_path / "conversations")
         monkeypatch.setattr(jobs, "_CONVERSATIONS_DIR", tmp_path / "conversations")
-        client = TestClient(app_module.create_app(), client=("10.0.0.5", 50000))
+        client = TestClient(app_module.create_app(host="0.0.0.0"), client=("10.0.0.5", 50000))
         client.post("/unlock", data={"passphrase": ""})
         return client
 

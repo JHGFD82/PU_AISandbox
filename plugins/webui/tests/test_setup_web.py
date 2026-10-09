@@ -45,7 +45,7 @@ def client_and_result():
     app = setup_web.create_setup_app(lambda folder: chosen.append(folder))
     # A loopback client address, because that is what a real browser on this
     # computer looks like — and the "Browse…" route refuses anything else.
-    return TestClient(app, client=("127.0.0.1", 50000)), chosen
+    return TestClient(app, base_url="http://127.0.0.1:8000", client=("127.0.0.1", 50000)), chosen
 
 
 def _make_setup(root: Path, *, people: int = 1):
@@ -316,7 +316,7 @@ class TestBrowseButton:
         opened = []
         monkeypatch.setattr(setup_web.file_picker, "choose", lambda **kw: opened.append(kw))
         app = setup_web.create_setup_app(lambda folder: None)
-        elsewhere = TestClient(app, client=("10.0.0.5", 50000))
+        elsewhere = TestClient(app, base_url="http://127.0.0.1:8000", client=("10.0.0.5", 50000))
         resp = elsewhere.post("/pick", json={"start": None})
         assert resp.status_code == 403
         assert opened == []

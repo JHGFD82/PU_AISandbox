@@ -39,6 +39,7 @@ from src import first_run, paths
 file_picker = sys.modules["_pu_webui_file_picker"]
 branding = sys.modules["_pu_webui_branding"]
 stopping = sys.modules["_pu_webui_stopping"]
+hostnames = sys.modules["_pu_webui_hostnames"]
 
 
 class PickFolderBody(BaseModel):
@@ -663,6 +664,9 @@ def create_setup_app(on_complete) -> FastAPI:
     # So a double-click on the sandbox's icon can replace a setup page that
     # was left open, rather than finding the port taken.
     stopping.add_stop_route(app)
+    # Always listened for on this computer only (see _serve_setup in
+    # plugin.py), so a web page elsewhere must not reach it under another name.
+    hostnames.answer_only_to_this_computer(app, "127.0.0.1")
 
     @app.get("/", response_class=HTMLResponse)
     async def show_form() -> str:

@@ -35,6 +35,7 @@ _register("_pu_webui_plugin_install", "src/plugin_install.py")
 _register("_pu_webui_upgrade", "src/upgrade.py")
 _register("_pu_webui_branding", "src/branding.py")
 _register("_pu_webui_stopping", "src/stopping.py")
+_register("_pu_webui_hostnames", "src/hostnames.py")
 _register("_pu_webui_setup_web", "src/setup_web.py")
 _register("_pu_webui_app", "src/app.py")
 
@@ -119,7 +120,7 @@ def client(tmp_path, monkeypatch):
     app = app_module.create_app()
     # A loopback client address, because that's what a browser on this same
     # computer looks like — and /api/pick-path refuses anything else.
-    return TestClient(app, client=("127.0.0.1", 50000))
+    return TestClient(app, base_url="http://127.0.0.1:8000", client=("127.0.0.1", 50000))
 
 
 @pytest.fixture

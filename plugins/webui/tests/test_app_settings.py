@@ -632,7 +632,7 @@ class TestBrowseButton:
         opened = []
         monkeypatch.setattr(app_module.file_picker, "choose", lambda **kw: opened.append(kw))
 
-        elsewhere = TestClient(app_module.create_app(), client=("10.0.0.5", 50000))
+        elsewhere = TestClient(app_module.create_app(host="0.0.0.0"), client=("10.0.0.5", 50000))
         elsewhere.post("/unlock", data={"passphrase": ""})
         resp = elsewhere.post("/api/pick-path", json={"kind": "folder"})
         assert resp.status_code == 403

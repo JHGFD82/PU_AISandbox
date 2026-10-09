@@ -135,7 +135,7 @@ python main.py webui set-passphrase           # set the unlock passphrase
 
 | Subcommand | What it does |
 |------------|--------------|
-| `serve` | Starts the server. `--host` defaults to `127.0.0.1` (this computer only), `--port` to `8000`. Leave the terminal open; Ctrl-C stops it. |
+| `serve` | Starts the server. `--host` defaults to `127.0.0.1` (this computer only), `--port` to `8000`. Leave the terminal open; Ctrl-C stops it. While it is on this computer only, open it as `http://127.0.0.1:8000` or `http://localhost:8000`: any other address is refused, so a website can't reach it by pointing its own name at your computer. |
 | `setup` | Serves a single setup page on this computer only, and stops as soon as you've answered it. `start.py` offers this as an alternative to answering at the terminal. |
 | `set-passphrase` | Sets the passphrase that unlocks the web interface, at a hidden prompt. Only the hash is stored. |
 
