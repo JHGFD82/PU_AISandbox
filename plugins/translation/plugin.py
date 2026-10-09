@@ -83,9 +83,11 @@ directory and adapt it as follows:
      (from ``src.runtime.ui_action``) at import time to add your own
      field(s) to the web UI composer's job modal — e.g. a checkbox like
      "Use Kanbun reading conventions" — shown as a subsection that appears
-     once a professor picks your language as the *destination* in the
-     composer, the same trigger point as ``get_peer_guidance`` above but for
-     form fields instead of prompt text. ``action_id`` must match the owning
+     once a professor picks your language in the composer. By default that
+     means as the *destination*, the same trigger point as
+     ``get_peer_guidance`` above but for form fields instead of prompt text;
+     pass ``field="source_language"`` for an option about the original text
+     instead. ``action_id`` must match the owning
      action's own ``UiAction.id`` (``"translate"`` here) — required
      alongside ``token`` so a *different* action (e.g. ``"transcribe"``)
      registering the same language token doesn't silently overwrite this
@@ -919,9 +921,12 @@ class TranslationPlugin:
         # A language-extension plugin's own composer field (e.g.
         # translation-ea's Kanbun checkbox) — registered separately, not
         # part of this plugin's own declared fields, so it's applied
-        # through the shared registry rather than read directly here. A
-        # no-op when nothing is registered for this destination token
-        # (the normal case without that extension installed).
+        # through the shared registry rather than read directly here. Asked
+        # about both languages, since an extension may follow either side
+        # (see register_extension_ui_hooks). A no-op when nothing is
+        # registered for them (the normal case without an extension).
+        apply_extension_ui_hooks("translate", fields.get("source_language"), sandbox, fields,
+                                 field="source_language")
         apply_extension_ui_hooks("translate", target_code_raw, sandbox, fields)
 
         # Pasted text has no filename to take this from, so it gets one that
@@ -1067,6 +1072,8 @@ class TranslationPlugin:
             sandbox.image_translation_service.tables = True
         if toc:
             sandbox.translation_service.toc = True
+        apply_extension_ui_hooks("translate", fields.get("source_language"), sandbox, fields,
+                                 field="source_language")
         apply_extension_ui_hooks("translate", fields.get("target_language"), sandbox, fields)
 
         requested_format = (fields.get("output_format") or "").strip().lower()

@@ -455,7 +455,7 @@ Call it once at import time, the same way you call `register_language()`. `apply
 
 `action_id` is required alongside `token` because two different actions can legitimately register the same language code for unrelated fields (`translate`'s Kanbun checkbox and `transcribe`'s vertical-text options both apply to `jp`). Keying by token alone would let whichever plugin imported last silently overwrite the other.
 
-Which side of the job `token` refers to depends on the action: the *destination* language for `translate`, the OCR language for `transcribe`.
+`field` says which of the form's language fields `token` has to be chosen in. Leave it out and it is `target_language`: the *destination* for `translate`, and the language in the image for `transcribe`. Pass `field="source_language"` for an option that describes the original text instead: it is then shown when the professor translates *from* your language, not into it.
 
 ---
 

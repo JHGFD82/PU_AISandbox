@@ -211,6 +211,31 @@ class TestPluginActionExtensionFields:
         )
         assert resp.json() == {"fields": []}
 
+    def test_a_field_registered_for_the_source_follows_the_source(self, unlocked_client):
+        from src.runtime.ui_action import UiField, register_extension_ui_hooks
+        register_extension_ui_hooks(
+            action_id="translate", token="jp",
+            fields=[UiField(name="kanbun", label="Kanbun", kind="checkbox", required=False)],
+            apply=lambda sandbox, fields: None, field="source_language",
+        )
+        url = "/api/plugin-actions/translate/extension-fields"
+        from_japanese = unlocked_client.get(
+            url, params={"source_language": "jp", "target_language": "en"}).json()
+        into_japanese = unlocked_client.get(
+            url, params={"source_language": "en", "target_language": "jp"}).json()
+        assert [f["name"] for f in from_japanese["fields"]] == ["kanbun"]
+        assert into_japanese == {"fields": []}
+
+    def test_a_field_offered_on_both_sides_comes_back_once(self, unlocked_client):
+        from src.runtime.ui_action import UiField, register_extension_ui_hooks
+        shared = [UiField(name="tables", label="Tables", kind="checkbox", required=False)]
+        for side in ("source_language", "target_language"):
+            register_extension_ui_hooks(action_id="translate", token="jp", fields=shared,
+                                        apply=lambda sandbox, fields: None, field=side)
+        resp = unlocked_client.get("/api/plugin-actions/translate/extension-fields",
+                                   params={"source_language": "jp", "target_language": "jp"})
+        assert [f["name"] for f in resp.json()["fields"]] == ["tables"]
+
     def test_requires_unlock(self, client):
         resp = client.get(
             "/api/plugin-actions/translate/extension-fields", params={"target_language": "jp"}

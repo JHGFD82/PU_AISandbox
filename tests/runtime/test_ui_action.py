@@ -192,6 +192,49 @@ class TestExtensionUiHooksRegistry:
         assert calls == [(fake_sandbox, {"kanbun": "true"})]
 
 
+class TestWhichLanguageFieldAnExtensionFollows:
+    """An option may describe the text being translated rather than the
+    translation, and then follows the source language, not the destination."""
+
+    @pytest.fixture(autouse=True)
+    def _isolated_registry(self, monkeypatch):
+        monkeypatch.setattr(ui_action_module, "_EXTENSION_UI_HOOKS", {})
+
+    def test_the_destination_is_followed_unless_another_field_is_named(self):
+        fields = [UiField(name="a", label="A", kind="text")]
+        register_extension_ui_hooks(action_id="translate", token="jp", fields=fields,
+                                    apply=lambda s, f: None)
+        assert get_extension_ui_fields("translate", "jp", field="target_language") == fields
+        assert get_extension_ui_fields("translate", "jp", field="source_language") == []
+
+    def test_a_source_registration_is_found_only_by_the_source(self):
+        fields = [UiField(name="kanbun", label="Kanbun", kind="checkbox", required=False)]
+        register_extension_ui_hooks(action_id="translate", token="jp", fields=fields,
+                                    apply=lambda s, f: None, field="source_language")
+        assert get_extension_ui_fields("translate", "jp", field="source_language") == fields
+        assert get_extension_ui_fields("translate", "jp") == []
+
+    def test_one_language_can_mean_different_things_on_each_side(self):
+        source = [UiField(name="kanbun", label="Kanbun", kind="checkbox", required=False)]
+        target = [UiField(name="register", label="Register", kind="text")]
+        register_extension_ui_hooks(action_id="translate", token="jp", fields=source,
+                                    apply=lambda s, f: None, field="source_language")
+        register_extension_ui_hooks(action_id="translate", token="jp", fields=target,
+                                    apply=lambda s, f: None)
+        assert get_extension_ui_fields("translate", "jp", field="source_language") == source
+        assert get_extension_ui_fields("translate", "jp") == target
+
+    def test_apply_runs_only_for_the_field_registered(self):
+        calls = []
+        register_extension_ui_hooks(action_id="translate", token="jp", fields=[],
+                                    apply=lambda s, f: calls.append("ran"),
+                                    field="source_language")
+        apply_extension_ui_hooks("translate", "jp", object(), {})
+        assert calls == []
+        apply_extension_ui_hooks("translate", "jp", object(), {}, field="source_language")
+        assert calls == ["ran"]
+
+
 class TestAimingANoteAtOneSide:
     """A note can be a standing instruction, or about the passage in hand.
 
