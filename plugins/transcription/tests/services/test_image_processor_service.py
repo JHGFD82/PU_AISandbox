@@ -105,8 +105,16 @@ class TestReadingOnePicture:
         assert model.calls[0]["max_tokens"] == svc_mod.OCR_MAX_TOKENS
 
         service.custom_temperature, service.custom_top_p = 0.9, 0.5
+        service.custom_max_tokens = 500
         service.process_image_ocr("page.png", "English")
         assert (model.calls[1]["temperature"], model.calls[1]["top_p"]) == (0.9, 0.5)
+        assert model.calls[1]["max_tokens"] == 500
+
+    def test_a_reply_length_given_holds_for_every_pass(self, monkeypatch, service):
+        model = _answering(monkeypatch, service, _reply("first"), _reply("second"))
+        service.custom_max_tokens = 500
+        service.process_image_ocr("page.png", "English", passes=2)
+        assert [call["max_tokens"] for call in model.calls] == [500, 500]
 
     def test_a_model_that_cannot_read_pictures_is_refused_before_anything_is_sent(
         self, monkeypatch, service
