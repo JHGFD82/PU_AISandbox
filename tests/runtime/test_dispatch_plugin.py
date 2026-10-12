@@ -240,6 +240,33 @@ class TestRun:
         dp.run(self._make_args(("en", "jp")), "test", None, None, None, None)
         assert asked == [("jp", ())]
 
+    def test_every_merged_plugin_may_refuse_before_anything_runs(self):
+        """A flag belongs to the plugin that added it, which may not be the
+        one about to run the command."""
+        dp, primary = _make_dispatcher(["en"])
+        secondary = _make_plugin(["jp"])
+        secondary.check_args.side_effect = CLIError("--kanbun needs jp or zh")
+        dp._absorb(secondary, "translation-ea")
+
+        with pytest.raises(CLIError, match="--kanbun"):
+            dp.run(self._make_args(("en", "fr")), "test", None, None, None, None)
+        primary.run.assert_not_called()
+
+    def test_every_merged_plugin_is_asked(self):
+        dp, primary = _make_dispatcher(["en"])
+        secondary = _make_plugin(["jp"])
+        dp._absorb(secondary, "translation-ea")
+        args = self._make_args(("en", "fr"))
+        dp.run(args, "test", None, None, None, None)
+        primary.check_args.assert_called_once_with(args)
+        secondary.check_args.assert_called_once_with(args)
+
+    def test_a_plugin_without_check_args_is_fine(self):
+        dp, primary = _make_dispatcher(["en"])
+        del primary.check_args
+        dp.run(self._make_args(("en", "fr")), "test", None, None, None, None)
+        primary.run.assert_called_once()
+
     def test_no_peer_guidance_when_dest_has_no_method(self):
         dp, primary = _make_dispatcher(["en"])
         secondary = _make_plugin(["jp"])
