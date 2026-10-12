@@ -784,6 +784,27 @@ def _require_unlocked(request: Request) -> None:
         raise HTTPException(401, "Not unlocked.")
 
 
+def _load_conversation(professor: str, conversation_id: str):
+    """Return one of this professor's conversations and the store it came from, or raise a 404 error.
+
+    Call it after the request has been checked — ``_require_unlocked()`` and
+    ``_validated_professor()`` — since it trusts *professor* as given.
+
+    Args:
+        professor: The professor's netID, already validated.
+        conversation_id: The conversation the browser asked about.
+
+    Returns:
+        A ``(store, conversation)`` pair: the store, so the caller can save
+        the conversation again or find its folder, and the conversation itself.
+    """
+    store = conversation.ConversationStore(professor)
+    conv = store.load(conversation_id)
+    if conv is None:
+        raise HTTPException(404, "Conversation not found.")
+    return store, conv
+
+
 # Addresses that mean the browser asking is on this same computer.
 _SAME_COMPUTER = frozenset({"127.0.0.1", "::1", "localhost"})
 
@@ -1687,9 +1708,7 @@ def create_app(host: str = "127.0.0.1") -> FastAPI:
         _require_unlocked(request)
         _validated_professor(professor)
         _require_same_computer(request)
-        store = conversation.ConversationStore(professor)
-        if store.load(conversation_id) is None:
-            raise HTTPException(404, "No such conversation.")
+        store, _conv = _load_conversation(professor, conversation_id)
         folder = store.folder(conversation_id)
         if not file_picker.reveal(folder):
             raise HTTPException(
@@ -1758,10 +1777,7 @@ def create_app(host: str = "127.0.0.1") -> FastAPI:
     async def api_get_conversation(request: Request, conversation_id: str, professor: str):
         _require_unlocked(request)
         professor = _validated_professor(professor)
-        store = conversation.ConversationStore(professor)
-        conv = store.load(conversation_id)
-        if conv is None:
-            raise HTTPException(404, "Conversation not found.")
+        _store, conv = _load_conversation(professor, conversation_id)
         return conv.to_dict()
 
     @app.delete("/api/conversations/{conversation_id}")
@@ -1777,10 +1793,7 @@ def create_app(host: str = "127.0.0.1") -> FastAPI:
     async def api_rename_conversation(request: Request, conversation_id: str, body: RenameConversationBody):
         _require_unlocked(request)
         professor = _validated_professor(body.professor)
-        store = conversation.ConversationStore(professor)
-        conv = store.load(conversation_id)
-        if conv is None:
-            raise HTTPException(404, "Conversation not found.")
+        store, conv = _load_conversation(professor, conversation_id)
         title = body.title.strip()
         if not title:
             raise HTTPException(400, "Title cannot be blank.")
@@ -1795,10 +1808,7 @@ def create_app(host: str = "127.0.0.1") -> FastAPI:
         """Download a conversation as a transcript (Word, PDF, Markdown or plain text)."""
         _require_unlocked(request)
         professor = _validated_professor(professor)
-        store = conversation.ConversationStore(professor)
-        conv = store.load(conversation_id)
-        if conv is None:
-            raise HTTPException(404, "Conversation not found.")
+        _store, conv = _load_conversation(professor, conversation_id)
         if format not in export.FORMATS:
             supported = ", ".join(sorted(export.FORMATS))
             raise HTTPException(400, f"Unsupported export format '{format}'. Supported: {supported}.")
@@ -2283,10 +2293,7 @@ def create_app(host: str = "127.0.0.1") -> FastAPI:
         """
         _require_unlocked(request)
         professor = _validated_professor(professor)
-        store = conversation.ConversationStore(professor)
-        conv = store.load(conversation_id)
-        if conv is None:
-            raise HTTPException(404, "Conversation not found.")
+        _store, conv = _load_conversation(professor, conversation_id)
         match = next(
             (m for m in conv.messages if m.kind == "job_result" and m.job_id == job_id), None
         )
@@ -2319,10 +2326,7 @@ def create_app(host: str = "127.0.0.1") -> FastAPI:
         """
         _require_unlocked(request)
         professor = _validated_professor(body.professor)
-        store = conversation.ConversationStore(professor)
-        conv = store.load(body.conversation_id)
-        if conv is None:
-            raise HTTPException(404, "Conversation not found.")
+        store, conv = _load_conversation(professor, body.conversation_id)
         if conv.active_job_id:
             raise HTTPException(
                 409,
