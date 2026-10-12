@@ -42,7 +42,7 @@ from __future__ import annotations
 import logging
 import tomllib
 from pathlib import Path
-from typing import Optional
+from typing import Iterator, Optional
 
 from .file_writing import write_in_one_step
 
@@ -86,6 +86,40 @@ def _already_mentions(text: str, section: str, key: str) -> bool:
         if in_section and line.split("=")[0].strip() == key:
             return True
     return False
+
+
+def explained_settings(lines: list[str]) -> Iterator[tuple[Optional[str], str, str, list[str]]]:
+    """Go through a settings file's lines, giving each setting with the explanation written above it.
+
+    The explanation is the run of comment lines directly above a setting; a
+    blank line or a section heading ends it, so a comment belongs to the
+    setting it sits on and not to one further down. Commented-out settings are
+    comments here like any other — only lines a TOML reader would act on count.
+
+    Args:
+        lines: The file's lines, as read.
+
+    Yields:
+        ``(section, key, line, notes)`` for each setting: the section it sits
+        in (``None`` above the first heading), its name, the line as its
+        author wrote it with surrounding spaces removed, and the comment lines
+        above it with their ``#`` taken off.
+    """
+    section: Optional[str] = None
+    notes: list[str] = []
+    for raw in lines:
+        line = raw.strip()
+        if line.startswith("[") and line.endswith("]"):
+            section, notes = line[1:-1].strip(), []
+            continue
+        if line.startswith("#"):
+            notes.append(line.lstrip("#").strip())
+            continue
+        if not line:
+            notes = []
+            continue
+        yield section, line.split("=")[0].strip(), line, notes
+        notes = []
 
 
 def live_line(path: Path, section: str, key: str) -> Optional[str]:
@@ -238,27 +272,10 @@ def _render(
         if out[-1] != "":
             out.append("")
         out.append(f"# [{section}]")
-        current: Optional[str] = None
-        pending: list[str] = []
-        for raw in own_lines:
-            line = raw.strip()
-            if line.startswith("[") and line.endswith("]"):
-                current = line[1:-1].strip()
-                pending = []
+        for current, name, line, notes in explained_settings(own_lines):
+            if current != section or name not in keys:
                 continue
-            if line.startswith("#"):
-                pending.append(line)
-                continue
-            if not line:
-                pending = []
-                continue
-            if current != section:
-                continue
-            name = line.split("=")[0].strip()
-            if name not in keys:
-                pending = []
-                continue
-            out.extend(f"# {note.lstrip('#').strip()}" for note in pending)
+            out.extend(f"# {note}" for note in notes)
             decided = None
             for description, path in (beneath or []):
                 found = live_line(path, section, name)
@@ -269,7 +286,6 @@ def _render(
             else:
                 found, description = decided
                 out.append(f"# {found}    # currently set by {description}")
-            pending = []
     while out and not out[-1].strip("# "):
         out.pop()
     return "\n".join(out) + "\n"

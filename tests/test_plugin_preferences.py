@@ -434,3 +434,31 @@ class TestSettingAPreferenceFromTheInterface:
         # One live heading, however many times it was offered.
         assert prefs.read_text().count("\n[webui]") == 1
 
+
+
+class TestExplainedSettings:
+    """Each setting arrives with the comment lines written directly above it."""
+
+    def _read(self, text):
+        from src.plugin_preferences import explained_settings
+        return list(explained_settings(text.splitlines()))
+
+    def test_a_setting_carries_the_comments_above_it(self):
+        found = self._read("[ocr]\n# How sure to be.\n#  Lower is steadier.\ntemperature = 0.0\n")
+        assert found == [("ocr", "temperature", "temperature = 0.0",
+                          ["How sure to be.", "Lower is steadier."])]
+
+    def test_a_blank_line_or_a_heading_ends_an_explanation(self):
+        found = self._read("# about nothing\n\n[a]\nx = 1\n# stray\n[b]\ny = 2\n")
+        assert [(s, k, notes) for s, k, _line, notes in found] == [("a", "x", []), ("b", "y", [])]
+
+    def test_an_explanation_belongs_to_one_setting_only(self):
+        found = self._read("[a]\n# for x\nx = 1\ny = 2\n")
+        assert [notes for *_rest, notes in found] == [["for x"], []]
+
+    def test_a_commented_out_setting_is_a_comment(self):
+        found = self._read("[a]\n# x = 1\ny = 2\n")
+        assert found == [("a", "y", "y = 2", ["x = 1"])]
+
+    def test_a_setting_above_any_heading_has_no_section(self):
+        assert self._read("x = 1\n")[0][0] is None

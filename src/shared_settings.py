@@ -28,7 +28,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 
-from .plugin_preferences import live_line, sections_of
+from .plugin_preferences import explained_settings, live_line, sections_of
 
 # Marks a setting the existing shared file says nothing about. The point of a
 # second draft is to make these findable without re-reading everything.
@@ -104,30 +104,13 @@ def _collect(sources: list, existing: Optional[Path]) -> dict:
         except OSError:
             continue
 
-        current: Optional[str] = None
-        pending: list[str] = []
-        for raw in own_lines:
-            line = raw.strip()
-            if line.startswith("[") and line.endswith("]"):
-                current, pending = line[1:-1].strip(), []
-                continue
-            if line.startswith("#"):
-                pending.append(line.lstrip("#").strip())
-                continue
-            if not line:
-                pending = []
-                continue
-            if current is None or current not in sections:
-                continue
-            key = line.split("=")[0].strip()
-            if key not in sections[current]:
-                pending = []
+        for current, key, line, notes in explained_settings(own_lines):
+            if current is None or key not in sections.get(current, ()):
                 continue
             section = collected.setdefault(current, {"keys": {}, "from": []})
             if label not in section["from"]:
                 section["from"].append(label)
-            section["keys"].setdefault(key, (line, list(pending)))
-            pending = []
+            section["keys"].setdefault(key, (line, notes))
     return collected
 
 
