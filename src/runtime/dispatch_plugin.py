@@ -240,8 +240,9 @@ class DispatchPlugin:
 
         Raises:
             CLIError: If ``args.language_code`` isn't in a recognized format,
-                      or if no merged plugin owns the requested source
-                      language.
+                      if no merged plugin owns the requested source
+                      language, or if any merged plugin's ``check_args()``
+                      refuses the command.
         """
         language_code = getattr(args, "language_code", None)
         if isinstance(language_code, tuple) and len(language_code) == 2:
@@ -263,6 +264,17 @@ class DispatchPlugin:
                 f"No plugin handles '{source_token}' as a source language. "
                 f"Available source languages: {available}."
             )
+
+        # Every plugin sharing this command may refuse it before any work
+        # starts — not only the one about to run it. A flag belongs to the
+        # plugin that added it, and that plugin may not be the one doing the
+        # translating: translation-ea's --kanbun on `translate en-jp` would
+        # otherwise reach the English plugin, which knows nothing of it, and
+        # be ignored without a word.
+        for plugin in (self._primary, *self._secondary):
+            check_args = getattr(plugin, "check_args", None)
+            if check_args is not None:
+                check_args(args)
 
         # Collect destination-side guidance from whichever plugin owns the
         # destination token, if it differs from the source owner.

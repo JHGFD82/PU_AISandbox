@@ -107,6 +107,7 @@ When two plugins share a command — `translate` is handled by both `translation
 
 - Maintains a `source_registry` mapping language code → owning plugin
 - Reads `args.language_code[0]` at runtime to find the owner and delegates `run()`
+- Asks every merged plugin's `check_args(args)`, if it has one, so a plugin can refuse its own flag even when another plugin will run the command
 - Collects destination-side "peer guidance" from the other plugin via `get_peer_guidance(token)` — with `args=` too, if the method takes it — and injects it into `args._peer_guidance`
 - Forwards `ui_action` and `run_ui_action` straight through to the primary plugin, which is why extension plugins contribute composer fields through the standalone registry in `src/runtime/ui_action.py` rather than through `DispatchPlugin`
 

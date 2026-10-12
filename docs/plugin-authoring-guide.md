@@ -89,6 +89,7 @@ plugin = MyPlugin()
 | `handles: list[str]` | absent | Extension plugins only — the languages you own. Match the base command's own form: short codes for `translate`, full names for `transcribe` (see [Writing an extension plugin](#writing-an-extension-plugin)). |
 | `register_command_flags(parser)` | absent | Extension plugins only — appends your flags to the base plugin's parser. |
 | `get_peer_guidance(token[, args])` | absent | Extension plugins only — contributes destination-side prompt guidance when your language is the *target*. Given the parsed command line too if it has an `args` parameter. |
+| `check_args(args)` | absent | Plugins sharing a command only — called on every one of them before the command runs, whichever plugin will run it. Raise `CLIError` to refuse a flag of yours that the languages chosen can't use. |
 | `ui_action` / `run_ui_action` / `preview_ui_action` | absent | Gives your command a form in the web interface — see [A button in the web interface](#a-button-in-the-web-interface). |
 
 None of the optional members are part of the `ModePlugin` protocol. Each is read with `getattr(plugin, "...", None)`, so declaring none of them leaves your plugin command-line only.
@@ -355,6 +356,15 @@ To add languages to an existing command like `translate`:
        if token == "jp" and getattr(args, "to_kanbun", False):
            return KANBUN_TARGET_NOTE
        return None
+   ```
+
+6. **Optionally implement `check_args(args)`** to refuse a flag of yours that can't apply to the languages chosen. A flag you add appears on the shared command for every language, and your `run()` is only called when you own the *source* language — so without this, `translate en-fr --my-flag` would reach the base plugin and be ignored without a word. It is called on every plugin sharing the command before any of them runs it. Raise `CLIError` with a sentence saying what to do instead:
+
+   ```python
+   def check_args(self, args) -> None:
+       source, target = args.language_code
+       if getattr(args, "my_flag", False) and source != "jp":
+           raise CLIError("--my-flag is for Japanese texts; the source must be jp.")
    ```
 
 ---

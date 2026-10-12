@@ -10,7 +10,7 @@ they matter when editing `src/runtime/` too, where this file isn't loaded.
 ## The contract
 
 - A plugin is a directory `plugins/<name>/plugin.py` exposing a module-level `plugin` object satisfying the `ModePlugin` protocol (`src/runtime/plugin.py`, structural typing — no base class needed): `commands: list[str]`, `register_subparsers(subparsers)`, `run(args, professor, model, temperature, top_p, max_tokens)`.
-- Optional members, all read with `getattr()` rather than declared on the protocol: `requires_professor`, `handles`, `register_command_flags`, `get_peer_guidance`, and the web-interface trio `ui_action` / `run_ui_action` / `preview_ui_action` (`src/runtime/ui_action.py`).
+- Optional members, all read with `getattr()` rather than declared on the protocol: `requires_professor`, `handles`, `register_command_flags`, `get_peer_guidance`, `check_args`, and the web-interface trio `ui_action` / `run_ui_action` / `preview_ui_action` (`src/runtime/ui_action.py`).
 - Plugins call `register_language(code, name)` (`src/config.py`) at import time to populate `LANGUAGE_MAP`, which argparse type-hooks validate against — this is why plugins must be loaded before the parser is built (the loader guarantees ordering).
 
 ## Which plugins are which
