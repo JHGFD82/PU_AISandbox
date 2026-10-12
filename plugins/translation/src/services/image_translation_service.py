@@ -65,6 +65,11 @@ class ImageTranslationService(BaseService):
         super().__init__(api_key, professor, token_tracker, token_tracker_file, model, temperature, top_p, max_tokens)
         self.image_processor = ImageProcessor()
         self.tables: bool = False
+        # Conventions a plugin adds for this translation (kanbun, say), each
+        # its own block of the instructions. Added through the translation
+        # plugin's add_variant_note(), which gives the same notes to the
+        # text translation service, so a scan is told what a typed page is.
+        self.variant_notes: list[str] = []
 
     def _get_max_tokens(self, model: str) -> int:
         """Decide the maximum response length to request from the model, in tokens.
@@ -107,6 +112,7 @@ class ImageTranslationService(BaseService):
             vertical=vertical,
             spread=spread,
             tables=self.tables,
+            variant_notes=self.variant_notes,
         )
         return spec.system_prompt()
 
@@ -128,6 +134,7 @@ class ImageTranslationService(BaseService):
             vertical=vertical,
             spread=spread,
             tables=self.tables,
+            variant_notes=self.variant_notes,
         )
         return spec.user_prompt()
 
@@ -153,6 +160,7 @@ class ImageTranslationService(BaseService):
             vertical=vertical,
             spread=spread,
             tables=self.tables,
+            variant_notes=self.variant_notes,
             system_note=self.system_note,
             user_note=self.user_note,
         )

@@ -42,6 +42,13 @@ class TestImageTranslationService:
         result = svc._build_user_prompt("Japanese", "English")
         assert "Japanese" in result
 
+    def test_variant_notes_reach_what_is_sent_and_the_preview(self, monkeypatch):
+        svc = _make_img_svc(monkeypatch)
+        assert svc.variant_notes == []
+        svc.variant_notes.append("The source text is kanbun.")
+        assert "The source text is kanbun." in svc._build_system_prompt("Japanese", "English")
+        assert "The source text is kanbun." in svc.build_prompts("Japanese", "English")[0]
+
     def test_build_prompts_returns_tuple(self, monkeypatch):
         svc = _make_img_svc(monkeypatch)
         system, user = svc.build_prompts("Japanese", "English")

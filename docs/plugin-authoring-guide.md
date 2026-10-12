@@ -326,10 +326,10 @@ To add languages to an existing command like `translate`:
 
        sandbox = SandboxProcessor(professor, model=model, temperature=temperature,
                                   top_p=top_p, max_tokens=max_tokens)
-       if getattr(args, "my_option", False):
-           sandbox.translation_service.variant_notes.append(MY_NOTE)
-
        _base = sys.modules["pu_plugin.translation.plugin"]
+       if getattr(args, "my_option", False):
+           _base.add_variant_note(sandbox, MY_NOTE)
+
        _base._execute_translate(
            sandbox, args,
            LANGUAGE_MAP[args.language_code[0]],
@@ -337,7 +337,7 @@ To add languages to an existing command like `translate`:
        )
    ```
 
-   Each entry in `variant_notes` is a plain string appended to the model's system prompt as its own additional-instructions block. Order is preserved.
+   `add_variant_note()` gives the note to both the text and the image translation services, so it applies whether the document is typed, a scanned PDF, or a photo of a page. Each note is a plain string appended to the model's system prompt as its own additional-instructions block. Order is preserved.
 
 5. **Optionally implement `get_peer_guidance(token)`** to contribute destination-side conventions when your language is the *target* rather than the source. Return a string or `None`:
 
@@ -434,12 +434,14 @@ This is `--dry-run` made interactive: the composer calls it after **every** chan
 An extension plugin never gets its own composer entry — only the base plugin's `ui_action` is exposed. It can still add fields to the base plugin's form, shown as a subsection that appears once the professor picks a language the extension owns:
 
 ```python
+import sys
+
 from src.runtime.ui_action import UiField, register_extension_ui_hooks
 
 
 def _apply_kanbun(sandbox, fields):
     if str(fields.get("kanbun", "")).strip().lower() in ("true", "1", "on", "yes"):
-        sandbox.translation_service.variant_notes.append(KANBUN_NOTE)
+        sys.modules["pu_plugin.translation.plugin"].add_variant_note(sandbox, KANBUN_NOTE)
 
 
 register_extension_ui_hooks(

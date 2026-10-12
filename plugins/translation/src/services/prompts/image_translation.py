@@ -1,6 +1,6 @@
 """Prompt spec for combined image OCR + translation operations."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 from . import translation_fragments as F
@@ -18,6 +18,7 @@ class ImageTranslationPromptSpec:
     vertical: bool = False
     spread: bool = False
     tables: bool = False
+    variant_notes: list[str] = field(default_factory=list)  # plugin-supplied conventions
     system_note: Optional[str] = None
     user_note: Optional[str] = None
 
@@ -37,6 +38,7 @@ class ImageTranslationPromptSpec:
             ),
             F.IMAGE_TRANSLATION_TRANSCRIPTION_RULES,
             F.IMAGE_TRANSLATION_TRANSLATION_RULES.format(target=self.target_language),
+            *[F.ADDITIONAL_INSTRUCTIONS.format(note=n) for n in self.variant_notes],
             F.TABLE_HINT_SYSTEM if self.tables else None,
             F.ADDITIONAL_INSTRUCTIONS.format(note=self.system_note) if self.system_note else None,
         ]

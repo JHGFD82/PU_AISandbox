@@ -27,6 +27,7 @@ def _make_sandbox():
     fake.translation_service.build_prompts.return_value = ("text system", "text user")
     fake.translation_service._get_model.return_value = "gpt-4o"
     fake.translation_service.variant_notes = []
+    fake.image_translation_service.variant_notes = []
     fake.image_translation_service.build_prompts.return_value = ("image system", "image user")
     fake.image_translation_service._get_model.return_value = "gpt-4o-vision"
     fake.image_processor.is_image_file.return_value = False
@@ -71,6 +72,13 @@ class TestRun:
         args = _args(language_code=("en", "en"), custom_text=True, _peer_guidance=["use British spelling"])
         plugin_mod.plugin.run(args, "heller", None, None, None, None)
         assert sandbox.translation_service.variant_notes == ["use British spelling"]
+        # A scanned PDF or a photo is translated by the image service.
+        assert sandbox.image_translation_service.variant_notes == ["use British spelling"]
+
+    def test_a_note_added_once_reaches_both_services(self, sandbox):
+        plugin_mod.add_variant_note(sandbox, "kanbun")
+        assert sandbox.translation_service.variant_notes == ["kanbun"]
+        assert sandbox.image_translation_service.variant_notes == ["kanbun"]
 
     def test_english_asks_for_no_guidance_of_its_own(self):
         assert plugin_mod.plugin.get_peer_guidance("en") is None
