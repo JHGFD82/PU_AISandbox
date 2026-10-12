@@ -62,6 +62,24 @@ class WhereTheirWorkIs:
         """Whether there is nothing of theirs there yet."""
         return not self.months and not self.conversations
 
+    def amount(self) -> str:
+        """Say how much of their work is there, in plain words.
+
+        Returns:
+            Something like ``'3 months of spending and 1 conversation'``, or
+            ``'nothing saved yet'``.
+        """
+        if self.is_empty:
+            return "nothing saved yet"
+        parts = []
+        if self.months:
+            parts.append("1 month of spending" if self.months == 1
+                         else f"{self.months} months of spending")
+        if self.conversations:
+            parts.append("1 conversation" if self.conversations == 1
+                         else f"{self.conversations} conversations")
+        return " and ".join(parts)
+
 
 @dataclass
 class ExtrasCandidate:

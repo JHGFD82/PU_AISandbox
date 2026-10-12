@@ -334,3 +334,23 @@ class TestItFollowsTheSettingsToWhereTheWorkIs:
         assert got.work == []
         assert got.months == 3
         assert got.is_usable is True
+
+
+class TestSayingHowMuchWorkIsThere:
+
+    @staticmethod
+    def _work(months, conversations):
+        return first_run.WhereTheirWorkIs(
+            netid="jh43", name="J. Heller", path=Path("/tmp"), elsewhere=False,
+            months=months, conversations=conversations,
+        )
+
+    @pytest.mark.parametrize("months, conversations, said", [
+        (0, 0, "nothing saved yet"),
+        (1, 0, "1 month of spending"),
+        (3, 0, "3 months of spending"),
+        (0, 1, "1 conversation"),
+        (2, 5, "2 months of spending and 5 conversations"),
+    ])
+    def test_in_plain_words(self, months, conversations, said):
+        assert self._work(months, conversations).amount() == said
