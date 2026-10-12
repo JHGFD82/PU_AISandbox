@@ -56,6 +56,16 @@ class TestImageTranslationPromptSpec:
         result = spec.system_prompt()
         assert "Extra instruction" in result
 
+    def test_variant_notes_included_in_order(self):
+        """A plugin's conventions (kanbun, say) reach a scan as they reach typed text."""
+        spec = ImageTranslationPromptSpec(
+            source_language="Japanese", target_language="English",
+            variant_notes=["First convention.", "Second convention."],
+        )
+        result = spec.system_prompt()
+        assert result.index("First convention.") < result.index("Second convention.")
+        assert "First convention." not in spec.user_prompt()
+
     def test_user_note_included(self):
         spec = ImageTranslationPromptSpec(
             source_language="Japanese", target_language="English",

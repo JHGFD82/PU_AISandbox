@@ -56,14 +56,17 @@ directory and adapt it as follows:
      this base plugin (or by ``DispatchPlugin``, the internal component
      that merges multiple plugins' flags into one shared parser).
 
-  5. Inside your plugin's ``run()`` method, append any language-specific
-     guidance to the translation service's ``variant_notes`` list *before*
-     calling the shared execution function::
+  5. Inside your plugin's ``run()`` method, add any language-specific
+     guidance with this plugin's ``add_variant_note()`` *before* calling the
+     shared execution function::
 
          if getattr(args, 'my_flag', False):
-             sandbox.translation_service.variant_notes.append(MY_NOTE)
+             _base = sys.modules["pu_plugin.translation.plugin"]
+             _base.add_variant_note(sandbox, MY_NOTE)
 
-     Each note is a plain string appended to the AI model's system prompt
+     It reaches both the text and the image translation services, so the
+     note applies to a scanned PDF or a photo of a page as well as typed
+     text. Each note is a plain string appended to the AI model's system prompt
      as its own additional-instructions block. You can append more than one
      note (for example, to handle a document that mixes writing
      conventions); their order in the list is preserved in the prompt.
@@ -100,7 +103,8 @@ directory and adapt it as follows:
 
          def _apply_kanbun(sandbox, fields):
              if str(fields.get("kanbun", "")).strip().lower() in ("true", "1", "on", "yes"):
-                 sandbox.translation_service.variant_notes.append(KANBUN_NOTE)
+                 _base = sys.modules["pu_plugin.translation.plugin"]
+                 _base.add_variant_note(sandbox, KANBUN_NOTE)
 
          register_extension_ui_hooks(
              action_id="translate",
@@ -130,7 +134,7 @@ from __future__ import annotations
 import argparse
 import functools
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 if TYPE_CHECKING:
     from src.runtime.sandbox_processor import SandboxProcessor
@@ -219,6 +223,25 @@ register_language('en', 'English')
 
 
 # ── Shared execution helper ────────────────────────────────────────────────────
+
+def add_variant_note(sandbox: Any, note: str) -> None:
+    """Add one convention for the model to follow, whatever form the document takes.
+
+    A typed page and a scan are translated by different services — text by
+    ``translation_service``, pictures of pages by
+    ``image_translation_service`` — and a convention such as kanbun has to
+    reach whichever one does the work. This gives the note to both, so a
+    plugin never has to know which it will be.
+
+    Args:
+        sandbox: The ``SandboxProcessor`` for this translation.
+        note: The convention, in plain words, added to the model's
+              instructions as its own block. Notes keep the order they were
+              added in.
+    """
+    sandbox.translation_service.variant_notes.append(note)
+    sandbox.image_translation_service.variant_notes.append(note)
+
 
 def _execute_translate(
     sandbox: "SandboxProcessor",
@@ -745,7 +768,7 @@ class TranslationPlugin:
         # (args._peer_guidance is set by DispatchPlugin.run() when the target
         # language is owned by a different plugin.)
         for note in getattr(args, '_peer_guidance', []):
-            sandbox.translation_service.variant_notes.append(note)
+            add_variant_note(sandbox, note)
 
         _execute_translate(sandbox, args, source_language, target_language)
 
