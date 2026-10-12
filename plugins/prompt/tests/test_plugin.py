@@ -5,7 +5,6 @@ Covers:
 - PromptPlugin.run: dry-run path, normal path, empty-prompt error,
   send_prompt exception, output-file path, include_system_prompt flag
 - _collect_multiline: sentinel line, multi-line, EOF
-- _dry_run_display: output formatting, optional params
 - _resolve_output_path: with and without output_file
 """
 
@@ -21,10 +20,10 @@ import plugins.prompt.plugin as plugin_mod
 from plugins.prompt.plugin import (
     PromptPlugin,
     _collect_multiline,
-    _dry_run_display,
     _resolve_output_path,
 )
 from src.errors import CLIError
+from src.runtime.command_runner import _CommandMixin
 
 
 # ---------------------------------------------------------------------------
@@ -116,9 +115,14 @@ class TestRegisterSubparsers:
 class TestPluginRunDryRun:
 
     def _make_sandbox_mock(self, svc_mock):
-        """Return a SandboxProcessor mock whose .prompt_service returns svc_mock."""
+        """Return a SandboxProcessor mock whose .prompt_service returns svc_mock.
+
+        Its dry-run printer is the real one, so what a dry run prints is
+        still checked here.
+        """
         sandbox_mock = MagicMock()
         sandbox_mock.prompt_service = svc_mock
+        sandbox_mock._dry_run_display = _CommandMixin._dry_run_display
         return sandbox_mock
 
     def test_dry_run_prints_and_returns_early(self, monkeypatch, capsys):
@@ -272,35 +276,6 @@ class TestCollectMultiline:
         _collect_multiline("My Label")
         out = capsys.readouterr().out
         assert "My Label" in out
-
-
-# ---------------------------------------------------------------------------
-# _dry_run_display
-# ---------------------------------------------------------------------------
-
-class TestDryRunDisplay:
-
-    def test_shows_model_and_prompts(self, capsys):
-        _dry_run_display("gpt-4o", "sys content", "usr content")
-        out = capsys.readouterr().out
-        assert "gpt-4o" in out
-        assert "sys content" in out
-        assert "usr content" in out
-        assert "DRY RUN" in out
-
-    def test_optional_params_shown_when_provided(self, capsys):
-        _dry_run_display("gpt-4o", "s", "u", temperature=0.5, top_p=0.8, max_tokens=1000)
-        out = capsys.readouterr().out
-        assert "0.5" in out
-        assert "0.8" in out
-        assert "1000" in out
-
-    def test_optional_params_hidden_when_none(self, capsys):
-        _dry_run_display("gpt-4o", "s", "u")
-        out = capsys.readouterr().out
-        assert "Temperature" not in out
-        assert "Top-p" not in out
-        assert "Max tokens" not in out
 
 
 # ---------------------------------------------------------------------------

@@ -191,7 +191,7 @@ class PromptPlugin:
                 "[Interactive prompt — text would be entered at runtime]",
                 system_prompt,
             )
-            _dry_run_display(
+            sandbox._dry_run_display(
                 effective_model, sys_p, usr_p,
                 temperature=temperature, top_p=top_p, max_tokens=max_tokens,
             )
@@ -247,47 +247,6 @@ def _collect_multiline(label: str) -> str:
         except EOFError:
             break
     return "\n".join(lines)
-
-
-def _dry_run_display(
-    model: str,
-    system_prompt: str,
-    user_prompt: str,
-    temperature: Optional[float] = None,
-    top_p: Optional[float] = None,
-    max_tokens: Optional[int] = None,
-) -> None:
-    """Print what would be sent to the AI model, without actually sending it.
-
-    Used to implement ``--dry-run``, letting a user preview the exact
-    prompts and settings before spending any API budget.
-
-    Args:
-        model: The model that would be called, e.g. ``'gpt-4o'``.
-        system_prompt: The system prompt text that would be sent.
-        user_prompt: The user prompt text that would be sent.
-        temperature: The sampling temperature that would be used, if the
-                     user specified one.
-        top_p: The nucleus-sampling value that would be used, if specified.
-        max_tokens: The maximum response length that would be requested, if
-                    specified.
-    """
-    sep = "=" * 70
-    print(f"\n{sep}")
-    print("  DRY RUN — No API call will be made")
-    print(f"  Model: {model}")
-    if temperature is not None:
-        print(f"  Temperature: {temperature}")
-    if top_p is not None:
-        print(f"  Top-p: {top_p}")
-    if max_tokens is not None:
-        print(f"  Max tokens: {max_tokens}")
-    print(sep)
-    print("\n--- SYSTEM PROMPT " + "-" * 52)
-    print(system_prompt)
-    print("\n--- USER PROMPT " + "-" * 54)
-    print(user_prompt)
-    print(f"\n{sep}\n")
 
 
 def _resolve_output_path(args: argparse.Namespace) -> Optional[str]:
