@@ -1999,7 +1999,12 @@ def create_app() -> FastAPI:
         Each language field in the form is passed by its own name, e.g.
         ``?source_language=jp&target_language=en``, since an extension may
         follow either side (see ``register_extension_ui_hooks``'s ``field``).
-        Fields come back once each, in the order the languages were given.
+        The answer is one section per language field that has any, in the
+        order given — ``{"sections": [{"language_field": "source_language",
+        "fields": [...]}]}`` — so the form can show a translation's source
+        options and destination options apart. A field name already used in
+        an earlier section is left out of a later one: the form holds one
+        value per name.
 
         See ``ExtensionUiHooks``'s docstring (``src/runtime/ui_action.py``):
         a language-extension plugin (e.g. an East-Asian translation or transcription extension)
@@ -2019,12 +2024,16 @@ def create_app() -> FastAPI:
         """
         _require_unlocked(request)
         from src.runtime.ui_action import get_extension_ui_fields
-        fields: list = []
+        sections = []
+        seen: set[str] = set()
         for language_field, token in request.query_params.multi_items():
-            for field in get_extension_ui_fields(action_id, token, field=language_field):
-                if all(field.name != seen.name for seen in fields):
-                    fields.append(field)
-        return {"fields": [asdict(f) for f in fields]}
+            fields = [f for f in get_extension_ui_fields(action_id, token, field=language_field)
+                      if f.name not in seen]
+            seen.update(f.name for f in fields)
+            if fields:
+                sections.append({"language_field": language_field,
+                                 "fields": [asdict(f) for f in fields]})
+        return {"sections": sections}
 
     @app.post("/api/plugin-actions/{action_id}/preview")
     async def api_plugin_action_preview(request: Request, action_id: str):

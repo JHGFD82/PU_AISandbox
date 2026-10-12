@@ -2496,13 +2496,16 @@ function appendFieldGroup(container, fields, startGroup) {
 }
 
 // The subsection a language-extension plugin contributes once its
-// language is picked (e.g. translation-ea's Kanbun checkbox once Japanese
+// language is picked (e.g. translation-ea's Kanbun checkboxes once Japanese
 // is chosen) — see ExtensionUiHooks's docstring in
 // src/runtime/ui_action.py. Rendered as its own container placed right
 // after the plugin's own fields ("a subsection after the translation
 // plugin options"), refreshed on every change to any of the form's
-// language fields, since an extension may follow either one. Returns []
-// (renders nothing) for any installation without a matching extension
+// language fields, since an extension may follow either one. A form with
+// more than one language field — translate's source and destination — gets
+// a heading per side, "Source language options" and "Destination language
+// options", because the same option can mean different things on each.
+// Renders nothing for any installation without a matching extension
 // plugin, which is the normal case.
 // The fields of an action's form that choose a language.
 function languageFieldsOf(action) {
@@ -2518,22 +2521,36 @@ async function refreshJobExtensionFields() {
     const el = document.getElementById(jobFieldControlId(field.name));
     if (el && el.value) chosen.append(field.name, el.value);
   });
-  let fields = [];
+  let sections = [];
   if (chosen.toString()) {
     try {
       const data = await api(
         `/api/plugin-actions/${encodeURIComponent(action.id)}/extension-fields?${chosen}`
       );
       if (state.activeAction !== action) return; // stale — modal moved on
-      fields = data.fields || [];
+      sections = data.sections || [];
     } catch (e) {
-      fields = [];
+      sections = [];
     }
   }
   if (state.activeAction !== action) return;
 
   box.innerHTML = "";
-  appendFieldGroup(box, fields);
+  const languageFields = languageFieldsOf(action);
+  const fields = [];
+  sections.forEach(section => {
+    if (languageFields.length > 1) {
+      const side = languageFields.find(f => f.name === section.language_field);
+      const header = document.createElement("div");
+      header.className = "job-field-group-label";
+      header.textContent = `${side ? side.label : section.language_field} options`;
+      box.appendChild(header);
+      section.fields.forEach(field => box.appendChild(buildJobFieldControl(field)));
+    } else {
+      appendFieldGroup(box, section.fields);
+    }
+    fields.push(...section.fields);
+  });
 
   const model = document.getElementById("model-field").value || state.defaultModel;
   state.activeActionFields = action.fields.concat(fields, samplingFieldsFor(model, action));

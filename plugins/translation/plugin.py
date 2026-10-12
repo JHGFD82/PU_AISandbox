@@ -1130,7 +1130,7 @@ ui_action = UiAction(
     },
     fields=[
         UiField(name="source_language", label="Source language", kind="language", group="Document"),
-        UiField(name="target_language", label="Target language", kind="language", group="Document"),
+        UiField(name="target_language", label="Destination language", kind="language", group="Document"),
         UiField(
             name="file", label="Document (or select multiple images / a whole folder of scans)",
             kind="file", group="Document", allow_folder=True, allow_text=True,
