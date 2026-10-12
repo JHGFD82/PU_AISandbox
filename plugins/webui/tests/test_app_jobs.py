@@ -150,7 +150,7 @@ class TestPluginActionExtensionFields:
             "/api/plugin-actions/translate/extension-fields", params={"target_language": "jp"}
         )
         assert resp.status_code == 200
-        assert resp.json() == {"fields": []}
+        assert resp.json() == {"sections": []}
 
     def test_returns_registered_fields_for_matching_token(self, unlocked_client):
         from src.runtime.ui_action import UiField, register_extension_ui_hooks
@@ -164,13 +164,14 @@ class TestPluginActionExtensionFields:
             "/api/plugin-actions/translate/extension-fields", params={"target_language": "jp"}
         )
         assert resp.status_code == 200
-        assert resp.json() == {
+        assert resp.json() == {"sections": [{
+            "language_field": "target_language",
             "fields": [{
                 "name": "kanbun", "label": "Use Kanbun conventions", "kind": "checkbox",
                 "required": False, "choices": None, "group": None, "allow_folder": False,
                 "allow_text": False,
-            }]
-        }
+            }],
+        }]}
 
     def test_blank_target_language_returns_empty_list(self, unlocked_client):
         from src.runtime.ui_action import UiField, register_extension_ui_hooks
@@ -182,7 +183,7 @@ class TestPluginActionExtensionFields:
         resp = unlocked_client.get(
             "/api/plugin-actions/translate/extension-fields", params={"target_language": ""}
         )
-        assert resp.json() == {"fields": []}
+        assert resp.json() == {"sections": []}
 
     def test_unmatched_token_returns_empty_list(self, unlocked_client):
         from src.runtime.ui_action import UiField, register_extension_ui_hooks
@@ -194,7 +195,7 @@ class TestPluginActionExtensionFields:
         resp = unlocked_client.get(
             "/api/plugin-actions/translate/extension-fields", params={"target_language": "zh"}
         )
-        assert resp.json() == {"fields": []}
+        assert resp.json() == {"sections": []}
 
     def test_different_action_with_the_same_token_returns_empty_list(self, unlocked_client):
         # Regression coverage for the collision this key shape fixes:
@@ -209,7 +210,50 @@ class TestPluginActionExtensionFields:
         resp = unlocked_client.get(
             "/api/plugin-actions/transcribe/extension-fields", params={"target_language": "jp"}
         )
-        assert resp.json() == {"fields": []}
+        assert resp.json() == {"sections": []}
+
+    def test_a_field_registered_for_the_source_follows_the_source(self, unlocked_client):
+        from src.runtime.ui_action import UiField, register_extension_ui_hooks
+        register_extension_ui_hooks(
+            action_id="translate", token="jp",
+            fields=[UiField(name="kanbun", label="Kanbun", kind="checkbox", required=False)],
+            apply=lambda sandbox, fields: None, field="source_language",
+        )
+        url = "/api/plugin-actions/translate/extension-fields"
+        from_japanese = unlocked_client.get(
+            url, params={"source_language": "jp", "target_language": "en"}).json()
+        into_japanese = unlocked_client.get(
+            url, params={"source_language": "en", "target_language": "jp"}).json()
+        assert [(s["language_field"], [f["name"] for f in s["fields"]])
+                for s in from_japanese["sections"]] == [("source_language", ["kanbun"])]
+        assert into_japanese == {"sections": []}
+
+    def test_each_side_comes_back_as_its_own_section(self, unlocked_client):
+        from src.runtime.ui_action import UiField, register_extension_ui_hooks
+        register_extension_ui_hooks(
+            action_id="translate", token="jp", apply=lambda sandbox, fields: None,
+            fields=[UiField(name="from_it", label="From", kind="checkbox", required=False)],
+            field="source_language")
+        register_extension_ui_hooks(
+            action_id="translate", token="jp", apply=lambda sandbox, fields: None,
+            fields=[UiField(name="into_it", label="Into", kind="checkbox", required=False)])
+        resp = unlocked_client.get("/api/plugin-actions/translate/extension-fields",
+                                   params={"source_language": "jp", "target_language": "jp"})
+        assert [(s["language_field"], [f["name"] for f in s["fields"]])
+                for s in resp.json()["sections"]] == [
+            ("source_language", ["from_it"]), ("target_language", ["into_it"])]
+
+    def test_a_field_offered_on_both_sides_comes_back_once(self, unlocked_client):
+        """The form holds one value per name, so a second would overwrite the first."""
+        from src.runtime.ui_action import UiField, register_extension_ui_hooks
+        shared = [UiField(name="tables", label="Tables", kind="checkbox", required=False)]
+        for side in ("source_language", "target_language"):
+            register_extension_ui_hooks(action_id="translate", token="jp", fields=shared,
+                                        apply=lambda sandbox, fields: None, field=side)
+        resp = unlocked_client.get("/api/plugin-actions/translate/extension-fields",
+                                   params={"source_language": "jp", "target_language": "jp"})
+        assert [(s["language_field"], [f["name"] for f in s["fields"]])
+                for s in resp.json()["sections"]] == [("source_language", ["tables"])]
 
     def test_requires_unlock(self, client):
         resp = client.get(

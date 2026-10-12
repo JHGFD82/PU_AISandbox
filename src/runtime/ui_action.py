@@ -238,10 +238,11 @@ class UiJobResult:
 # never gets its own composer entry — only the base plugin's ui_action is
 # ever exposed (see DispatchPlugin's proxying). But an extension can still
 # contribute its own extra fields to the *base* plugin's job modal, shown as
-# a subsection that appears once the professor picks a destination language
-# the extension owns, exactly mirroring get_peer_guidance()'s existing
-# "destination-side guidance" hook — just for form fields instead of prompt
-# text.
+# a subsection that appears once the professor picks a language the
+# extension owns. Which of the form's language fields it watches is the
+# extension's choice: the destination by default, as get_peer_guidance()'s
+# "destination-side guidance" does for prompt text, or the source for an
+# option that describes the original text.
 #
 # This is a plain, decoupled global registry (not routed through
 # DispatchPlugin at all) for the same reason register_language() in
@@ -249,10 +250,10 @@ class UiJobResult:
 # directly off the primary plugin instance (DispatchPlugin.__getattr__
 # forwards it straight through, never calling anything on DispatchPlugin
 # itself — see its docstring), so it has no way to ask "which extension
-# plugin owns this destination token" through DispatchPlugin. A shared
+# plugin owns this language token" through DispatchPlugin. A shared
 # registry that any extension plugin populates at import time sidesteps
 # that entirely: the base plugin's run_ui_action/preview_ui_action just
-# look up the destination token here directly, the same way they already
+# look up each chosen language here directly, the same way they already
 # look up LANGUAGE_MAP directly rather than asking DispatchPlugin for names.
 
 
@@ -262,9 +263,8 @@ class ExtensionUiHooks:
 
     Args:
         fields: Extra ``UiField``s to render, in display order, once this
-                token is selected as the relevant language for this action
-                (the destination language for ``translate``, the OCR
-                language for ``transcribe``).
+                token is chosen in the language field it was registered
+                for (see ``register_extension_ui_hooks``).
         apply: Called from the base plugin's ``run_ui_action`` right before
                the actual job runs, as ``apply(sandbox, fields_dict)`` —
                *sandbox* is the already-constructed ``SandboxProcessor`` for
@@ -281,10 +281,13 @@ class ExtensionUiHooks:
     apply: Callable[[Any, dict], None]
 
 
-# (action_id, token) -> that pair's registered extension hooks, e.g.
-# ('translate', 'jp') for translation-ea's Kanbun checkbox and
-# ('transcribe', 'jp') for transcription-ea's own composer fields. Keyed by
-# the action alongside the language token — not by token alone — because
+# (action_id, field, token) -> its registered extension hooks, e.g.
+# ('translate', 'source_language', 'jp') for translation-ea's Kanbun
+# checkbox and ('transcribe', 'target_language', 'jp') for transcription-ea's
+# own composer fields. The field is which of the form's language fields the
+# token was chosen in, so one language can mean different things on either
+# side of a translation. Keyed by the action alongside the language token —
+# not by token alone — because
 # two different actions can legitimately register the *same* language token
 # for entirely unrelated fields (translate's Kanbun checkbox and
 # transcribe's vertical/spread/passes/kanbun-mode fields both apply to
@@ -293,11 +296,17 @@ class ExtensionUiHooks:
 # for that token, breaking one of the two actions with no error raised.
 # Populated only by register_extension_ui_hooks() below, read only by
 # get_extension_ui_fields()/apply_extension_ui_hooks() below.
-_EXTENSION_UI_HOOKS: dict[tuple[str, str], ExtensionUiHooks] = {}
+_EXTENSION_UI_HOOKS: dict[tuple[str, str, str], ExtensionUiHooks] = {}
+
+
+def _hooks_key(action_id: str, field: str, token: str) -> tuple[str, str, str]:
+    """Return the registry key for one action, language field and language."""
+    return (action_id.strip().lower(), field.strip(), token.strip().lower())
 
 
 def register_extension_ui_hooks(
     action_id: str, token: str, fields: list[UiField], apply: Callable[[Any, dict], None],
+    field: str = "target_language",
 ) -> None:
     """Register a language-extension plugin's composer fields for one action's language token.
 
@@ -315,15 +324,18 @@ def register_extension_ui_hooks(
                    see the ``_EXTENSION_UI_HOOKS`` comment above for why.
         token: The short language code this contribution applies to (e.g.
                ``'jp'``) — matching a key in ``LANGUAGE_MAP`` and one of
-               this extension's own ``handles`` entries. Which side of the
-               job this token means depends on the action: the
-               *destination* language for ``translate``, the OCR language
-               for ``transcribe``.
+               this extension's own ``handles`` entries.
         fields: The ``UiField``s to add to the composer when this token is
                 selected for this action.
         apply: See ``ExtensionUiHooks.apply``'s docstring.
+        field: Which of the action's language fields *token* has to be
+               chosen in, by its ``UiField.name``. ``'target_language'``
+               (the default) is the destination for ``translate`` and the
+               language in the image for ``transcribe``;
+               ``'source_language'`` is the language a ``translate`` job
+               starts from, for an option that describes the original text.
     """
-    _EXTENSION_UI_HOOKS[(action_id.strip().lower(), token.strip().lower())] = ExtensionUiHooks(
+    _EXTENSION_UI_HOOKS[_hooks_key(action_id, field, token)] = ExtensionUiHooks(
         fields=fields, apply=apply,
     )
 
@@ -398,7 +410,8 @@ def apply_notes(fields: dict, *services: Any) -> None:
             service.user_note = note
 
 
-def get_extension_ui_fields(action_id: str, token: Optional[str]) -> list[UiField]:
+def get_extension_ui_fields(action_id: str, token: Optional[str],
+                            field: str = "target_language") -> list[UiField]:
     """Return the extra composer fields registered for *token* under *action_id*.
 
     Args:
@@ -407,6 +420,8 @@ def get_extension_ui_fields(action_id: str, token: Optional[str]) -> list[UiFiel
                    docstring for why this is needed alongside *token*.
         token: The selected language short code, or ``None``/blank if none
                is selected yet.
+        field: Which language field *token* was chosen in — see
+               ``register_extension_ui_hooks``.
 
     Returns:
         The registered ``UiField`` list, or ``[]`` if *token* is blank or no
@@ -416,11 +431,12 @@ def get_extension_ui_fields(action_id: str, token: Optional[str]) -> list[UiFiel
     """
     if not token:
         return []
-    hooks = _EXTENSION_UI_HOOKS.get((action_id.strip().lower(), token.strip().lower()))
+    hooks = _EXTENSION_UI_HOOKS.get(_hooks_key(action_id, field, token))
     return hooks.fields if hooks else []
 
 
-def apply_extension_ui_hooks(action_id: str, token: Optional[str], sandbox: Any, fields: dict) -> None:
+def apply_extension_ui_hooks(action_id: str, token: Optional[str], sandbox: Any, fields: dict,
+                             field: str = "target_language") -> None:
     """Apply a registered extension's fields to *sandbox*, if this action/token pair has one registered.
 
     Does nothing (rather than raising) when *token* is blank or nothing is
@@ -436,9 +452,11 @@ def apply_extension_ui_hooks(action_id: str, token: Optional[str], sandbox: Any,
         sandbox: The ``SandboxProcessor`` already constructed for this job.
         fields: The full submitted fields dict, so the extension's own
                 ``apply`` callback can read its field's value by name.
+        field: Which language field *token* was chosen in — see
+               ``register_extension_ui_hooks``.
     """
     if not token:
         return
-    hooks = _EXTENSION_UI_HOOKS.get((action_id.strip().lower(), token.strip().lower()))
+    hooks = _EXTENSION_UI_HOOKS.get(_hooks_key(action_id, field, token))
     if hooks:
         hooks.apply(sandbox, fields)

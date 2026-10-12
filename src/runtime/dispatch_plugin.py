@@ -29,6 +29,7 @@ could support other kinds of merged commands in the future.
 from __future__ import annotations
 
 import argparse
+import inspect
 import logging
 from typing import Optional
 
@@ -271,9 +272,9 @@ class DispatchPlugin:
         # token up in the registry happened to return nothing anyway, but
         # saying so directly is what the next few lines already assume.
         dest_owner = self.source_registry.get(dest_token) if dest_token else None
-        if dest_owner is not None and dest_owner is not owner:
+        if dest_token and dest_owner is not None and dest_owner is not owner:
             if hasattr(dest_owner, "get_peer_guidance"):
-                guidance = dest_owner.get_peer_guidance(dest_token)  # type: ignore[attr-defined]
+                guidance = _ask_for_peer_guidance(dest_owner, dest_token, args)
                 if guidance:
                     peer_guidance.append(guidance)
         elif dest_owner is None and dest_token:
@@ -288,3 +289,32 @@ class DispatchPlugin:
         args._peer_guidance = peer_guidance  # type: ignore[attr-defined]
 
         owner.run(args, professor, model, temperature, top_p, max_tokens)
+
+
+def _ask_for_peer_guidance(plugin: object, token: str,
+                           args: argparse.Namespace) -> Optional[str]:
+    """Ask the plugin that owns a translation's destination for its guidance.
+
+    A plugin's ``get_peer_guidance()`` is given the command's own flags as
+    ``args`` if it has a parameter by that name, so a flag it added can
+    change what it says — ``--to-kanbun``, for instance, asks for the
+    translation to be written as kanbun. One without that parameter is asked
+    with the language alone, as it always has been.
+
+    Args:
+        plugin: The plugin that owns the destination language.
+        token: The destination language's short code, e.g. ``'jp'``.
+        args: Everything typed on the command line, as parsed.
+
+    Returns:
+        The guidance to add to the prompt, or ``None`` for none.
+    """
+    method = plugin.get_peer_guidance  # type: ignore[attr-defined]
+    try:
+        named = inspect.signature(method).parameters.get("args")
+    except (TypeError, ValueError):
+        named = None
+    # A parameter actually called args — not *args, which takes anything.
+    wants_the_flags = named is not None and named.kind in (
+        inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY)
+    return method(token, args=args) if wants_the_flags else method(token)

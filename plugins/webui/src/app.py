@@ -2061,18 +2061,27 @@ def create_app(host: str = "127.0.0.1") -> FastAPI:
         return {"languages": languages}
 
     @app.get("/api/plugin-actions/{action_id}/extension-fields")
-    async def api_plugin_action_extension_fields(request: Request, action_id: str, target_language: str = ""):
-        """List any extra composer fields a language-extension plugin contributes for one destination language.
+    async def api_plugin_action_extension_fields(request: Request, action_id: str):
+        """List any extra composer fields a language-extension plugin contributes for the languages chosen.
+
+        Each language field in the form is passed by its own name, e.g.
+        ``?source_language=jp&target_language=en``, since an extension may
+        follow either side (see ``register_extension_ui_hooks``'s ``field``).
+        The answer is one section per language field that has any, in the
+        order given — ``{"sections": [{"language_field": "source_language",
+        "fields": [...]}]}`` — so the form can show a translation's source
+        options and destination options apart. A field name already used in
+        an earlier section is left out of a later one: the form holds one
+        value per name.
 
         See ``ExtensionUiHooks``'s docstring (``src/runtime/ui_action.py``):
         a language-extension plugin (e.g. an East-Asian translation or transcription extension)
         never gets its own composer entry, but can still register extra
         fields that appear as a subsection once its language is picked —
         this is the endpoint the composer polls (on every relevant-language
-        change) to know what to render. ``action_id`` IS used here (unlike
-        earlier, before both ``translate`` and ``transcribe`` used this
-        mechanism) — the registry is keyed by ``(action_id, token)``, not
-        by token alone, because two different actions can register the
+        change) to know what to render. ``action_id`` matters: the registry
+        is keyed by action as well as language, because two different
+        actions can register the
         same language token for entirely unrelated fields (translate's
         Kanbun checkbox and transcribe's vertical/spread/passes fields both
         apply to ``'jp'``, for instance); passing the wrong action_id here
@@ -2083,8 +2092,16 @@ def create_app(host: str = "127.0.0.1") -> FastAPI:
         """
         _require_unlocked(request)
         from src.runtime.ui_action import get_extension_ui_fields
-        fields = get_extension_ui_fields(action_id, target_language)
-        return {"fields": [asdict(f) for f in fields]}
+        sections = []
+        seen: set[str] = set()
+        for language_field, token in request.query_params.multi_items():
+            fields = [f for f in get_extension_ui_fields(action_id, token, field=language_field)
+                      if f.name not in seen]
+            seen.update(f.name for f in fields)
+            if fields:
+                sections.append({"language_field": language_field,
+                                 "fields": [asdict(f) for f in fields]})
+        return {"sections": sections}
 
     @app.post("/api/plugin-actions/{action_id}/preview")
     async def api_plugin_action_preview(request: Request, action_id: str):

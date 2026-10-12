@@ -88,7 +88,7 @@ plugin = MyPlugin()
 | `model_roles: dict[str, ModelRole]` | **required** | Which models this plugin's work should use — see [Which models your plugin uses](#which-models-your-plugin-uses). A plugin without it is refused at load. |
 | `handles: list[str]` | absent | Extension plugins only — the languages you own. Match the base command's own form: short codes for `translate`, full names for `transcribe` (see [Writing an extension plugin](#writing-an-extension-plugin)). |
 | `register_command_flags(parser)` | absent | Extension plugins only — appends your flags to the base plugin's parser. |
-| `get_peer_guidance(token)` | absent | Extension plugins only — contributes destination-side prompt guidance when your language is the *target*. |
+| `get_peer_guidance(token[, args])` | absent | Extension plugins only — contributes destination-side prompt guidance when your language is the *target*. Given the parsed command line too if it has an `args` parameter. |
 | `ui_action` / `run_ui_action` / `preview_ui_action` | absent | Gives your command a form in the web interface — see [A button in the web interface](#a-button-in-the-web-interface). |
 
 None of the optional members are part of the `ModePlugin` protocol. Each is read with `getattr(plugin, "...", None)`, so declaring none of them leaves your plugin command-line only.
@@ -348,6 +348,15 @@ To add languages to an existing command like `translate`:
        return None
    ```
 
+   Give it a parameter named `args` as well, and it is handed everything typed on the command line, so a flag your plugin added can change the guidance even when another plugin is doing the translating — `translate en-jp --to-kanbun` is driven by the English plugin, and it is the Japanese plugin's `--to-kanbun` that asks for kanbun:
+
+   ```python
+   def get_peer_guidance(self, token: str, args=None) -> Optional[str]:
+       if token == "jp" and getattr(args, "to_kanbun", False):
+           return KANBUN_TARGET_NOTE
+       return None
+   ```
+
 ---
 
 ## A button in the web interface
@@ -455,7 +464,7 @@ Call it once at import time, the same way you call `register_language()`. `apply
 
 `action_id` is required alongside `token` because two different actions can legitimately register the same language code for unrelated fields (`translate`'s Kanbun checkbox and `transcribe`'s vertical-text options both apply to `jp`). Keying by token alone would let whichever plugin imported last silently overwrite the other.
 
-Which side of the job `token` refers to depends on the action: the *destination* language for `translate`, the OCR language for `transcribe`.
+`field` says which of the form's language fields `token` has to be chosen in. Leave it out and it is `target_language`: the *destination* for `translate`, and the language in the image for `transcribe`. Pass `field="source_language"` for an option that describes the original text instead: it is then shown when the professor translates *from* your language, not into it.
 
 ---
 

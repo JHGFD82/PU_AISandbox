@@ -753,6 +753,29 @@ class TestExtensionUiHooksIntegration:
         )
         assert calls == []
 
+    def test_run_ui_action_applies_a_hook_registered_for_the_source(self, monkeypatch, plugin_module, tmp_path):
+        """An option about the original text is registered against the source
+        language, and must be applied when that is chosen — and only then."""
+        self._patch_sandbox(monkeypatch, translate_side_effect=self._write_output)
+        calls = []
+        register_extension_ui_hooks(
+            action_id="translate", token="ja", fields=[],
+            apply=lambda sandbox, fields: calls.append(fields["kanbun"]),
+            field="source_language",
+        )
+        src_file = tmp_path / "upload.txt"
+        src_file.write_text("hello", encoding="utf-8")
+
+        for source, target in (("ja", "en"), ("en", "ja")):
+            plugin_module.plugin.run_ui_action(
+                fields={
+                    "source_language": source, "target_language": target,
+                    "file_path": str(src_file), "file_name": "upload.txt", "kanbun": source,
+                },
+                professor="fake", model=None, on_progress=None, output_dir=str(tmp_path / "out"),
+            )
+        assert calls == ["ja"], "applied for the wrong side, or not at all"
+
     def test_run_ui_action_tolerates_no_hook_registered(self, monkeypatch, plugin_module, tmp_path):
         # The normal case for any installation without a matching language
         # extension plugin — must not raise.
@@ -787,6 +810,25 @@ class TestExtensionUiHooksIntegration:
             professor="fake", model=None,
         )
         assert calls == [{"source_language": "en", "target_language": "ja", "kanbun": "true"}]
+
+    def test_preview_ui_action_applies_a_hook_registered_for_the_source(self, monkeypatch, plugin_module):
+        fake_sandbox = MagicMock()
+        fake_sandbox.translation_service.build_prompts.return_value = ("SYS", "USR")
+        fake_sandbox.translation_service._get_model.return_value = "resolved-model"
+        monkeypatch.setattr(
+            "src.runtime.sandbox_processor.SandboxProcessor",
+            MagicMock(return_value=fake_sandbox),
+        )
+        calls = []
+        register_extension_ui_hooks(
+            action_id="translate", token="ja", fields=[],
+            apply=lambda sandbox, fields: calls.append(fields), field="source_language",
+        )
+        plugin_module.plugin.preview_ui_action(
+            fields={"source_language": "ja", "target_language": "en", "kanbun": "true"},
+            professor="fake", model=None,
+        )
+        assert calls == [{"source_language": "ja", "target_language": "en", "kanbun": "true"}]
 
 
 class TestTheAbstractReachesBothWays:
