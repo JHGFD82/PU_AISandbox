@@ -35,6 +35,38 @@ class ChatService(BaseService):
     # ``src/runtime/model_role.py``. Read by ``BaseService._get_model()``.
     model_role = CHAT_ROLE
 
+    def _prepare_turn(
+        self, messages: list[dict[str, Any]], system_prompt: Optional[str],
+    ) -> dict[str, Any]:
+        """Return everything one chat turn sends, whether its reply is awaited or streamed.
+
+        Picks the model, the sampling settings (this installation's own
+        unless the conversation's options set others), and puts the system
+        prompt, if there is one, ahead of the conversation under whichever
+        role name that model expects.
+
+        Args:
+            messages: The conversation so far — see ``send_message()``.
+            system_prompt: The instruction to put ahead of it, or ``None``.
+
+        Returns:
+            The keyword arguments for ``_create_completion()`` or
+            ``_create_completion_stream()``: ``model``, ``messages``,
+            ``max_tokens``, ``temperature`` and ``top_p``.
+        """
+        model = self._get_model()
+        temperature, top_p, max_tokens = self._resolve_sampling_params(
+            model, PROMPT_TEMPERATURE, PROMPT_TOP_P, PROMPT_MAX_TOKENS,
+        )
+        api_messages: list[dict[str, Any]] = []
+        if system_prompt:
+            api_messages.append({"role": get_model_system_role(self._catalog_model_name(model)), "content": system_prompt})
+        api_messages.extend(messages)
+        return {
+            "model": model, "messages": api_messages, "max_tokens": max_tokens,
+            "temperature": temperature, "top_p": top_p,
+        }
+
     def send_message(
         self,
         messages: list[dict[str, Any]],
@@ -62,24 +94,11 @@ class ChatService(BaseService):
         Raises:
             RuntimeError: If every retry attempt failed to get a response.
         """
-        model = self._get_model()
-        temperature, top_p, max_tokens = self._resolve_sampling_params(
-            model, PROMPT_TEMPERATURE, PROMPT_TOP_P, PROMPT_MAX_TOKENS,
-        )
-
-        api_messages: list[dict[str, Any]] = []
-        if system_prompt:
-            api_messages.append({"role": get_model_system_role(self._catalog_model_name(model)), "content": system_prompt})
-        api_messages.extend(messages)
+        request = self._prepare_turn(messages, system_prompt)
+        model = request["model"]
 
         def _attempt(_attempt_num: int) -> Optional[tuple[Any, str]]:
-            response = self._create_completion(
-                model=model,
-                messages=api_messages,
-                max_tokens=max_tokens,
-                temperature=temperature,
-                top_p=top_p,
-            )
+            response = self._create_completion(**request)
             content = self._extract_response_content(response)
             return (response, content) if content is not None else None
 
@@ -149,15 +168,8 @@ class ChatService(BaseService):
                        exception as a hard stop and surface it, not retry the
                        call themselves.
         """
-        model = self._get_model()
-        temperature, top_p, max_tokens = self._resolve_sampling_params(
-            model, PROMPT_TEMPERATURE, PROMPT_TOP_P, PROMPT_MAX_TOKENS,
-        )
-
-        api_messages: list[dict[str, Any]] = []
-        if system_prompt:
-            api_messages.append({"role": get_model_system_role(self._catalog_model_name(model)), "content": system_prompt})
-        api_messages.extend(messages)
+        request = self._prepare_turn(messages, system_prompt)
+        model = request["model"]
 
         content_parts: list[str] = []
         response_model = model
@@ -174,13 +186,7 @@ class ChatService(BaseService):
         finish_reason: Optional[str] = None
 
         try:
-            stream = self._create_completion_stream(
-                model=model,
-                messages=api_messages,
-                max_tokens=max_tokens,
-                temperature=temperature,
-                top_p=top_p,
-            )
+            stream = self._create_completion_stream(**request)
             for chunk in stream:
                 if getattr(chunk, "model", None):
                     response_model = chunk.model
