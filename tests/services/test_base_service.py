@@ -459,6 +459,68 @@ class TestImageContentBlock:
         assert len(calls) >= 2
 
 
+class TestImageMessages:
+
+    def test_instructions_then_the_image_with_what_to_do(self, monkeypatch):
+        svc = _make_svc(monkeypatch)
+        messages = svc._image_messages("gpt-4o", "developer", "SYS", "USR", "data:image/png;base64,AAA=")
+        assert messages[0] == {"role": "developer", "content": "SYS"}
+        assert messages[1]["role"] == "user"
+        text, image = messages[1]["content"]
+        assert text == {"type": "text", "text": "USR"}
+        assert image == svc._build_image_content_block("gpt-4o", "data:image/png;base64,AAA=")
+
+
+class TestImageForRequest:
+
+    def test_a_blank_page_is_not_sent(self):
+        processor = MagicMock()
+        processor.is_blank_image.return_value = True
+        assert BaseService._image_for_request(processor, "/scans/p1.png") is None
+        processor.local_image_to_data_url.assert_not_called()
+
+    def test_a_page_with_something_on_it_is_converted(self):
+        processor = MagicMock()
+        processor.is_blank_image.return_value = False
+        processor.local_image_to_data_url.return_value = "data:image/png;base64,AAA="
+        assert BaseService._image_for_request(processor, "/scans/p1.png") == "data:image/png;base64,AAA="
+
+    def test_an_image_that_cannot_be_read_is_logged_and_raised(self, caplog):
+        processor = MagicMock()
+        processor.is_blank_image.return_value = False
+        processor.local_image_to_data_url.side_effect = OSError("truncated")
+        with caplog.at_level(logging.ERROR), pytest.raises(OSError):
+            BaseService._image_for_request(processor, "/scans/p1.png")
+        assert "p1.png" in caplog.text and "truncated" in caplog.text
+
+
+class TestTextOrRetry:
+
+    @staticmethod
+    def _reply(content):
+        response = MagicMock()
+        response.choices = [MagicMock()]
+        response.choices[0].message.content = content
+        return response
+
+    def test_text_comes_back(self):
+        assert BaseService._text_or_retry(self._reply("page text"), "OCR", 0) == "page text"
+
+    @pytest.mark.parametrize("content", [None, "", "   \n", 42])
+    def test_nothing_worth_keeping_asks_for_another_attempt(self, content):
+        assert BaseService._text_or_retry(self._reply(content), "OCR", 0) is None
+
+    def test_a_reply_with_no_choices_asks_for_another_attempt(self):
+        response = MagicMock()
+        response.choices = []
+        assert BaseService._text_or_retry(response, "OCR", 0) is None
+
+    def test_the_log_names_what_was_asked_and_which_attempt(self, caplog):
+        with caplog.at_level(logging.WARNING):
+            BaseService._text_or_retry(self._reply(""), "Refinement pass 2", 1)
+        assert "Refinement pass 2 returned empty content (attempt 2/" in caplog.text
+
+
 # ---------------------------------------------------------------------------
 # _resolve_sampling_params — debug logging branch (line 76)
 # ---------------------------------------------------------------------------
