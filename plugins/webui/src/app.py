@@ -437,6 +437,30 @@ def _sse(event: dict) -> str:
     return f"data: {json.dumps(event)}\n\n"
 
 
+def _sse_response(events) -> StreamingResponse:
+    """Answer with a stream of events, sent to the browser as each one is ready.
+
+    Args:
+        events: Something that hands over the events one at a time, each
+                already written by ``_sse()``. A plain generator runs in a
+                thread of its own, so it may wait on slow work without holding
+                up any other request.
+
+    Returns:
+        The answer to give the browser.
+    """
+    return StreamingResponse(
+        events,
+        media_type="text/event-stream",
+        # Telling anything between here and the browser to pass each event on
+        # at once rather than saving them up. X-Accel-Buffering only matters if
+        # this ever runs behind nginx or another buffering reverse proxy (it
+        # doesn't today, as a local single-user tool) — harmless to set
+        # regardless.
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
 def _as_the_catalog_knows_it(model: str) -> str:
     """Return a model's name as the catalog files it, given any way of writing it.
 
@@ -1407,10 +1431,7 @@ def create_app(host: str = "127.0.0.1") -> FastAPI:
             def already_stream():
                 yield _sse({"type": "done", "model": already, "already": True,
                             "capabilities": _capability_summary(already)})
-            return StreamingResponse(
-                already_stream(), media_type="text/event-stream",
-                headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-            )
+            return _sse_response(already_stream())
 
         def event_stream():
             # A plain generator, for the reason given at the chat stream below:
@@ -1456,11 +1477,7 @@ def create_app(host: str = "127.0.0.1") -> FastAPI:
             yield _sse({"type": "done", "model": model_name, "already": False,
                         "capabilities": _capability_summary(model_name)})
 
-        return StreamingResponse(
-            event_stream(),
-            media_type="text/event-stream",
-            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-        )
+        return _sse_response(event_stream())
 
     # ':path' because a model on an endpoint can have a slash in its own name
     # (my_cluster:meta-llama/Llama-3-70B), which a plain parameter will not match.
@@ -2024,11 +2041,7 @@ def create_app(host: str = "127.0.0.1") -> FastAPI:
             # the server asks for whatever comes next.
             browser_has_been_told.set()
 
-        return StreamingResponse(
-            event_stream(),
-            media_type="text/event-stream",
-            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-        )
+        return _sse_response(event_stream())
 
     @app.post("/api/updates/undo")
     def api_undo_update(request: Request, body: UndoUpdateBody):
@@ -2399,18 +2412,19 @@ def create_app(host: str = "127.0.0.1") -> FastAPI:
                     conv.api_messages(), system_prompt=conv.system_prompt
                 ):
                     if event["type"] == "delta":
-                        yield f"data: {json.dumps(event)}\n\n"
+                        yield _sse(event)
                     else:
                         final = event
             except Exception as e:
-                yield f"data: {json.dumps({'type': 'error', 'message': _chat_error_message(e)})}\n\n"
+                yield _sse({"type": "error", "message": _chat_error_message(e)})
                 return
 
             if final is None:
                 # stream_message() always yields exactly one "done" event
                 # once it stops iterating without raising — this only fires
                 # if that contract is ever broken.
-                yield f"data: {json.dumps({'type': 'error', 'message': 'Chat request failed: no reply received.'})}\n\n"
+                yield _sse({"type": "error",
+                            "message": "Chat request failed: no reply received."})
                 return
 
             conv.messages.append(conversation.Message(
@@ -2437,16 +2451,9 @@ def create_app(host: str = "127.0.0.1") -> FastAPI:
                 conv.title = generated_title or title_source.strip()[:60] or conv.title
             store.save(conv)
 
-            yield f"data: {json.dumps({'type': 'done', 'conversation': conv.to_dict()})}\n\n"
+            yield _sse({"type": "done", "conversation": conv.to_dict()})
 
-        return StreamingResponse(
-            event_stream(),
-            media_type="text/event-stream",
-            # X-Accel-Buffering only matters if this ever runs behind nginx
-            # or another buffering reverse proxy (it doesn't today, as a
-            # local single-user tool) — harmless to set regardless.
-            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-        )
+        return _sse_response(event_stream())
 
     # Startup sweep: a fresh process
     # always starts with an empty _job_store, so any conversation whose
