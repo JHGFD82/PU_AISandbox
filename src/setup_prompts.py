@@ -28,20 +28,6 @@ from .errors import CLIError
 _RULE = "─" * 64
 
 
-def _amount(months: int, conversations: int) -> str:
-    """Say how much of somebody's work is somewhere, in plain words."""
-    if not months and not conversations:
-        return "nothing saved yet"
-    parts = []
-    if months:
-        parts.append("1 month of spending" if months == 1
-                     else f"{months} months of spending")
-    if conversations:
-        parts.append("1 conversation" if conversations == 1
-                     else f"{conversations} conversations")
-    return " and ".join(parts)
-
-
 def _describe(candidate: first_run.ExtrasCandidate) -> list[str]:
     """Return the lines describing an installation that was found.
 
@@ -67,7 +53,7 @@ def _describe(candidate: first_run.ExtrasCandidate) -> list[str]:
         lines.append("  Data locations" if candidate.data_is_elsewhere
                      else "  Data location")
         for w in candidate.work:
-            lines.append(f"      {w.name}   ({_amount(w.months, w.conversations)})")
+            lines.append(f"      {w.name}   ({w.amount()})")
             lines.append(f"        {w.path}")
         if candidate.data_is_elsewhere:
             lines.append("")

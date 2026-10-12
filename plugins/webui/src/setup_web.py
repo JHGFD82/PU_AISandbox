@@ -153,19 +153,6 @@ def _describe(candidate: first_run.ExtrasCandidate) -> str:
     return "<ul>" + "".join(f"<li>{i}</li>" for i in items) + "</ul>"
 
 
-def _amount(months: int, conversations: int) -> str:
-    """Say how much of somebody's work is somewhere, in plain words."""
-    if not months and not conversations:
-        return "nothing saved yet"
-    parts = []
-    if months:
-        parts.append("1 month of spending" if months == 1 else f"{months} months of spending")
-    if conversations:
-        parts.append("1 conversation" if conversations == 1
-                     else f"{conversations} conversations")
-    return " and ".join(parts)
-
-
 def _describe_data(candidate: first_run.ExtrasCandidate) -> str:
     """Return a block naming where each person's work is kept, and how much.
 
@@ -185,7 +172,7 @@ def _describe_data(candidate: first_run.ExtrasCandidate) -> str:
     for w in candidate.work:
         where = "" if not w.elsewhere else f"<br><code>{html.escape(str(w.path))}</code>"
         rows.append(
-            f"<li>{html.escape(w.name)} <em>({_amount(w.months, w.conversations)})</em>"
+            f"<li>{html.escape(w.name)} <em>({w.amount()})</em>"
             f"{where}</li>")
 
     if candidate.data_is_elsewhere:
