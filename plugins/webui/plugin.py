@@ -55,6 +55,7 @@ _register("_pu_webui_plugin_install", "src/plugin_install.py")
 _register("_pu_webui_upgrade", "src/upgrade.py")
 _register("_pu_webui_branding", "src/branding.py")
 _register("_pu_webui_stopping", "src/stopping.py")
+_register("_pu_webui_hostnames", "src/hostnames.py")
 _register("_pu_webui_setup_web", "src/setup_web.py")
 _register("_pu_webui_app", "src/app.py")
 
@@ -173,10 +174,6 @@ class WebUiPlugin:
 plugin = WebUiPlugin()
 
 
-# Addresses that mean "only this computer can reach the server". Anything
-# else is reachable by other machines on the network — see _is_loopback_host().
-_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1", "[::1]"})
-
 
 def _is_loopback_host(host: str) -> bool:
     """Return True if *host* can only be reached from this same computer.
@@ -193,7 +190,7 @@ def _is_loopback_host(host: str) -> bool:
     Returns:
         True if only this computer can reach it.
     """
-    return host.strip().lower() in _LOOPBACK_HOSTS
+    return sys.modules["_pu_webui_hostnames"].is_loopback(host)
 
 
 def _serve_setup(args: argparse.Namespace) -> None:

@@ -95,6 +95,7 @@ export = sys.modules["_pu_webui_export"]
 branding = sys.modules["_pu_webui_branding"]
 upgrade = sys.modules["_pu_webui_upgrade"]
 stopping = sys.modules["_pu_webui_stopping"]
+hostnames = sys.modules["_pu_webui_hostnames"]
 
 _TEMPLATES_DIR = Path(__file__).parent / "templates"
 templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
@@ -880,12 +881,17 @@ def _chat_error_message(error: Exception) -> str:
     )
 
 
-def create_app() -> FastAPI:
+def create_app(host: str = "127.0.0.1") -> FastAPI:
     """Build and configure the FastAPI application for the local web interface.
 
     Called once by ``run_server()``. Kept as a separate function (rather
     than a module-level ``app = FastAPI()``) so tests can build a fresh app
     instance without starting a real server.
+
+    Args:
+        host: The address the server will listen on. While that is this
+              computer's own, requests naming any other address are refused
+              — see ``hostnames.py``.
     """
     app = FastAPI(title="Princeton University AI Sandbox")
 
@@ -898,6 +904,8 @@ def create_app() -> FastAPI:
     app.add_middleware(
         SessionMiddleware, secret_key=secret, session_cookie=WEBUI_SESSION_COOKIE_NAME
     )
+    # Added last, so it is the first thing every request meets.
+    hostnames.answer_only_to_this_computer(app, host)
 
     branding.add_favicon_route(app)
     stopping.add_stop_route(app, _reason_not_to_stop)
@@ -2477,7 +2485,7 @@ def run_server(host: str, port: int) -> None:
     written_to = start_logging_to_a_file()
     if written_to is not None:
         print(f"Keeping a log at {written_to}")
-    app = create_app()
+    app = create_app(host)
     # A few seconds for requests still being answered to finish, then stop
     # anyway: a browser tab can hold a request open for as long as it likes,
     # and the launcher is waiting for the port to be free.

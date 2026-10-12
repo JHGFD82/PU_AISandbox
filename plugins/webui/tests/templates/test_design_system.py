@@ -766,7 +766,7 @@ class TestTheTabIcon:
     def test_the_setup_pages_show_it_too(self):
         """Two applications, one mark — otherwise setup looks like other software."""
         setup_web = sys.modules["_pu_webui_setup_web"]
-        setup_client = TestClient(setup_web.create_setup_app(lambda: None))
+        setup_client = TestClient(setup_web.create_setup_app(lambda: None), base_url="http://127.0.0.1:8000")
         assert setup_client.get("/favicon.ico").status_code == 200
 
     def test_the_icon_holds_the_three_sizes_a_browser_picks_between(self):
