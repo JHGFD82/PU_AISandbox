@@ -244,6 +244,52 @@ def add_variant_note(sandbox: Any, note: str) -> None:
     sandbox.image_translation_service.variant_notes.append(note)
 
 
+def _set_layout_options(sandbox: Any, *, tables: bool, toc: bool) -> None:
+    """Tell the translation services about tables and a table of contents, if asked.
+
+    Tables are kept as tables by both services, since a scan can hold them
+    as well as a typed page. The table of contents only matters to the text
+    service: it tidies the dotted lines that join each heading to its page
+    number, which a picture of a page has no text form of to tidy.
+
+    Args:
+        sandbox: The ``SandboxProcessor`` for this translation.
+        tables: Whether ``--preserve-tables`` (or its checkbox) was chosen.
+        toc: Whether ``--toc`` (or its checkbox) was chosen.
+    """
+    if tables:
+        sandbox.translation_service.tables = True
+        sandbox.image_translation_service.tables = True
+    if toc:
+        sandbox.translation_service.toc = True
+
+
+def _apply_form_options(sandbox: Any, fields: dict, *, tables: bool, toc: bool) -> None:
+    """Set up the translation services from a web form, the same way for a job and its preview.
+
+    Kept in one place so the prompt preview can never show something other
+    than what the job will send.
+
+    Args:
+        sandbox: The ``SandboxProcessor`` for this translation.
+        fields: The submitted form values.
+        tables: Whether the "preserve tables" box was ticked.
+        toc: Whether the "table of contents" box was ticked.
+    """
+    apply_notes(fields, sandbox.translation_service, sandbox.image_translation_service)
+    _set_layout_options(sandbox, tables=tables, toc=toc)
+    # A language-extension plugin's own composer field (e.g.
+    # translation-ea's Kanbun checkbox) — registered separately, not
+    # part of this plugin's own declared fields, so it's applied
+    # through the shared registry rather than read directly here. Asked
+    # about both languages, since an extension may follow either side
+    # (see register_extension_ui_hooks). A no-op when nothing is
+    # registered for them (the normal case without an extension).
+    apply_extension_ui_hooks("translate", fields.get("source_language"), sandbox, fields,
+                             field="source_language")
+    apply_extension_ui_hooks("translate", fields.get("target_language"), sandbox, fields)
+
+
 def _execute_translate(
     sandbox: "SandboxProcessor",
     args: argparse.Namespace,
@@ -379,12 +425,10 @@ def _execute_translate(
     sandbox._apply_inline_notes(sandbox.translation_service, args)
     sandbox._apply_inline_notes(sandbox.image_translation_service, args)
 
-    if getattr(args, 'preserve_tables', False):
-        sandbox.translation_service.tables = True
-        sandbox.image_translation_service.tables = True
-
-    if getattr(args, 'toc', False):
-        sandbox.translation_service.toc = True
+    _set_layout_options(
+        sandbox,
+        tables=getattr(args, 'preserve_tables', False), toc=getattr(args, 'toc', False),
+    )
 
     if getattr(args, 'dry_run', False):
         model_dr = sandbox.translation_service._get_model()
@@ -913,24 +957,7 @@ class TranslationPlugin:
         sandbox = SandboxProcessor(
             professor, model=model, temperature=temperature, top_p=top_p, max_tokens=max_tokens,
         )
-        apply_notes(
-            fields, sandbox.translation_service, sandbox.image_translation_service,
-        )
-        if preserve_tables:
-            sandbox.translation_service.tables = True
-            sandbox.image_translation_service.tables = True
-        if toc:
-            sandbox.translation_service.toc = True
-        # A language-extension plugin's own composer field (e.g.
-        # translation-ea's Kanbun checkbox) — registered separately, not
-        # part of this plugin's own declared fields, so it's applied
-        # through the shared registry rather than read directly here. Asked
-        # about both languages, since an extension may follow either side
-        # (see register_extension_ui_hooks). A no-op when nothing is
-        # registered for them (the normal case without an extension).
-        apply_extension_ui_hooks("translate", fields.get("source_language"), sandbox, fields,
-                                 field="source_language")
-        apply_extension_ui_hooks("translate", target_code_raw, sandbox, fields)
+        _apply_form_options(sandbox, fields, tables=preserve_tables, toc=toc)
 
         # Pasted text has no filename to take this from, so it gets one that
         # says what it is. Without it the output would arrive as
@@ -1067,17 +1094,7 @@ class TranslationPlugin:
         toc = field_is_on(fields, "toc")
 
         sandbox = SandboxProcessor(professor, model=model)
-        apply_notes(
-            fields, sandbox.translation_service, sandbox.image_translation_service,
-        )
-        if preserve_tables:
-            sandbox.translation_service.tables = True
-            sandbox.image_translation_service.tables = True
-        if toc:
-            sandbox.translation_service.toc = True
-        apply_extension_ui_hooks("translate", fields.get("source_language"), sandbox, fields,
-                                 field="source_language")
-        apply_extension_ui_hooks("translate", fields.get("target_language"), sandbox, fields)
+        _apply_form_options(sandbox, fields, tables=preserve_tables, toc=toc)
 
         requested_format = (fields.get("output_format") or "").strip().lower()
         output_format = requested_format if requested_format in ("docx", "pdf", "txt", "md") else "console"
