@@ -490,6 +490,52 @@ def start_job(
     return job
 
 
+def _job_message(content: str, kind: str, job_id: str, **extra: Any) -> Any:
+    """Return a new message from a job, stamped with the time it was written.
+
+    Args:
+        content: What the message says, as the professor will read it.
+        kind: Which sort of job message it is — ``'job_notice'``,
+              ``'job_progress'``, ``'job_page'``, ``'job_result'`` or
+              ``'job_error'`` — which decides how the page shows it.
+        job_id: The job it is about.
+        **extra: Any further ``Message`` fields this kind carries, such as
+                 ``page_number`` or ``output_filename``.
+    """
+    return conversation.Message(
+        role="assistant", content=content, timestamp=datetime.now().isoformat(),
+        kind=kind, job_id=job_id, **extra,
+    )
+
+
+def _tell_conversation(
+    conversation_store: "ConversationStore", job: Job, content: str, kind: str,
+    *, release: bool = False, **extra: Any,
+) -> None:
+    """Add a message from *job* to the conversation it was started from, and save it.
+
+    Reads the conversation afresh each time, so whatever else was saved to it
+    meanwhile is kept. Does nothing if the conversation has been deleted while
+    the job ran — there is nowhere left to say anything.
+
+    Args:
+        conversation_store: The store for the professor the job runs under.
+        job: The job the message is from.
+        content: What the message says.
+        kind: Which sort of job message it is (see ``_job_message()``).
+        release: Also give the conversation's composer back, because this is
+                 the job's last word.
+        **extra: Any further ``Message`` fields this kind carries.
+    """
+    conv = conversation_store.load(job.conversation_id)
+    if conv is None:
+        return
+    conv.messages.append(_job_message(content, kind, job.id, **extra))
+    if release:
+        conv.active_job_id = None
+    conversation_store.save(conv)
+
+
 def _run_job(
     plugin: Any,
     job: Job,
@@ -571,17 +617,12 @@ def _release_conversation(
             job_store.set_status(job.id, "error", error="stopped without recording an outcome")
 
         try:
-            conv.messages.append(conversation.Message(
-                role="assistant",
-                content=(
-                    f"The {job.action_id} job stopped without being able to record what "
-                    "happened, so there is nothing to show for it here. Whoever looks "
-                    "after this installation can find the reason in the server's log. "
-                    "Anything it did manage to write is still on the server."
-                ),
-                timestamp=datetime.now().isoformat(),
-                kind="job_error",
-                job_id=job.id,
+            conv.messages.append(_job_message(
+                f"The {job.action_id} job stopped without being able to record what "
+                "happened, so there is nothing to show for it here. Whoever looks "
+                "after this installation can find the reason in the server's log. "
+                "Anything it did manage to write is still on the server.",
+                "job_error", job.id,
             ))
             conv.active_job_id = None
             conversation_store.save(conv)
@@ -654,36 +695,19 @@ def _carry_out_job(
     except ValueError:
         workers_requested = 1
     if workers_requested > 1:
-        conv = conversation_store.load(job.conversation_id)
-        if conv is not None:
-            conv.messages.append(conversation.Message(
-                role="assistant",
-                content=(
-                    "Live preview of each item is turned off while running with more than one "
-                    "worker. The progress bar below will still update normally, and the finished "
-                    "result will be here as soon as the job completes."
-                ),
-                timestamp=datetime.now().isoformat(),
-                kind="job_notice",
-                job_id=job.id,
-            ))
-            conversation_store.save(conv)
+        _tell_conversation(
+            conversation_store, job,
+            "Live preview of each item is turned off while running with more than one "
+            "worker. The progress bar below will still update normally, and the finished "
+            "result will be here as soon as the job completes.",
+            "job_notice",
+        )
 
     def on_progress(done: int, total: int) -> None:
-        conv = conversation_store.load(job.conversation_id)
-        if conv is None:
-            # Conversation was deleted mid-job — nowhere left to report to.
-            return
-        conv.messages.append(conversation.Message(
-            role="assistant",
-            content=f"{progress_verb}... {done} of {total} done.",
-            timestamp=datetime.now().isoformat(),
-            kind="job_progress",
-            job_id=job.id,
-            progress_done=done,
-            progress_total=total,
-        ))
-        conversation_store.save(conv)
+        _tell_conversation(
+            conversation_store, job, f"{progress_verb}... {done} of {total} done.",
+            "job_progress", progress_done=done, progress_total=total,
+        )
 
     def on_page_text(page_number: int, text: str) -> None:
         # A plugin (currently just translate) that reports on_page_text
@@ -692,18 +716,9 @@ def _carry_out_job(
         # PageTextCallback's docstring in src/runtime/ui_action.py for why
         # this is a separate callback from on_progress rather than the same
         # one carrying more data (on_progress only ever passes two ints).
-        conv = conversation_store.load(job.conversation_id)
-        if conv is None:
-            return
-        conv.messages.append(conversation.Message(
-            role="assistant",
-            content=text,
-            timestamp=datetime.now().isoformat(),
-            kind="job_page",
-            job_id=job.id,
-            page_number=page_number,
-        ))
-        conversation_store.save(conv)
+        _tell_conversation(
+            conversation_store, job, text, "job_page", page_number=page_number,
+        )
 
     # Inside the conversation the job was started from, so that what a job
     # produced sits with the conversation that asked for it and the documents
@@ -743,17 +758,10 @@ def _carry_out_job(
         discard_output_dir_if_empty(output_dir)
         discard_scratch_dir(fields)
         job_store.set_status(job.id, "error", error=str(e))
-        conv = conversation_store.load(job.conversation_id)
-        if conv is not None:
-            conv.messages.append(conversation.Message(
-                role="assistant",
-                content=f"The {job.action_id} job failed: {e}",
-                timestamp=datetime.now().isoformat(),
-                kind="job_error",
-                job_id=job.id,
-            ))
-            conv.active_job_id = None
-            conversation_store.save(conv)
+        _tell_conversation(
+            conversation_store, job, f"The {job.action_id} job failed: {e}",
+            "job_error", release=True,
+        )
         return
 
     job_store.set_status(job.id, "done")
@@ -765,12 +773,8 @@ def _carry_out_job(
     try:
         conv = conversation_store.load(job.conversation_id)
         if conv is not None:
-            conv.messages.append(conversation.Message(
-                role="assistant",
-                content=result.summary,
-                timestamp=datetime.now().isoformat(),
-                kind="job_result",
-                job_id=job.id,
+            conv.messages.append(_job_message(
+                result.summary, "job_result", job.id,
                 output_filename=result.output_filename,
                 output_path=result.output_path,
                 # Same fields a chat turn's reply carries — reused here
@@ -809,21 +813,13 @@ def _carry_out_job(
         )
         job_store.set_status(job.id, "error", error=f"Result recording failed: {e}")
         try:
-            conv = conversation_store.load(job.conversation_id)
-            if conv is not None:
-                conv.messages.append(conversation.Message(
-                    role="assistant",
-                    content=(
-                        f"The {job.action_id} job finished, but saving its result to this "
-                        f"conversation failed ({e}). The output file may still exist on the "
-                        "server even though it isn't linked here."
-                    ),
-                    timestamp=datetime.now().isoformat(),
-                    kind="job_error",
-                    job_id=job.id,
-                ))
-                conv.active_job_id = None
-                conversation_store.save(conv)
+            _tell_conversation(
+                conversation_store, job,
+                f"The {job.action_id} job finished, but saving its result to this "
+                f"conversation failed ({e}). The output file may still exist on the "
+                "server even though it isn't linked here.",
+                "job_error", release=True,
+            )
         except Exception:
             # Two independent save failures in a row — nothing more we can
             # safely do without risking further corruption. The conversation
@@ -866,16 +862,11 @@ def sweep_stale_jobs(professors: list[str], conversation_store_factory) -> int:
                 continue
             interrupted_job_id = conv.active_job_id
             conv.active_job_id = None
-            conv.messages.append(conversation.Message(
-                role="assistant",
-                content=(
-                    "This job was interrupted (the web server restarted while it was running) "
-                    "and did not finish. If you need the rest of it, start a new job — the page-range "
-                    "field lets you pick up from wherever this one left off."
-                ),
-                timestamp=datetime.now().isoformat(),
-                kind="job_error",
-                job_id=interrupted_job_id,
+            conv.messages.append(_job_message(
+                "This job was interrupted (the web server restarted while it was running) "
+                "and did not finish. If you need the rest of it, start a new job — the page-range "
+                "field lets you pick up from wherever this one left off.",
+                "job_error", interrupted_job_id,
             ))
             store.save(conv)
             cleared += 1
