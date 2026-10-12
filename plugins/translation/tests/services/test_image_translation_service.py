@@ -31,23 +31,26 @@ class TestImageTranslationService:
         assert svc is not None
         assert svc.tables is False
 
-    def test_build_system_prompt(self, monkeypatch):
+    def test_build_prompts_names_the_language(self, monkeypatch):
         svc = _make_img_svc(monkeypatch)
-        result = svc._build_system_prompt("Japanese", "English")
-        assert isinstance(result, str)
-        assert len(result) > 0
+        system, user = svc.build_prompts("Japanese", "English")
+        assert system
+        assert "Japanese" in user
 
-    def test_build_user_prompt(self, monkeypatch):
-        svc = _make_img_svc(monkeypatch)
-        result = svc._build_user_prompt("Japanese", "English")
-        assert "Japanese" in result
-
-    def test_variant_notes_reach_what_is_sent_and_the_preview(self, monkeypatch):
+    def test_variant_notes_reach_the_prompt(self, monkeypatch):
         svc = _make_img_svc(monkeypatch)
         assert svc.variant_notes == []
         svc.variant_notes.append("The source text is kanbun.")
-        assert "The source text is kanbun." in svc._build_system_prompt("Japanese", "English")
         assert "The source text is kanbun." in svc.build_prompts("Japanese", "English")[0]
+
+    def test_notes_reach_the_prompts(self, monkeypatch):
+        """What is sent and what the preview shows are the same two prompts."""
+        svc = _make_img_svc(monkeypatch)
+        svc.system_note = "Romanise names in Hepburn."
+        svc.user_note = "The second column is a later addition."
+        system, user = svc.build_prompts("Japanese", "English")
+        assert "Romanise names in Hepburn." in system
+        assert "The second column is a later addition." in user
 
     def test_build_prompts_returns_tuple(self, monkeypatch):
         svc = _make_img_svc(monkeypatch)
