@@ -210,7 +210,10 @@ class ImageProcessorService(BaseService):
             raise
 
         system_role = get_model_system_role(catalog_model)
-        max_tokens = get_model_max_completion_tokens(catalog_model, OCR_MAX_TOKENS)
+        # A length asked for with -M wins, as it does for every other service;
+        # otherwise the longest reply the catalog says this model can give.
+        max_tokens = (self.custom_max_tokens if self.custom_max_tokens is not None
+                      else get_model_max_completion_tokens(catalog_model, OCR_MAX_TOKENS))
 
         def body(attempt: int) -> Any:
             logging.debug("Making OCR API call")
