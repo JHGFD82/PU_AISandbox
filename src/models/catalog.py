@@ -11,10 +11,11 @@ back to disk.
 import json
 import logging
 import os
-import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+from ..file_writing import write_in_one_step
 
 
 MODEL_CATALOG_FILE = "model_catalog.json"
@@ -192,19 +193,7 @@ def save_model_catalog(config: Dict[str, Any]) -> None:
     """
     global _catalog_cache
     _catalog_cache = None  # Invalidate before write so any concurrent reader re-reads
-    catalog_file = get_model_catalog_path()
-    catalog_file.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp_path = tempfile.mkstemp(dir=catalog_file.parent, suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w") as f:
-            json.dump(config, f, indent=2)
-        os.replace(tmp_path, catalog_file)
-    except Exception:
-        try:
-            os.unlink(tmp_path)
-        except OSError:
-            pass
-        raise
+    write_in_one_step(get_model_catalog_path(), json.dumps(config, indent=2))
 
 
 def no_models_message() -> str:

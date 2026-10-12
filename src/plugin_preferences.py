@@ -40,10 +40,11 @@ comment they have written, stays as it is.
 from __future__ import annotations
 
 import logging
-import os
 import tomllib
 from pathlib import Path
 from typing import Optional
+
+from .file_writing import write_in_one_step
 
 logger = logging.getLogger(__name__)
 
@@ -204,10 +205,7 @@ def _write(path: Path, lines: list[str]) -> None:
     previous one intact rather than a file that no longer parses, which would
     take the whole sandbox down at its next start.
     """
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text("\n".join(lines).rstrip("\n") + "\n", encoding="utf-8")
-    os.replace(tmp, path)
+    write_in_one_step(path, "\n".join(lines).rstrip("\n") + "\n")
 
 
 def _render(

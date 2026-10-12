@@ -60,6 +60,10 @@ The single entry point:
 
 Answers one question: which folder holds this person's settings, catalog and data. A marker file (`.installation`) inside the package records the answer, and has to live there because the sandbox needs to know where the settings file is before it can read it. Its absence is exactly the signal "this copy hasn't been set up" — no version numbers to compare.
 
+### `src/file_writing.py` — saving a file
+
+`write_in_one_step()` is how every file the sandbox keeps is saved: written beside the real one, then moved into place in a single step, so a reader never sees half a file and a crash leaves the old one intact. Plugins saving their own files should use it too. Pass `private=True` for a file holding secrets; `settings.toml` is the only one that does.
+
 ### `src/first_run.py` and `src/setup_prompts.py` — setup
 
 `first_run.py` holds the decisions (what a folder already contains, which files to create, what must never be overwritten); `setup_prompts.py` asks them at the terminal, and `plugins/webui/src/setup_web.py` asks the same questions in a browser. Both routes go through `first_run.py`, so the two can't drift on what counts as an existing setup.

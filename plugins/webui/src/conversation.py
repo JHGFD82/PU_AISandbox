@@ -27,11 +27,12 @@ import os
 import re
 import secrets
 import shutil
-import threading
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
+
+from src.file_writing import write_in_one_step
 
 logger = logging.getLogger(__name__)
 
@@ -801,10 +802,7 @@ class ConversationStore:
             conversation.messages = merge_messages(on_disk.messages, conversation.messages)
 
         conversation.updated_at = datetime.now().isoformat()
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp_path = path.with_suffix(f".{os.getpid()}.{threading.get_ident()}.tmp")
-        tmp_path.write_text(json.dumps(conversation.to_dict(), indent=2))
-        os.replace(tmp_path, path)
+        write_in_one_step(path, json.dumps(conversation.to_dict(), indent=2))
         self._write_settings_note(conversation)
 
     def _write_settings_note(self, conversation: "Conversation") -> None:
@@ -840,9 +838,7 @@ class ConversationStore:
             "",
         ]
         note = self.folder(conversation.id) / "settings.txt"
-        tmp = note.with_suffix(f".{os.getpid()}.{threading.get_ident()}.tmp")
-        tmp.write_text("\n".join(lines), encoding="utf-8")
-        os.replace(tmp, note)
+        write_in_one_step(note, "\n".join(lines))
 
     def create(self, model: str, title: str = "New conversation") -> Conversation:
         """Create, save, and return a brand new empty conversation."""

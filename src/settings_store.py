@@ -57,9 +57,7 @@ their own table above: ``usage_path``, and ``usage_mode`` of "read-only" or
 from __future__ import annotations
 
 import logging
-import os
 import platform
-import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, overload
@@ -67,6 +65,7 @@ from typing import Any, Literal, overload
 import tomlkit
 
 from .errors import CLIError
+from .file_writing import write_in_one_step
 
 from . import paths
 
@@ -124,19 +123,11 @@ def _load() -> tomlkit.TOMLDocument:
 
 
 def _save(doc: tomlkit.TOMLDocument) -> None:
-    """Write *doc* back to ``settings.toml`` atomically (temp file + replace), preserving formatting."""
-    _settings_path().parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp_path = tempfile.mkstemp(dir=str(_settings_path().parent), suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            f.write(tomlkit.dumps(doc))
-        os.replace(tmp_path, _settings_path())
-    except Exception:
-        try:
-            os.unlink(tmp_path)
-        except OSError:
-            pass
-        raise
+    """Write *doc* back to ``settings.toml`` in one step, keeping its formatting.
+
+    Readable by this computer's account alone, because it holds API keys.
+    """
+    write_in_one_step(_settings_path(), tomlkit.dumps(doc), private=True)
 
 
 @overload

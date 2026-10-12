@@ -1834,7 +1834,7 @@ class TestCorrectionsWrittenFromSeveralThreads:
             used.append(str(src))
             return real_replace(src, dst)
 
-        with patch("src.tracking.token_tracker.os.replace", side_effect=remember):
+        with patch("src.file_writing.os.replace", side_effect=remember):
             tracker.record_unreported_call("gpt-4o")
 
         assert len(used) == 1

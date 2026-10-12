@@ -1036,9 +1036,9 @@ class TestACopyASyncServiceSetAside:
     def test_our_own_half_written_file_is_not_mistaken_for_one(self, opened):
         """A save in progress writes a temp file in the same folder."""
         store, cid, folder = opened
-        (folder / "conversation.9999.1.tmp").write_text("{}")
+        (folder / "conversation.json.9999.1.tmp").write_text("{}")
         store.load(cid)
-        assert (folder / "conversation.9999.1.tmp").exists()
+        assert (folder / "conversation.json.9999.1.tmp").exists()
 
     def test_a_conversation_with_no_copies_beside_it_is_not_rewritten(self, opened):
         """Opening a conversation must not look like changing it."""
