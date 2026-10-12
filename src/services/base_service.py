@@ -377,6 +377,90 @@ class BaseService:
 
         return {"type": "image_url", "image_url": {"url": data_url}}
 
+    def _image_messages(
+        self, model: str, system_role: str, system_prompt: str, user_prompt: str, data_url: str,
+    ) -> list[dict[str, Any]]:
+        """Return the messages for a request about one image: the instructions, then the image.
+
+        Args:
+            model: The model the request goes to, which decides how the image
+                   is wrapped (see ``_build_image_content_block()``).
+            system_role: The role name the model expects for its standing
+                         instructions (``'system'`` or ``'developer'``).
+            system_prompt: The standing instructions.
+            user_prompt: What to do with this image, sent alongside it.
+            data_url: The image, as a data URL.
+
+        Returns:
+            Two messages, ready to send or to add a follow-up exchange to.
+        """
+        return [
+            {"role": system_role, "content": system_prompt},
+            {"role": "user", "content": [
+                {"type": "text", "text": user_prompt},
+                self._build_image_content_block(model, data_url),
+            ]},
+        ]
+
+    @staticmethod
+    def _image_for_request(image_processor: Any, file_path: str) -> Optional[str]:
+        """Return an image ready to send to a model, or ``None`` if the page is blank.
+
+        A blank page is skipped rather than sent, since asking a model to read
+        nothing costs money and can only come back empty.
+
+        Args:
+            image_processor: The service's ``ImageProcessor``, which checks for
+                             blank pages and converts the image.
+            file_path: Where the image is on disk.
+
+        Returns:
+            The image as a data URL — its contents turned into text so it can
+            travel inside the request — or ``None`` for a blank page.
+
+        Raises:
+            Exception: Whatever went wrong reading the image, after logging it.
+        """
+        name = os.path.basename(file_path)
+        if image_processor.is_blank_image(file_path):
+            logging.info(f"Skipping blank image {name} — no API call made.")
+            return None
+        try:
+            return image_processor.local_image_to_data_url(file_path)
+        except Exception as e:
+            logging.error(f"Failed to read image {name}: {e}")
+            raise
+
+    @staticmethod
+    def _text_or_retry(response: Any, what: str, attempt: int) -> Optional[str]:
+        """Return the reply's text, or ``None`` — meaning "try again" — if it has none worth keeping.
+
+        For use inside a ``_run_with_retry()`` attempt, where returning ``None``
+        asks for another attempt. A reply with no text, text of the wrong
+        kind, or only blank space is treated that way, and the reason is
+        logged so a run that keeps retrying can be explained afterwards.
+
+        Args:
+            response: The raw reply from the model.
+            what: What was being asked for, for the log, e.g.
+                  ``'OCR refinement pass 2'``.
+            attempt: Which attempt this is, counting from 0.
+        """
+        if not (response.choices and response.choices[0].message):
+            logging.warning(f"{what}: no choices in the API response. Retrying...")
+            return None
+        content = response.choices[0].message.content
+        if content is None:
+            logging.warning(f"{what} returned None content. Raw message: {response.choices[0].message}")
+            return None
+        if not isinstance(content, str):
+            logging.warning(f"Unexpected content type {type(content)}: {content!r}. Retrying...")
+            return None
+        if not content.strip():
+            logging.warning(f"{what} returned empty content (attempt {attempt + 1}/{MAX_RETRIES}). Retrying...")
+            return None
+        return content
+
     def _build_completion_kwargs(
         self,
         model: str,

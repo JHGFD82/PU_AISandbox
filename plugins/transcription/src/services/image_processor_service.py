@@ -1,7 +1,6 @@
 """Image processing service for OCR operations — base plugin (English only)."""
 
 import logging
-import os
 from typing import Optional, Any
 
 from ..models import (
@@ -12,7 +11,6 @@ from .base_service import BaseService
 from ..console import print_pass_result
 from ..processors.image_processor import ImageProcessor
 from ..tracking.token_tracker import TokenTracker
-from .constants import MAX_RETRIES
 from .prompts import OcrPromptSpec
 
 from ..settings import (
@@ -95,43 +93,35 @@ class ImageProcessorService(BaseService):
     def _call_ocr_api(self, model: str, system_role: str, system_prompt: str,
                       user_prompt: str, data_url: str, max_tokens: int) -> Any:
         """Call the OCR API with the correct token-limit parameter for the model."""
-        messages: list[dict[str, Any]] = [
-            {"role": system_role, "content": system_prompt},
-            {"role": "user", "content": [
-                {"type": "text", "text": user_prompt},
-                self._build_image_content_block(model, data_url)
-            ]},
-        ]
-        temperature = self.custom_temperature if self.custom_temperature is not None else OCR_TEMPERATURE
-        top_p = self.custom_top_p if self.custom_top_p is not None else OCR_TOP_P
-        if self.custom_temperature is not None or self.custom_top_p is not None:
-            logging.debug(f"OCR API params: temperature={temperature}, top_p={top_p}")
-        return self._create_completion(
-            model, messages, max_tokens,
-            temperature=temperature, top_p=top_p,
-            frequency_penalty=OCR_FREQUENCY_PENALTY,
-            presence_penalty=OCR_PRESENCE_PENALTY,
-        )
+        messages = self._image_messages(model, system_role, system_prompt, user_prompt, data_url)
+        return self._ocr_completion(model, messages, max_tokens)
 
     def _call_refinement_api(self, model: str, system_role: str, system_prompt: str,
                               first_user_prompt: str, data_url: str,
                               prior_transcription: str, refinement_prompt: str,
                               max_tokens: int) -> Any:
         """Call the OCR API for a refinement pass, providing prior transcription as context."""
-        messages: list[dict[str, Any]] = [
-            {"role": system_role, "content": system_prompt},
-            {"role": "user", "content": [
-                {"type": "text", "text": first_user_prompt},
-                self._build_image_content_block(model, data_url)
-            ]},
+        messages = self._image_messages(model, system_role, system_prompt, first_user_prompt, data_url)
+        messages += [
             {"role": "assistant", "content": prior_transcription},
             {"role": "user", "content": [
                 {"type": "text", "text": refinement_prompt},
                 self._build_image_content_block(model, data_url)
             ]},
         ]
+        return self._ocr_completion(model, messages, max_tokens)
+
+    def _ocr_completion(self, model: str, messages: list[dict[str, Any]], max_tokens: int) -> Any:
+        """Send one OCR request with this service's sampling settings, and return the raw reply.
+
+        The settings are the transcription defaults unless ``-t``/``-T`` asked
+        for others, plus the penalties that discourage a model from repeating
+        itself — a common way for a transcription to go wrong.
+        """
         temperature = self.custom_temperature if self.custom_temperature is not None else OCR_TEMPERATURE
         top_p = self.custom_top_p if self.custom_top_p is not None else OCR_TOP_P
+        if self.custom_temperature is not None or self.custom_top_p is not None:
+            logging.debug(f"OCR API params: temperature={temperature}, top_p={top_p}")
         return self._create_completion(
             model, messages, max_tokens,
             temperature=temperature, top_p=top_p,
@@ -151,20 +141,7 @@ class ImageProcessorService(BaseService):
                 refinement_prompt, max_tokens,
             )
             self._record_response_usage(response, model, critical=True)
-            if response.choices and len(response.choices) > 0 and response.choices[0].message:
-                content = response.choices[0].message.content
-                if content is None:
-                    logging.warning(f"Refinement pass {pass_num} returned None content.")
-                    return None
-                if not isinstance(content, str):
-                    logging.warning(f"Unexpected content type {type(content)}: {content!r}. Retrying...")
-                    return None
-                if not content.strip():
-                    logging.warning(f"Refinement pass {pass_num} returned empty content (attempt {attempt + 1}/{MAX_RETRIES}). Retrying...")
-                    return None
-                return content
-            logging.warning("No choices in refinement API response. Retrying...")
-            return None
+            return self._text_or_retry(response, f"Refinement pass {pass_num}", attempt)
 
         return self._run_with_retry(
             body, model, f"OCR refinement pass {pass_num}",
@@ -197,17 +174,9 @@ class ImageProcessorService(BaseService):
             spread=spread,
         )
 
-        if self.image_processor.is_blank_image(file_path):
-            logging.info(
-                f"Skipping blank image {os.path.basename(file_path)} — no API call made."
-            )
+        data_url = self._image_for_request(self.image_processor, file_path)
+        if data_url is None:
             return ""
-
-        try:
-            data_url = self.image_processor.local_image_to_data_url(file_path)
-        except Exception as e:
-            logging.error(f"Failed to process image {os.path.basename(file_path)}: {e}")
-            raise
 
         system_role = get_model_system_role(catalog_model)
         # A length asked for with -M wins, as it does for every other service;
@@ -221,20 +190,7 @@ class ImageProcessorService(BaseService):
                 model, system_role, system_prompt, user_prompt, data_url, max_tokens
             )
             self._record_response_usage(response, model, critical=True)
-            if response.choices and len(response.choices) > 0 and response.choices[0].message:
-                content = response.choices[0].message.content
-                if content is None:
-                    logging.warning("OCR API returned None content.")
-                    return None
-                if not isinstance(content, str):
-                    logging.warning(f"Unexpected content type {type(content)}: {content!r}. Retrying...")
-                    return None
-                if not content.strip():
-                    logging.warning(f"OCR returned empty content (attempt {attempt + 1}/{MAX_RETRIES}). Retrying...")
-                    return None
-                return content
-            logging.warning("No choices in OCR API response. Retrying...")
-            return None
+            return self._text_or_retry(response, "OCR", attempt)
 
         transcription = self._run_with_retry(
             body, model, "OCR transcription",

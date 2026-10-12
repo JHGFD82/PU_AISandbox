@@ -11,7 +11,6 @@ transcription-only pass with no translation context available yet.
 """
 
 import logging
-import os
 import re
 from typing import Any, Optional
 
@@ -22,7 +21,6 @@ from ..models import (
 from .base_service import BaseService
 from ..processors.image_processor import ImageProcessor
 from ..tracking.token_tracker import TokenTracker
-from .constants import MAX_RETRIES
 from .prompts import ImageTranslationPromptSpec
 
 from ..settings import IMAGE_TRANSLATION_ROLE, IMAGE_TRANSLATION_MAX_TOKENS, IMAGE_TRANSLATION_TEMPERATURE
@@ -196,16 +194,7 @@ class ImageTranslationService(BaseService):
             The raw API response object, passed on to
             ``_record_response_usage()`` and then parsed by the caller.
         """
-        messages: list[dict[str, Any]] = [
-            {"role": system_role, "content": system_prompt},
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": user_prompt},
-                    self._build_image_content_block(model, data_url),
-                ],
-            },
-        ]
+        messages = self._image_messages(model, system_role, system_prompt, user_prompt, data_url)
         temperature = self.custom_temperature if self.custom_temperature is not None else IMAGE_TRANSLATION_TEMPERATURE
         if self.custom_temperature is not None:
             logging.debug(f"Image translation API params: temperature={temperature}")
@@ -293,17 +282,9 @@ class ImageTranslationService(BaseService):
         system_prompt, user_prompt = self.build_prompts(source_language, target_language, vertical=vertical, spread=spread)
         max_tokens = self._get_max_tokens(catalog_model)
 
-        if self.image_processor.is_blank_image(file_path):
-            logging.info(
-                f"Skipping blank image {os.path.basename(file_path)} — no API call made."
-            )
+        data_url = self._image_for_request(self.image_processor, file_path)
+        if data_url is None:
             return "", ""
-
-        try:
-            data_url = self.image_processor.local_image_to_data_url(file_path)
-        except Exception as e:
-            logging.error(f"Failed to read image {os.path.basename(file_path)}: {e}")
-            raise
 
         def body(attempt: int) -> Any:
             logging.debug(
@@ -314,31 +295,8 @@ class ImageTranslationService(BaseService):
                 model, system_role, system_prompt, user_prompt, data_url, max_tokens
             )
             self._record_response_usage(response, model, critical=True)
-            if (
-                response.choices
-                and len(response.choices) > 0
-                and response.choices[0].message
-            ):
-                content = response.choices[0].message.content
-                if content is None:
-                    logging.warning(
-                        f"Response content is None. "
-                        f"Raw message: {response.choices[0].message}"
-                    )
-                    return None
-                if not isinstance(content, str):
-                    logging.warning(
-                        f"Unexpected content type {type(content)}: {content!r}. Retrying..."
-                    )
-                    return None
-                if not content.strip():
-                    logging.warning(
-                        f"Empty response (attempt {attempt + 1}/{MAX_RETRIES}). Retrying..."
-                    )
-                    return None
-                return self._parse_response(content)
-            logging.warning("No choices in API response. Retrying...")
-            return None
+            content = self._text_or_retry(response, "Image translation", attempt)
+            return self._parse_response(content) if content is not None else None
 
         return self._run_with_retry(
             body, model, "image translation",
