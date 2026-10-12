@@ -27,47 +27,25 @@ class DocxProcessor(BaseTextProcessor):
         Walks the document body in document order so that table content appears
         at its correct position relative to surrounding paragraphs.  Each table
         row is rendered as a tab-separated line; rows are separated by newlines.
+
+        Read through ``extract_blocks()``, so this and the block-by-block
+        reading used for Word output always agree on what the document holds.
         """
+        from ..models.doc_block import TableBlock
+
         try:
-            from docx import Document
-            from docx.oxml.ns import qn
-
-            doc = Document(file_obj)
-            blocks: List[str] = []
-
-            for child in doc.element.body:
-                tag = child.tag.split('}')[-1] if '}' in child.tag else child.tag
-
-                if tag == 'p':
-                    # Regular paragraph
-                    text = ''.join(node.text or '' for node in child.iter(qn('w:t'))).strip()
-                    if text:
-                        blocks.append(text)
-
-                elif tag == 'tbl':
-                    # Table — collect rows, cells separated by tabs
-                    rows: List[str] = []
-                    for row in child.iter(qn('w:tr')):
-                        cells: List[str] = []
-                        for cell in row.iter(qn('w:tc')):
-                            cell_text = ''.join(
-                                node.text or '' for node in cell.iter(qn('w:t'))
-                            ).strip()
-                            cells.append(cell_text)
-                        row_text = '\t'.join(cells)
-                        if row_text.strip():
-                            rows.append(row_text)
-                    if rows:
-                        blocks.append('\n'.join(rows))
-
-            return '\n\n'.join(blocks) if blocks else ""
-
+            blocks = self.extract_blocks(file_obj)
         except ImportError:
             raise ImportError(
                 "python-docx is required to process Word documents. "
                 "Install it with: pip install python-docx"
             ) from None
-    
+        return '\n\n'.join(
+            '\n'.join('\t'.join(row) for row in block.rows)
+            if isinstance(block, TableBlock) else block.text
+            for block in blocks
+        )
+
     @staticmethod
     def process_docx_with_pages(file_obj: BinaryIO, target_page_size: int = DEFAULT_PAGE_SIZE) -> List[str]:
         """Extract all text from a Word document and split it into translation-sized pages.

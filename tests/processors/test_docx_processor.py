@@ -181,6 +181,23 @@ class TestDocxProcessorTableExtraction:
         content = DocxProcessor().extract_raw_content(buf2)
         assert "Alpha\tBeta\tGamma" in content
 
+    def test_blank_rows_and_empty_tables_are_left_out(self):
+        from docx import Document
+
+        from src.processors.docx_processor import DocxProcessor
+        buf = BytesIO()
+        doc = Document()
+        doc.add_paragraph("Before")
+        tbl = doc.add_table(rows=3, cols=2)
+        tbl.rows[0].cells[0].text = "A"
+        tbl.rows[2].cells[1].text = "B"
+        doc.add_table(rows=1, cols=2)
+        doc.add_paragraph("After")
+        doc.save(buf)
+        buf.seek(0)
+        content = DocxProcessor().extract_raw_content(buf)
+        assert content == "Before\n\nA\t\n\tB\n\nAfter"
+
     def test_pure_paragraph_doc_unchanged(self):
         from docx import Document
 
