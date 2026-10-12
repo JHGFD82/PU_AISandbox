@@ -26,6 +26,7 @@ docstring for why.
 from __future__ import annotations
 
 import html
+import re
 import sys
 import threading
 from pathlib import Path
@@ -586,7 +587,16 @@ document.getElementById("continue").addEventListener("click", () => {
 });
 </script>"""
 
-_MODELS_SCRIPT = "<script>" + _SEND + """
+# The page is drawn by Jinja, but the script is handed to it as finished text,
+# so the shared wait is read in here rather than included. Its Jinja comment
+# is taken off first: nothing renders it on this route, and the page would
+# show it as text.
+_WAIT_FOR_THE_SANDBOX = re.sub(
+    r"\{#.*?#\}\s*", "",
+    (_TEMPLATES_DIR / "_wait_for_the_sandbox.html").read_text(encoding="utf-8"),
+    flags=re.S)
+
+_MODELS_SCRIPT = _WAIT_FOR_THE_SANDBOX + ("<script>" + _SEND + """
 document.getElementById("add-model").addEventListener("click", async () => {
   document.getElementById("models-error").hidden = true;
   const model = document.getElementById("modelname").value.trim();
@@ -620,32 +630,25 @@ document.getElementById("finish").addEventListener("click", async () => {
     said.textContent =
       "The sandbox is starting now \u2014 this page will move to it in a moment.";
     document.body.replaceChildren(heading, said);
-    // This page outlives the server that sent it: finishing stops setup, and
-    // the sandbox proper starts on the same address a second or two later. How
-    // long that takes depends on the computer, so the page asks until someone
-    // answers rather than guessing a number and landing on an error page when
-    // the guess is short.
-    setTimeout(function () {
-      (function ask() {
-        fetch("/", { method: "HEAD", cache: "no-store" })
-          .then(function () { location.href = "/"; })
-          .catch(function () { setTimeout(ask, 500); });
-      })();
-    }, 1500);
+    // Finishing stops setup, and the sandbox proper starts on the same address
+    // a second or two later.
+    waitForTheSandboxToComeBack(
+      function (message) { said.textContent = message; },
+      function () { location.href = "/"; });
   } catch (e) {
     button.disabled = false;
     document.getElementById("finish-hint").textContent = e.message;
   }
 });
-</script>"""
+</script>""")
 
 
 # There is no separate "all set" page any more. Setup no longer ends when the
 # folder exists — it carries on to ask who is using this and what they may send
 # to — so the last page is the one holding those two questions, and it says "All
-# set" in place once they are answered. Its waiting-for-the-server-to-go-away
-# loop is the one that used to live here, kept because guessing a number instead
-# lands on an error page whenever the guess is short.
+# set" in place once they are answered. It waits for the sandbox with
+# _wait_for_the_sandbox.html, the same wait the sandbox's own pages use after an
+# install or an update.
 
 
 def create_setup_app(on_complete) -> FastAPI:

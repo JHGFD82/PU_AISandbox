@@ -38,6 +38,7 @@ import sys
 import tempfile
 import threading
 import uuid
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -704,9 +705,16 @@ def _close_for_a_restart() -> None:
     restart, which for an update can be a quarter of an hour.
 
     Raises:
-        HTTPException: 409 if a job is running, or if another update or
-            install already has a restart on its way.
+        HTTPException: 409 if an update or a job is running, or if an install
+            already has a restart on its way.
     """
+    # Asked first only so the refusal can say which it is: a running update
+    # has closed the store too, so the close below would refuse it anyway.
+    if upgrade.an_update_is_running():
+        raise HTTPException(409, (
+            "An update is already running, perhaps from another window. Wait "
+            "for it to finish."
+        ))
     if _job_store.close(_ABOUT_TO_RESTART):
         return
     if _job_store.running():
@@ -719,6 +727,31 @@ def _close_for_a_restart() -> None:
         "The sandbox is already being updated, or is about to restart after "
         "something was installed. Wait for that to finish."
     ))
+
+
+@contextmanager
+def _reopen_if_this_fails():
+    """Take jobs again if the work inside goes wrong, since no restart will follow.
+
+    For the work between ``_close_for_a_restart()`` and ``_restart_soon()``.
+    Without it a failed install or update would leave the sandbox turning
+    every job away until somebody restarted it by hand.
+    """
+    try:
+        yield
+    except BaseException:
+        _job_store.reopen()
+        raise
+
+
+def _restart_soon(seconds: float) -> None:
+    """Restart into the new code after *seconds*, so the answer already sent gets there first.
+
+    The pause is what lets the browser hear that a restart is coming, and so
+    start waiting for the sandbox to come back, before there is nothing
+    listening.
+    """
+    threading.Timer(seconds, _restart_into_the_new_code).start()
 
 
 def _require_unlocked(request: Request) -> None:
@@ -1851,8 +1884,6 @@ def create_app(host: str = "127.0.0.1") -> FastAPI:
 
         # An install only ever ends in a restart, so the same rule as an
         # update: nothing running, and nothing allowed to start meanwhile.
-        if upgrade.an_update_is_running():
-            raise HTTPException(409, "An update is running. Wait for it to finish.")
         _close_for_a_restart()
 
         from src.paths import PACKAGE_ROOT
@@ -1865,11 +1896,10 @@ def create_app(host: str = "127.0.0.1") -> FastAPI:
         # of among the plugins, was never found afterwards, and left a folder
         # for the next attempt to collide with.
         try:
-            installed = install.install_from_git(
-                body.repository, body.folder, PACKAGE_ROOT / "plugins")
+            with _reopen_if_this_fails():
+                installed = install.install_from_git(
+                    body.repository, body.folder, PACKAGE_ROOT / "plugins")
         except install.InstallError as e:
-            # No restart is coming after all.
-            _job_store.reopen()
             # Written down as well as answered. A browser is not always what
             # is looking, and until this was here a refused install left no
             # trace anywhere — not in the page, which could not show it, and
@@ -1877,15 +1907,10 @@ def create_app(host: str = "127.0.0.1") -> FastAPI:
             logging.warning("Could not install a plugin from %r into %r: %s",
                             body.repository, body.folder, e)
             raise HTTPException(400, str(e)) from e
-        except BaseException:
-            _job_store.reopen()
-            raise
 
-        # After the answer has gone, so the browser is told where to look
-        # before there is nothing listening. It then waits for the sandbox to
-        # answer again, the same way the last page of setup does.
-        threading.Timer(_RESTART_AFTER_AN_INSTALL_SECONDS,
-                        _restart_into_the_new_code).start()
+        # The browser then waits for the sandbox to answer again, the same way
+        # the last page of setup does.
+        _restart_soon(_RESTART_AFTER_AN_INSTALL_SECONDS)
         return {
             "installed": installed.name,
             "commands": installed.commands,
@@ -1945,11 +1970,7 @@ def create_app(host: str = "127.0.0.1") -> FastAPI:
         # refusal. It is not what makes two updates impossible — apply_update
         # takes the lock itself, which closes the gap between asking and
         # starting — it is what makes the refusal readable.
-        if upgrade.an_update_is_running():
-            raise HTTPException(409, (
-                "An update is already running. It may be going on in another "
-                "window."
-            ))
+        #
         # Closed for the whole update, not only checked: an update can take a
         # quarter of an hour, and a job started during it would be thrown
         # away by the restart at the end.
@@ -1961,17 +1982,15 @@ def create_app(host: str = "127.0.0.1") -> FastAPI:
 
         def work():
             try:
-                outcome["applied"] = upgrade.apply_update(
-                    lambda step, label: told.put((step, label)))
+                with _reopen_if_this_fails():
+                    outcome["applied"] = upgrade.apply_update(
+                        lambda step, label: told.put((step, label)))
             except upgrade.StoppedPartway as e:
                 outcome["error"] = str(e)
                 outcome["was"] = e.was
             except Exception as e:
                 outcome["error"] = str(e)
             finally:
-                if "applied" not in outcome:
-                    # No restart is coming after all.
-                    _job_store.reopen()
                 told.put(None)
             if "applied" not in outcome:
                 return
@@ -1982,8 +2001,7 @@ def create_app(host: str = "127.0.0.1") -> FastAPI:
             # update it asked for — rather than new code on disk, and a sandbox
             # turning every job away until somebody restarts it by hand.
             browser_has_been_told.wait(_WAIT_FOR_THE_BROWSER_SECONDS)
-            threading.Timer(_RESTART_AFTER_AN_UPDATE_SECONDS,
-                            _restart_into_the_new_code).start()
+            _restart_soon(_RESTART_AFTER_AN_UPDATE_SECONDS)
 
         # Started here, not by the stream: a stream only runs while a browser
         # is reading it.

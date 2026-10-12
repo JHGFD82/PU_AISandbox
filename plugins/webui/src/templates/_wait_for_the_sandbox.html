@@ -1,0 +1,62 @@
+{#
+  Waiting for the sandbox to come back after it restarts.
+
+  A partial of its own, not part of _helpers.html, because the setup pages use
+  it too and have no use for the rest: there is no Quit button there, and no
+  /quit to send it to. setup_web.py reads this file and adds it to its last
+  page.
+#}
+<script>
+// How long to keep asking before saying something has gone wrong.
+const RESTART_PATIENCE_MS = 60000;
+
+// Wait for the sandbox to finish restarting, then show the page again.
+//
+// Three things restart it: installing a plugin, updating the sandbox, and
+// finishing setup. Each way this page outlives the server that sent it, and
+// how long the new one takes to answer depends on the computer — so this asks
+// until it does rather than guessing a number and reloading onto nothing.
+//
+// It asks for "/", which answers whoever is asking. The first version asked
+// for /api/plugin-actions — the very thing it was waiting to see change — and
+// that endpoint requires an unlocked session. Restarting mints a new session
+// secret unless one is configured, so every session from before the restart is
+// void: the poll got 401 once a second, forever, and the page never reloaded.
+//
+// `say` is passed in rather than an element named here. This used to name
+// #install-busy, which is the install dialog's own status line and does not
+// exist on the settings page — the second caller would have got a null and
+// nothing would have been said at all.
+//
+// `whenBack` is what to do once it answers. Left out, the window reloads,
+// which is right after an install or an update. Setup passes its own, because
+// the page it is on belongs to the setup server and the sandbox has no such
+// address: it goes to "/" instead.
+function waitForTheSandboxToComeBack(say, whenBack) {
+  const gaveUpAt = Date.now() + RESTART_PATIENCE_MS;
+  setTimeout(function () {
+    (function ask() {
+      fetch("/", { method: "HEAD", cache: "no-store" })
+        // window.top, not window: the settings page is also shown inside the
+        // chat page's settings panel, and reloading only that frame would
+        // leave a fresh settings page sitting inside a chat page still talking
+        // to a server that no longer exists. Standing on its own, window.top
+        // is this window, so this is right either way.
+        .then(whenBack || function () { window.top.location.reload(); })
+        .catch(function () {
+          // Only a failure to connect reaches here, which is what a server
+          // that is still starting looks like. Any answer at all, including
+          // one asking to unlock again, means it is back.
+          if (Date.now() > gaveUpAt) {
+            say("The sandbox is taking longer than expected to come back. "
+                + "Reload this page in a moment. If it does not come back, "
+                + "open the sandbox again from its icon, or run "
+                + "`python3 start.py` to see in the terminal what went wrong.");
+            return;
+          }
+          setTimeout(ask, 500);
+        });
+    })();
+  }, 1200);
+}
+</script>

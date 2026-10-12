@@ -236,7 +236,7 @@ def _serve_setup(args: argparse.Namespace) -> None:
 
     def stop_when_finished():
         finished.wait()
-        server.should_exit = True
+        sys.modules["_pu_webui_stopping"].stop_soon(app)
 
     threading.Thread(target=stop_when_finished, daemon=True).start()
 
