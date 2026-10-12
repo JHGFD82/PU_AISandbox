@@ -32,9 +32,7 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import re
-import tempfile
 import threading
 import urllib.error
 import urllib.request
@@ -42,6 +40,8 @@ from collections import Counter, defaultdict
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, Optional
+
+from ..file_writing import write_in_one_step
 
 OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models"
 
@@ -213,11 +213,7 @@ def _save(summary: Dict[str, Any]) -> None:
     """Write the boiled-down list, all at once, so a reader never sees half of it."""
     path = makers_path()
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".model_makers.", suffix=".tmp")
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(summary, f, indent=1, sort_keys=True)
-        os.replace(tmp, path)
+        write_in_one_step(path, json.dumps(summary, indent=1, sort_keys=True))
     except OSError as error:
         logging.info("Could not save the list of model makers to %s: %s", path, error)
 

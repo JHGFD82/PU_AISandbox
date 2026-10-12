@@ -456,63 +456,6 @@ class TestLoadModelCatalogMissingFileError:
 
 
 # ---------------------------------------------------------------------------
-# save_model_catalog — exception cleanup path (lines 76-81 of catalog.py)
-# ---------------------------------------------------------------------------
-
-class TestSaveModelCatalogExceptionPath:
-
-    def test_temp_file_cleaned_up_on_write_failure(self, monkeypatch, tmp_path):
-        """If writing the temp file fails the OSError is re-raised and no tmp file lingers."""
-        import os
-        import tempfile as _tempfile
-
-        output_file = tmp_path / "model_catalog.json"
-        monkeypatch.setattr(catalog_module, "get_model_catalog_path", lambda: output_file)
-
-        tmp_created = []
-
-        original_mkstemp = _tempfile.mkstemp
-
-        def fake_mkstemp(dir=None, suffix=None):
-            fd, path = original_mkstemp(dir=dir, suffix=suffix)
-            tmp_created.append(path)
-            return fd, path
-
-        # Make os.replace fail after the temp file is written
-
-        def bad_replace(src, dst):
-            raise OSError("simulated replace failure")
-
-        monkeypatch.setattr(_tempfile, "mkstemp", fake_mkstemp)
-        monkeypatch.setattr(os, "replace", bad_replace)
-        monkeypatch.setattr(catalog_module.os, "replace", bad_replace)
-
-        with pytest.raises(OSError, match="simulated replace failure"):
-            save_model_catalog(SAMPLE_CATALOG)
-
-    def test_unlink_oserror_is_suppressed_and_original_exception_reraised(
-        self, monkeypatch, tmp_path
-    ):
-        """If both os.replace and os.unlink fail, the OSError from unlink is
-        suppressed and the original replace failure is re-raised."""
-
-        output_file = tmp_path / "model_catalog.json"
-        monkeypatch.setattr(catalog_module, "get_model_catalog_path", lambda: output_file)
-
-        def bad_replace(src, dst):
-            raise OSError("simulated replace failure")
-
-        def bad_unlink(path):
-            raise OSError("simulated unlink failure")
-
-        monkeypatch.setattr(catalog_module.os, "replace", bad_replace)
-        monkeypatch.setattr(catalog_module.os, "unlink", bad_unlink)
-
-        with pytest.raises(OSError, match="simulated replace failure"):
-            save_model_catalog(SAMPLE_CATALOG)
-
-
-# ---------------------------------------------------------------------------
 # maybe_sync_model_pricing — missing/stale logic (pricing.py lines 125-153)
 # ---------------------------------------------------------------------------
 

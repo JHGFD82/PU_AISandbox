@@ -24,7 +24,6 @@ given professor is in.
 
 import json
 import logging
-import os
 import secrets
 import threading
 from dataclasses import asdict, dataclass
@@ -33,6 +32,7 @@ from pathlib import Path
 from typing import Any
 
 from ..console import print_banner, print_subsection
+from ..file_writing import write_in_one_step
 from ..paths import data_root
 from ..models.catalog import (
     get_model_pricing,
@@ -772,33 +772,14 @@ class TokenTracker:
         power cut — can no longer leave the month's accounting truncated:
         the original file is untouched until the replacement is complete.
 
-        (This is the same approach ``ConversationStore.save()`` and
-        ``save_model_catalog()`` already use, for the same reason.)
+        Every file the sandbox keeps is saved this way; see
+        ``src/file_writing.py``.
 
         Args:
             data: The complete usage record to write, in the same shape
                   ``_load_usage_data()`` returns.
         """
-        data_file = self._require_data_file()
-        data_file.parent.mkdir(parents=True, exist_ok=True)
-        # The temporary file goes in the same folder as the real one, because
-        # moving a file into place is only guaranteed to be a single step when
-        # both are on the same disk. Its name includes the process and thread
-        # doing the writing so two writers never reuse the same scratch file.
-        tmp_path = data_file.with_name(
-            f"{data_file.name}.{os.getpid()}.{threading.get_ident()}.tmp"
-        )
-        try:
-            with open(tmp_path, "w") as f:
-                json.dump(data, f, indent=2)
-            os.replace(tmp_path, data_file)
-        except Exception:
-            # Don't leave scratch files behind in data/ if the write failed.
-            try:
-                os.unlink(tmp_path)
-            except OSError:
-                pass
-            raise
+        write_in_one_step(self._require_data_file(), json.dumps(data, indent=2))
 
     def _save_usage_data(self) -> None:
         """Save the current in-memory usage data."""
@@ -1023,11 +1004,7 @@ class TokenTracker:
             if not archive_path.exists():
                 if records:
                     folded = fold_usage_records(records, month)
-                    archive_path.parent.mkdir(parents=True, exist_ok=True)
-                    tmp_path = archive_path.with_suffix(".tmp")
-                    with open(tmp_path, "w") as f:
-                        json.dump(folded, f, indent=2)
-                    os.replace(tmp_path, archive_path)
+                    write_in_one_step(archive_path, json.dumps(folded, indent=2))
                     logging.info(f"Folded shared-write month {month} for {self.professor} → {archive_path.name}")
                 else:
                     # Nothing readable and nothing archived: an empty
@@ -1368,31 +1345,7 @@ class TokenTracker:
             corrections: The whole structure, as ``_load_corrections()``
                          returns it.
         """
-        path = self._corrections_path()
-        path.parent.mkdir(parents=True, exist_ok=True)
-        # The scratch file's name carries the process and thread writing it, so
-        # two writers never share one. A single fixed name looked harmless while
-        # only one thing ever wrote here, and stopped being harmless the moment
-        # a parallel job did: two threads filled the same scratch file at once
-        # and both then moved it, so the second move found nothing there and
-        # raised FileNotFoundError inside a translation worker — after leaving
-        # the real file holding one write laid over another, which no longer
-        # parsed as JSON. The usage data next door is written this way for the
-        # same reason; see ``_save_usage_data_to()``.
-        temporary = path.with_name(
-            f"{path.name}.{os.getpid()}.{threading.get_ident()}.tmp"
-        )
-        try:
-            with open(temporary, "w") as f:
-                json.dump(corrections, f, indent=2)
-            os.replace(temporary, path)
-        except Exception:
-            # Never leave scratch files behind in someone's data folder.
-            try:
-                os.unlink(temporary)
-            except OSError:
-                pass
-            raise
+        write_in_one_step(self._corrections_path(), json.dumps(corrections, indent=2))
 
     def _month_corrections(self, month: str | None = None) -> dict[str, Any]:
         """One month's corrections, with both lists present even when empty."""

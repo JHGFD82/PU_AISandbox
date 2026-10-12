@@ -399,7 +399,7 @@ class TestSettingAPreferenceFromTheInterface:
             seen.append((Path(src).name, Path(dst).name))
             return real_replace(src, dst)
 
-        with mock.patch("src.plugin_preferences.os.replace", watched):
+        with mock.patch("src.file_writing.os.replace", watched):
             set_live(prefs, "webui", "keep_job_outputs", "false")
         assert seen and seen[0][1] == "preferences.toml"
         assert seen[0][0] != "preferences.toml"
