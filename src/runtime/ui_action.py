@@ -27,6 +27,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
+from src.errors import CLIError
+
 # Called with (completed_count, total_count) after each unit of work (a
 # page, an image) finishes, in completion order. Every method that accepts
 # one defaults it to None and does nothing extra when none is passed — the
@@ -340,6 +342,82 @@ def register_extension_ui_hooks(
     )
 
 
+def _field_raw(fields: dict, name: str) -> str:
+    """Return what was typed into one form field, as text with spaces trimmed, or ``''`` if nothing was."""
+    value = fields.get(name)
+    return str(value if value is not None else "").strip()
+
+
+def field_text(fields: dict, name: str) -> Optional[str]:
+    """Return what was typed into one form field, or ``None`` if it was left blank.
+
+    Args:
+        fields: The submitted form values, keyed by ``UiField.name``.
+        name: The field to read, e.g. ``'page_nums'``.
+
+    Returns:
+        The text with surrounding spaces removed, or ``None`` for a blank box,
+        so that "left blank" and "typed something" are told apart in one test.
+    """
+    return _field_raw(fields, name) or None
+
+
+def field_is_on(fields: dict, name: str) -> bool:
+    """Return whether a checkbox in the submitted form was ticked.
+
+    A browser sends a ticked box in more than one way — ``'true'``, ``'on'``,
+    ``'1'`` or ``'yes'`` — and an unticked one often not at all, so this
+    accepts all of those and reads anything else, including a missing field,
+    as not ticked.
+
+    Args:
+        fields: The submitted form values, keyed by ``UiField.name``.
+        name: The checkbox to read, e.g. ``'preserve_tables'``.
+    """
+    return _field_raw(fields, name).lower() in ("true", "1", "on", "yes")
+
+
+def field_int(fields: dict, name: str, label: str) -> Optional[int]:
+    """Return the whole number typed into one form field, or ``None`` if it was left blank.
+
+    Args:
+        fields: The submitted form values, keyed by ``UiField.name``.
+        name: The field to read, e.g. ``'workers'``.
+        label: What the field is called in plain words, for the error message
+               (e.g. ``'number of parallel workers'``).
+
+    Raises:
+        CLIError: If something other than a whole number was typed.
+    """
+    raw = _field_raw(fields, name)
+    if not raw:
+        return None
+    try:
+        return int(raw)
+    except ValueError:
+        raise CLIError(f"Invalid {label} '{raw}' — must be a whole number.") from None
+
+
+def field_float(fields: dict, name: str, label: str) -> Optional[float]:
+    """Return the number typed into one form field, or ``None`` if it was left blank.
+
+    Args:
+        fields: The submitted form values, keyed by ``UiField.name``.
+        name: The field to read, e.g. ``'temperature'``.
+        label: What the field is called in plain words, for the error message.
+
+    Raises:
+        CLIError: If something other than a number was typed.
+    """
+    raw = _field_raw(fields, name)
+    if not raw:
+        return None
+    try:
+        return float(raw)
+    except ValueError:
+        raise CLIError(f"Invalid {label} '{raw}' — must be a number.") from None
+
+
 def notes_target_field(group: str = "Notes") -> UiField:
     """Return the field asking which prompt a note should be added to.
 
@@ -397,7 +475,7 @@ def apply_notes(fields: dict, *services: Any) -> None:
                    go down either of two paths (a document or a picture of
                    one), since which it will be is not known this early.
     """
-    note = (fields.get("notes") or "").strip()
+    note = field_text(fields, "notes")
     if not note:
         return
     target = str(fields.get("notes_target") or "both").strip().lower()

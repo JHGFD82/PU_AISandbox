@@ -433,6 +433,8 @@ def run_ui_action(self, fields, professor, model, on_progress, output_dir,
     )
 ```
 
+**Reading `fields`:** every value arrives as text, and a box left blank may be missing altogether. `src/runtime/ui_action.py` has four readers that handle both the same way for every plugin: `field_text(fields, "abstract")` gives the text or `None` for a blank box, `field_is_on(fields, "toc")` says whether a checkbox was ticked, and `field_int(fields, "workers", "number of parallel workers")` and `field_float(...)` give a number or `None`, stopping the job with a plain message naming the field when something else was typed.
+
 The token and cost fields are optional but worth filling in: they let someone see that a job used its full response budget on some page, which the summary text alone can't show. `SandboxProcessor`'s tracker exposes `get_session_usage()` for exactly this — a running total scoped to one instance's lifetime.
 
 There is no resume. If a job is interrupted, the escape valve is a page-range field, which is why `translate` includes one.
@@ -455,11 +457,11 @@ An extension plugin never gets its own composer entry — only the base plugin's
 ```python
 import sys
 
-from src.runtime.ui_action import UiField, register_extension_ui_hooks
+from src.runtime.ui_action import UiField, field_is_on, register_extension_ui_hooks
 
 
 def _apply_kanbun(sandbox, fields):
-    if str(fields.get("kanbun", "")).strip().lower() in ("true", "1", "on", "yes"):
+    if field_is_on(fields, "kanbun"):
         sys.modules["pu_plugin.translation.plugin"].add_variant_note(sandbox, KANBUN_NOTE)
 
 
