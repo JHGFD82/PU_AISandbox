@@ -104,7 +104,8 @@ from src.settings import (  # noqa: E402
 )
 from src.runtime.ui_action import (  # noqa: E402
     PageTextCallback, ProgressCallback, UiAction, UiField, UiJobResult, UiPromptPreview,
-    apply_extension_ui_hooks, apply_notes, notes_target_field,
+    apply_extension_ui_hooks, apply_notes, field_float, field_int, field_is_on,
+    notes_target_field,
 )
 from src.services.constants import DEFAULT_PARALLEL_WORKERS        # noqa: E402
 
@@ -539,33 +540,12 @@ class TranscriptionPlugin:
             raise CLIError("No file was attached to this transcribe job.")
         file_name = fields.get("file_name") or os.path.basename(file_path)
 
-        def _to_float(value, field_label: str) -> Optional[float]:
-            raw = str(value if value is not None else "").strip()
-            if not raw:
-                return None
-            try:
-                return float(raw)
-            except ValueError:
-                raise CLIError(f"Invalid {field_label} '{raw}' — must be a number.") from None
-
-        def _to_int(value, field_label: str) -> Optional[int]:
-            raw = str(value if value is not None else "").strip()
-            if not raw:
-                return None
-            try:
-                return int(raw)
-            except ValueError:
-                raise CLIError(f"Invalid {field_label} '{raw}' — must be a whole number.") from None
-
-        def _to_bool(value) -> bool:
-            return str(value if value is not None else "").strip().lower() in ("true", "1", "on", "yes")
-
-        workers = _to_int(fields.get("workers"), "number of parallel workers") or 1
+        workers = field_int(fields, "workers", "number of parallel workers") or 1
         if workers < 1:
             raise CLIError("Number of parallel workers must be at least 1.")
-        temperature = _to_float(fields.get("temperature"), "temperature")
-        top_p = _to_float(fields.get("top_p"), "top-p")
-        max_tokens = _to_int(fields.get("max_tokens"), "max tokens")
+        temperature = field_float(fields, "temperature", "temperature")
+        top_p = field_float(fields, "top_p", "top-p")
+        max_tokens = field_int(fields, "max_tokens", "max tokens")
 
         # Generic reads of vertical/spread/passes — see this method's own
         # docstring above for why these are parsed unconditionally rather
@@ -574,11 +554,11 @@ class TranscriptionPlugin:
         # (default False/False/1), not sandbox attributes an extension can
         # toggle after the fact. Absent from every submission unless a
         # language extension registered them as its own composer fields, in
-        # which case fields.get(...) just returns None/"" and these fall
+        # which case each reads as blank and these fall
         # back to the same defaults as an installation with no extension.
-        vertical = _to_bool(fields.get("vertical"))
-        spread = _to_bool(fields.get("spread"))
-        passes = _to_int(fields.get("passes"), "number of OCR passes") or 1
+        vertical = field_is_on(fields, "vertical")
+        spread = field_is_on(fields, "spread")
+        passes = field_int(fields, "passes", "number of OCR passes") or 1
         if passes < 1:
             raise CLIError("Number of OCR passes must be at least 1.")
 
@@ -676,7 +656,7 @@ class TranscriptionPlugin:
 
         code = (fields.get("target_language") or "").strip().lower()
         target_language = LANGUAGE_MAP.get(code, "the selected language")
-        vertical = str(fields.get("vertical", "")).strip().lower() in ("true", "1", "on", "yes")
+        vertical = field_is_on(fields, "vertical")
 
         sandbox = SandboxProcessor(professor, model=model)
         apply_notes(fields, sandbox.image_processor_service)

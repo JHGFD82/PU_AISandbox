@@ -311,3 +311,41 @@ class TestAimingANoteAtOneSide:
     def test_answering_is_optional(self):
         from src.runtime.ui_action import notes_target_field
         assert notes_target_field().required is False
+
+
+class TestReadingAFormField:
+    """Every value arrives as text, and a box left blank may not arrive at all."""
+
+    def test_a_blank_or_missing_box_is_none(self):
+        from src.runtime.ui_action import field_float, field_int, field_text
+        for fields in ({}, {"x": None}, {"x": ""}, {"x": "   "}):
+            assert field_text(fields, "x") is None
+            assert field_int(fields, "x", "x") is None
+            assert field_float(fields, "x", "x") is None
+
+    def test_text_is_trimmed(self):
+        from src.runtime.ui_action import field_text
+        assert field_text({"x": "  1-5 "}, "x") == "1-5"
+
+    @pytest.mark.parametrize("value", ["true", "TRUE", "on", "1", "yes", True, " on "])
+    def test_each_way_a_ticked_box_arrives(self, value):
+        from src.runtime.ui_action import field_is_on
+        assert field_is_on({"x": value}, "x") is True
+
+    @pytest.mark.parametrize("fields", [{}, {"x": None}, {"x": ""}, {"x": "false"}, {"x": "off"}])
+    def test_anything_else_is_not_ticked(self, fields):
+        from src.runtime.ui_action import field_is_on
+        assert field_is_on(fields, "x") is False
+
+    def test_numbers(self):
+        from src.runtime.ui_action import field_float, field_int
+        assert field_int({"x": " 4 "}, "x", "x") == 4
+        assert field_float({"x": "0.5"}, "x", "x") == 0.5
+
+    def test_something_other_than_a_number_names_the_field(self):
+        from src.errors import CLIError
+        from src.runtime.ui_action import field_float, field_int
+        with pytest.raises(CLIError, match="font size 'big' — must be a whole number"):
+            field_int({"x": "big"}, "x", "font size")
+        with pytest.raises(CLIError, match="temperature 'warm' — must be a number"):
+            field_float({"x": "warm"}, "x", "temperature")

@@ -99,10 +99,10 @@ directory and adapt it as follows:
      is a plain global registry rather than something routed through
      ``DispatchPlugin``. Example::
 
-         from src.runtime.ui_action import UiField, register_extension_ui_hooks
+         from src.runtime.ui_action import UiField, field_is_on, register_extension_ui_hooks
 
          def _apply_kanbun(sandbox, fields):
-             if str(fields.get("kanbun", "")).strip().lower() in ("true", "1", "on", "yes"):
+             if field_is_on(fields, "kanbun"):
                  _base = sys.modules["pu_plugin.translation.plugin"]
                  _base.add_variant_note(sandbox, KANBUN_NOTE)
 
@@ -213,7 +213,8 @@ from src.processors.pdf_processor import generate_process_text    # noqa: E402
 from src.processors.txt_processor import TxtProcessor             # noqa: E402
 from src.runtime.ui_action import (  # noqa: E402
     PageTextCallback, ProgressCallback, UiAction, UiField, UiJobResult, UiPromptPreview,
-    apply_extension_ui_hooks, apply_notes, notes_target_field,
+    apply_extension_ui_hooks, apply_notes, field_float, field_int, field_is_on,
+    field_text, notes_target_field,
 )
 from src.services.constants import DEFAULT_PARALLEL_WORKERS       # noqa: E402
 from src.settings import DEFAULT_PAGE_SIZE                        # noqa: E402
@@ -871,27 +872,6 @@ class TranslationPlugin:
                 raise CLIError(f"Invalid {field_label} '{code}'. Use one of: {valid}.")
             return LANGUAGE_MAP[normalized]
 
-        def _to_bool(value) -> bool:
-            return str(value if value is not None else "").strip().lower() in ("true", "1", "on", "yes")
-
-        def _to_int(value, field_label: str) -> Optional[int]:
-            raw = str(value if value is not None else "").strip()
-            if not raw:
-                return None
-            try:
-                return int(raw)
-            except ValueError:
-                raise CLIError(f"Invalid {field_label} '{raw}' — must be a whole number.") from None
-
-        def _to_float(value, field_label: str) -> Optional[float]:
-            raw = str(value if value is not None else "").strip()
-            if not raw:
-                return None
-            try:
-                return float(raw)
-            except ValueError:
-                raise CLIError(f"Invalid {field_label} '{raw}' — must be a number.") from None
-
         target_code_raw = fields.get("target_language", "")
         source_language = _resolve_language(fields.get("source_language", ""), "source language")
         target_language = _resolve_language(target_code_raw, "target language")
@@ -900,7 +880,7 @@ class TranslationPlugin:
         # — the browser's answer to the command line's -c/--custom. Checked
         # first because in that mode there is no upload at all, so file_path is
         # legitimately absent rather than missing by mistake.
-        pasted_text = (fields.get("file_text") or "").strip() or None
+        pasted_text = field_text(fields, "file_text")
         file_path = fields.get("file_path")
         if not pasted_text and not file_path:
             raise CLIError(
@@ -914,21 +894,21 @@ class TranslationPlugin:
         # path whenever there is no pasted text, and unused when there is.
         document = file_path or ""
 
-        scanned = _to_bool(fields.get("scanned"))
-        spread = _to_bool(fields.get("spread"))
-        preserve_tables = _to_bool(fields.get("preserve_tables"))
-        toc = _to_bool(fields.get("toc"))
-        preserve_media = _to_bool(fields.get("preserve_media"))
-        page_nums = (fields.get("page_nums") or "").strip() or None
-        abstract_text = (fields.get("abstract") or "").strip() or None
-        font = (fields.get("font") or "").strip() or None
-        font_size = _to_int(fields.get("font_size"), "font size")
-        workers = _to_int(fields.get("workers"), "number of parallel workers") or 1
+        scanned = field_is_on(fields, "scanned")
+        spread = field_is_on(fields, "spread")
+        preserve_tables = field_is_on(fields, "preserve_tables")
+        toc = field_is_on(fields, "toc")
+        preserve_media = field_is_on(fields, "preserve_media")
+        page_nums = field_text(fields, "page_nums")
+        abstract_text = field_text(fields, "abstract")
+        font = field_text(fields, "font")
+        font_size = field_int(fields, "font_size", "font size")
+        workers = field_int(fields, "workers", "number of parallel workers") or 1
         if workers < 1:
             raise CLIError("Number of parallel workers must be at least 1.")
-        temperature = _to_float(fields.get("temperature"), "temperature")
-        top_p = _to_float(fields.get("top_p"), "top-p")
-        max_tokens = _to_int(fields.get("max_tokens"), "max tokens")
+        temperature = field_float(fields, "temperature", "temperature")
+        top_p = field_float(fields, "top_p", "top-p")
+        max_tokens = field_int(fields, "max_tokens", "max tokens")
 
         sandbox = SandboxProcessor(
             professor, model=model, temperature=temperature, top_p=top_p, max_tokens=max_tokens,
@@ -1080,11 +1060,11 @@ class TranslationPlugin:
 
         source_language = _lang_name(fields.get("source_language"))
         target_language = _lang_name(fields.get("target_language"))
-        scanned = str(fields.get("scanned", "")).strip().lower() in ("true", "1", "on", "yes")
-        abstract_text = (fields.get("abstract") or "").strip() or None
-        pasted_text = (fields.get("file_text") or "").strip() or None
-        preserve_tables = str(fields.get("preserve_tables", "")).strip().lower() in ("true", "1", "on", "yes")
-        toc = str(fields.get("toc", "")).strip().lower() in ("true", "1", "on", "yes")
+        scanned = field_is_on(fields, "scanned")
+        abstract_text = field_text(fields, "abstract")
+        pasted_text = field_text(fields, "file_text")
+        preserve_tables = field_is_on(fields, "preserve_tables")
+        toc = field_is_on(fields, "toc")
 
         sandbox = SandboxProcessor(professor, model=model)
         apply_notes(
