@@ -200,6 +200,46 @@ class TestRun:
         dp.run(args, "test", None, None, None, None)
         assert "Japanese guidance" in args._peer_guidance
 
+    def test_a_dest_owner_that_takes_args_is_given_the_command_line(self):
+        """So a flag it added (--to-kanbun) can change its guidance, even
+        though another plugin is doing the translating."""
+        dp, primary = _make_dispatcher(["en"])
+
+        class Japanese:
+            handles = ["jp"]
+            commands = ["translate"]
+
+            def get_peer_guidance(self, token, args=None):
+                return "write kanbun" if getattr(args, "to_kanbun", False) else None
+
+            def run(self, *a):
+                pass
+
+        dp._absorb(Japanese(), "translation-ea")
+        args = self._make_args(("en", "jp"))
+        args.to_kanbun = True
+        dp.run(args, "test", None, None, None, None)
+        assert args._peer_guidance == ["write kanbun"]
+
+    def test_a_dest_owner_that_takes_only_the_language_is_asked_with_it_alone(self):
+        dp, primary = _make_dispatcher(["en"])
+        asked = []
+
+        class Japanese:
+            handles = ["jp"]
+            commands = ["translate"]
+
+            def get_peer_guidance(self, token, *extra):
+                asked.append((token, extra))
+                return None
+
+            def run(self, *a):
+                pass
+
+        dp._absorb(Japanese(), "translation-ea")
+        dp.run(self._make_args(("en", "jp")), "test", None, None, None, None)
+        assert asked == [("jp", ())]
+
     def test_no_peer_guidance_when_dest_has_no_method(self):
         dp, primary = _make_dispatcher(["en"])
         secondary = _make_plugin(["jp"])

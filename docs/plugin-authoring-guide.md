@@ -88,7 +88,7 @@ plugin = MyPlugin()
 | `model_roles: dict[str, ModelRole]` | **required** | Which models this plugin's work should use — see [Which models your plugin uses](#which-models-your-plugin-uses). A plugin without it is refused at load. |
 | `handles: list[str]` | absent | Extension plugins only — the languages you own. Match the base command's own form: short codes for `translate`, full names for `transcribe` (see [Writing an extension plugin](#writing-an-extension-plugin)). |
 | `register_command_flags(parser)` | absent | Extension plugins only — appends your flags to the base plugin's parser. |
-| `get_peer_guidance(token)` | absent | Extension plugins only — contributes destination-side prompt guidance when your language is the *target*. |
+| `get_peer_guidance(token[, args])` | absent | Extension plugins only — contributes destination-side prompt guidance when your language is the *target*. Given the parsed command line too if it has an `args` parameter. |
 | `ui_action` / `run_ui_action` / `preview_ui_action` | absent | Gives your command a form in the web interface — see [A button in the web interface](#a-button-in-the-web-interface). |
 
 None of the optional members are part of the `ModePlugin` protocol. Each is read with `getattr(plugin, "...", None)`, so declaring none of them leaves your plugin command-line only.
@@ -345,6 +345,15 @@ To add languages to an existing command like `translate`:
    def get_peer_guidance(self, token: str) -> Optional[str]:
        if token == "jp":
            return "Use kanji level appropriate for academic audiences."
+       return None
+   ```
+
+   Give it a parameter named `args` as well, and it is handed everything typed on the command line, so a flag your plugin added can change the guidance even when another plugin is doing the translating — `translate en-jp --to-kanbun` is driven by the English plugin, and it is the Japanese plugin's `--to-kanbun` that asks for kanbun:
+
+   ```python
+   def get_peer_guidance(self, token: str, args=None) -> Optional[str]:
+       if token == "jp" and getattr(args, "to_kanbun", False):
+           return KANBUN_TARGET_NOTE
        return None
    ```
 
