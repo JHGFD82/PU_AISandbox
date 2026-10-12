@@ -218,6 +218,46 @@ def save_to_text_file(content: str, output_path: str, label: str) -> None:
         )
 
 
+def _fallback_to_text(content: str, output_path: str, label: str) -> None:
+    """Save as a plain .txt file instead, used when a Word document or PDF can't be made.
+
+    Args:
+        content: The text to save.
+        output_path: The originally-requested path; its extension is swapped
+                     to .txt automatically.
+        label: A short description used in the saved-confirmation message
+               shown to the user.
+    """
+    text_output_path = str(Path(output_path).with_suffix('.txt'))
+    save_to_text_file(content, text_output_path, label)
+
+
+def _fallback_after_error(error: Exception, kind: str, content: str, output_path: str, label: str) -> None:
+    """Say that making a document failed, then save the text as a .txt file instead.
+
+    A plain text file can hold any character, which is why it is the fallback
+    for Chinese, Japanese and Korean text a document's fonts could not show.
+
+    Args:
+        error: What went wrong.
+        kind: The kind of document that could not be made, as the person
+              would call it, e.g. ``'PDF'`` or ``'Word document'``.
+        content: The text to save.
+        output_path: The originally-requested path.
+        label: A short description used in the saved-confirmation message.
+    """
+    _emit_message(
+        f"Error generating {kind}: {error}",
+        level=logging.ERROR,
+        log_message=f'Error saving to {kind}: {error}',
+    )
+    _emit_message(
+        "Falling back to text file for reliable CJK character support...",
+        level=logging.WARNING,
+    )
+    _fallback_to_text(content, output_path, label)
+
+
 def append_to_text_file(content: str, output_path: str, label: str) -> None:
     """Add text to the end of an existing .txt file, followed by a blank line.
 

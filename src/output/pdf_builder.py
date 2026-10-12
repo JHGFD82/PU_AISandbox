@@ -5,7 +5,10 @@ from pathlib import Path
 from typing import Optional
 
 from .font_resolver import get_pdf_font
-from ._output_utils import _emit_message, _normalize_paragraphs, _extract_markdown_tables, save_to_text_file
+from ._output_utils import (
+    _emit_message, _extract_markdown_tables, _fallback_after_error, _fallback_to_text,
+    _normalize_paragraphs,
+)
 from ..settings import DEFAULT_FONT_SIZE
 
 # PDF page margins (in points, 72 pts = 1 inch)
@@ -192,27 +195,4 @@ def save_to_pdf(
         )
         _fallback_to_text(content, output_path, label)
     except Exception as e:
-        _emit_message(
-            f"Error generating PDF: {e}",
-            level=logging.ERROR,
-            log_message=f'Error saving to PDF: {e}',
-        )
-        _emit_message(
-            "Falling back to text file for reliable CJK character support...",
-            level=logging.WARNING,
-        )
-        _fallback_to_text(content, output_path, label)
-
-
-def _fallback_to_text(content: str, output_path: str, label: str) -> None:
-    """Save as a plain .txt file instead, used when PDF generation fails.
-
-    Args:
-        content: The text to save.
-        output_path: The originally-requested .pdf path; the extension is
-                     swapped to .txt automatically.
-        label: A short description used in the saved-confirmation message
-               shown to the user.
-    """
-    text_output_path = str(Path(output_path).with_suffix('.txt'))
-    save_to_text_file(content, text_output_path, label)
+        _fallback_after_error(e, "PDF", content, output_path, label)
