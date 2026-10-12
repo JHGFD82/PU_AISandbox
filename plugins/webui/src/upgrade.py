@@ -301,6 +301,23 @@ def _run(*arguments: str, timeout: int) -> subprocess.CompletedProcess[str]:
         raise UpgradeError(_TOOK_TOO_LONG.format(seconds=timeout)) from None
 
 
+def _ask(*arguments: str) -> Optional[str]:
+    """Return git's answer to a quick question about this copy, or None if there isn't one.
+
+    For questions whose answer only decides how much to say: git missing, too
+    slow, or answering with an error all come back as None, so a page asking
+    can say less rather than fail to open.
+
+    Returns:
+        What git printed, or None.
+    """
+    try:
+        done = _run(*arguments, timeout=_LOOKING_TIMEOUT_SECONDS)
+    except (git_tool.GitUnusable, UpgradeError, OSError):
+        return None
+    return done.stdout if done.returncode == 0 else None
+
+
 def _said(done: subprocess.CompletedProcess[str]) -> str:
     """Return git's own words from a finished command."""
     return git_tool.what_it_said(done)
@@ -320,14 +337,10 @@ def package_version() -> Optional[Version]:
         The version, or None if this copy was not fetched with git, or git is
         not usable, or git did not answer in the ordinary way.
     """
-    try:
-        done = _run("log", "-1", "--format=%h%x09%cs%x09%s",
-                    timeout=_LOOKING_TIMEOUT_SECONDS)
-    except (git_tool.GitUnusable, UpgradeError, OSError):
+    answer = _ask("log", "-1", "--format=%h%x09%cs%x09%s")
+    if answer is None:
         return None
-    if done.returncode != 0:
-        return None
-    parts = done.stdout.strip().split("\t", 2)
+    parts = answer.strip().split("\t", 2)
     if len(parts) != 3:
         return None
     return Version(sha=parts[0], date=parts[1], subject=parts[2])
@@ -345,14 +358,10 @@ def where_this_copy_is() -> Optional[str]:
         Something like ``refs/heads/main 3f9c…``, or None if git is not usable
         or this copy was not fetched with git.
     """
-    try:
-        done = _run("rev-parse", "--symbolic-full-name", "HEAD", "HEAD",
-                    timeout=_LOOKING_TIMEOUT_SECONDS)
-    except (git_tool.GitUnusable, UpgradeError, OSError):
+    answer = _ask("rev-parse", "--symbolic-full-name", "HEAD", "HEAD")
+    if answer is None:
         return None
-    if done.returncode != 0:
-        return None
-    return " ".join(done.stdout.split()) or None
+    return " ".join(answer.split()) or None
 
 
 def why_this_copy_cannot_be_updated() -> Optional[str]:
@@ -579,12 +588,8 @@ def _is_changing(*paths: str) -> bool:
     pressing the button: an update that also has to install new software, and
     one that changes the sandbox's built-in default settings.
     """
-    try:
-        done = _run("diff", "--name-only", "HEAD", "@{u}", "--", *paths,
-                    timeout=_LOOKING_TIMEOUT_SECONDS)
-    except (git_tool.GitUnusable, UpgradeError, OSError):
-        return False
-    return done.returncode == 0 and bool(done.stdout.strip())
+    answer = _ask("diff", "--name-only", "HEAD", "@{u}", "--", *paths)
+    return bool(answer and answer.strip())
 
 
 # ── Doing it ────────────────────────────────────────────────────────────────
