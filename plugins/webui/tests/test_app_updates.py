@@ -133,7 +133,7 @@ class TestInstallingAPluginOverTheWeb:
         source = Path(app_module.__file__).read_text()
         handler = source[source.index("def api_install_plugin"):]
         handler = handler[:handler.index("@app.get")]
-        assert handler.index("threading.Timer") < handler.index("return {")
+        assert handler.index("_restart_soon(") < handler.index("return {")
 
 
 class TestUpdatingTheSandboxOverTheWeb:
@@ -369,7 +369,7 @@ class TestUpdatingTheSandboxOverTheWeb:
         stream = handler[handler.index("def event_stream"):]
         assert stream.index('"restarting": True') < stream.index("browser_has_been_told.set()")
         assert (handler.index("browser_has_been_told.wait(")
-                < handler.index("threading.Timer(_RESTART_AFTER_AN_UPDATE_SECONDS"))
+                < handler.index("_restart_soon(_RESTART_AFTER_AN_UPDATE_SECONDS"))
 
     def test_an_update_nobody_is_watching_still_restarts(
             self, unlocked_client, upgrade, monkeypatch):

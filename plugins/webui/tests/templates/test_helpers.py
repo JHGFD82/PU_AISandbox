@@ -14,11 +14,22 @@ class TestWaitingForARestartIsWrittenOnce:
     the settings page could not have called it without getting a null."""
 
     def test_it_is_in_the_shared_partial(self):
-        helpers = (WEBUI_SRC / "templates"
-                   / "_helpers.html").read_text()
-        assert "function waitForTheSandboxToComeBack(say)" in helpers
-        assert "install-busy" not in _code_only(helpers), (
+        wait = (WEBUI_SRC / "templates"
+                / "_wait_for_the_sandbox.html").read_text()
+        assert "function waitForTheSandboxToComeBack(say, whenBack)" in wait
+        assert "install-busy" not in _code_only(wait), (
             "it still names one page's element")
+        helpers = (WEBUI_SRC / "templates" / "_helpers.html").read_text()
+        assert '{% include "_wait_for_the_sandbox.html" %}' in helpers
+        assert "function waitForTheSandboxToComeBack" not in helpers
+
+    def test_the_last_page_of_setup_waits_the_same_way(self):
+        """It had a copy of its own, without the deadline, so a sandbox that
+        never started after setup left the page saying "starting now" for
+        ever."""
+        setup_web = (WEBUI_SRC / "setup_web.py").read_text()
+        assert "_wait_for_the_sandbox.html" in setup_web
+        assert 'fetch("/"' not in setup_web, "setup has its own copy again"
 
     def test_the_page_is_only_declared_once_how_long_to_wait(self):
         """Two `const RESTART_PATIENCE_MS` in one scope is a SyntaxError that
@@ -29,9 +40,9 @@ class TestWaitingForARestartIsWrittenOnce:
         """The settings page is also shown inside the chat page's settings
         panel. Reloading that frame alone would leave a fresh settings page
         inside a chat page still talking to a server that no longer exists."""
-        helpers = (WEBUI_SRC / "templates"
-                   / "_helpers.html").read_text()
-        assert "window.top.location.reload()" in helpers
+        wait = (WEBUI_SRC / "templates"
+                / "_wait_for_the_sandbox.html").read_text()
+        assert "window.top.location.reload()" in wait
 
 
 class TestNoPageCallsAHelperItHasNot:
