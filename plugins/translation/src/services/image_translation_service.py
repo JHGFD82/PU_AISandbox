@@ -92,52 +92,6 @@ class ImageTranslationService(BaseService):
             return self.custom_max_tokens
         return get_model_max_completion_tokens(model, IMAGE_TRANSLATION_MAX_TOKENS)
 
-    def _build_system_prompt(self, source_language: str, target_language: str, vertical: bool = False, spread: bool = False) -> str:
-        """Build the system prompt (the model's standing instructions) for one image translation request.
-
-        Args:
-            source_language: The language the image's text is written in.
-            target_language: The language to translate into.
-            vertical: Whether the text runs top-to-bottom, right-to-left,
-                      as in traditional vertical Japanese or Chinese layout.
-            spread: Whether the image shows two facing pages side by side
-                    (a two-page spread) rather than a single page.
-
-        Returns:
-            The system prompt text.
-        """
-        spec = ImageTranslationPromptSpec(
-            source_language=source_language,
-            target_language=target_language,
-            vertical=vertical,
-            spread=spread,
-            tables=self.tables,
-            variant_notes=self.variant_notes,
-        )
-        return spec.system_prompt()
-
-    def _build_user_prompt(self, source_language: str, target_language: str, vertical: bool = False, spread: bool = False) -> str:
-        """Build the user-facing prompt text that accompanies the image in the API request.
-
-        Args:
-            source_language: The language the image's text is written in.
-            target_language: The language to translate into.
-            vertical: Whether the text runs top-to-bottom, right-to-left.
-            spread: Whether the image shows two facing pages side by side.
-
-        Returns:
-            The user prompt text.
-        """
-        spec = ImageTranslationPromptSpec(
-            source_language=source_language,
-            target_language=target_language,
-            vertical=vertical,
-            spread=spread,
-            tables=self.tables,
-            variant_notes=self.variant_notes,
-        )
-        return spec.user_prompt()
-
     def build_prompts(self, source_language: str, target_language: str, vertical: bool = False, spread: bool = False) -> tuple[str, str]:
         """Build the prompts that would be sent to the model, without actually calling it.
 
