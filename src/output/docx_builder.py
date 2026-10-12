@@ -8,7 +8,7 @@ from typing import List, Optional
 from .font_resolver import get_docx_font
 from ._output_utils import (
     _emit_message, _normalize_paragraphs, _extract_markdown_tables,
-    _PAGE_MARKER_RE, save_to_text_file,
+    _fallback_after_error, _fallback_to_text, _PAGE_MARKER_RE,
 )
 from ..settings import DEFAULT_FONT_SIZE
 
@@ -292,27 +292,4 @@ def save_to_docx(
         _emit_message("Saving as text file instead.", level=logging.WARNING)
         _fallback_to_text(content, output_path, label)
     except Exception as e:
-        _emit_message(
-            f"Error generating Word document: {e}",
-            level=logging.ERROR,
-            log_message=f'Error saving to Word document: {e}',
-        )
-        _emit_message(
-            "Falling back to text file for reliable CJK character support...",
-            level=logging.WARNING,
-        )
-        _fallback_to_text(content, output_path, label)
-
-
-def _fallback_to_text(content: str, output_path: str, label: str) -> None:
-    """Save as a plain .txt file instead, used when Word document generation fails.
-
-    Args:
-        content: The text to save.
-        output_path: The originally-requested .docx path; the extension is
-                     swapped to .txt automatically.
-        label: A short description used in the saved-confirmation message
-               shown to the user.
-    """
-    text_output_path = str(Path(output_path).with_suffix('.txt'))
-    save_to_text_file(content, text_output_path, label)
+        _fallback_after_error(e, "Word document", content, output_path, label)

@@ -21,6 +21,7 @@ from ._output_utils import (
     _extract_markdown_tables,
     _render_table_as_ascii,
     _render_markdown_tables_as_ascii,
+    _fallback_to_text,
     save_to_text_file,
     append_to_text_file,
 )
@@ -76,6 +77,7 @@ class FileOutputHandler:
     _render_table_as_ascii           = staticmethod(_render_table_as_ascii)
     _render_markdown_tables_as_ascii = staticmethod(_render_markdown_tables_as_ascii)
     _apply_docx_table_borders        = staticmethod(_apply_docx_table_borders)
+    _fallback_to_text                = staticmethod(_fallback_to_text)
     save_to_text_file                = staticmethod(save_to_text_file)
     append_to_text_file              = staticmethod(append_to_text_file)
     save_to_pdf                      = staticmethod(save_to_pdf)
@@ -109,12 +111,6 @@ class FileOutputHandler:
     def _ensure_parent_directory(output_path: str) -> None:
         """Ensure the parent directory for output exists."""
         Path(output_path).parent.mkdir(parents=True, exist_ok=True)
-
-    @staticmethod
-    def _fallback_to_text(content: str, output_path: str, label: str) -> None:
-        """Fallback to text output when rich document generation fails."""
-        text_output_path = str(Path(output_path).with_suffix('.txt'))
-        save_to_text_file(content, text_output_path, label)
 
     @staticmethod
     def save_translation_output(

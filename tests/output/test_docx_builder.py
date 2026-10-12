@@ -16,7 +16,8 @@ from docx import Document
 
 from src.models.embedded_media import EmbeddedMedia
 from src.output import docx_builder
-from src.output.docx_builder import _apply_docx_table_borders, _fallback_to_text, save_to_docx
+from src.output._output_utils import _fallback_to_text
+from src.output.docx_builder import _apply_docx_table_borders, save_to_docx
 from src.output.file_output import FileOutputHandler
 from tests.helpers import RED, png
 
