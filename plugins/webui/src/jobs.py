@@ -289,11 +289,50 @@ class JobStore:
 
     def __init__(self) -> None:
         self._jobs: dict[str, Job] = {}
-        self._lock = threading.Lock()
+        # Re-entrant, because close() asks running() while holding it.
+        self._lock = threading.RLock()
+        # Why new jobs are being turned away, or None while they are taken.
+        # See close().
+        self._closed_because: Optional[str] = None
 
     def add(self, job: Job) -> None:
+        """Start keeping track of *job*.
+
+        Raises:
+            RuntimeError: If the store is closed (see ``close()``), saying why.
+        """
         with self._lock:
+            if self._closed_because is not None:
+                raise RuntimeError(self._closed_because)
             self._jobs[job.id] = job
+
+    def close(self, why: str) -> bool:
+        """Stop taking new jobs, so that the sandbox can restart without losing one.
+
+        Only done when nothing is running and nothing else has closed the store
+        already, both decided at once: asking "is anything running?" and then
+        closing would leave a gap for a job to start in, and that job would be
+        thrown away by the restart.
+
+        Args:
+            why: What somebody starting a job is told while it stays closed,
+                 e.g. that the sandbox is about to restart.
+
+        Returns:
+            True if this call closed the store. False if a job is running, or
+            the store was already closed for something else — ``running()``
+            tells the two apart.
+        """
+        with self._lock:
+            if self._closed_because is not None or self.running():
+                return False
+            self._closed_because = why
+            return True
+
+    def reopen(self) -> None:
+        """Take new jobs again, after whatever closed the store did not restart after all."""
+        with self._lock:
+            self._closed_because = None
 
     def get(self, job_id: str) -> Optional[Job]:
         with self._lock:

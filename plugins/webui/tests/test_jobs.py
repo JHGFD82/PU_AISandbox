@@ -157,6 +157,46 @@ class TestJobStore:
         store.set_status("nope", "done")  # must not raise
 
 
+class TestClosingTheJobStoreForARestart:
+    """A restart destroys a running job, so one must not start in between
+    deciding to restart and restarting."""
+
+    def _job(self, job_id="job_1"):
+        return jobs.Job(id=job_id, professor="heller", conversation_id="c_1",
+                        action_id="translate")
+
+    def test_a_closed_store_turns_new_jobs_away_saying_why(self):
+        store = jobs.JobStore()
+        assert store.close("about to restart") is True
+        with pytest.raises(RuntimeError, match="about to restart"):
+            store.add(self._job())
+        assert store.get("job_1") is None
+
+    def test_it_will_not_close_while_a_job_is_running(self):
+        store = jobs.JobStore()
+        store.add(self._job())
+        assert store.close("about to restart") is False
+        store.add(self._job("job_2"))  # still taking jobs
+
+    def test_a_finished_job_does_not_keep_it_open(self):
+        store = jobs.JobStore()
+        store.add(self._job())
+        store.set_status("job_1", "done")
+        assert store.close("about to restart") is True
+
+    def test_only_one_thing_can_close_it(self):
+        store = jobs.JobStore()
+        assert store.close("an update") is True
+        assert store.close("an install") is False
+
+    def test_reopening_takes_jobs_again(self):
+        store = jobs.JobStore()
+        store.close("about to restart")
+        store.reopen()
+        store.add(self._job())
+        assert store.close("about to restart") is False
+
+
 class TestFindPluginForAction:
     def test_finds_matching_plugin(self):
         p = _FakePlugin(action_id="translate")

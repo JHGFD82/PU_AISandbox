@@ -40,6 +40,19 @@ _register("_pu_webui_setup_web", "src/setup_web.py")
 _register("_pu_webui_app", "src/app.py")
 
 @pytest.fixture(autouse=True)
+def _a_fresh_job_store(monkeypatch):
+    """Give every test its own record of running jobs.
+
+    The app keeps one for the life of the process, and an update or install
+    closes it until the restart that follows — which tests never let happen,
+    so a store closed in one test would turn away every job in the next.
+    """
+    app_module = sys.modules["_pu_webui_app"]
+    jobs = sys.modules["_pu_webui_jobs"]
+    monkeypatch.setattr(app_module, "_job_store", jobs.JobStore())
+
+
+@pytest.fixture(autouse=True)
 def _do_not_look_for_updates_while_testing():
     """Stop every create_app() in the suite reaching out to GitHub.
 
