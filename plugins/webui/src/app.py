@@ -393,6 +393,25 @@ class AddModelBody(BaseModel):
     professor: str
 
 
+def _provider_model_name(body: AddModelBody) -> str:
+    """Return the model name the settings page asked to add, or raise a 400 error if it names no provider.
+
+    Args:
+        body: What the browser sent when asking to add a model.
+
+    Returns:
+        The name with surrounding spaces removed, e.g. ``'openai/gpt-5.2'``.
+    """
+    name = body.provider_model.strip()
+    if "/" not in name:
+        raise HTTPException(
+            400,
+            "A model is named as its provider and then the model, separated by a "
+            "slash — for example openai/gpt-5.2 or anthropic/claude-opus-4-8.",
+        )
+    return name
+
+
 class TestModelBody(BaseModel):
     professor: str
 
@@ -1409,13 +1428,7 @@ def create_app(host: str = "127.0.0.1") -> FastAPI:
         """Add a model by name, then find out what it can do and record that."""
         _require_unlocked(request)
         professor = _validated_professor(body.professor)
-        name = body.provider_model.strip()
-        if "/" not in name:
-            raise HTTPException(
-                400,
-                "A model is named as its provider and then the model, separated by a "
-                "slash — for example openai/gpt-5.2 or anthropic/claude-opus-4-8.",
-            )
+        name = _provider_model_name(body)
         from src.config import get_api_key
         from src.models import add_model_to_catalog
 
@@ -1443,13 +1456,7 @@ def create_app(host: str = "127.0.0.1") -> FastAPI:
         """
         _require_unlocked(request)
         professor = _validated_professor(body.professor)
-        name = body.provider_model.strip()
-        if "/" not in name:
-            raise HTTPException(
-                400,
-                "A model is named as its provider and then the model, separated by a "
-                "slash — for example openai/gpt-5.2 or anthropic/claude-opus-4-8.",
-            )
+        name = _provider_model_name(body)
         from src.config import get_api_key
         from src.models import add_model_to_catalog
         from src.models.capabilities import TESTING_STEPS
