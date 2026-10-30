@@ -1568,3 +1568,54 @@ class TestAModelNameInTheSidebarFiltersTheList:
         script = self._chat().split("function filterByModel(model) {")[1].split("\n}\n")[0]
         assert "const filter = defaultFilter();" in script
         assert "state.filter = filter;" in script
+
+
+class TestTheResponseLengthBox:
+    """What is typed into Max response tokens is what gets sent.
+
+    The box is plain text, so it is read the way a person writes a number, and
+    a reply arriving must not put back an older value behind the box's back.
+    """
+
+    def _script(self):
+        return _rendered_chat()
+
+    def _function(self, script, name):
+        body = script[script.index(f"function {name}"):]
+        return body[:body.index("\n}\n")]
+
+    def test_a_number_with_commas_is_read_whole(self):
+        """parseInt("16,000") is 16, which cuts every answer off after a few words."""
+        parse = self._function(self._script(), "parseTokenCount")
+        assert 'replace(/[,\\s_]/g, "")' in parse
+        assert "parseInt" not in parse
+
+    def test_the_box_is_not_read_with_parseint(self):
+        reading = self._function(self._script(), "readSamplingInputs")
+        assert "parseInt" not in reading
+        assert "parseTokenCount(" in reading
+
+    def test_something_unreadable_keeps_the_last_good_value_and_says_so(self):
+        """JSON turns NaN into null, so an unreadable box read as a number would clear the
+        setting in silence."""
+        script = self._script()
+        reading = self._function(script, "readSamplingInputs")
+        assert "maxTokOk ? maxTok : state.sampling.max_tokens" in reading
+        assert "showMaxTokensError(!maxTokOk)" in reading
+        assert 'id="sampling-max-tokens-error"' in script
+
+    def test_done_stays_open_on_a_number_it_cannot_read(self):
+        script = self._script()
+        done = script[script.index('getElementById("sampling-options-done")'):]
+        done = done[:done.index("});")]
+        assert "if (!readSamplingInputs())" in done
+
+    def test_reopening_the_open_conversation_keeps_the_panel(self):
+        """Every reply reopens the conversation; the panel may hold something
+        typed while it was arriving."""
+        script = self._script()
+        opening = script[script.index("async function openConversation"):]
+        opening = opening[:opening.index("if (conv.active_job_id)")]
+        assert "const movingTo = state.conversationId !== id;" in opening
+        assert opening.index("const movingTo") < opening.index("state.conversationId = id;")
+        assert "if (movingTo) {" in opening
