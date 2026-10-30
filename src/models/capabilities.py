@@ -2,8 +2,9 @@
 
 The sandbox has to know several things about a model before it can use one
 properly: whether it can look at an image, what it wants the response-length
-setting called, which label it expects on a system instruction, and whether it
-will accept being told how varied its wording should be. Providers do not
+setting called, which label it expects on a system instruction, whether it
+will accept being told how varied its wording should be, and the longest answer
+it can give. Providers do not
 publish any of this in a form that can be read, and the pricing service the
 sandbox already talks to reports prices and nothing else.
 
@@ -28,6 +29,7 @@ unanswered and reported as untested.
 """
 
 import logging
+import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional
@@ -120,6 +122,10 @@ def _is_a_refusal(error: Exception) -> bool:
     """
     if is_transient_error(error):
         return False
+    # Before the list below, which matches bare status codes: a stated limit
+    # such as 14010 contains "401" and would be taken for a refused key.
+    if stated_output_limit(str(error)) is not None:
+        return True
     message = str(error).lower()
     if any(phrase in message for phrase in _NOT_ABOUT_THE_MODEL):
         return False
@@ -185,6 +191,54 @@ _ABOUT_THE_PICTURE = (
 
 # Said to every probe. Short, harmless, and never shown to anyone.
 _HELLO = [{"role": "user", "content": "hi"}]
+
+# Far more than any model can write, so that a provider which checks the cap
+# refuses it and says what the most is. Nothing published reads anywhere near
+# this; the longest seen while writing this was 128,000.
+_FAR_TOO_MANY_TOKENS = 10_000_000
+
+# Sent with that cap instead of "hi". Some providers don't check the cap and
+# simply answer, with nothing to stop them going on; asking for one word keeps
+# that answer as short as the ones the other probes get.
+_ONE_WORD = [{"role": "user", "content": "Reply with the single word: ok"}]
+
+# How providers state the longest answer a model can give when refusing a cap
+# above it, copied from real refusals. Only these are read, because a refusal
+# can carry other numbers — a Llama model on Azure answers with the most it
+# can *read and write together* (131,072), and recording that as the most it
+# can write would let a request ask for more than the model will give.
+_OUTPUT_LIMIT_WORDINGS = (
+    # OpenAI: "max_tokens is too large: 10000000. This model supports at most
+    # 16384 completion tokens, whereas you provided 10000000."
+    re.compile(r"supports at most ([\d,]+) completion tokens", re.IGNORECASE),
+    # Anthropic, through Azure: "max_tokens: 10000000 > 128000, which is the
+    # maximum allowed number of output tokens for claude-opus-4-8"
+    re.compile(r">\s*([\d,]+), which is the maximum allowed number of output tokens",
+               re.IGNORECASE),
+)
+
+
+def stated_output_limit(error_text: str) -> Optional[int]:
+    """Read the longest answer a model can give out of a provider's refusal.
+
+    Args:
+        error_text: What the provider said when it turned down a request for
+                    too long an answer.
+
+    Returns:
+        The most tokens the model will write in one answer (tokens are roughly
+        words), or ``None`` if the refusal doesn't state it in a wording known
+        to mean exactly that.
+    """
+    for wording in _OUTPUT_LIMIT_WORDINGS:
+        found = wording.search(error_text)
+        if found:
+            limit = int(found.group(1).replace(",", ""))
+            # A figure at or above what was asked for can't be the reason for
+            # the refusal, so it isn't the limit, whatever the sentence says.
+            if 0 < limit < _FAR_TOO_MANY_TOKENS:
+                return limit
+    return None
 
 
 @dataclass
@@ -388,6 +442,41 @@ def _probe_vision(asker: _Asker, report: CapabilityReport) -> bool:
     return True
 
 
+def _probe_output_limit(asker: _Asker, report: CapabilityReport) -> bool:
+    """Find out the longest answer the model can give, by asking for far more.
+
+    No provider lists this anywhere it can be looked up, but most of them say
+    it when refusing a request for more: "this model supports at most 16384
+    completion tokens". So this asks for ten million and reads the figure out
+    of the refusal.
+
+    Not every provider checks. Some take the request and answer it, and then
+    nothing has been learned; that is reported as unsettled rather than
+    guessed at. Run last because, unlike the others, it is refused on purpose,
+    and a temporary failure here should not cost the answers already settled.
+    """
+    accepted, error = asker.ask(
+        messages=_ONE_WORD, **{asker.max_tokens_field: _FAR_TOO_MANY_TOKENS}
+    )
+    if accepted:
+        report.unsettled.append(
+            "Could not settle the longest answer it can give: the provider "
+            "accepted a request for ten million tokens without saying"
+        )
+        return True
+
+    limit = stated_output_limit(error)
+    if limit is None:
+        report.unsettled.append(
+            f"Could not settle the longest answer it can give: {error[:140]}"
+        )
+        return True
+
+    report.findings["max_output_tokens"] = limit
+    report.settled.append(f"Longest answer it can give: {limit:,} tokens")
+    return True
+
+
 # Run in this order because each depends on the ones before it having settled
 # how a request to this model has to be addressed.
 #
@@ -400,6 +489,7 @@ _PROBES = (
     ("Checking how to give it instructions", _probe_system_role),
     ("Checking which settings it accepts", _probe_sampling_params),
     ("Checking whether it can read images", _probe_vision),
+    ("Checking the longest answer it can give", _probe_output_limit),
 )
 
 # How many steps a caller showing progress should expect in total: the probes

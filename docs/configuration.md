@@ -207,6 +207,11 @@ what no provider publishes anywhere readable:
 | What does it call the response-length setting? | `prefers.max_tokens_field` |
 | What label does it want on an opening instruction? | `prefers.system_role` |
 | Does it accept `temperature` and `top_p`? | `rejects` |
+| What is the longest answer it can give, in tokens? | `max_output_tokens` |
+
+The last is found by asking for ten million tokens: most providers refuse and
+say what the most is. Some (Gemini and Mistral among them) accept the request
+instead without saying, and the question is left unsettled for those models.
 
 This matters because chat needs a model that can read images — a question typed
 in the browser may carry a document — so a model whose capabilities were never
