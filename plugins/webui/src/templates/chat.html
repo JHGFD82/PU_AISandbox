@@ -291,6 +291,8 @@
   .sampling-options-popover .job-field label { font-size: var(--text-xs); }
   .sampling-options-footer { display: flex; justify-content: flex-end; gap: 0.4rem; margin-top: 0.3rem; }
   .sampling-options-footer button { padding: 0.4rem 0.6rem; font-size: var(--text-sm); }
+  .field-note.field-error { color: var(--danger-text); }
+  .field-note.field-error[hidden] { display: none; }
 
   #messages { flex: 1; overflow-y: auto; padding: var(--space-6) var(--space-4); }
 
@@ -1033,7 +1035,11 @@
             </div>
             <div class="job-field">
               <label for="sampling-max-tokens">Max response tokens</label>
-              <input type="text" id="sampling-max-tokens" placeholder="">
+              <input type="text" id="sampling-max-tokens" placeholder="" inputmode="numeric">
+              <div class="field-note field-error" id="sampling-max-tokens-error" role="alert" hidden>
+                Enter a whole number, such as 8000 or 8,000. Leave it blank to
+                use the number shown in grey.
+              </div>
             </div>
             <div class="job-field" id="system-prompt-field">
               <label for="sampling-system-prompt">Instructions for this conversation</label>
@@ -1998,6 +2004,7 @@ function showSamplingDefaults(model) {
 }
 
 function openSamplingPopover() {
+  showMaxTokensError(false);
   document.getElementById("sampling-temperature").value = state.sampling.temperature ?? "";
   document.getElementById("sampling-top-p").value = state.sampling.top_p ?? "";
   document.getElementById("sampling-max-tokens").value = state.sampling.max_tokens ?? "";
@@ -2014,19 +2021,45 @@ function toggleSamplingPopover() {
   if (popover.hidden) openSamplingPopover(); else closeSamplingPopover();
 }
 
+// The number of tokens typed into the response-length box, read the way a
+// person writes it. Returns null for a blank box, and undefined for something
+// that isn't a whole number above zero.
+//
+// Commas, spaces and underscores are ignored, so "16,000" means sixteen
+// thousand and not 16. A number misread that way would cut every answer off
+// after a few words while the box went on showing what was typed.
+function parseTokenCount(text) {
+  const digits = text.replace(/[,\s_]/g, "");
+  if (digits === "") return null;
+  if (!/^\d+$/.test(digits) || Number(digits) < 1) return undefined;
+  return Number(digits);
+}
+
+function showMaxTokensError(show) {
+  document.getElementById("sampling-max-tokens-error").hidden = !show;
+  document.getElementById("sampling-max-tokens").setAttribute("aria-invalid", show ? "true" : "false");
+}
+
+// Copies what the panel shows into the settings sent with the next message.
+// Returns false when the response-length box holds something that can't be
+// read as a number. The setting then keeps its last good value rather than
+// quietly becoming blank, and the box says what it needs.
 function readSamplingInputs() {
   const temp = document.getElementById("sampling-temperature").value.trim();
   const topP = document.getElementById("sampling-top-p").value.trim();
-  const maxTok = document.getElementById("sampling-max-tokens").value.trim();
+  const maxTok = parseTokenCount(document.getElementById("sampling-max-tokens").value);
+  const maxTokOk = maxTok !== undefined;
+  showMaxTokensError(!maxTokOk);
   // Kept as typed apart from trimming the ends: line breaks and quotation marks
   // are part of what somebody wrote and are carried to the model as written.
   const prompt = document.getElementById("sampling-system-prompt").value.trim();
   state.sampling = {
     temperature: temp === "" ? null : parseFloat(temp),
     top_p: topP === "" ? null : parseFloat(topP),
-    max_tokens: maxTok === "" ? null : parseInt(maxTok, 10),
+    max_tokens: maxTokOk ? maxTok : state.sampling.max_tokens,
     system_prompt: prompt === "" ? null : prompt,
   };
+  return maxTokOk;
 }
 
 document.getElementById("sampling-options-btn").addEventListener("click", (e) => {
@@ -2042,7 +2075,11 @@ document.getElementById("sampling-system-prompt").addEventListener("input", () =
 });
 document.getElementById("sampling-options-done").addEventListener("click", (e) => {
   e.stopPropagation();
-  readSamplingInputs();
+  // Stays open on a number it can't read, so the message saying so is seen.
+  if (!readSamplingInputs()) {
+    document.getElementById("sampling-max-tokens").focus();
+    return;
+  }
   closeSamplingPopover();
 });
 document.getElementById("sampling-options-clear").addEventListener("click", (e) => {
@@ -2052,6 +2089,7 @@ document.getElementById("sampling-options-clear").addEventListener("click", (e) 
   document.getElementById("sampling-max-tokens").value = "";
   document.getElementById("sampling-system-prompt").value = "";
   growSystemPrompt();
+  showMaxTokensError(false);
   state.sampling = { temperature: null, top_p: null, max_tokens: null, system_prompt: null };
 });
 
@@ -3847,14 +3885,23 @@ function renderMessages(conv) {
 
 async function openConversation(id) {
   stopJobPolling();
+  // The settings panel is read from the conversation only when moving to a
+  // different one. Reopening the one already open happens after every reply,
+  // a failed send and a job being started. The conversation's saved copy then
+  // holds what was sent last, and the panel holds that or something changed
+  // since. Taking the saved copy here would throw away anything typed while a
+  // reply was arriving, though the box would still show it.
+  const movingTo = state.conversationId !== id;
   state.conversationId = id;
   const conv = await api(`/api/conversations/${id}?professor=${encodeURIComponent(state.professor)}`);
   state.conversationModel = conv.model;
   state.conversationHasMessages = conv.messages.length > 0;
-  state.sampling = {
-    temperature: conv.temperature ?? null, top_p: conv.top_p ?? null, max_tokens: conv.max_tokens ?? null,
-    system_prompt: conv.system_prompt ?? null,
-  };
+  if (movingTo) {
+    state.sampling = {
+      temperature: conv.temperature ?? null, top_p: conv.top_p ?? null, max_tokens: conv.max_tokens ?? null,
+      system_prompt: conv.system_prompt ?? null,
+    };
+  }
   document.getElementById("model-field").value = conv.model;
   applySamplingVisibility();
   renderMessages(conv);
