@@ -16,6 +16,7 @@ from src.models import (
     get_available_models,
     get_model_catalog_path,
     get_model_max_completion_tokens,
+    get_model_max_output_tokens,
     get_model_pricing,
     get_model_system_role,
     get_monthly_limit,
@@ -32,6 +33,7 @@ from src.models import (
     record_sampling_params_rejected,
     remove_model_from_catalog,
     save_model_catalog,
+    within_output_limit,
 )
 
 
@@ -401,6 +403,34 @@ class TestGetModelMaxCompletionTokens:
 
     def test_default_value_is_respected(self, mock_catalog):
         assert get_model_max_completion_tokens("gpt-4o", default=8192) == 8192
+
+
+class TestTheLongestAnswerAModelCanGive:
+    """max_output_tokens is written by testing a model; these read it back."""
+
+    @pytest.fixture()
+    def catalog(self, monkeypatch):
+        monkeypatch.setattr(catalog_module, "load_model_catalog", lambda: {"models": {
+            "gpt-4o": {"max_output_tokens": 16384},
+            "untested": {"input": 1.0},
+            "garbled": {"max_output_tokens": "lots"},
+        }})
+
+    def test_a_tested_model_reports_its_limit(self, catalog):
+        assert get_model_max_output_tokens("gpt-4o") == 16384
+
+    @pytest.mark.parametrize("model", ["untested", "garbled", "ghost"])
+    def test_otherwise_nobody_knows(self, catalog, model):
+        assert get_model_max_output_tokens(model) is None
+
+    def test_a_cap_above_the_limit_is_lowered(self, catalog):
+        assert within_output_limit("gpt-4o", 200_000) == 16384
+
+    def test_a_cap_below_it_is_kept(self, catalog):
+        assert within_output_limit("gpt-4o", 4000) == 4000
+
+    def test_an_unknown_limit_lowers_nothing(self, catalog):
+        assert within_output_limit("untested", 200_000) == 200_000
 
 
 # ---------------------------------------------------------------------------

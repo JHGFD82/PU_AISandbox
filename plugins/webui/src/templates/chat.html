@@ -809,6 +809,10 @@
   /* Text selects itself all over the page when a drag crosses it otherwise. */
   .job-modal-panel.is-resizing { user-select: none; }
   .job-field { margin-bottom: 1.15rem; }
+  /* A response-length box with its Max button beside it — see placeMaxButton(). */
+  .max-tokens-row { display: flex; gap: var(--space-2); align-items: center; }
+  .max-tokens-row :is(input, textarea) { flex: 1; min-width: 0; }
+  .max-tokens-row button { padding: 0.35rem 0.6rem; font-size: var(--text-sm); flex: none; }
   .job-field label { display: block; font-size: var(--text-sm); font-weight: 600; margin-bottom: 0.35rem; }
   /* The file-or-folder choice: inline, and quieter than the field's own label,
      because it qualifies that label rather than competing with it. */
@@ -1995,6 +1999,44 @@ function showSamplingDefaults(model) {
    ["sampling-max-tokens", cap]].forEach(([id, value]) => {
     document.getElementById(id).placeholder = value === null || value === undefined ? "" : String(value);
   });
+  placeMaxButton(document.getElementById("sampling-max-tokens"), model);
+}
+
+// A "Max" button beside a response-length box, filling in the longest answer
+// the model can give (GET /api/models's max_output_tokens, found out when the
+// model was tested). Hidden for a model whose limit nobody knows, rather than
+// offering a number that might be refused. Asking for more is safe anyway —
+// the request is lowered to the limit — so this is a convenience for wanting
+// "as long as it goes", not a guard. Called again whenever the model changes;
+// the button is made once and then only updated.
+function placeMaxButton(input, model) {
+  if (!input) return;
+  let button = input.parentElement.querySelector(".max-tokens-btn");
+  if (!button) {
+    const row = document.createElement("div");
+    row.className = "max-tokens-row";
+    input.replaceWith(row);
+    row.appendChild(input);
+    button = document.createElement("button");
+    button.type = "button";
+    button.className = "secondary max-tokens-btn";
+    button.textContent = "Max";
+    button.addEventListener("click", (e) => {
+      e.stopPropagation();
+      input.value = button.dataset.limit;
+      // So whatever already listens to the box — saving the conversation's
+      // setting, refreshing a job's preview — hears about it as if typed.
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    row.appendChild(button);
+  }
+  const limit = model && model.max_output_tokens;
+  button.style.display = limit ? "" : "none";
+  if (limit) {
+    button.dataset.limit = String(limit);
+    button.title = `The longest answer this model can give: ${limit.toLocaleString()} tokens`;
+    button.setAttribute("aria-label", `Use the longest answer this model can give, ${limit.toLocaleString()} tokens`);
+  }
 }
 
 function openSamplingPopover() {
@@ -2432,6 +2474,7 @@ function applyJobModelChoice() {
   if (cap && model && model.max_response_tokens) {
     cap.placeholder = String(model.max_response_tokens);
   }
+  placeMaxButton(cap, model);
 }
 
 function samplingFieldsFor(modelName, action) {

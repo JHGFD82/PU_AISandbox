@@ -27,6 +27,7 @@ def _make_svc(monkeypatch, **kwargs) -> BaseService:
     monkeypatch.setattr("src.services.base_service.maybe_sync_model_pricing", lambda m: None)
     monkeypatch.setattr("src.services.base_service.get_model_max_completion_tokens", lambda m, d: d)
     monkeypatch.setattr("src.services.base_service.model_rejected_fields", lambda m: {})
+    monkeypatch.setattr("src.services.base_service.within_output_limit", lambda m, t: t)
     tracker = MagicMock()
     tracker.record_usage.return_value = MagicMock(total_cost=0.001)
     svc = BaseService.__new__(BaseService)
@@ -841,3 +842,47 @@ class TestTheCatalogIsAskedAboutTheRightModel:
         )
         assert result == "answered"
         assert recorded == ["my_mac_studio:qwen3.8:27b-mlx"]
+
+
+class TestTheCapIsKeptWithinWhatTheModelCanGive:
+    """-M above a model's tested limit is lowered, not sent to be refused."""
+
+    @staticmethod
+    def _svc(monkeypatch) -> BaseService:
+        from src.models.catalog import within_output_limit
+
+        svc = _make_svc(monkeypatch)
+        monkeypatch.setattr("src.services.base_service.within_output_limit", within_output_limit)
+        monkeypatch.setattr("src.services.base_service.model_max_tokens_field", lambda m: "max_tokens")
+        monkeypatch.setattr(catalog_module, "load_model_catalog", lambda: {"models": {
+            "gpt-4o": {"max_output_tokens": 16384},
+            "untested": {},
+        }})
+        return svc
+
+    @staticmethod
+    def _cap(svc, model, max_tokens):
+        return svc._build_completion_kwargs(
+            model=model, messages=[], max_tokens=max_tokens,
+            temperature=None, top_p=None, stream=False, extra_kwargs={},
+        )["max_tokens"]
+
+    def test_a_cap_above_the_limit_is_lowered_to_it(self, monkeypatch):
+        assert self._cap(self._svc(monkeypatch), "gpt-4o", 200_000) == 16384
+
+    def test_a_cap_within_the_limit_is_left_alone(self, monkeypatch):
+        assert self._cap(self._svc(monkeypatch), "gpt-4o", 4000) == 4000
+
+    def test_a_model_whose_limit_is_unknown_gets_what_was_asked(self, monkeypatch):
+        assert self._cap(self._svc(monkeypatch), "untested", 200_000) == 200_000
+
+    def test_the_person_is_told_once_not_once_per_page(self, monkeypatch, caplog):
+        svc = self._svc(monkeypatch)
+        with caplog.at_level(logging.WARNING):
+            for _ in range(3):
+                self._cap(svc, "gpt-4o", 200_000)
+        said = [r.getMessage() for r in caplog.records if "at most" in r.getMessage()]
+        assert said == [
+            "gpt-4o can write at most 16,384 tokens in one answer, so that is what "
+            "was asked for instead of 200,000."
+        ]

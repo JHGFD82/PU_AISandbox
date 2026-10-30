@@ -315,7 +315,7 @@ def effective_sampling(conversation: "Conversation") -> dict[str, Any]:
     """
     # Imported here rather than at the top: this module is the plain store for
     # conversations, and it should not drag the model catalog in on import.
-    from src.models.catalog import get_model_max_completion_tokens
+    from src.models.catalog import get_model_max_completion_tokens, within_output_limit
     from src.settings import PROMPT_MAX_TOKENS, PROMPT_TEMPERATURE, PROMPT_TOP_P
 
     if conversation.max_tokens is not None:
@@ -327,6 +327,11 @@ def effective_sampling(conversation: "Conversation") -> dict[str, Any]:
             # A model no longer in the catalog still had a conversation; the
             # sandbox's own figure is what it would fall back to.
             max_tokens = PROMPT_MAX_TOKENS
+    try:
+        # What is actually sent: a cap above the model's limit is lowered to it.
+        max_tokens = within_output_limit(conversation.model, max_tokens)
+    except Exception:
+        pass
     return {
         "temperature": PROMPT_TEMPERATURE if conversation.temperature is None else conversation.temperature,
         "top_p": PROMPT_TOP_P if conversation.top_p is None else conversation.top_p,

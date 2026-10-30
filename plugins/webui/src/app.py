@@ -63,6 +63,7 @@ from src.config import load_professor_config
 from src.errors import CLIError
 from src.models import (
     get_model_max_completion_tokens,
+    get_model_max_output_tokens,
     model_company,
     model_endpoint,
     model_owner,
@@ -1511,6 +1512,10 @@ def create_app() -> FastAPI:
                 # because a person choosing a model for a long piece of work
                 # has no other way to find out.
                 "max_response_tokens": get_model_max_completion_tokens(m, PROMPT_MAX_TOKENS),
+                # The most it *can* write, where testing found out — what the
+                # Max button beside a response-length box fills in. None where
+                # the provider never said, and then there is no button.
+                "max_output_tokens": get_model_max_output_tokens(m),
                 # Who the model belongs to, for grouping the menu. Worked out
                 # from the route it is reached by, except where that route
                 # resells somebody else's — see model_owner().
