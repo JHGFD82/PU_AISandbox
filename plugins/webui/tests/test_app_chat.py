@@ -592,10 +592,12 @@ class TestTheModelSaysWhatItCanDo:
         monkeypatch.setattr(app_module, "model_supports_vision", lambda m: False)
         monkeypatch.setattr(app_module, "model_accepts_sampling_params", lambda m: False)
         monkeypatch.setattr(app_module, "get_model_max_completion_tokens", lambda m, d: 16000)
+        monkeypatch.setattr(app_module, "get_model_max_output_tokens", lambda m: 100000)
         monkeypatch.setattr(app_module, "model_owner", lambda m: "Test")
         monkeypatch.setattr(app_module, "resolve_model", lambda **kw: "o3-mini")
         model = unlocked_client.get("/api/models?professor=heller").json()["models"][0]
         assert model["max_response_tokens"] == 16000
+        assert model["max_output_tokens"] == 100000
         assert model["supports_vision"] is False
         assert model["accepts_sampling_params"] is False
 
@@ -632,6 +634,42 @@ class TestTheModelSaysWhatItCanDo:
         page = self._page()
         visibility = page.split("function applySamplingVisibility")[1].split("\n}")[0]
         assert "showSamplingDefaults(model)" in visibility
+
+
+class TestTheMaxButton:
+    """Beside each response-length box: fills in the most the model can write."""
+
+    def _page(self):
+        return (WEBUI_SRC / "templates" / "chat.html").read_text()
+
+    def _helper(self):
+        return self._page().split("function placeMaxButton")[1].split("\n}")[0]
+
+    def test_it_is_beside_the_chat_box_and_follows_the_model(self):
+        defaults = self._page().split("function showSamplingDefaults")[1].split("\n}")[0]
+        assert 'placeMaxButton(document.getElementById("sampling-max-tokens"), model)' in defaults
+
+    def test_it_is_beside_a_job_s_box_and_follows_the_job_s_model(self):
+        """A job can run on a different model from the conversation's."""
+        choice = self._page().split("function applyJobModelChoice")[1].split("\n}")[0]
+        assert "placeMaxButton(cap, model)" in choice
+
+    def test_it_fills_in_the_tested_limit(self):
+        helper = self._helper()
+        assert "model.max_output_tokens" in helper
+        assert "input.value = button.dataset.limit" in helper
+
+    def test_it_is_hidden_when_nobody_knows_the_limit(self):
+        assert 'button.style.display = limit ? "" : "none"' in self._helper()
+
+    def test_filling_it_in_counts_as_typing(self):
+        """Otherwise the conversation's setting and a job's preview miss it."""
+        assert 'dispatchEvent(new Event("input"' in self._helper()
+
+    def test_it_is_made_once_however_often_the_model_changes(self):
+        helper = self._helper()
+        assert 'querySelector(".max-tokens-btn")' in helper
+        assert "if (!button)" in helper
 
 
 class TestTheModelMenuIsGrouped:

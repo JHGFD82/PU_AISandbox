@@ -835,6 +835,46 @@ def get_model_max_completion_tokens(model: str, default: int) -> int:
     return config["models"].get(model, {}).get("max_completion_tokens", default)
 
 
+def get_model_max_output_tokens(model: str) -> Optional[int]:
+    """Return the longest answer a model can give, if that has been found out.
+
+    Learned by testing the model (see ``src/models/capabilities.py``), which
+    asks for far more than any model can write and reads the limit out of the
+    provider's refusal. Not every provider says, so for some models this is
+    never known.
+
+    Args:
+        model: The model name as the catalog holds it (e.g. ``'gpt-4o'``).
+
+    Returns:
+        The most tokens (roughly, words) the model will write in one answer,
+        or ``None`` if nobody knows.
+    """
+    entry = load_model_catalog()["models"].get(model)
+    limit = entry.get("max_output_tokens") if isinstance(entry, dict) else None
+    return limit if isinstance(limit, int) and limit > 0 else None
+
+
+def within_output_limit(model: str, max_tokens: int) -> int:
+    """Lower a response-length cap to what the model can actually give.
+
+    A request for more than a model's limit is refused outright, so asking
+    for 200,000 tokens from a model that writes at most 16,384 used to mean
+    no answer at all. Lowering it gets the longest answer there is instead.
+
+    Args:
+        model: The model name as the catalog holds it.
+        max_tokens: The cap asked for — with ``-M``, a conversation's own
+                    setting, or the sandbox's default.
+
+    Returns:
+        *max_tokens*, or the model's limit if that is lower. Unchanged when
+        the limit isn't known.
+    """
+    limit = get_model_max_output_tokens(model)
+    return min(max_tokens, limit) if limit is not None else max_tokens
+
+
 
 
 def cheapest_model(require_vision: bool = False) -> Optional[str]:

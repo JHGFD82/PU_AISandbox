@@ -421,6 +421,13 @@ Available on `prompt`, `translate`, `transcribe` and `transcription_review`:
 | `-M <int>`, `--max-tokens <int>` | Longest response to accept |
 | `--dry-run` | Show the prompts that would be sent, without calling the API |
 
+If `-M` asks for more than the model can write in one answer, the sandbox asks
+for the most it can write instead and says so, rather than sending a request
+the provider would refuse. A model's limit is found when it is tested (see
+[Adding models](configuration.md#adding-models)); for a model whose provider
+never says, `-M` is sent as given. In the web interface, the **Max** button
+beside the response-length box fills in that limit.
+
 ---
 
 ## Page ranges

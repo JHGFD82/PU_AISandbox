@@ -14,6 +14,7 @@ from src.models.capabilities import (
     CapabilityReport,
     apply_capability_report,
     probe_model_capabilities,
+    stated_output_limit,
 )
 
 
@@ -26,10 +27,13 @@ class FakeModel:
                                      the response-length setting.
         system_role: The label it accepts on an opening instruction.
         sees_images: Whether it accepts a request carrying a picture.
+        output_limit: The longest answer it will give. A request for more is
+                      refused in OpenAI's words; ``None`` takes any cap
+                      without a word, as Gemini and Mistral do.
     """
 
     def __init__(self, refuses=(), wants_max_completion_tokens=False,
-                 system_role="system", sees_images=True):
+                 system_role="system", sees_images=True, output_limit=16384):
         self.chat = self
         self.completions = self
         self.requests = []
@@ -37,6 +41,7 @@ class FakeModel:
         self._wants_mct = wants_max_completion_tokens
         self._system_role = system_role
         self._sees_images = sees_images
+        self._output_limit = output_limit
 
     def create(self, **kwargs):
         self.requests.append(kwargs)
@@ -60,6 +65,12 @@ class FakeModel:
         for name in self._refuses:
             if name in kwargs:
                 raise Exception(f"Unsupported value: '{name}' is not supported with this model.")
+        cap = kwargs.get("max_tokens", kwargs.get("max_completion_tokens"))
+        if self._output_limit is not None and cap > self._output_limit:
+            raise Exception(
+                f"Error code: 400 - max_tokens is too large: {cap}. This model supports "
+                f"at most {self._output_limit} completion tokens, whereas you provided {cap}."
+            )
         return {"choices": []}
 
 
@@ -218,12 +229,18 @@ class TestTheCostOfTesting:
         A ceiling rather than an exact figure: this asserted exactly one token,
         which is what a reasoning model refuses outright — the assertion was
         holding the bug in place. What matters is that it stays negligible.
+
+        The one exception is the request that asks for far too much on purpose,
+        so the refusal says what the most is; it asks for a one-word answer.
         """
         model = FakeModel()
         probe_model_capabilities("plain-model", model)
-        for request in model.requests:
+        *ordinary, asks_for_too_much = model.requests
+        for request in ordinary:
             length = request.get("max_tokens", request.get("max_completion_tokens"))
             assert 0 < length <= 32
+        assert asks_for_too_much["max_tokens"] > 1_000_000
+        assert "single word" in asks_for_too_much["messages"][0]["content"]
 
     def test_an_ordinary_model_is_settled_in_a_handful_of_requests(self):
         model = FakeModel()
@@ -516,3 +533,93 @@ class TestOneSlowModelCannotHoldUpTheRest:
                 f"{path.name} builds its own client"
             )
             assert "Portkey(api_key" not in body, f"{path.name} still builds a raw client"
+
+
+class TestTheLongestAnswerAModelCanGive:
+    """The limit is read out of the provider's refusal of a far larger cap.
+
+    The wordings below are copied from real refusals seen on 30 Oct 2026.
+    """
+
+    def test_it_is_read_from_the_refusal(self):
+        report = probe_model_capabilities("plain-model", FakeModel(output_limit=16384))
+        assert report.findings["max_output_tokens"] == 16384
+        assert "Longest answer it can give: 16,384 tokens" in report.settled
+
+    def test_it_is_asked_for_by_the_name_the_model_wants(self):
+        model = FakeModel(wants_max_completion_tokens=True, output_limit=128000)
+        report = probe_model_capabilities("reasoner", model)
+        assert report.findings["max_output_tokens"] == 128000
+        assert "max_completion_tokens" in model.requests[-1]
+
+    def test_a_provider_that_does_not_check_settles_nothing(self):
+        """Gemini and Mistral take ten million and answer; that says nothing."""
+        report = probe_model_capabilities("lenient", FakeModel(output_limit=None))
+        assert "max_output_tokens" not in report.findings
+        assert any("longest answer" in line for line in report.unsettled)
+        assert report.findings["supports_vision"] is True
+
+    def test_it_lands_in_the_catalog_entry(self):
+        report = probe_model_capabilities("plain-model", FakeModel(output_limit=16384))
+        assert apply_capability_report({"input": 1.0}, report)["max_output_tokens"] == 16384
+
+    @pytest.mark.parametrize("message, limit", [
+        ("Error code: 400 - {'error': {'message': 'max_tokens is too large: 10000000. "
+         "This model supports at most 16384 completion tokens, whereas you provided "
+         "10000000.', 'type': 'invalid_request_error', 'param': 'max_tokens', "
+         "'code': 'invalid_value'}}", 16384),
+        ("Error code: 400 - {'error': {'message': 'azure-ai error: max_tokens: 10000000 "
+         "> 128000, which is the maximum allowed number of output tokens for "
+         "claude-opus-4-8', 'type': 'invalid_request_error'}}", 128000),
+    ])
+    def test_each_providers_wording_is_read(self, message, limit):
+        assert stated_output_limit(message) == limit
+
+    def test_the_most_a_model_can_read_and_write_together_is_not_taken(self):
+        """Llama on Azure names its whole context, not the longest answer.
+
+        Recording 131,072 as the longest answer would let a request ask for
+        far more than the model will write.
+        """
+        message = (
+            "Error code: 400 - azure-ai error: Model does not support request parameter "
+            "value supplied: Request context length (10,000,025 tokens) exceeds the "
+            "maximum sequence length for this model (131,072 tokens). Estimated prompt "
+            "tokens: 25, max_tokens: 10,000,000."
+        )
+        assert stated_output_limit(message) is None
+
+        class NamesItsContextInstead(FakeModel):
+            def create(self, **kwargs):
+                if kwargs.get("max_tokens", 0) > 1_000_000:
+                    raise Exception(message)
+                return super().create(**kwargs)
+
+        report = probe_model_capabilities("llama", NamesItsContextInstead())
+        assert "max_output_tokens" not in report.findings
+        assert report.findings["supports_vision"] is True
+
+    def test_a_limit_containing_a_status_code_is_still_a_refusal(self):
+        """14010 contains "401", which elsewhere means a refused key."""
+        report = probe_model_capabilities("odd-limit", FakeModel(output_limit=14010))
+        assert report.findings["max_output_tokens"] == 14010
+        assert report.reachable is True
+
+    def test_a_temporary_failure_here_keeps_the_earlier_answers(self):
+        class DropsTheLastRequest(FakeModel):
+            def create(self, **kwargs):
+                if kwargs.get("max_tokens", 0) > 1_000_000:
+                    raise Exception("Connection error while reaching the provider")
+                return super().create(**kwargs)
+
+        report = probe_model_capabilities("flaky", DropsTheLastRequest())
+        assert report.findings["supports_vision"] is True
+        assert "max_output_tokens" not in report.findings
+        assert report.reachable is True
+
+    @pytest.mark.parametrize("message", [
+        "supports at most 10000000 completion tokens",
+        "supports at most 0 completion tokens",
+    ])
+    def test_a_figure_that_cannot_be_the_reason_is_ignored(self, message):
+        assert stated_output_limit(message) is None

@@ -21,6 +21,8 @@ from .catalog import (
     cheapest_model,
     get_model_catalog_path,
     get_model_max_completion_tokens,
+    get_model_max_output_tokens,
+    within_output_limit,
     get_model_pricing,
     get_model_system_role,
     get_monthly_limit,
@@ -82,6 +84,8 @@ __all__ = [
     "model_preferences",
     "model_rejected_fields",
     "get_model_max_completion_tokens",
+    "get_model_max_output_tokens",
+    "within_output_limit",
     # catalog (continued)
     "is_model_access_error",
     "record_rejected_field",

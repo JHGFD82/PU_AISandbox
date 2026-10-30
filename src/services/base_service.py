@@ -21,7 +21,7 @@ from ..errors import CLIError
 from ..models import (
     endpoint_model_name, model_max_tokens_field, model_rejected_fields,
     record_rejected_field, resolve_model, maybe_sync_model_pricing,
-    get_model_max_completion_tokens,
+    get_model_max_completion_tokens, within_output_limit,
 )
 from ..tracking.token_tracker import TokenTracker, TokenUsage
 from .api_config import endpoint_client
@@ -513,8 +513,13 @@ class BaseService:
         if top_p is not None:
             kwargs["top_p"] = top_p
 
-        # Whichever name this model wants for the response-length cap.
-        kwargs[model_max_tokens_field(self._catalog_model_name(model))] = max_tokens
+        # Whichever name this model wants for the response-length cap, and no
+        # more than the model can give: above its limit the request is refused.
+        catalog_model = self._catalog_model_name(model)
+        allowed = within_output_limit(catalog_model, max_tokens)
+        if allowed < max_tokens:
+            self._say_cap_was_lowered(catalog_model, max_tokens, allowed)
+        kwargs[model_max_tokens_field(catalog_model)] = allowed
 
         # Everything this model is known to refuse comes out here, in one pass:
         # sampling parameters a reasoning model won't take, request fields a
@@ -526,6 +531,27 @@ class BaseService:
                 continue
             kwargs.pop(field, None)
         return kwargs
+
+    def _say_cap_was_lowered(self, model: str, asked: int, allowed: int) -> None:
+        """Tell the person their response-length cap was more than the model can give.
+
+        Said once per model for each service, not once per request: a
+        translation of a long document sends one request per page, and the
+        same sentence forty times over would bury everything else.
+
+        Args:
+            model: The model, as the catalog names it.
+            asked: The cap that was asked for.
+            allowed: The model's limit, which is what is sent instead.
+        """
+        already_said = self.__dict__.setdefault("_lowered_caps", set())
+        if (model, asked) in already_said:
+            return
+        already_said.add((model, asked))
+        logging.warning(
+            "%s can write at most %s tokens in one answer, so that is what was "
+            "asked for instead of %s.", model, f"{allowed:,}", f"{asked:,}",
+        )
 
     def _send_completion(self, kwargs: dict[str, Any], model: str) -> Any:
         """Make one chat request, learning from the provider if it refuses a field.

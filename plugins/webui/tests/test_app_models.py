@@ -286,7 +286,8 @@ class TestAddingAModelSaysWhatItIsDoing:
             for label in ("Looking up what it costs", "Checking how to ask it for a length",
                           "Checking how to give it instructions",
                           "Checking which settings it accepts",
-                          "Checking whether it can read images"):
+                          "Checking whether it can read images",
+                          "Checking the longest answer it can give"):
                 on_progress(label)
             return "gpt-5.2", {"input": 1.0, "output": 2.0}
 
@@ -306,10 +307,11 @@ class TestAddingAModelSaysWhatItIsDoing:
             "Checking how to give it instructions",
             "Checking which settings it accepts",
             "Checking whether it can read images",
+            "Checking the longest answer it can give",
         ]
         # Numbered, so a bar has something to fill against.
-        assert [e["step"] for e in progress] == [1, 2, 3, 4, 5]
-        assert all(e["total"] == 5 for e in progress)
+        assert [e["step"] for e in progress] == [1, 2, 3, 4, 5, 6]
+        assert all(e["total"] == 6 for e in progress)
         assert events[-1]["type"] == "done"
         assert events[-1]["capabilities"]["supports_vision"] is True
 
