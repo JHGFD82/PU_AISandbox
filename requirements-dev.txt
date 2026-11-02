@@ -21,7 +21,13 @@ pyright==1.1.390
 
 # The test runner, and its coverage measurement (what to measure is set in
 # .coveragerc; `pytest --cov` reads it).
-pytest
+#
+# 9.2 is the floor because of how it undoes monkeypatch.setattr on a module.
+# src/settings_store.py works out SETTINGS_PATH on request rather than
+# storing it, so before 9.2 undoing a test's replacement left the computed
+# path stored in the module, and every later test shared whichever temporary
+# settings file was patched last. From 9.2 the undo removes it again.
+pytest>=9.2
 pytest-cov
 
 # Used by FastAPI's TestClient, which the web UI tests rely on. It currently
